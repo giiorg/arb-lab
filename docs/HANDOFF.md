@@ -1,41 +1,46 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-07-18): spec + tutorial **converged**; ready for external human review
+## Status (2026-07-18): **v0.6** — external reviews (R1, R2) + Codex convergence applied; implementation-ready *by capital tier* (§1.1)
 
-Phase-1 deliverables are complete. The normative build-spec and the teaching tutorial are drafted and hardened through **four Codex adversarial rounds on the spec + one on the tutorial**. The architecture is validated and internally coherent; each round narrowed (11 → 6 → 4 → 4 findings) from structural to integration/precision. **Next gate: the user's external reviewers → then implementation** per spec §12.
+The normative build-spec is **v0.6**. Since v0.5.1 it absorbed **two external human reviews (R1, R2)**, **three venue-fact re-verifications** (account-mode, protection capability, spot surface — official docs, 2026-07-18), and a **Codex adversarial convergence pass** (three rounds, 8 + 5 + 3 findings, all applied). The spec is **deliberately not re-labelled "converged"** — it is honest about being institutional-grade and is now **tiered by capital gate**: the **foundation + read-path + edge-proof (milestones 1–2) are fully build-ready**, heavier controls (signer isolation, hardened off-host actuator, full backtest fidelity, four-eyes) bind at **$10K+**. The convergence rounds surfaced a **meta-finding**: the **off-host emergency actuator is a bounded distributed-systems subproject** — each round found a deeper takeover requirement (fence-first → reduce the reconciled residual → quiesce all resting orders to finality → replicate full recovery handles) — so go-live is **de-risked via a sub-$1K canary** (§12 / §7.4) that proves the actuator protocol in production-lite before real size. Next gate: **implementation per §12** (milestones reordered so the edge is proven before the heavy OMS build).
 
 ## Artifacts (read in this order)
-1. **`docs/build-spec.md`** — the **normative** MVP build-spec, **v0.5.1**. The "what to build," and the source of truth. Its Appendix traces every resolved finding (P/C/A/S/B = original review; D = architecture decisions; X/Y/Z = Codex rounds 1/2/3+4) to a section.
-2. **`docs/tutorial.md`** — teaching companion (the "why"). Cash-and-carry-first; defers all normative detail to the spec via `§spec` references.
-3. **`docs/review/2026-07-18-05-tutorial-critical-review.md`** — the critical review (26 findings; verified facts in §7).
-4. **`docs/legacy/`** — frozen research record (01–05 + sources). **Do not edit** — it's the historical "why."
+1. **`docs/build-spec.md`** — the **normative** MVP build-spec, **v0.6**. New since v0.5.1: **§1.1** capital-gate tiering; **§4.1** boot-verified account/margin architecture matrix; **§4.2** spot-leg surface; **§7.7** sequence diagrams (entry+disarm / ADL / host-death takeover). The Appendix traces every finding (P/C/A/S/B, D, X/Y/Z, **R1-F#/R2-#/R1-meta**, **Codex-C#/M#/Cx2**) to a section.
+2. **`docs/tutorial.md`** — teaching companion. New: **§3.9** a complete worked numerical trade ledger + a crash/partial-fill timeline; "spot can't be liquidated" now qualified by the §4.1 posture; softened absolutes.
+3. **`docs/review/2026-07-18-06-v0.6-review-and-verification-record.md`** — the R1/R2 findings + resolution + the **venue-verification citations** (the spec carries only endpoint names; the URLs live here).
+4. **`docs/review/2026-07-18-05-tutorial-critical-review.md`** — the earlier critical review (26 findings).
+5. **`docs/legacy/`** — frozen research record. **Do not edit.**
 
 ## Locked decisions (do NOT re-litigate)
-- **Stack:** from-scratch **Go** backend; **React/Next on Bun** operator dashboard. OSS (NautilusTrader, Hummingbot, CCXT, barter-rs) = reference only, never dependencies.
-- **Strategy-pluggable foundation** running swappable strategies. **MVP proves cash-and-carry FIRST** (long spot + short perp, one venue — harvests the funding *level*, the real edge). Cross-exchange *spread* is strategy #2, scoped to alts/dislocation only (structurally too thin on majors — finding P1).
-- **Venues:** Binance + Bybit, N-venue-ready behind one adapter seam.
-- **Architecture** (resolved & validated): **D1** single-process in-process engine (in-proc dispatch on the hot path; NATS deferred, seam documented); **D2** local write-ahead journal + transactional outbox → embedded store; **D3** `platform/fixedpoint` dimensional scaled-int money (no float64); **D4** Nautilus-style parity `Clock` + single total-order dispatcher. DDD/hexagonal à la `bitnet-backend-go` (`internal/{boundary,engine,platform}`, ports in `application/ports`, `driven/`+`driving/`, compile-time port assertions, `module.go` wiring, no DI container).
-- **Custody = on-exchange for MVP** (small size, isolated per-venue subaccounts, caps ≤~20–30%/venue, USDT/USDC margin). OES = documented scale-up path.
-- **Risk bar = real capital, live** — durable order/account truth, custody/key security, reconciliation, and money-losing edges are ship-blockers.
+- **Stack:** from-scratch **Go** backend; **React/Next on Bun** operator dashboard. OSS = reference only.
+- **Strategy-pluggable foundation**; **MVP proves cash-and-carry FIRST**; cross-exchange spread is strategy #2 (alts/dislocation only).
+- **Venues:** Binance + Bybit, N-venue-ready behind one adapter seam. (N-venue-*ready* ≠ wiring both in the first slice — the walking skeleton is one venue/one symbol.)
+- **Architecture D1–D4** (single-process engine; journal+outbox→embedded store; `platform/fixedpoint`; parity `Clock` + total-order dispatcher). DDD/hexagonal à la `bitnet-backend-go`.
+- **Custody = on-exchange for MVP** (isolated per-venue subaccounts, caps ≤~20–30%/venue, USDT/USDC margin). OES = documented scale-up.
+- **Risk bar = real capital, live.**
+- **v0.6 author decisions (via the user):** (a) **tier the MUSTs by capital gate + reorder milestones** (edge before OMS); (b) **solo-honest controls** (time-delayed self-approval, out-of-band confirm, dead-man alerting — no assumed second person); (c) **per-venue account matrix defaulting to segregated/isolated** (Binance classic + single-asset + isolated + Portfolio-Margin-off; Bybit UTA `ISOLATED_MARGIN` + isLeverage=0 + spot-margin/hedge off).
 
-## What the Codex rounds hardened (full map in spec Appendix)
-- **Round 1 (11):** single-writer **`oms`** context + durable write-ahead journal; ADL/account venue contract; delivery lanes; strategy/venue DDD boundary; pre-authorized (not human-gated) emergency; fixedpoint intermediates + dimensional types; clock total-order; dedupe UNIQUE; key blast-radius; acceptance gate.
-- **Round 2 (6):** fill dedup identity; `Place` non-idempotent + `SubmissionUnknown`; `ExposureReduction` (spot has no `reduceOnly`); total-order `IngressSeq`; funding key uses symbol; acceptance-gate numbers.
-- **Round 3 (4):** canonical **`VenueInstrument`** (spot ≠ perp, independent ID namespaces); orthogonal fill ledger + race-complete state machine; **mandatory** emergency-actuator failover; journal (not audit projection) is reconciliation truth.
-- **Round 4 coherence gate (4):** fixed a UNIQUE-key contradiction, made the escalation ladder concurrent, closed the first-fill→protection host-death window, and fenced the reduction generation against duplicate-stacking.
-- **Tutorial review (4):** product-specific fee endpoints; cash-and-carry funding is perp-leg-only; acceptance gate is per funding-bearing perp leg; taught host-independent flatten coverage.
+## What the reviews + Codex hardened (full map in the Appendix + the review record)
+- **R1/R2 (external):** account & margin-mode architecture (the flagship's whole safety premise, boot-verified); the **forecasting model** (was undefined — now a `FundingForecast` port + testable contract); **exit hysteresis** (was a boolean); **protection disarm** (was specified only at arming); the **spot-leg surface** (was perp-centric); the cash-and-carry **kill-math**; durability + local-journal-loss; two-authority naming; capital tiering; solo-honest controls; funding=ledger-truth; money compile-vs-runtime; tax classification downstream.
+- **Codex round 1 (8):** $1K host-death needs an **off-host executor** (not deferred); ADL rehedge must not use reduce-only into a zeroed perp; disarm needs a fenced `DisarmPending`; forecast/exit need a testable contract; `C_total`→`C_allocated`; posture re-verified pre-trade; economic gate tiered; `AcceptOrdinal` tie-breaker.
+- **Codex round 2 (Blocker + 4):** the off-host actuator is a **second writer** → **takeover must fence-first** (revoke the bot credential, reconcile, reduce only the *residual*), not sell the allocated qty; §6.7 had to delegate to the §5.3 reduce-only matrix; forecast needs a durable `HoldPlan` + joint-aggregation rule; the $1K economic bound had to be **defined** (dataset/slippage/threshold); `AcceptOrdinal` single stamping point.
+- **Codex round 3 (Blocker + 2 Major):** takeover must **quiesce every resting bot order (algo/TP-SL/OCO) to finality** before reducing (fencing stops *new* submissions, not resting orders — an armed stop fires after the reduction otherwise); the `EmergencyPlan` must **replicate full recovery handles** (client/algo IDs, cursors, `TradeID`) since the local journal is gone; **exit is a forward continue-vs-close score** (entry costs are sunk, not re-charged). Meta: the actuator is a **subproject** → the sub-$1K canary path.
 
-## Residual follow-ups for the implementing team (from Codex — TDD, not the spec)
-These are specified as invariants + acceptance tests (spec §9 chaos), to be *proven in code* against real venue behaviors:
-- Fill-ledger + protective-order races (identical spot/perp exec IDs; duplicate position events during an outstanding reduction; protective-order ↔ OMS inventory handoff).
-- Venue-specific **stable-not-found / finality** windows for `SubmissionUnknown` resolution.
-- The host-death **first-fill→protection-ack** window is *bounded and tested*, not eliminated — validate the per-venue attached-protection (or pre-armed `EmergencyPlan`) mechanism.
+## Residual follow-ups (for the implementing team, TDD — not the spec)
+- **Before real capital:** an **empirical testnet liquidation test** of the isolated-perp / segregated-spot posture (§4.1) — the "spot can't be seized" property rests on per-position/segregation semantics, not a single guarantee.
+- **Prove in code** (spec §9 chaos, now including): actuator **takeover fence** under network partition / late-fill-after-takeover / bot-recovery-during-takeover (no double-reduce); ADL-from-a-zeroed-perp re-hedge; disarm cancel-vs-trigger race; Bybit realtime-cache-cleared→history fallback; wrong/out-of-band posture refusal.
+- **Calibrate:** the `FundingForecast` estimator + the joint-aggregation rule + the `BasisForecast` default, against the §8 persistence model; tune the defined $1K economic bound.
+
+## Open polish (non-blocking)
+- Tutorial "what changed" appendix — fold the recurring "the legacy tutorial got this wrong" asides into one appendix so the teaching text stands alone (R1).
+
+## Open decision (for the user — surfaced, not decided)
+- **Go-live sequencing.** The off-host actuator being a subproject creates a fork the spec resolves with a *recommended default* (sub-$1K canary on Bybit — best venue-native attach — to build + chaos-test the takeover protocol before $1K), but it's your call: (a) take the recommended sub-$1K canary path; (b) build the full distributed takeover protocol up front before any live trade; (c) constrain the first slice further (e.g. Bybit-only, or a size where a naked-window loss is de-minimis). Milestones 1–2 (foundation + edge-proof) are independent of this choice — it only gates *how you first go live*.
 
 ## Next steps
-1. **External human review** of `docs/build-spec.md` (with `docs/tutorial.md` as companion).
-   - **When reviewer feedback arrives (in a fresh session):** triage each item like the Codex findings — validate it against the spec + the verified facts (review §7), apply the valid ones (silently discard false positives), re-run a Codex convergence pass (`codex:codex-copilot` → `artifact-review`) if the changes are non-trivial, then bump the spec version and update this file. Keep the Appendix traceability current.
-2. **Implement** per spec **§12 milestones**: foundation skeleton (`platform/*` + `engine/venue` + `engine/state` + CI gates) → cash-and-carry read-path → OMS write-path → account/control + risk + reconcile-only-boot → backtester + paper gate → $1K live → strategy #2.
+1. **Implement** per spec **§12 milestones** (reordered): foundation skeleton → **read-path + data-capture + minimal research sim that clears the $1K economic gate (BTC, one venue) BEFORE the OMS** → OMS write-path → account/control + risk + reconcile-only-boot + host-independent protection → full backtester + economic gate → $1K live → strategy #2.
+2. **When more reviewer feedback arrives (fresh session):** triage per this file — validate each item against the spec + the verified facts (review record §2), apply the valid ones, re-run a Codex convergence round if non-trivial, bump the version, keep the Appendix current.
 
 ## Status notes
-- All docs are **uncommitted**. Per the user's rule, **no AI attribution** in commit messages / authored content.
-- Verified facts (APIs/market/tooling) were checked 2026-07-18; the 4 verification subagents from the prior session are complete and terminated.
+- All docs are **uncommitted** (branch `docs/funding-arb-spec`). Per the user's rule, **no AI attribution** in commits / authored content.
+- Verified facts (APIs/market/tooling) checked 2026-07-18; the verification subagents are complete and terminated.
