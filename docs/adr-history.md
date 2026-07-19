@@ -22,138 +22,171 @@ Draft v0.7.1 (2026-07-19) — Codex adversarial rounds 1–4 (11 → 6 → 4 →
 
 | Finding / Decision | Resolved in |
 |---|---|
-| P1 spread-vs-level | §1, §2.1–2.3 |
-| P2 hurdle rate | §2.1 |
-| P3 ADL (realized hedge-failure) | §2.1, §7.1 (naked-leg-gap sizing) |
-| P4 build-vs-buy | §11 |
-| C1 cost single-source | §2.4 |
-| C2 discrete settlement | §2.4, §6 |
-| C3 drift-based min-edge | §2.4 |
-| C4 tiered MMR | §4, §7.1 |
-| C5 buffer policy | §5.2 |
-| C6 inverse perps | §1, §4 |
-| C7 basis in funding audit | §6 |
-| C8 Bybit dynamic settlement | §2.4, §4, §6 |
-| A1 venue adapter | §3.2, §4 (segregated capabilities) |
-| A2 multi-region / split-ready | §3.7, §11 |
-| A3 durable state / reconcile-only boot | §7.5, §6.10 |
-| A4 exactly-once funding | §5.1 (UNIQUE + ledger txn ID) |
-| A5 kill-switch modes | §7.4 |
-| S1 custody/OES | §7.2 |
-| S2 key security | §7.3 |
-| S3 audit durability | §3.2, §7.5 (append-only projection) |
-| S4 escalation ladder | §7.4 |
-| B1 backtest fidelity | §3.5, §8 |
-| B2 test taxonomy | §9 |
-| D1 topology (in-process engine) | §3.0, §3.1, §3.7 |
-| D2 durability (journal + outbox → embedded store) | §3.0, §5, §6, §7.5 |
-| D3 money (`platform/fixedpoint`) | §3.0, §3.6, §4, §5.1, §11 |
-| D4 clock (parity dispatcher + server-time) | §3.0, §3.5, §3.6 |
-| **X1 durable order/account truth (single-writer OMS)** | §3.0, §3.2, §4 (`OrderByClientID`/`Fills`), §5.1, §6 |
-| **X2 ADL/margin controls + account contract** | §2.1, §4 (`AccountSource`), §6.8, §7.1 |
-| **X3 Trade ownership + exclusive lease** | §1, §3.2, §5.1 |
-| **X4 bus back-pressure / delivery lanes / freshness** | §3.4 |
-| **X5 DDD boundary (strategy input, venue ACL)** | §3.2, §3.3, §3.6 |
-| **X6 pre-authorized (not human-gated) emergency** | §7.4 |
-| **X7 fixedpoint intermediates + dimensional types** | §3.6, §4, §5.1 |
-| **X8 clock total-order parity + server-time** | §3.5, §3.6, §6.3 |
-| **X9 DedupeKey → UNIQUE + ledger txn ID** | §5.1 |
-| **X10 key blast-radius = whole subaccount** | §7.3 |
-| **X11 paper acceptance-gate pass/fail** | §9 |
-| **Y1 fill dedup identity (`ExecutionID` + `UNIQUE`)** | §4, §5.1, §5.3 |
-| **Y2 `Place` non-idempotent / `SubmissionUnknown`** | §4, §5.3, §6 |
-| **Y3 `ExposureReduction` command (executable ADL path) + actuator failure domain** | §5.3, §6, §7.4 |
-| **Y4 replay/total order = `DispatchSeq`/`IngressSeq` (the consumed order); `AcceptOrdinal` = raw-arrival capture/audit (SourceTime → analysis only); deterministic coalescing** | §3.5 |
-| **Y5 funding fallback key uses symbol + ledger-entry type** | §5.1 |
-| **Y6 acceptance-gate numeric thresholds** | §9 |
-| **Z1 canonical `VenueInstrument` identity (spot ≠ perp; independent ID namespaces)** | §3.3, §3.4, §3.5, §4, §5.1, §5.3 |
-| **Z2 orthogonal fill ledger + race-complete state machine + immediate-flatten** | §5.3, §6.7 |
-| **Z3 mandatory emergency-actuator failover (venue-native baseline / replicated `EmergencyPlan`)** | §7.4 |
-| **Z4 single reconciliation truth (journal, not the audit projection)** | §3.2, §7.5 |
+| P1 spread-vs-level | core §1, core §2.1–2.3 |
+| P2 hurdle rate | core §2.1 |
+| P3 ADL (realized hedge-failure) | core §2.1, core §7.1 (naked-leg-gap sizing) |
+| P4 build-vs-buy | core §11 |
+| C1 cost single-source | core §2.4 |
+| C2 discrete settlement | core §2.4, core §6 |
+| C3 drift-based min-edge | core §2.4 |
+| C4 tiered MMR | Profiles §1, core §7.1 |
+| C5 buffer policy | core §5.2 |
+| C6 inverse perps | core §1, core §4 |
+| C7 basis in funding audit | core §6 |
+| C8 Bybit dynamic settlement | core §2.4, Profiles §1, core §6 |
+| A1 venue adapter | core §3.2, core §4 (segregated capabilities) |
+| A2 multi-region / split-ready | core §3.7, core §11 |
+| A3 durable state / reconcile-only boot | core §7.5, core §6.10 |
+| A4 exactly-once funding | core §5.1 (UNIQUE + ledger txn ID) |
+| A5 kill-switch modes | core §7.4 |
+| S1 custody/OES | core §7.2 |
+| S2 key security | core §7.3 |
+| S3 audit durability | core §3.2, core §7.5 (append-only projection) |
+| S4 escalation ladder | core §7.4 |
+| B1 backtest fidelity | core §3.5, core §8 |
+| B2 test taxonomy | core §9 |
+| D1 topology (in-process engine) | core §3.0, core §3.1, core §3.7 |
+| D2 durability (journal + outbox → embedded store) | core §3.0, core §5, core §6, core §7.5 |
+| D3 money (`platform/fixedpoint`) | core §3.0, core §3.6, core §4, core §5.1, core §11 |
+| D4 clock (parity dispatcher + server-time) | core §3.0, core §3.5, core §3.6 |
+| **X1 durable order/account truth (single-writer OMS)** | core §3.0, core §3.2, core §4 (`OrderByClientID`/`Fills`), core §5.1, core §6 |
+| **X2 ADL/margin controls + account contract** | core §2.1, core §4 (`AccountSource`), core §6.8, core §7.1 |
+| **X3 Trade ownership + exclusive lease** | core §1, core §3.2, core §5.1 |
+| **X4 bus back-pressure / delivery lanes / freshness** | core §3.4 |
+| **X5 DDD boundary (strategy input, venue ACL)** | core §3.2, core §3.3, core §3.6 |
+| **X6 pre-authorized (not human-gated) emergency** | core §7.4 |
+| **X7 fixedpoint intermediates + dimensional types** | core §3.6, core §4, core §5.1 |
+| **X8 clock total-order parity + server-time** | core §3.5, core §3.6, core §6.3 |
+| **X9 DedupeKey → UNIQUE + ledger txn ID** | core §5.1 |
+| **X10 key blast-radius = whole subaccount** | core §7.3 |
+| **X11 paper acceptance-gate pass/fail** | core §9 |
+| **Y1 fill dedup identity (`ExecutionID` + `UNIQUE`)** | core §4, core §5.1, core §5.3 |
+| **Y2 `Place` non-idempotent / `SubmissionUnknown`** | core §4, core §5.3, core §6 |
+| **Y3 `ExposureReduction` command (executable ADL path) + actuator failure domain** | core §5.3, core §6, core §7.4 |
+| **Y4 replay/total order = `DispatchSeq`/`IngressSeq` (the consumed order); `AcceptOrdinal` = raw-arrival capture/audit (SourceTime → analysis only); deterministic coalescing** | core §3.5 |
+| **Y5 funding fallback key uses symbol + ledger-entry type** | core §5.1 |
+| **Y6 acceptance-gate numeric thresholds** | core §9 |
+| **Z1 canonical `VenueInstrument` identity (spot ≠ perp; independent ID namespaces)** | core §3.3, core §3.4, core §3.5, core §4, core §5.1, core §5.3 |
+| **Z2 orthogonal fill ledger + race-complete state machine + immediate-flatten** | SM §1, SM §2 |
+| **Z3 mandatory emergency-actuator failover (venue-native baseline / replicated `EmergencyPlan`)** | core §7.4 |
+| **Z4 single reconciliation truth (journal, not the audit projection)** | core §3.2, core §7.5 |
 | **— External human review (R1, R2) → v0.6 —** | |
-| **R1-F1 / R2-#2 account & margin architecture (boot-verified posture)** | §4.1, §2.1, §7.1, §7.5, §9 |
-| **R1-F2 / R2-#4 protection lifecycle: disarm + actuator MVP-mandatory on Binance** | §4 (attach row), §7.4, §11, §12 |
-| **R1-F3 / R2-#3 forecasting model + total-carry + exit hysteresis** | §2.2, §2.4, §3.3, §5.2 |
-| **R1-F4 cash-and-carry kill-math (break-even, utilization, maker lever)** | §2.4, tutorial §3.9 |
-| **R1-F5 spot-leg surface + per-(venue,API-family) rate limits** | §4.2, §4, §7.6 |
-| **R1-meta capital-gate tiering** | §1.1, §7.4, §9, §12 |
-| **R1-meta solo-honest controls (time-delay, out-of-band, dead-man)** | §7.4, §5.2, §9, §3.2 |
-| **R2-#1 Bybit order-history recovery fallback (realtime cache cleared on restart)** | §4, §5.3, §12 |
-| **R2-#5 two authorities named (venue = reality; journal = intent/allocation)** | §3.0 |
-| **R2-#6 `DispatchSeq`/`IngressSeq` = replay authority (dense, no "ties"); the earlier "arrival order = replay authority" formulation is superseded by R2c-6/Cx4-1** | §3.5 |
-| **R2-#7 coalescing only on reconstructed books; reconstruction ownership** | §3.4, §11 |
-| **R2-#8 Intent idempotency (IntentID/Revision/ValidUntil)** | §3.3 |
-| **R2-#9 funding = venue-ledger amount (accounting truth); rate×mark = audit** | tutorial §3.8, §5.1 |
-| **R2-#10 money: compile-time category vs runtime unit check** | §1, §3.6 |
-| **R2-#11 durability + local-journal-loss coverage** (fullfsync → WAL+`synchronous=FULL`, see R2b-9) | §3.0, §11 |
-| **R2-#12 acceptance gate = operational; economic gate is separate** | §9 |
-| **R2-#13 milestone reorder — prove the edge before the OMS** | §12 |
-| **R1/R2 tax classification is downstream policy (emit raw events)** | §10 |
-| **R1 journal tamper-evidence (hash-chain the journal, not only audit)** | §5.1 |
-| **R1 `VenueInstrument` in normative signatures; `Account` = subaccount** | §4, §5.1 |
-| **R1 rescue-margin float counts toward per-venue cap** | §7.2 |
+| **R1-F1 / R2-#2 account & margin architecture (boot-verified posture)** | core §4.1, core §2.1, core §7.1, core §7.5, core §9 |
+| **R1-F2 / R2-#4 protection lifecycle: disarm + actuator MVP-mandatory on Binance** | Profiles §1 (attach row), SM §5, core §7.4, core §11, core §12 |
+| **R1-F3 / R2-#3 forecasting model + total-carry + exit hysteresis** | core §2.2, core §2.4, core §3.3, core §5.2 |
+| **R1-F4 cash-and-carry kill-math (break-even, utilization, maker lever)** | core §2.4, tutorial §3.9 |
+| **R1-F5 spot-leg surface + per-(venue,API-family) rate limits** | Profiles §3, Profiles §1, core §7.6 |
+| **R1-meta capital-gate tiering** | core §1.1, core §7.4, core §9, core §12 |
+| **R1-meta solo-honest controls (time-delay, out-of-band, dead-man)** | core §7.4, core §5.2, core §9, core §3.2 |
+| **R2-#1 Bybit order-history recovery fallback (realtime cache cleared on restart)** | Profiles §1, SM §1, core §12 |
+| **R2-#5 two authorities named (venue = reality; journal = intent/allocation)** | core §3.0 |
+| **R2-#6 `DispatchSeq`/`IngressSeq` = replay authority (dense, no "ties"); the earlier "arrival order = replay authority" formulation is superseded by R2c-6/Cx4-1** | core §3.5 |
+| **R2-#7 coalescing only on reconstructed books; reconstruction ownership** | core §3.4, core §11 |
+| **R2-#8 Intent idempotency (IntentID/Revision/ValidUntil)** | core §3.3 |
+| **R2-#9 funding = venue-ledger amount (accounting truth); rate×mark = audit** | tutorial §3.8, core §5.1 |
+| **R2-#10 money: compile-time category vs runtime unit check** | core §1, core §3.6 |
+| **R2-#11 durability + local-journal-loss coverage** (fullfsync → WAL+`synchronous=FULL`, see R2b-9) | core §3.0, core §11 |
+| **R2-#12 acceptance gate = operational; economic gate is separate** | core §9 |
+| **R2-#13 milestone reorder — prove the edge before the OMS** | core §12 |
+| **R1/R2 tax classification is downstream policy (emit raw events)** | core §10 |
+| **R1 journal tamper-evidence (hash-chain the journal, not only audit)** | core §5.1 |
+| **R1 `VenueInstrument` in normative signatures; `Account` = subaccount** | core §4, core §5.1 |
+| **R1 rescue-margin float counts toward per-venue cap** | core §7.2 |
 | **R1/R2 worked numerical trade ledger + crash/partial-fill timeline** | tutorial §3.9 |
 | **— Codex convergence pass (v0.6) —** | |
-| **Codex-C1 $1K host-death: off-host executor + two-leg plan, not deferred** | §1.1, §7.4, §12 |
-| **Codex-C2 ADL rehedge: `reduceOnly` by instrument position, not package delta** | §5.3, §7.7, §9 |
-| **Codex-M3 disarm fenced state machine (`DisarmPending` + late-fill sweep)** | §7.4, §7.7, §9 |
-| **Codex-M4 forecast/exit testable contract (quantile, horizon, dwell, basis default)** | §2.4, §5.2 |
-| **Codex-M5 `C_allocated` = full-bankroll denominator (rescue + reserves)** | §2.1, §2.2, §4.1 |
-| **Codex-M6 posture re-verified pre-trade (`AccountPostureSource`); UTA-status fix** | §4, §4.1, §6.3, §7.5 |
-| **Codex-M7 economic gate tiered (conservative $1K bound)** | §8, §9, §12 |
-| **Codex-m8 `AcceptOrdinal` = raw-arrival capture/audit stamp (the historical "final tie-breaker" framing is superseded by R2c-6/Cx4-1 — `DispatchSeq` is the dense replay key)** | §3.5 |
+| **Codex-C1 $1K host-death: off-host executor + two-leg plan, not deferred** | core §1.1, core §7.4, core §12 |
+| **Codex-C2 ADL rehedge: `reduceOnly` by instrument position, not package delta** | SM §2, core §7.7, core §9 |
+| **Codex-M3 disarm fenced state machine (`DisarmPending` + late-fill sweep)** | SM §5, core §7.7, core §9 |
+| **Codex-M4 forecast/exit testable contract (quantile, horizon, dwell, basis default)** | core §2.4, core §5.2 |
+| **Codex-M5 `C_allocated` = full-bankroll denominator (rescue + reserves)** | core §2.1, core §2.2, core §4.1 |
+| **Codex-M6 posture re-verified pre-trade (`AccountPostureSource`); UTA-status fix** | core §4, core §4.1, core §6.3, core §7.5 |
+| **Codex-M7 economic gate tiered (conservative $1K bound)** | core §8, core §9, core §12 |
+| **Codex-m8 `AcceptOrdinal` = raw-arrival capture/audit stamp (the historical "final tie-breaker" framing is superseded by R2c-6/Cx4-1 — `DispatchSeq` is the dense replay key)** | core §3.5 |
 | **— Codex round 2 (convergence) —** | |
-| **Cx2-Blocker actuator takeover = fence-first, reduce the *reconciled residual* not allocated qty** | §7.4, §7.7, §9 |
-| **Cx2 §6.7 reduction delegates to the §5.3 state matrix (reduce-only-by-position)** | §6.7 |
-| **Cx2 forecast `HoldPlan` + joint-aggregation rule + one-unit normalization** | §2.4, §5.2 |
-| **Cx2 $1K economic bound defined (dataset/slippage/threshold) + explicit m2 deliverable** | §8, §9, §12 |
-| **Cx2 `AcceptOrdinal` single stamping point; $1K/$10K actuator tier language split** | §3.5, §7.4 |
+| **Cx2-Blocker actuator takeover = fence-first, reduce the *reconciled residual* not allocated qty** | SM §4, core §7.7, core §9 |
+| **Cx2 §6.7 reduction delegates to the §5.3 state matrix (reduce-only-by-position)** | SM §2 |
+| **Cx2 forecast `HoldPlan` + joint-aggregation rule + one-unit normalization** | core §2.4, core §5.2 |
+| **Cx2 $1K economic bound defined (dataset/slippage/threshold) + explicit m2 deliverable** | core §8, core §9, core §12 |
+| **Cx2 `AcceptOrdinal` single stamping point; $1K/$10K actuator tier language split** | core §3.5, core §7.4 |
 | **— Codex round 3 (verification) —** | |
-| **Cx3-Blocker takeover must quiesce ALL resting orders (algo/TP-SL/OCO) to finality first** | §7.4, §9 |
-| **Cx3 `EmergencyPlan` replicates full recovery handles (client/algo IDs, cursors, `TradeID`)** | §7.4 |
-| **Cx3 exit = forward continue-vs-close score (entry costs are sunk, not re-charged)** | §2.4 |
-| **Cx3-meta off-host actuator = bounded subproject; sub-$1K canary de-risking path** | §7.4, §12 |
+| **Cx3-Blocker takeover must quiesce ALL resting orders (algo/TP-SL/OCO) to finality first** | SM §4, core §9 |
+| **Cx3 `EmergencyPlan` replicates full recovery handles (client/algo IDs, cursors, `TradeID`)** | SM §6 |
+| **Cx3 exit = forward continue-vs-close score (entry costs are sunk, not re-charged)** | core §2.4 |
+| **Cx3-meta off-host actuator = bounded subproject; sub-$1K canary de-risking path** | core §7.4, core §12 |
 | **— External human review round 2 (R1, R2) + 2 Codex convergence rounds → v0.7 —** | |
-| **R2b-B1 ambiguous-vs-determined residual by *remaining executable quantity*; quiesce-to-finality before compensating (fixes partial-fill/pending-leg exposure creation)** | §5.3, §6.4, §6.7, §7.4, §9, tutorial §3.9 |
-| **R2b-B2 canary = acceptance of bounded loss, not validation of an unbuilt path; Bybit create = async ack; spot-IOC bracket = integration-test item** | §12, §7.4, §4 |
-| **R1b-1 rescue margin under Isolated = active `add-margin` top-up (not passive buffer); `PackageDelever` fallback; isolated-vs-cross trade-off** | §7.1, §4.1, §5.3, §9 |
-| **R1b-2 / R2b-3 per-venue `Fence` capability (verified endpoints/authority) + fence-unavailable branch + credential blast radius; signer isolation binds at `$1K` where exchange-side fencing unavailable** | §7.4, §7.3, §1.1, §12, §9 |
-| **R1b-3 §1.1 ↔ §7.4 attach-coverage alignment (actuator mandatory for any leg lacking *verified* attach, incl. Bybit spot IOC); §7.7 diagram fix** | §1.1, §7.4, §7.7 |
-| **R1b-4 exit score charges closing cost only where branches differ (no premature-exit bias)** | §2.4 |
-| **R1b-5 posture freshness = max-age TTL + pre-trade REST re-verify (position-mode changes emit no venue event)** | §6.3, §7.5 |
-| **R1b-6a `holdFraction` defined; R1b-6b tutorial pre-ship checklist (posture assertion, tiered signer isolation); R1b-6c market-data capture-lane + losslessness discipline** | §2.4, tutorial §9, §3.5 |
-| **R2b-4 crash boundary `DispatchAuthorized` (query-only recovery for every pre-ack state)** | §5.3, §6 |
-| **R2b-5 one-way position mode + configured leverage in posture verification (boot/pre-trade/on-change)** | §4, §4.1, §6.3, §7.5 |
-| **R2b-6 operator control-plane security contract (mTLS/authz/replay/CSRF/network/audit)** | §7.3, §12 |
-| **R2b-7 economic gate hardened (depth-walk, latency, per-regime + rolling, drawdown, LCB) + versioned calibration artifact (not author-selectable)** | §8, §12 |
+| **R2b-B1 ambiguous-vs-determined residual by *remaining executable quantity*; quiesce-to-finality before compensating (fixes partial-fill/pending-leg exposure creation)** | SM §2, core §6.4, core §7.4, core §9, tutorial §3.9 |
+| **R2b-B2 canary = acceptance of bounded loss, not validation of an unbuilt path; Bybit create = async ack; spot-IOC bracket = integration-test item** | core §12, core §7.4, Profiles §1 |
+| **R1b-1 rescue margin under Isolated = active `add-margin` top-up (not passive buffer); `PackageDelever` fallback; isolated-vs-cross trade-off** | core §7.1, core §4.1, SM §7, core §9 |
+| **R1b-2 / R2b-3 per-venue `Fence` capability (verified endpoints/authority) + fence-unavailable branch + credential blast radius; signer isolation binds at `$1K` where exchange-side fencing unavailable** | SM §3, SM §4, core §7.3, core §1.1, core §12, core §9 |
+| **R1b-3 §1.1 ↔ §7.4 attach-coverage alignment (actuator mandatory for any leg lacking *verified* attach, incl. Bybit spot IOC); §7.7 diagram fix** | core §1.1, core §7.4, core §7.7 |
+| **R1b-4 exit score charges closing cost only where branches differ (no premature-exit bias)** | core §2.4 |
+| **R1b-5 posture freshness = max-age TTL + pre-trade REST re-verify (position-mode changes emit no venue event)** | core §6.3, core §7.5 |
+| **R1b-6a `holdFraction` defined; R1b-6b tutorial pre-ship checklist (posture assertion, tiered signer isolation); R1b-6c market-data capture-lane + losslessness discipline** | core §2.4, tutorial §9, core §3.5 |
+| **R2b-4 crash boundary `DispatchAuthorized` (query-only recovery for every pre-ack state)** | SM §1, core §6 |
+| **R2b-5 one-way position mode + configured leverage in posture verification (boot/pre-trade/on-change)** | core §4, Profiles §2, core §6.3, core §7.5 |
+| **R2b-6 operator control-plane security contract (mTLS/authz/replay/CSRF/network/audit)** | core §7.3, core §12 |
+| **R2b-7 economic gate hardened (depth-walk, latency, per-regime + rolling, drawdown, LCB) + versioned calibration artifact (not author-selectable)** | core §8, core §12 |
 | **R2b-8 tutorial worked-trade denominator = `C_allocated` (not `C_legs`)** | tutorial §3.9 |
-| **R2b-9 SQLite durability = WAL + `synchronous=FULL` on Linux (fullfsync is macOS-only); local fs only** | §3.0, §11 |
-| **R2b-10 shared IP-ban safety envelope default (separate product weight/order counters)** | §7.6, §4.2 |
-| **R2b-11 raw arrival (`AcceptOrdinal`) = capture/causal order (NOT the replay authority — see R2c-6); `SourceTime` → freshness/analysis only; capture-lane persistence** | §3.5 |
-| **R2b-12 fill-ledger admission unbounded for known orders (finality window bounds only ambiguous-acceptance resolution)** | §5.3 |
+| **R2b-9 SQLite durability = WAL + `synchronous=FULL` on Linux (fullfsync is macOS-only); local fs only** | core §3.0, core §11, Profiles §4 |
+| **R2b-10 shared IP-ban safety envelope default (separate product weight/order counters)** | core §7.6, Profiles §3 |
+| **R2b-11 raw arrival (`AcceptOrdinal`) = capture/causal order (NOT the replay authority — see R2c-6); `SourceTime` → freshness/analysis only; capture-lane persistence** | core §3.5 |
+| **R2b-12 fill-ledger admission unbounded for known orders (finality window bounds only ambiguous-acceptance resolution)** | SM §1 |
 | **R2b-13 tutorial ADL re-hedge = ordinary non-reduce-only short** | tutorial §6.2 |
 | **— External human review round 3 (R1c, R2c) + Codex convergence → v0.7.1 —** | |
-| **R2c-1 liq distance is mark-price-driven (recompute on every mark + margin/position/tier change); stale mark blocks openings + escalates** | §2.2, §6, §7.1, §9, tutorial §6.2 |
-| **R2c-2 `FenceReady` continuous health gate + proactive wind-down (bounded `FenceReadyLost` RTO — differentiated in Cx4-5); incident branch = last-resort residual only** | §1.1, §7.4, §4, §9 |
-| **R2c-3 first-class safety ports (`MarginGateway`/`FenceGateway`/`ProtectionGateway`/`EmergencyPlanStore`); `TransferCollateral` leaves `AccountSource`, gains submit-unknown semantics** | §4 |
-| **R2c-4 three-failure-domain topology (engine ∥ operator/control ∥ minimal actuator daemon, no dashboard/HTTP); "single process" = the engine only** | §3.2, §11 |
+| **R2c-1 liq distance is mark-price-driven (recompute on every mark + margin/position/tier change); stale mark blocks openings + escalates** | core §2.2, core §6, core §7.1, core §9, tutorial §6.2 |
+| **R2c-2 `FenceReady` continuous health gate + proactive wind-down (bounded `FenceReadyLost` RTO — differentiated in Cx4-5); incident branch = last-resort residual only** | core §1.1, SM §3, core §4, core §9 |
+| **R2c-3 first-class safety ports (`MarginGateway`/`FenceGateway`/`ProtectionGateway`/`EmergencyPlanStore`); `TransferCollateral` leaves `AccountSource`, gains submit-unknown semantics** | core §4 |
+| **R2c-4 three-failure-domain topology (engine ∥ operator/control ∥ minimal actuator daemon, no dashboard/HTTP); "single process" = the engine only** | core §3.2, core §11 |
 | **R2c-5 tutorial corrected to the safety kernel (top-up→`PackageDelever`; determined/ambiguous ladder; split <5 s / <30 s; `DispatchAuthorized` not IDs-alone)** | tutorial §3.6, §6.2, §6.5, §7.7 |
-| **R2c-6 dispatch sequence decoupled: `IngressSeq`/`DispatchSeq` (replay key, consumed order) ≠ `AcceptOrdinal`/`RawIngressSeq` (raw-arrival causal); no cross-source head-of-line blocking; explicit mapping** | §3.5 |
-| **R2c-7 `EmergencyClosePackage` rationale fixed (CloseTrade is not `stop-opening`-subject; justification = foundation authority + delta≈0 no-op)** | §5.3 |
-| **R2c-8 canary loss = written risk-acceptance spec (max notional/collateral; worst-case = uncovered-leg notional; BTC-only; manual-recovery RTO; independent monitoring; signed acceptance)** | §12, §7.4 |
-| **R2c-9 durability backup/anchor made real (SQLite online-backup / `VACUUM INTO`, not raw copy; RPO/RTO; encryption; external anchor; restore-drill gate)** | §11 |
-| **R2c-10 hurdle = near-risk-free, dated/sourced/haircut-adjusted, revision-controlled (not a hardcoded 4.6%, not "risk-free")** | §2.1, §8 |
+| **R2c-6 dispatch sequence decoupled: `IngressSeq`/`DispatchSeq` (replay key, consumed order) ≠ `AcceptOrdinal`/`RawIngressSeq` (raw-arrival causal); no cross-source head-of-line blocking; explicit mapping** | core §3.5 |
+| **R2c-7 `EmergencyClosePackage` rationale fixed (CloseTrade is not `stop-opening`-subject; justification = foundation authority + delta≈0 no-op)** | core §5.3 |
+| **R2c-8 canary loss = written risk-acceptance spec (max notional/collateral; worst-case = uncovered-leg notional; BTC-only; manual-recovery RTO; independent monitoring; signed acceptance)** | core §12, core §7.4 |
+| **R2c-9 durability backup/anchor made real (SQLite online-backup / `VACUUM INTO`, not raw copy; RPO/RTO; encryption; external anchor; restore-drill gate)** | core §11 |
+| **R2c-10 hurdle = near-risk-free, dated/sourced/haircut-adjusted, revision-controlled (not a hardcoded 4.6%, not "risk-free")** | core §2.1, core §8 |
 | **R2c-11 provenance corrected (4 Codex rounds; verification dates)** | HANDOFF, review records, tutorial |
 | **R1c-1 tutorial top-up fallback = `PackageDelever` (was `ExposureReduction`) — folded into R2c-5** | tutorial §6.2 |
-| **R1c-2 fence credential holds unavoidable transfer-class authority on Bybit (grant narrowest — `Sub Member Transfer`, never `Withdrawal`); signer isolation elevated to primary `Fence`** | §7.3, §7.4 |
-| **R1c-3 sub-account availability is a verify-item (tier-gated on Binance); single-account fallback + signer-isolation fence** | §7.2, §7.4 |
-| **R1c-4 interval-floor compensation in the deadline-exceeded branch (compensate the residual invariant across the ambiguity; only when the interval doesn't straddle zero)** | §6.7, §7.4 |
-| **R1c-5 strategic fork if the milestone-2 gate fails (maker entry / regime-selective / alt niche / tuition); mechanically-derived thresholds = solo default** | §12, §8 |
+| **R1c-2 fence credential holds unavoidable transfer-class authority on Bybit (grant narrowest — `Sub Member Transfer`, never `Withdrawal`); signer isolation elevated to primary `Fence`** | core §7.3, SM §4 |
+| **R1c-3 sub-account availability is a verify-item (tier-gated on Binance); single-account fallback + signer-isolation fence** | core §7.2, SM §4 |
+| **R1c-4 interval-floor compensation in the deadline-exceeded branch (compensate the residual invariant across the ambiguity; only when the interval doesn't straddle zero)** | SM §2 |
+| **R1c-5 strategic fork if the milestone-2 gate fails (maker entry / regime-selective / alt niche / tuition); mechanically-derived thresholds = solo default** | core §12, core §8 |
 | **— Codex convergence (v0.7.1) —** | |
-| **Cx4-1 replay/total-order language unified: `DispatchSeq`/`IngressSeq` = the sole replay authority; raw `AcceptOrdinal` = capture/audit only; parity = replay the persisted dispatch log (not regenerate from raw capture)** | §3.5, Appendix |
-| **Cx4-2 interval-floor = a reserved `IntervalFloorReduction` generation (counted in `outstanding_reserved_reductions`, no blind retry, own ambiguous result routes through finality) — never issued twice; "no compensation before finality" reworded to "uncertain part"** | §6.7, §9 |
-| **Cx4-3 mark-risk = OMS-owned read port over `engine/state`; adverse-preserving mark coalescing (worst-adverse never dropped); per-venue mark max-age + `Clock`-timer staleness-on-silence** | §3.4, §6, §7.1 |
-| **Cx4-4 signer isolation pinned to its own actuator-fenceable failure domain (authenticated protocol + health + revoke; not bot-co-located); "no venue credential" corrected to "no additional key-management/transfer-class credential"** | §7.3, §7.4, §11 |
-| **Cx4-5 `FenceReadyLost` arbitration mapped to commands (block OpenTrade; supersede delever; `EmergencyClosePackage`/`ExposureReduction` via §6.7; overrides hard-halt); "never outlives its fence" → bounded wind-down + RTO** | §7.4 |
-| **Cx4-6 parity seam `ExecutionVenue` gains `MarginGateway`+`ProtectionGateway` (same safety code in backtest/chaos); `EmergencyPlanStore` gains `ListActive` / generation-CAS / `Deactivate` + actuator reconcile-only boot** | §3.5, §4, §7.4, §9 |
-| **Cx4-7 deployment non-goals + tutorial qualified: "single process" = the trading engine only; operator + actuator are separate required domains** | §1, §11, tutorial §7.3 |
+| **Cx4-1 replay/total-order language unified: `DispatchSeq`/`IngressSeq` = the sole replay authority; raw `AcceptOrdinal` = capture/audit only; parity = replay the persisted dispatch log (not regenerate from raw capture)** | core §3.5, ADR §3 |
+| **Cx4-2 interval-floor = a reserved `IntervalFloorReduction` generation (counted in `outstanding_reserved_reductions`, no blind retry, own ambiguous result routes through finality) — never issued twice; "no compensation before finality" reworded to "uncertain part"** | SM §2, core §9 |
+| **Cx4-3 mark-risk = OMS-owned read port over `engine/state`; adverse-preserving mark coalescing (worst-adverse never dropped); per-venue mark max-age + `Clock`-timer staleness-on-silence** | core §3.4, core §6, core §7.1 |
+| **Cx4-4 signer isolation pinned to its own actuator-fenceable failure domain (authenticated protocol + health + revoke; not bot-co-located); "no venue credential" corrected to "no additional key-management/transfer-class credential"** | core §7.3, SM §4, core §11 |
+| **Cx4-5 `FenceReadyLost` arbitration mapped to commands (block OpenTrade; supersede delever; `EmergencyClosePackage`/`ExposureReduction` via §6.7; overrides hard-halt); "never outlives its fence" → bounded wind-down + RTO** | SM §3 |
+| **Cx4-6 parity seam `ExecutionVenue` gains `MarginGateway`+`ProtectionGateway` (same safety code in backtest/chaos); `EmergencyPlanStore` gains `ListActive` / generation-CAS / `Deactivate` + actuator reconcile-only boot** | core §3.5, core §4, SM §6, core §9 |
+| **Cx4-7 deployment non-goals + tutorial qualified: "single process" = the trading engine only; operator + actuator are separate required domains** | core §1, core §11, tutorial §7.3 |
+
+## 4. v0.8 doc-split map (what moved where)
+
+The trimmed core keeps its §-numbers; this maps each v0.7.1 block to its v0.8 home (design `docs/superpowers/specs/2026-07-19-doc-split-design.md`, plan `docs/superpowers/plans/2026-07-19-doc-split-execution.md`).
+
+| v0.7.1 location (frozen blob, `6d211cd`) | v0.8 home |
+|---|---|
+| Convergence narrative (Status ¶ + Codex/review-round summary) | ADR §1 |
+| Appendix — finding→resolution traceability table | ADR §3 (this table) |
+| §4 quirk matrix (perp/futures venue facts) | Profiles §1 |
+| §4.1 account & margin posture tables | Profiles §2 |
+| §4.2 spot-leg surface table | Profiles §3 |
+| Review-record §2 dated verification citations | copied to Profiles §4 |
+| §5.3 order-state list + transition table | SM §1 |
+| §5.3 `reduceOnly`-by-instrument-position naked-leg cases | SM §2 |
+| §5.3 `PackageDelever` generation mechanics | SM §7 |
+| §6.7 (core §6 step 7) ambiguous-order classifier mechanics | SM §2 |
+| §7.4 actuator takeover protocol (fence latch → quiesce → reconcile → reduce) | SM §4 |
+| §7.4 `Fence`/`FenceReadyLost` differentiated-state branches | SM §3 |
+| §7.4 protective-order disarm (`Armed → DisarmPending → Disarmed`) | SM §5 |
+| §7.4 `EmergencyPlan` lifecycle (replicate/generations/deactivate) | SM §6 |
+
+The requirement text, its `[→ …]` tag, and a `[mechanism: …]` pointer stay in the core at every row above — only the state list / transition table / dated fact table moved.
+
+**Flagged ambiguities surfaced by the split.** Structuring already-converged prose into explicit state machines surfaced seven places where the source prose under-determines a transition. None are resolved here — each is a **surfaced-not-resolved ambiguity for the next review round** (fresh tags, per the HANDOFF fresh-tag rule: next → R1d/R2d):
+
+- **FLAG-1** — SM §1 (OMS order lifecycle) — the entry edge into `CancelUnknown` (and any cancel-lost-race exit) is never stated.
+- **FLAG-2** — SM §1 (OMS order lifecycle) — the terminal state of a stably-not-found order is never named.
+- **FLAG-3** — SM §7 (PackageDelever generations) — whether the interval between perp-reduce finality and spot submission is a distinct modeled state (`SpotReduceReserved`) is under-determined.
+- **FLAG-4** — SM §7 (PackageDelever generations) — the exit from `Held/Alert` on later resolution of the held leg's ambiguity is never stated.
+- **FLAG-5** — SM §3 (FenceReadyLost arbitration) — branch coverage of the four-dimension `FenceReady` health space is under-determined (no stated branch for a backup-fence-readiness-only loss).
+- **FLAG-6** — SM §3 (FenceReadyLost arbitration) — exits from the branches (fence restored mid-arbitration; re-arbitration on a changed condition) are never stated.
+- **FLAG-7** — SM §6 (EmergencyPlan lifecycle) — the deactivation path for a trade flattened *by the actuator* (host dead, the OMS close path never runs) is never stated.
