@@ -114,7 +114,7 @@ Draft v0.7.1 (2026-07-19) — Codex adversarial rounds 1–4 (11 → 6 → 4 →
 | **Cx3 exit = forward continue-vs-close score (entry costs are sunk, not re-charged)** | core §2.4 |
 | **Cx3-meta off-host actuator = bounded subproject; sub-$1K canary de-risking path** | core §7.4, core §12 |
 | **— External human review round 2 (R1, R2) + 2 Codex convergence rounds → v0.7 —** | |
-| **R2b-B1 ambiguous-vs-determined residual by *remaining executable quantity*; quiesce-to-finality before compensating (fixes partial-fill/pending-leg exposure creation)** | SM §2, core §6.4, core §7.4, core §9, tutorial §3.9 |
+| **R2b-B1 ambiguous-vs-determined residual by *remaining executable quantity*; quiesce-to-finality before compensating (fixes partial-fill/pending-leg exposure creation)** | core §5.3, SM §2, core §6.4, core §7.4, core §9, tutorial §3.9 |
 | **R2b-B2 canary = acceptance of bounded loss, not validation of an unbuilt path; Bybit create = async ack; spot-IOC bracket = integration-test item** | core §12, core §7.4, Profiles §1 |
 | **R1b-1 rescue margin under Isolated = active `add-margin` top-up (not passive buffer); `PackageDelever` fallback; isolated-vs-cross trade-off** | core §7.1, core §4.1, SM §7, core §9 |
 | **R1b-2 / R2b-3 per-venue `Fence` capability (verified endpoints/authority) + fence-unavailable branch + credential blast radius; signer isolation binds at `$1K` where exchange-side fencing unavailable** | SM §3, SM §4, core §7.3, core §1.1, core §12, core §9 |
@@ -147,7 +147,7 @@ Draft v0.7.1 (2026-07-19) — Codex adversarial rounds 1–4 (11 → 6 → 4 →
 | **R1c-1 tutorial top-up fallback = `PackageDelever` (was `ExposureReduction`) — folded into R2c-5** | tutorial §6.2 |
 | **R1c-2 fence credential holds unavoidable transfer-class authority on Bybit (grant narrowest — `Sub Member Transfer`, never `Withdrawal`); signer isolation elevated to primary `Fence`** | core §7.3, SM §4 |
 | **R1c-3 sub-account availability is a verify-item (tier-gated on Binance); single-account fallback + signer-isolation fence** | core §7.2, SM §4 |
-| **R1c-4 interval-floor compensation in the deadline-exceeded branch (compensate the residual invariant across the ambiguity; only when the interval doesn't straddle zero)** | SM §2 |
+| **R1c-4 interval-floor compensation in the deadline-exceeded branch (compensate the residual invariant across the ambiguity; only when the interval doesn't straddle zero)** | core §6.7, SM §2, SM §3 |
 | **R1c-5 strategic fork if the milestone-2 gate fails (maker entry / regime-selective / alt niche / tuition); mechanically-derived thresholds = solo default** | core §12, core §8 |
 | **— Codex convergence (v0.7.1) —** | |
 | **Cx4-1 replay/total-order language unified: `DispatchSeq`/`IngressSeq` = the sole replay authority; raw `AcceptOrdinal` = capture/audit only; parity = replay the persisted dispatch log (not regenerate from raw capture)** | core §3.5, ADR §3 |
