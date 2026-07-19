@@ -148,13 +148,219 @@ None.
 
 ---
 
-## §3. FenceReadyLost arbitration *(Task 4)*
+## §3. FenceReadyLost arbitration `[→ R2c-2, Cx4-5, Codex]`
 
-## §4. Actuator takeover protocol *(Task 4)*
+**Source (v0.7.1):** build-spec §7.4 (the `Fence` bullet: the `FenceReady` health gate, the `FenceReadyLost` branches, the fence-unavailable failure branch) + §9 — re-expressed, no new behavior. **Normative owner:** the requirement + tag live in core §7.4 (tier bindings: core §1.1); this section is the mechanism. Ownership split with §4: this section owns the **arbitration** (dimension tracking, first-safe-action, the three branches, the RTO structure, the tiered fence-unavailable floor); §4 owns takeover/epoch mechanics and is referenced, never restated.
 
-## §5. Protective-order disarm *(Task 4)*
+**Scope.** "`FenceReady` — a continuously-monitored health gate, not a one-time preflight" `[→ R2c-2]`: "a successful provisioning-time propagation test is **not** an availability guarantee during a later incident", so the primary `Fence`'s health is "**polled continuously**" (`FenceGateway.FenceStatus`, core §4 ports: "CONTINUOUSLY polled health — blocks openings + winds down open exposure on loss"). The arbitration branches instead of taking one wind-down path "because the naïve "bot winds down" path is **impossible exactly when the signer itself failed** (the bot is alive but cannot sign `EmergencyClosePackage`/`ExposureReduction`, since signing readiness feeds `FenceReady`)".
 
-## §6. EmergencyPlan lifecycle *(Task 4)*
+### States
+
+"**`FenceReady` is a differentiated *state*, not one Boolean `[→ Cx4-5, Codex]`**" — it tracks four dimensions (core §7.4, verbatim):
+
+- **signing readiness** — "can the bot sign at all?"
+- **primary-revoke readiness** — "can the actuator **durably latch** a revoke/starve the signer honors across restart?"
+- **backup-fence readiness** — exchange-side (mechanism: §4 here)
+- **durably-fenced** — "a **latched, monotonic revoke *epoch*** — `VerifyFence` validates the epoch, **not** a point-in-time snapshot" (epoch semantics owned by §4 here)
+
+Machine states (the branch labels name the source prose's numbered branches 1–3):
+
+| State | Meaning |
+|---|---|
+| `FenceReady` | the differentiated health state above, continuously monitored; normal trading posture |
+| `FenceReadyLost` | the explicit arbitration entered on loss of any dimension: the first-safe-action is applied, then a branch is selected on *which* dimension failed |
+| `WindDown` (branch 1) | "Revoke-control lost, signing still works" — bot-driven wind-down through the defined verbs |
+| `TakeoverTransfer` (branch 2) | "Signing unavailable *and* a durable revoke is latchable" — execution transfers to the actuator takeover (§4 here) |
+| `ManualOnly` (branch 3) | "Fence state uncertain" — bounded pre-armed protection + operator manual kill only |
+
+### Transitions
+
+| From | Event / condition | To | Action / guard |
+|---|---|---|---|
+| `FenceReady` | loss of any dimension | `FenceReadyLost` | "Loss triggers an explicit **`FenceReadyLost` arbitration** that first **blocks `OpenTrade`** and **supersedes any active `PackageDelever` generation** (quiescing its reserved leg to §6.7 finality first)" (§7 here) ", then **branches on *which* dimension failed**"; the automated **first-safe-action** (block openings + confirm pre-armed protection) carries its own always-holds RTO (Invariants) |
+| `FenceReadyLost` | "Revoke-control lost, signing still works" | `WindDown` (branch 1) | "**bot-driven wind-down** through the defined verbs — `EmergencyClosePackage` for a *neutral* package (an `ExposureReduction` would no-op at delta≈0), `ExposureReduction` only for a *fixed* residual — each routed through the §6.7 classifier" (§2 here). "This **overrides a configured `hard-halt-and-alert`**" (kill-switch mode (c), core §7.4): "halting while the fence is degrading is worse than a controlled exit — an explicit priority choice, not an arbitration conflict" |
+| `FenceReadyLost` | "Signing unavailable *and* a durable revoke is latchable" | `TakeoverTransfer` (branch 2) | "the actuator **latches a durable, monotonic takeover epoch**" — "the same **fence-first** revoke/starve primitive as the takeover protocol" (§4 here, which owns the epoch semantics: honored across restart until explicit operator clearance; `VerifyFence` validates **that epoch**, never a point-in-time snapshot) — "only then does execution **transfer to the actuator takeover**, reducing the reconciled residual" (§4 here) |
+| `FenceReadyLost` | "Fence state uncertain" — "no durable revoke latch achievable, and signing cannot be confirmed" | `ManualOnly` (branch 3) | "**bounded pre-armed protection + operator manual kill only**, never a compensating trade *or an un-latched takeover* that could create **two writers**". Branch membership rule (core §7.4): "a signer merely unreachable *without* a durable latch is **branch 3**", not branch 2 — because a point-in-time `VerifyFence` alone is insufficient (§4 here) |
+
+**The tiered fence-unavailable floor** (core §7.4 "Failure branch — fence unavailable at incident time"; stated here, consumed by §4's failed-latch edge): "fence-first is otherwise absolute (never two writers), so a *down* fence while the bot host is *also* dead would **deadlock the actuator while naked** — the precise failure the actuator exists to prevent. The resolution differs by tier, because **interval-floor safety proves only that a reduction cannot *overshoot the sign*, not that the actuator is the *sole writer*** — an unfenced actuator trade can still collide with a recovering bot:"
+
+- **At `$1K`+ (single-writer guaranteed):** "if **no durable fence latch** can be established (neither a latched revoke epoch nor a validated `VerifyFence`), the actuator stays **read-only** — **wait `T_fence` → on miss, alert + operator manual kill (venue UI/2FA) *only*; it does NOT automatically trade**, because a transient double-write is *not* acceptable where single-writer is promised. The prior `FenceReady` wind-down (run while the bot was alive) is what keeps a position from reaching this point un-fenced; read-only + manual covers the residual."
+- **In the pre-`$1K` canary only (core §12):** "the actuator MAY act on an **interval-floor / de-minimis residual** after `T_fence` — but this is the **separately-signed accepted bounded loss of the canary**, which **explicitly does *not* claim single-writer safety** (the fence/takeover isn't built yet); it is never presented as a `$1K`+ guarantee."
+
+(The writer-identity contrast with `DeadlineExceededAmbiguous` — ambiguous *order* vs ambiguous *writer* — is stated in §2's state table.)
+
+### Invariants
+
+- **RTO structure (core §7.4, verbatim):** "Each branch carries its own §9 target — an **automated first-safe-action RTO** (block openings + confirm pre-armed protection) that always holds, a **composite wind-down / takeover RTO** for branches 1–2 (which may include a §6.7 finality step), and a **manual-kill escalation *target*** for branch 3 (not an automated RTO)." Numbers (core §9): first-safe-action **< 5 s**; branch-1/2 composite **< 30 s**; branch 3 is a manual target, never an automated RTO (Chaos below).
+- **The honest guarantee (core §7.4, verbatim):** "The honest guarantee is a **bounded first-safe-action, then wind-down or takeover within the composite RTO** — *not* "never outlives its fence": an *ambiguous* residual still quiesces to finality first (which can delay closure), so what is guaranteed is "**exposure is reduced toward flat within the RTO, never knowingly grown while `FenceReady` is lost, and never left with two writers**.""
+- **Why the wind-down exists (tier gap, core §7.4):** "This closes the gap where "`$1K` requires a working fence" (§1.1) otherwise met only an incident-time **read-only + manual** fallback: exposure is wound down (or handed to the actuator) *before* an incident, rather than discovered fence-dead at host-death time."
+- **Openings stay blocked while lost:** `OpenTrade` is blocked by the first-safe-action and exposure is "never knowingly grown while `FenceReady` is lost" (the guarantee above) — the block is scoped to the loss, not to a one-shot check.
+- **Tier bindings stay core-owned:** the `$1K` working-fence requirement and the actuator tiering ("a *minimal single-node* actuator with the fence-first protocol above + a plan **integrity check**" at `$1K`; `$10K+` hardens it; "The watchdog escalates (i)→(iii) on host silence") are core §1.1 / core §7.4 requirements — referenced here, owned there.
+
+### Chaos & acceptance cases (§9 of the core)
+
+- **`FenceReady` loss** (core §9, mapped in full): "differentiated state: revoke-lost-but-signing-works → bot wind-down; **signing-unavailable + `VerifyFence`-proves-fenced → actuator takeover**; uncertain → bounded-protection + manual, **never two writers**) → new openings blocked (first-safe-action) + **branch-appropriate RTOs met** (branch-1/2 wind-down/takeover composite; branch-3 → manual escalation)" `[→ R2c-2, Cx4-5]`.
+- **RTO gate (core §9):** "**`FenceReadyLost` first-safe-action (block openings + confirm pre-armed protection) < 5 s** with a **branch-1/2 wind-down or durable-fence takeover composite < 30 s** (may include a §6.7 finality step) and **branch-3 = a manual-kill escalation *target*, not an automated RTO**".
+- **Fence-unavailable** — the tiered floor above, exercised inside §9's actuator-takeover-fence clause (§4 here): "**fence unavailable** (no durable latch → **actuator read-only + operator manual kill at `$1K`+**, never an unfenced trade; de-minimis unfenced action only in the signed canary regime, §12, which claims no single-writer safety)".
+- **Fence-race** — the core promises it: "Fence-unavailable and fence-race are §9 cases" (core §7.4). No §9 sub-case is *named* fence-race; the closest named exercise of the race (a second writer racing the fence) is the takeover clause's **bot-recovery-during-takeover** sub-case (§4 here).
+
+### Flagged ambiguities
+
+- **[FLAG-5]** Branch coverage of the dimension space is under-determined. The arbitration "branches on *which* dimension failed" and `FenceReady` tracks **four** dimensions, but the three branch guards name only revoke-control, signing, and durable-latch conditions — the branch for a **backup-fence-readiness-only** loss (signing confirmed working, primary revoke still latchable) is never stated. Readings: (i) with signing and primary-revoke intact no branch condition fires — the loss degrades redundancy only, and the stated response reduces to the first-safe-action posture + alerting, without a wind-down; (ii) every dimension loss must select a branch, and the conservative default for a degraded fence with working signing is branch 1's wind-down. Not resolved here; the transitions table carries only the three stated branch guards.
+- **[FLAG-6]** Exits from the branches are never stated. No edge is given for `FenceReady` being **restored** mid-arbitration (does a started wind-down abort or run to completion?), nor for **re-arbitration** when a branch condition changes (branch 3 → branch 2 once a durable latch becomes achievable; branch 3 → branch 1 if signing is re-confirmed). The only stated endings are: branch 2 transfers execution to the takeover (whose fence persists "until explicit operator clearance", §4 here), branch 3 ends in operator manual kill, and openings stay blocked "while `FenceReady` is lost". Readings: (i) the arbitration is one-way per incident — a branch runs to its terminal outcome and normal operation resumes only via operator/boot paths (consistent with core §7.5's reconcile-only boot and branch 2's operator clearance); (ii) the continuously-polled `FenceStatus` re-arbitrates as dimensions change. Not resolved here.
+
+---
+
+## §4. Actuator takeover protocol `[→ Codex, R1b-2, R2b-3, R1c-2, R1c-3, R2c-2, R2c-3, R1-meta]`
+
+**Source (v0.7.1):** build-spec §7.4 (takeover bullet + `Fence` capability bullet + tiering/subproject bullets) + the §4 ports (`FenceGateway`, `ProtectionGateway`) + §9 — re-expressed, no new behavior. **Normative owner:** the requirement + tag live in core §7.4; this section is the mechanism. Ownership split: this section owns **takeover/epoch mechanics**; the `FenceReadyLost` arbitration that can hand over to it, and the tiered fence-unavailable floor, are owned by §3 here; the `EmergencyPlan` lifecycle it consumes is §6 here.
+
+**Scope.** "**Takeover is a fence-first protocol, not a fire-and-forget sell `[→ Codex]`.** The actuator is a *second writer*, so before it trades it MUST **fence the bot's trading credential/signer** (via the venue-specific **`Fence` capability** defined below — exchange-side credential disable *or* signer isolation) — single-writer is preserved by *transferring* the writer, never by running two." The protocol is "a bounded distributed-systems subproject" (core §7.4): "Three convergence rounds each surfaced a deeper takeover requirement (fence-first → reduce the *reconciled residual* → quiesce *all* resting orders to finality → replicate *full* recovery handles)"; the spec fixes the invariants below, and the protocol itself "MUST be **designed, prototyped, and chaos-tested as its own workstream** (host-death mid-`DisarmPending`, mid-reduction, partition, late-fill), not assumed correct from prose" — the recommended sub-`$1K` de-risking path stays core §12.
+
+### States
+
+Protocol phases, derived from the core §7.4 takeover bullet's mandatory sequence (fence → quiesce-to-finality → reconcile → reduce; the prose sequences the steps, it does not name states):
+
+| State | Meaning |
+|---|---|
+| *(standby)* | the actuator holds replicated plans (§6 here) with watcher→actuator auth and independent key/IP (core §7.4); "The watchdog escalates (i)→(iii) on host silence" (core §7.4) |
+| `FenceLatch` | latching the fence: a durable, monotonic revoke/takeover **epoch** via the `Fence` capability (mechanisms below) |
+| `QuiesceSurfaces` | the finality barrier: every bot-owned exposure-changing order quiesced to finality across both product families |
+| `Reconcile` | executions/positions reconciled via the §6.7 finality contract (§2 here) at the **same watermark** |
+| `ReduceResidual` | the **reconciled live residual** reduced — a §2-classifier client |
+| `FenceUnavailable` | "**no durable fence latch** can be established" — the tiered fence-unavailable floor governs (§3 here) |
+
+### Transitions
+
+| From | Event / condition | To | Action / guard |
+|---|---|---|---|
+| *(standby)* | the bot host *and its local journal* die (watchdog: host silence) | `FenceLatch` | the emergency actuator "MUST act after the bot host *and its local journal* die" (core §7.4); if the actuator itself restarted, its own reconcile-only boot first enumerates active plans via `EmergencyPlanStore.ListActive()` and applies the latest generation per trade (§6 here) |
+| *(standby)* | §3 branch-2 hand-off ("Signing unavailable *and* a durable revoke is latchable") | `FenceLatch` | the hand-off *is* this machine's fence-first step: the epoch is latched first; execution transfers only once latched (§3 here) |
+| `FenceLatch` | durable epoch latched; `VerifyFence` validates **the epoch** | `QuiesceSurfaces` | fence-first is absolute — "before it trades it MUST **fence the bot's trading credential/signer**"; epoch semantics in Invariants |
+| `FenceLatch` | "**no durable fence latch** can be established" | `FenceUnavailable` | the tiered floor (§3 here): at `$1K`+ read-only — wait `T_fence` → on miss, alert + operator manual kill only; pre-`$1K` canary = the separately-signed bounded-loss regime |
+| `FenceUnavailable` | a durable latch is established within `T_fence` | `QuiesceSurfaces` | the floor's condition ("**no durable fence latch** can be established") no longer holds, so fence-first proceeds; the floor's stated consequences are for the `T_fence` **miss** (§3 here) |
+| `QuiesceSurfaces` | every bot-owned exposure-changing order reaches finality | `Reconcile` | "Fencing stops *new* submissions but does **not** cancel orders the venue already holds, so the takeover then **quiesces every bot-owned exposure-changing order to finality across both product families** — entries, reductions, and **all resting protection** (conditional / algo / TP-SL / OCO / trailing / attached), which are **separate cancel surfaces** (Binance cancel-all-*algo* is distinct from cancel-all-orders; Bybit stop/OCO need distinct filters and ack asynchronously) — a **finality barrier `[→ Codex]`**" (port: `ProtectionGateway.EnumerateResting`/`CancelToFinality`, core §4) |
+| `Reconcile` | reconcile completes at the watermark | `ReduceResidual` | "Only after that barrier does it **reconcile executions/positions via the §6.7 finality contract (same watermark)**" (§2 here — "never a weaker cancel-ack-only variant", §2's one-canonical-boundary invariant) |
+| `ReduceResidual` | the reduction is issued (routed through the §2 single gate) | *(complete — the fence stays latched until explicit operator clearance)* | "**reduce the reconciled live residual**, *not* the pre-allocated qty (which may be stale: an entry leg can still have filled, or a partial reduction already run)" |
+| *(any takeover state)* | the bot recovers mid-takeover | *(bot fenced, reconcile-only)* | "A bot that recovers mid-takeover finds itself fenced and stays in reconcile-only until an operator clears it" |
+
+**The `Fence` capability — "per-venue, verify-and-pin, with a failure branch" `[→ R1b-2, R2b-3, R1c-2, R1c-3, R2c-2]`** (core §7.4; the dated per-venue endpoint facts live in Profiles §4):
+
+- **Definition + availability:** "Fencing = guaranteeing single-writer by making the bot unable to trade; it has **two mechanisms**, and **at least one MUST be available and propagation-tested per venue before that venue reaches `$1K`**. **Signer isolation is the *primary* mechanism on both venues** (no venue credential, no money-moving blast radius, account-tier-independent, §7.3); exchange-side disable is the **backup**".
+- **Signer isolation (primary, core §7.3):** "the order-signer runs in **its own trust boundary the actuator can fence independently of the bot host** — a minimal signer daemon (a **fourth failure domain**, or a credential the actuator solely owns and can rotate), reached by the bot over an **authenticated signing protocol**, with a **health test** (feeding `FenceReady`" — §3 here — ") and a defined **revoke/starve** mechanism. A signer that merely lived on — and died with — the bot host would **not** be re-fenceable when the bot *restarts* mid-takeover, so **co-location with the bot is not signer isolation**. It holds the **trade** credential (within the §7.3 subaccount blast radius) but **no additional key-management/transfer-class credential** and has **no account-tier dependency** — that, plus the actuator's independent control, is why it is preferred over the money-moving exchange-side path. The trade-off it *does* add (a bot-facing signing RPC + the trade credential in that domain) is part of the §7.3 blast-radius analysis."
+- **Exchange-side credential disable (backup):** on **Bybit** the caller "**must hold a transfer/withdrawal-class authority** (`Account Transfer` / `Sub Member Transfer` / `Withdrawal`): a money-moving credential, so grant the **narrowest — `Sub Member Transfer`, never `Withdrawal`** (§7.3)" — the blast-radius policy for that hotter-than-the-trade-key credential stays core §7.4. "**Binance** has **no REST way to disable a *regular* account's own key** (UI + 2FA only); it is API-automatable **only if the bot runs on a *sub-account*** and the actuator holds a **master key** with sub-account management … — **which presupposes the account actually *has* sub-accounts, a tier-gated Binance feature that MUST be confirmed for the real account (§7.2 verify-item); if sub-accounts are unavailable the Binance exchange-side path does not exist and signer isolation is the sole fence** `[→ R1c-3]`". (The elided endpoint list + dated sources: Profiles §4.)
+- **Tiering consequence:** "because the primary mechanism (signer isolation) needs no venue credential, a working fence **binds at `$1K` on every venue**; the exchange-side path is a per-venue *backup* used only where it is available *and* verified (a Binance regular/sub-less account has none). The `Fence` MUST define **ack semantics + a propagation test** (prove the bot can no longer write) before it is trusted." (`FenceGateway.VerifyFence`, core §4: "propagation test: prove the bot can no longer write".)
+
+### Invariants
+
+- **Single-writer by transfer `[→ Codex]`:** "single-writer is preserved by *transferring* the writer, never by running two" — the actuator is a second writer and MUST fence before it trades.
+- **Epoch semantics (owned here; consumed by §3's branch 2 and its durably-fenced dimension):** the latch is "a **latched, monotonic revoke *epoch***" / "a durable, monotonic takeover epoch" — the same fence-first revoke/starve primitive in both uses — "that the signer **MUST honor across restart until explicit operator clearance**, and `VerifyFence` validates **that epoch** (not a point-in-time snapshot)"; "A **point-in-time `VerifyFence` alone is insufficient** — a transiently-crashed signer could restart mid-takeover and restore **two writers**".
+- **Fencing is not cancellation:** "Fencing stops *new* submissions but does **not** cancel orders the venue already holds" — hence the quiesce barrier is mandatory: "Skipping it re-creates the exact hazard: an armed stop fires *after* the reduction and leaves a naked leg."
+- **Reduce only the reconciled residual:** never the pre-allocated qty ("which may be stale: an entry leg can still have filled, or a partial reduction already run"); the takeover is a §2-classifier client ("actuator takeover", §2's single-gate enumeration) and reconciles through the §2 contract at its watermark.
+- **The fence, not command IDs, prevents double-reduce:** "`Place` isn't a venue idempotency key (§5.3), so the fence — not "idempotent command IDs" — is what prevents a double-reduce."
+- **Plan handles, never coarse balances:** the takeover associates orders/fills via the replicated plan's handle set (§6 here); coarse-balance fallback is forbidden (core §7.4: "never on selling from **coarse venue balances** (forbidden — it can hit unrelated inventory)").
+
+### Chaos & acceptance cases (§9 of the core)
+
+- **Actuator takeover fence** (core §9, mapped in full; bracketed pointers mark the sub-cases owned by sibling machines): "network partition / late-fill-after-takeover / bot-recovery-during-takeover / **fence unavailable** (no durable latch → **actuator read-only + operator manual kill at `$1K`+**, never an unfenced trade; de-minimis unfenced action only in the signed canary regime, §12, which claims no single-writer safety)" [floor: §3 here] " / **host-death with an armed stop or `DisarmPending`**" [§5 here] " / **host-death with an outstanding reduction** → single writer, **all resting orders quiesced to finality *before* the reduction**, no double-reduce, reduces only the reconciled residual; **actuator reconcile-only boot enumerates plans via `ListActive` (no `TradeID` list post-host-death) and never re-actions a `Deactivate` tombstone; `Replicate`↔`Deactivate` reorder/retry, crash between close and deactivation, actuator restart → no stale plan re-actioned**" [plan lifecycle: §6 here] ") — assert journal recovery + net-delta invariant + no duplicate/over-reduction + host-independent coverage every time."
+- **From the takeover bullet (core §7.4):** "Network-partition, late-fill-after-takeover, partial-fill, and bot-recovery-during-takeover are §9 cases."
+
+### Flagged ambiguities
+
+None.
+
+---
+
+## §5. Protective-order disarm `[→ R1-F2, Z3, R2-#4, R2b-B2, Codex]`
+
+**Source (v0.7.1):** build-spec §7.4 (host-independent-coverage bullet [the arm side] + protective-order-disarm bullet) + §9 — re-expressed, no new behavior. **Normative owner:** the requirement + tag live in core §7.4 (per-venue attach facts: Profiles §1/§3); this section is the mechanism.
+
+**Scope.** Per live leg-level protective order. "Entry-time leg-level protection exists only to bound the first-fill→hedge-complete window." The window exists because "Exposure begins the instant an entry leg fills — a *separate* venue op from any follow-on protective order, so it cannot share the fill's journal transaction" (core §7.4). Protection is armed venue-natively where a leg *verifiably* supports atomic attach (core §7.4/§1.1; per-venue attach facts + the spot-IOC caveat — "Assume the spot IOC leg is unprotected until an integration test proves otherwise" — Profiles §1/§3); the host-death backstop for every leg lacking verified attach is the pre-armed `EmergencyPlan` actuator (§6 here) — "armed **before** entry submission and covering **whichever leg fills first**" — not this machine. "Disarm is a **fenced state machine `Armed → DisarmPending → Disarmed`**, not a fire-and-forget cancel". A protective execution while still `Armed` pre-neutral is the protection doing its job — a fill event classified by §2 like any other; this machine models the disarm half of the lifecycle.
+
+### States
+
+| State | Meaning |
+|---|---|
+| `Armed` | a live leg-level protective order covers the first-fill→hedge-complete window; it **reserves** the leg allocation (core §7.4) — the §2 sizing counts it ("a protective order's leg reservation", §2's reservation-aware sizing) |
+| `DisarmPending` | the disarm is in flight: the cancel is issued but "a stop can trigger *during* cancellation, and §5.3's post-cancel-late-fill rule applies" (§1 here) |
+| `Disarmed` | entered only through the §6.7 finality contract (§2 here) — never on a cancel-ack alone; remaining-executable quantity has collapsed; "Ongoing protection is then package-level (the §6 monitor + this ladder), not leg-level" |
+
+### Transitions
+
+| From | Event / condition | To | Action / guard |
+|---|---|---|---|
+| *(first-fill→ack window)* | the armed protection is confirmed | `Armed` | arm side (core §7.4): the attach is "submitted atomically with the entry, but **acceptance is async — the fill *and* the armed protection are confirmed on the private WS, not the HTTP response**" `[→ R2b-B2]`; "The residual first-fill→ack window is minimized, bounded, and a §9 acceptance case" |
+| `Armed` | hot-path `ExposureReduction` on the protected leg | `Armed` (same order, amended) | "A live (non-host-death) protective order **reserves** the leg allocation, so a hot-path `ExposureReduction` **amends / cancel-replaces that same fenced protective order** rather than duplicating it" (core §7.4) |
+| `Armed` | neutral-hedge confirmation (both legs filled, package net-delta-neutral) | `DisarmPending` | the package is now neutral, so the armed stop has become "a naked-leg generator" (the full rationale sentence: Invariants); "on neutral-hedge confirmation the OMS issues the cancel" |
+| `DisarmPending` | the protective order **partially** executes (incl. a wick-triggered late fill) | `DisarmPending` (stays) | "a protective order that **partially** executes stays in **`DisarmPending`** and is **reclassified after every fill**" (§2 here); "a partial fill with quantity still live is *ambiguous*, never compensated mid-flight" |
+| `DisarmPending` | the §6.7 finality contract completes (§2 here) | `Disarmed` | "runs the **§6.7 finality contract** (not a cancel-ack alone) before `Disarmed`": the contract collapses the order's remaining-executable quantity to a fixed residual; "a protective execution is package-compensated via the fenced reduction generation **only once the finality contract collapses its remaining-executable quantity to a fixed residual**", "and the protection's inventory reservation is held until then" |
+
+### Invariants
+
+- **The naked-leg-generator rationale (core §7.4, verbatim):** "**Once both legs are filled and the package is net-delta-neutral, an armed leg-level stop is no longer protection — it is a naked-leg generator** (a benign wick through the spot stop-sell leaves you naked short)."
+- **Never a cancel-ack alone:** disarm completes only through the §6.7 finality contract (§2 here) — "protection-disarm's sweep" reconciles "through *this* contract **and its watermark**, never a weaker cancel-ack-only variant" (§2's one-canonical-boundary invariant).
+- **Ambiguous mid-flight is never compensated:** a protective execution is package-compensated via the fenced reduction generation only once finality collapses the remaining-executable quantity to a fixed residual — "a partial fill with quantity still live is *ambiguous*, never compensated mid-flight" — and the inventory reservation is held until then.
+- **Reservation/amend rule (arm side, core §7.4):** a live protective order reserves the leg allocation; the hot path amends / cancel-replaces that same fenced protective order, never duplicates it (so the §2 classifier does not misread the reservation as naked exposure).
+- **Package-level thereafter:** "Ongoing protection is then package-level (the §6 monitor + this ladder), not leg-level."
+- **The honest acceptance claim (core §7.4, verbatim):** "Absent an atomic package-level conversion, the acceptance claim is a **measurable bound on detect→re-neutralize**, not "a wick can never create a naked leg"."
+
+### Chaos & acceptance cases (§9 of the core)
+
+- **Protective-order disarm race** (core §9): "wick-triggered late fill during `DisarmPending` → re-neutralized within bound"; the source's own case line: "a §9 case (armed → neutral → DisarmPending → wick-triggered late fill → re-neutralized within bound)."
+- **Host death between first fill and protective-order ack** (core §9) — the arm-side window: covered by the pre-armed `EmergencyPlan` backstop (§6 here) + the minimized, bounded first-fill→ack window (core §7.4).
+- **Protective-order ↔ OMS inventory handoff** (core §9) — exercises the reservation lifecycle above: reserve at arm → amend on the hot path → release only at finality.
+- **Host-death with an armed stop or `DisarmPending`** (core §9, inside the actuator-takeover-fence clause — §4 here): the takeover quiesces the armed/disarming protective order to finality **before** any reduction — "an armed stop fires *after* the reduction and leaves a naked leg" is the exact hazard (§4's quiesce invariant).
+
+### Flagged ambiguities
+
+None.
+
+---
+
+## §6. EmergencyPlan lifecycle `[→ Y3, Z3, R1-F2, R2c-3, Codex]`
+
+**Source (v0.7.1):** build-spec §7.4 (actuator-authority bullet: the replicated `EmergencyPlan`) + the §4 `EmergencyPlanStore` port + §6 step 9 (Close) + §7.5 (reconcile-only boot) + §9 — re-expressed, no new behavior. **Normative owner:** the requirement + tag live in core §7.4 / §6 step 9 / §7.5 (the three-failure-domain and watcher→actuator auth requirements stay core §7.4); this section is the mechanism.
+
+**Scope.** Per-`TradeID` plan, across replicate → act → deactivate. The port (core §4): "INTERNAL driven port (NOT a venue call) — replicate the EmergencyPlan off-host BEFORE exposure opens" `[→ R2c-3, Codex]`; "EmergencyPlanStore is internal-only (off-host replication, not a venue call)". Its methods (port comments, verbatim): `Replicate` — "monotonic per-(TradeID,generation) upsert/CAS — a later generation supersedes; ack REQUIRED before the entry submits"; `ListActive` — "actuator reconcile-only boot enumerates ALL active plans — it has NO TradeID list after host death"; `Load` — "latest generation for one trade"; `Deactivate` — "TERMINAL, IDEMPOTENT TOMBSTONE — ack succeeds even if already tombstoned; after ack any Replicate for this TradeID (same OR later gen) is REJECTED (no reactivation); ListActive never returns a tombstoned trade". Why the plan exists (core §7.4): the emergency actuator "MUST act after the bot host *and its local journal* die. Because the allocation cap lives in that journal, the actuator relies on **host-independent coverage** …, never on selling from **coarse venue balances** (forbidden — it can hit unrelated inventory)."
+
+**Plan content (core §7.4, verbatim):** "carrying, for **both legs**, everything the takeover needs *without* the host-local journal: subaccount + `TradeID`, all intended **client/algo order IDs** + the bot-owned order namespace/prefix, sides, allocated qtys, the creation window, **recovery cursors**, and attached-protection parent/child IDs, plus loss/slippage bounds + fencing generation". "Without these handles the actuator can't associate fills once the journal dies" (consumed by §4's reconcile/reduce).
+
+### States
+
+| State | Meaning |
+|---|---|
+| *(none)* | no plan replicated — exposure MUST NOT open: the plan "is pushed to the actuator **before exposure opens** (actuator **ack required before the entry submits**)" |
+| `Active` | replicated and acknowledged; carries the latest **generation** ("monotonic per-(TradeID,generation) upsert/CAS — a later generation supersedes", port); enumerable by `ListActive()` |
+| `DeactivationPending` | close-side: a durable journal record that the close reached finality but the `Deactivate` ack is not yet persisted; the hedge-group lease is retained |
+| `Deactivated` (tombstone) | terminal: the idempotent `Deactivate` tombstone — rejects any same-or-later-generation replication; "ListActive never returns a tombstoned trade" (port) |
+
+### Transitions
+
+| From | Event / condition | To | Action / guard |
+|---|---|---|---|
+| *(none)* | entry planned; `Replicate(plan)` acknowledged (`ReplicaAck`) | `Active` | "ack REQUIRED before the entry submits" (port); "pushed to the actuator **before exposure opens**", "with watcher→actuator auth and independent key/IP" (core §7.4) |
+| `Active` | a later protection/reduction generation is created | `Active` (generation++) | "later protection/reduction generations are replicated **as they are created** (monotonic generation upsert/CAS)"; a later generation supersedes (port) |
+| `Active` | the close reaches finality (core §6 step 9) | `DeactivationPending` | the OMS "**journals a durable `DeactivationPending` before/atomically-with close finality, retains the hedge-group lease while pending, and invokes the idempotent `EmergencyPlanStore.Deactivate` (a terminal tombstone)**" |
+| `DeactivationPending` | the `Deactivate`'s **persisted acknowledgement** | `Deactivated` (tombstone) | "only its *persisted acknowledgement* releases the lease or admits a successor trade"; idempotent: "ack succeeds even if already tombstoned" (port) |
+| `DeactivationPending` | crash between close and ack, or the store is unreachable | `DeactivationPending` (held; re-driven) | "A crash between close and ack is recovered by **reconcile-only boot re-driving the pending `Deactivate` (idempotent, bounded backoff, alert)**" (core §7.5); "Holding the lease while the store is unreachable is the correct fail-safe (a symbol waits rather than risk a stale-plan takeover against a successor)" |
+| `Deactivated` (tombstone) | a same-or-later-generation `Replicate` arrives (reorder / retry) | `Deactivated` (replication rejected) | "after ack any Replicate for this TradeID (same OR later gen) is REJECTED (no reactivation)" (port); "a flattened trade leaves **no stale, still-actionable plan** even under `Replicate`↔`Deactivate` reordering" (core §7.4) |
+
+### Invariants
+
+- **Replicate-before-exposure, ack-before-entry `[→ R2c-3, Codex]`:** the plan is replicated off-host **before** exposure opens and the actuator ack is **required before the entry submits** — the *(none)* → `Active` guard above; entry-time arming order is a core §6/§7.4 requirement.
+- **Actuator boot reads `ListActive`, never a `TradeID` list (core §7.4, verbatim):** "The actuator's **own reconcile-only boot enumerates active plans via `EmergencyPlanStore.ListActive()`** — it has no `TradeID` list once the host is gone — applies the **latest generation** per trade, and treats a **`Deactivate` tombstone** as terminal (rejecting any same-or-later-generation replication)".
+- **Close awaits the tombstone (core §7.4):** "the normal **Close awaits that tombstone before releasing the lease** (§6 step 9), so a flattened trade leaves **no stale, still-actionable plan** even under `Replicate`↔`Deactivate` reordering."
+- **The lease is never released with a plan still active (core §6 step 9, verbatim):** "the lease is **never** released with a plan still active — so a closed trade leaves no plan an actuator restart could re-action, even under `Replicate`↔`Deactivate` reordering or a mid-close crash". The §7.5 restatement: "A journaled **`DeactivationPending`** (a close that had not confirmed its `EmergencyPlanStore.Deactivate`) is **re-driven to acknowledgement (idempotent, bounded backoff, alert) before its hedge-group lease is released** — a closed trade never leaves an active plan behind".
+- **Generations are monotonic:** per-(`TradeID`, generation) upsert/CAS; a later generation supersedes; the actuator always applies the **latest** generation (port + core §7.4).
+
+### Chaos & acceptance cases (§9 of the core)
+
+- **Plan sub-cases of the actuator-takeover-fence clause** (core §9, mapped in full; the clause itself is quoted in §4): "**actuator reconcile-only boot enumerates plans via `ListActive` (no `TradeID` list post-host-death) and never re-actions a `Deactivate` tombstone; `Replicate`↔`Deactivate` reorder/retry, crash between close and deactivation, actuator restart → no stale plan re-actioned**".
+- Mapping: reorder/retry → the tombstone-rejection row; crash between close and deactivation → the re-drive row (core §7.5); actuator restart → the boot invariant (latest generation; tombstone terminal, never returned by `ListActive`).
+
+### Flagged ambiguities
+
+- **[FLAG-7]** The deactivation path for a trade flattened **by the actuator** (host dead — the core §6-step-9 close path never runs) is never stated: the "closed trade leaves no plan an actuator restart could re-action" guarantee is defined via the OMS close → `DeactivationPending` → tombstone chain, and §9's "actuator restart → no stale plan re-actioned" sub-cases are that chain's scenarios. Readings: (i) such a plan simply stays `Active` until the recovered, operator-cleared OMS (or the operator) drives close/deactivation — harmless to re-action in the interim because the takeover "reduce[s] the reconciled live residual" (zero once flattened; §4 here); (ii) an unstated actuator-side `Deactivate` after its own flatten. Not resolved here; the tables carry only the OMS-side deactivation path.
 
 ---
 
