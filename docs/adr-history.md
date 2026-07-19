@@ -1,6 +1,6 @@
 # ADR & Review History — Funding-Rate Arbitrage Platform
 
-**Status:** v0.8 (2026-07-19) — structural release. Content frozen from build-spec v0.7.1; reorganization only, no normative change.
+**Status:** v0.9 (2026-07-20) — round-4 content release: ADR §3 gains the R1d block; the ADR §4 FLAG list records the seven rulings.
 **Doc set:** normative core `build-spec.md` · venue facts `venue-profiles.md` · kernel machines `state-machines.md` · history/traceability `adr-history.md` · teaching companion `tutorial.md`.
 **Role:** the convergence record — how the spec got here (review rounds, Codex convergence), plus the finding→resolution traceability that used to be the build-spec Appendix. Nothing here is normative on its own; the requirements live in the core.
 
@@ -12,6 +12,7 @@ Draft v0.7.1 (2026-07-19) — Codex adversarial rounds 1–4 (11 → 6 → 4 →
 
 ## 2. Review records
 
+- `docs/review/2026-07-20-09-v0.8-round4-R1d-review-and-resolution-record.md` — **round-4 (R1d)** findings + triage + venue-verification annexes → v0.9 (R2d pending).
 - `docs/review/2026-07-19-08-v0.7.1-review-and-verification-record.md` — round-3 (R1c/R2c) findings + resolutions + Codex convergence pass.
 - `docs/review/2026-07-19-07-v0.7-review-and-verification-record.md` — round-2 (R1/R2 second round) findings + resolutions + venue/tooling verification citations (§2 there).
 - `docs/review/2026-07-18-06-v0.6-review-and-verification-record.md` — v0.6 round.
@@ -157,6 +158,25 @@ Draft v0.7.1 (2026-07-19) — Codex adversarial rounds 1–4 (11 → 6 → 4 →
 | **Cx4-5 `FenceReadyLost` arbitration mapped to commands (block OpenTrade; supersede delever; `EmergencyClosePackage`/`ExposureReduction` via §6.7; overrides hard-halt); "never outlives its fence" → bounded wind-down + RTO** | SM §3 |
 | **Cx4-6 parity seam `ExecutionVenue` gains `MarginGateway`+`ProtectionGateway` (same safety code in backtest/chaos); `EmergencyPlanStore` gains `ListActive` / generation-CAS / `Deactivate` + actuator reconcile-only boot** | core §3.5, core §4, SM §6, core §9 |
 | **Cx4-7 deployment non-goals + tutorial qualified: "single process" = the trading engine only; operator + actuator are separate required domains** | core §1, core §11, tutorial §7.3 |
+| **— External human review round 4 (R1d) → v0.9 —** | |
+| **R1d-1 takeover terminal state = flat: state-dependent end action (fixed residual → `ExposureReduction`; neutral package → two-leg close within plan bounds — post-quiesce a package would be unprotected/unmanaged)** | core §1.1, core §7.4, core §7.7, core §9, SM §4 |
+| **R1d-2 interval-floor pre-action capital bound = `max(\|a\|,\|b\|)` (the `\|b\|` phrasing was net-long-only; a net-short interval's worst exposure is `\|a\|`); §9 overshoot assertion generalized to "opposite sign"** | core §6.7, core §9, SM §2 |
+| **R1d-3 classification re-runs on every input-changing event: fill/position (realized delta) + order-lifecycle/finality (possible-delta intervals — cancel ack, terminal status, sweep/watermark completion, finality timer, query result); never waits for the next fill/position event** | core §5.3, core §6.7, SM §1, SM §2 |
+| **R1d-4 actuator execution authority made coherent: "no venue credential" shorthand fixed (fence *action* needs none; the signer holds the trade key); `ActuatorReady` (actuator's own independent trade credential + reachability + plan-store integrity) added as a monitored dimension + branch-2 precondition + blast-radius entry; durably-fenced reclassified as incident/takeover state** | core §1.1, core §7.3, core §7.4, core §9, SM §3, SM §4 |
+| **R1d-5 plan generations: replication = freshness, never coverage — prefix-complete discovery from the acked entry generation (namespace-derived IDs + venue enumeration + cursor sweep); per-generation ack rejected for hot-path handles (would couple reductions to plan-store availability); policy-changing generations require ack before effect** | core §7.4, core §9, SM §6 |
+| **R1d-6 margin ops are their own durable target-state machine: journaled `MarginOp` (local op ID, intended delta, before-state + watermark) fsynced before dispatch; resolution by per-venue evidence (Binance `positionMargin/history` symbol+type+amount+window match; Bybit `positionIM` delta vs before-state — its transaction-log documents NO margin type; Bybit transfers by client `transferId` UUID, Binance transfers read-back before retry), never OrderByClientID-like point lookup, never blind delta retry; boot resolves pending margin ops** | core §4, core §7.1, core §7.5, core §9, SM §7, Profiles §4 |
+| **R1d-7 Bybit forced-close evidence corrected (no `closeType` on order/execution streams): normative source fields, dedup, and recovery query per verified schemas** | Profiles §1, Profiles §4, core §6.8 |
+| **R1d-8 canary sequencing made implementable: actuator/`Fence`/takeover = canary-concurrent workstream; `$1K` promotion (not canary start) gates on the §9 pass; pre-`$1K` de-minimis actuator action conditioned on the actuator existing; "isn't built yet" corrected to "not yet built or not yet §9-proven"** | core §7.4, core §12, SM §3 |
+| **R1d-9 stale-mark escalation defined: REST-mark/`MarginStatus` failover on the reserved rate-limit budget; `T_blind` + `mark_blind_action` (`delever`\|`close`) pre-authorized de-risk within a bounded response time — never an alert alone** | core §2.2, core §5.2, core §6.8, core §7.1, core §9, SM §7, tutorial §6.2 |
+| **R1d-10 tutorial re-synced: t₅′ teaches `AbsentAfterFinality` (not "stable Rejected/not-found"); §3.7 monitoring leads mark-driven; Part 9 signer-isolation gate matches the core's `$1K` fence floor** | tutorial §3.7, §3.9, Part 9 |
+| **R1d-11 governance: SM sections = normative mechanism incorporated by reference (core wins on conflict); tag conventions cover all lettered rounds + informal provenance tags; Profiles citation coverage stated honestly + ellipsis URLs expanded** | core header, SM header, Profiles header/§4 |
+| **R1d-F1…F7 rulings on the seven v0.8 FLAGs — all adopted (details: ADR §4 list below)** | SM §1, SM §3, SM §6, SM §7, core §5.3, core §7.4 |
+| **— Codex convergence (v0.9) —** | |
+| **Cx5-1 takeover completion is evidence-gated, never issuance-gated: `CloseInFlight` awaits §6.7 finality + zero reconciled per-leg allocations + final surfaces (= the §6 tombstone evidence); re-attempts consume a replicated **close-attempt budget** (`max_close_attempts` + `T_close`, plan fields — round-2 refinement: the aggregate bound is a consumable budget, not a per-attempt adjective), exhaustion → `HeldIncident` unconditionally (fence latched, plan active, operator escalated) — never a false "flat"** | core §1.1, core §7.4, core §9, SM §4, SM §6 |
+| **Cx5-2 core gains the 1→3 escalation (signing dies mid-wind-down with no latch or `ActuatorReady`) — branch 2 iff latch + `ActuatorReady`, else branch 3; core/SM/§9 now agree** | core §7.4, core §9, SM §3 |
+| **Cx5-3 prefix-complete discovery made real: `HistoricalOrders` port (normal + algo history, server↔client ID mapping, end watermark); completeness is retention-bounded (Binance ≈90d orders / ≈6mo trades, no server-side prefix filter) → periodic acknowledged checkpoint generations (ID map + cursors) keep discovery inside retention** | core §4, core §7.4, SM §6, Profiles §4 |
+| **Cx5-4 `MarginOpStatus` gains first-class `Ambiguous` (evidence ≠ causal identity); same-position margin ops serialized; on `Ambiguous`: no delta retry, openings blocked, live-state safety continues, explicit float reconciliation** | core §4, core §7.1, core §7.5, core §9, SM §7 |
+| **Cx5-5 residual "no venue credential" shorthand purged (HANDOFF + SM tiering quote)** | HANDOFF, SM §4 |
 
 ## 4. v0.8 doc-split map (what moved where)
 
@@ -181,12 +201,12 @@ The trimmed core keeps its §-numbers; this maps each v0.7.1 block to its v0.8 h
 
 The requirement text, its `[→ …]` tag, and a `[mechanism: …]` pointer stay in the core at every row above — only the state list / transition table / dated fact table moved.
 
-**Flagged ambiguities surfaced by the split.** Structuring already-converged prose into explicit state machines surfaced seven places where the source prose under-determines a transition. None are resolved here — each is a **surfaced-not-resolved ambiguity for the next review round** (fresh tags, per the HANDOFF fresh-tag rule: next → R1d/R2d):
+**Flagged ambiguities surfaced by the split — all seven resolved in v0.9 by the round-4 (R1d) reviewer rulings** `[→ R1d-F1…F7]`. The v0.8 flag texts are preserved (struck through in spirit) with each ruling:
 
-- **FLAG-1** — SM §1 (OMS order lifecycle) — the entry edge into `CancelUnknown` (and any cancel-lost-race exit) is never stated.
-- **FLAG-2** — SM §1 (OMS order lifecycle) — the terminal state of a stably-not-found order is never named.
-- **FLAG-3** — SM §7 (PackageDelever generations) — whether the interval between perp-reduce finality and spot submission is a distinct modeled state (`SpotReduceReserved`) is under-determined.
-- **FLAG-4** — SM §7 (PackageDelever generations) — the exit from `Held/Alert` on later resolution of the held leg's ambiguity is never stated.
-- **FLAG-5** — SM §3 (FenceReadyLost arbitration) — branch coverage of the four-dimension `FenceReady` health space is under-determined (no stated branch for a backup-fence-readiness-only loss).
-- **FLAG-6** — SM §3 (FenceReadyLost arbitration) — exits from the branches (fence restored mid-arbitration; re-arbitration on a changed condition) are never stated.
-- **FLAG-7** — SM §6 (EmergencyPlan lifecycle) — the deactivation path for a trade flattened *by the actuator* (host dead, the OMS close path never runs) is never stated.
+- **FLAG-1** — SM §1 — *was:* the entry edge into `CancelUnknown` (and any cancel-lost-race exit) never stated. **Resolved (R1d-F1):** ambiguous cancel transport result → `CancelUnknown` (symmetry with `SubmissionUnknown`); explicit terminal cancel + final executions sweep → `Canceled`; cancel-lost-to-fill → `Filled`.
+- **FLAG-2** — SM §1 — *was:* the terminal state of a stably-not-found order never named. **Resolved (R1d-F2):** new terminal **`AbsentAfterFinality`**; `Rejected` is not overloaded (explicit venue rejection only); a discovered execution supersedes it.
+- **FLAG-3** — SM §7 — *was:* a distinct state between perp-reduce finality and spot submission under-determined. **Resolved (R1d-F3):** durable **`SpotReduceAuthorized`** journal record (crash-boundary discipline at generation scope).
+- **FLAG-4** — SM §7 — *was:* exit from `Held/Alert` on later resolution never stated. **Resolved (R1d-F4):** nonterminal — eventual finality resumes the remaining target, or `TerminalFlatten` under the liquidation policy.
+- **FLAG-5** — SM §3 — *was:* no stated branch for a backup-fence-readiness-only loss. **Resolved (R1d-F5):** **`FenceDegraded`** (alert/repair, openings continue on the intact primary — not a wind-down); dimension space re-cut in the same round (`ActuatorReady` added, durably-fenced reclassified, R1d-4).
+- **FLAG-6** — SM §3 — *was:* exits from the branches never stated. **Resolved (R1d-F6):** one-way per incident — restored health never aborts a started branch; escalate-only re-arbitration; recovery = terminal outcome + operator clearance + fresh propagation test.
+- **FLAG-7** — SM §6 — *was:* deactivation for a trade flattened *by the actuator* never stated. **Resolved (R1d-F7):** actuator-side tombstone gated on two-leg close + zero reconciled per-leg allocations + final surfaces, with a durable `ActuatedFlat`/`DeactivationPending` record until the tombstone is durable.
