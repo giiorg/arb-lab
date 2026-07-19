@@ -317,7 +317,7 @@ type AccountPostureSource interface {
 type VenueAdapter interface { MarketDataSource; OrderGateway; AccountSource; MarginGateway; ProtectionGateway; ReferenceSource; OpsSource; AccountPostureSource }
 ```
 
-**Per-venue quirk matrix the adapter MUST encode** — normative venue facts, each dated: (Profiles §1). The adapter MUST encode every row; a row change is a spec change, not an adapter patch `[→ 7.2]`.
+**Per-venue quirk matrix the adapter MUST encode (verified 2026-07-18):** the full matrix — every row normative for the adapter, each fact dated — is at (Profiles §1).
 
 Contract-type (`linear`/`inverse`) is first-class so neutrality math can branch when inverse is added `[→ C6]`. All numeric fields cross the boundary as dimensional `fixedpoint` (parsed from venue decimal strings), never `float64` `[→ D3, X7]`.
 
@@ -331,7 +331,7 @@ The isolated **perp short can still be liquidated on a sharp rally** — a margi
 
 ### 4.2 Spot-leg surface — the other 50% `[→ R1-F5]`
 
-The spot leg is a first-class venue surface — separate hosts/streams/filters; no mark/funding exists on spot. Facts: (Profiles §3).
+Cash-and-carry is half spot, and spot is a **different API family** from the perp on both venues — separate endpoints, streams, user-data, filters, and rate-limit budgets. The adapter MUST encode: (Profiles §3). (Spot has no mark or funding — price/freshness-check it from its own book, Profiles §3.)
 
 ---
 
