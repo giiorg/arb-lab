@@ -1,6 +1,6 @@
 # ADR & Review History — Funding-Rate Arbitrage Platform
 
-**Status:** v0.9 (2026-07-20) — round-4 content release: ADR §3 gains the R1d block; the ADR §4 FLAG list records the seven rulings.
+**Status:** v0.9.1 (2026-07-20) — formal-model corrective release: ADR §3 gains the **FM block** (model-checker findings, `docs/formal/`). v0.9 was the round-4 content release: ADR §3 gains the R1d block; the ADR §4 FLAG list records the seven rulings.
 **Doc set:** normative core `build-spec.md` · venue facts `venue-profiles.md` · kernel machines `state-machines.md` · history/traceability `adr-history.md` · teaching companion `tutorial.md`.
 **Role:** the convergence record — how the spec got here (review rounds, Codex convergence), plus the finding→resolution traceability that used to be the build-spec Appendix. Nothing here is normative on its own; the requirements live in the core.
 
@@ -12,6 +12,7 @@ Draft v0.7.1 (2026-07-19) — Codex adversarial rounds 1–4 (11 → 6 → 4 →
 
 ## 2. Review records
 
+- `docs/review/2026-07-20-10-v0.9-formal-model-b-FM-1-record.md` — **formal model (b)** round (TLA+ fence/takeover/plan composition): FM-1 finding + resolution → v0.9.1; model + results: `docs/formal/`.
 - `docs/review/2026-07-20-09-v0.8-round4-R1d-review-and-resolution-record.md` — **round-4 (R1d)** findings + triage + venue-verification annexes → v0.9 (R2d pending).
 - `docs/review/2026-07-19-08-v0.7.1-review-and-verification-record.md` — round-3 (R1c/R2c) findings + resolutions + Codex convergence pass.
 - `docs/review/2026-07-19-07-v0.7-review-and-verification-record.md` — round-2 (R1/R2 second round) findings + resolutions + venue/tooling verification citations (§2 there).
@@ -177,6 +178,8 @@ Draft v0.7.1 (2026-07-19) — Codex adversarial rounds 1–4 (11 → 6 → 4 →
 | **Cx5-3 prefix-complete discovery made real: `HistoricalOrders` port (normal + algo history, server↔client ID mapping, end watermark); completeness is retention-bounded (Binance ≈90d orders / ≈6mo trades, no server-side prefix filter) → periodic acknowledged checkpoint generations (ID map + cursors) keep discovery inside retention** | core §4, core §7.4, SM §6, Profiles §4 |
 | **Cx5-4 `MarginOpStatus` gains first-class `Ambiguous` (evidence ≠ causal identity); same-position margin ops serialized; on `Ambiguous`: no delta retry, openings blocked, live-state safety continues, explicit float reconciliation** | core §4, core §7.1, core §7.5, core §9, SM §7 |
 | **Cx5-5 residual "no venue credential" shorthand purged (HANDOFF + SM tiering quote)** | HANDOFF, SM §4 |
+| **— Formal model (b) counterexamples (v0.9.1; `docs/formal/`) —** | |
+| **FM-1 takeover completion evidence terminalizes the trade: once `ActuatedFlat` exists (or any flatten reaches §6.7 finality with flat evidence) the trade re-admits no exposure-opening order — plan may only proceed to the tombstone; fresh exposure = successor trade via the lease. Closes the model-checked composition hazard (R1d-F7 re-drive × R1d-F6 clearance × §6 ack-before-entry): clearance in the `ActuatedFlat`→`Deactivate` crash window + same-plan re-entry → the stale re-driven tombstone revokes host-independent coverage under live exposure. Tombstone-as-clearance-precondition rejected (plan-store coupling, the R1d-5 argument)** | core §7.4, SM §3, SM §4, SM §6 |
 
 ## 4. v0.8 doc-split map (what moved where)
 
