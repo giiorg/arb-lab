@@ -50,7 +50,13 @@ CONSTANTS
   \* ("behaviors with finitely many crashes terminate"); FALSE leaves
   \* crashes unbounded for the safety configs (counter frozen).
   BOUND_CRASHES,
-  CRASH_BUDGET
+  CRASH_BUDGET,
+  \* TRUE: the operator's manual flatten / cancel-all are available (all
+  \* safety configs + the operator-assisted liveness config). FALSE (the
+  \* automated-convergence liveness config only): checks that branch 1/2
+  \* reach flat or an honest escalation terminal WITHOUT manual rescue --
+  \* the SS9 composite-guarantee shape [-> Cx6-5].
+  OPERATOR_INTERVENES
 
 VARIABLES
   \* --- Venue truth (abstract: one package, one venue-abstract account) ---
@@ -202,6 +208,12 @@ BotEntrySubmit ==
 \* by stop-opening (first-safe-action blocks openings only).
 BotCloseSubmit ==
   /\ botUp /\ botPhase \in { "normal", "winddown" }
+  \* Branch 3 is manual-only and branch 2 has transferred the writer: a
+  \* restored signer never re-enables automated bot writes there (one-way
+  \* per incident, R1d-F6; SM SS3 branch 3 "never a compensating trade").
+  \* "lost" stays permissive for closes: pre-branch, the SS2-routed
+  \* reduction flows continue (first-safe-action blocks openings only).
+  /\ fenceCtl \notin { "manual", "takeover" }
   /\ pos # "flat" /\ ~botCloseLive /\ SigningWorks
   /\ botCloseLive' = TRUE
   /\ botLandedPostLatch' = (botLandedPostLatch \/ ActuatorFencedActive)
@@ -212,6 +224,10 @@ BotCloseSubmit ==
 \* window is the cancel-vs-fire race below). A cancel is a venue write.
 BotCancelProt ==
   /\ botUp /\ botPhase \in { "normal", "winddown" } /\ protLive /\ SigningWorks
+  \* Branch 3: cancelling protection would remove the bounded pre-armed
+  \* protection the branch's posture consists of; branch 2: the takeover
+  \* owns the cancel surfaces (same gating as BotCloseSubmit).
+  /\ fenceCtl \notin { "manual", "takeover" }
   /\ protLive' = FALSE
   /\ botLandedPostLatch' = (botLandedPostLatch \/ ActuatorFencedActive)
   /\ UNCHANGED << pos, entryLive, botCloseLive, actCloseLive, actLandedUnfenced >>
@@ -402,9 +418,13 @@ WatchdogFire ==
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, planVars, flagVars, crashBudget >>
 
 \* SM SS4 FenceLatch: latch the durable, monotonic revoke epoch; VerifyFence
-\* validates THE EPOCH (never a point-in-time snapshot).
+\* validates THE EPOCH (never a point-in-time snapshot). Requires
+\* ActuatorReady: engaging the protocol without execution capability would
+\* fence the bot and transfer the writer to nobody (SM SS3 branch-2
+\* rationale, applied to the watchdog path too [-> Cx6-2]); without it the
+\* latch attempt times out to the FenceUnavailable floor.
 ActLatch ==
-  /\ actPhase = "latch" /\ latchable
+  /\ actPhase = "latch" /\ latchable /\ actReadyOK
   /\ latched' = TRUE /\ actPhase' = "quiesce"
   /\ UNCHANGED << signerUp, attemptsLeft, actuatedFlat >>
   /\ UNCHANGED << venueVars, botVars, envVars, ctlVars, planVars, flagVars, crashBudget >>
@@ -432,7 +452,7 @@ ActUnavailRetry ==
 \* action after T_fence. At $1K+ this action does not exist: the floor is
 \* read-only + operator manual kill (SM SS3).
 ActCanaryUnfencedClose ==
-  /\ CANARY_UNFENCED /\ actPhase = "unavail"
+  /\ CANARY_UNFENCED /\ actPhase = "unavail" /\ actReadyOK
   /\ pos # "flat" /\ ~actCloseLive /\ attemptsLeft > 0
   /\ actCloseLive' = TRUE /\ attemptsLeft' = attemptsLeft - 1
   /\ actPhase' = "closeInFlight"
@@ -445,29 +465,47 @@ ActCanaryUnfencedClose ==
 \* of the actuator's own prior orders after a crash (re-attempts stay
 \* bounded; the fence + finality contract, not command IDs, prevent
 \* double-execution). Cancels race venue fills (the venue actions below).
+\* Cancels are actuator VENUE WRITES (its own subaccount-scoped credential,
+\* core SS7.3): they require execution readiness and are instrumented for
+\* I1 exactly like closes [-> Cx6].
 ActQuiesceCancelEntry ==
-  /\ actPhase = "quiesce" /\ entryLive
+  /\ actPhase = "quiesce" /\ entryLive /\ actReadyOK
   /\ entryLive' = FALSE
-  /\ UNCHANGED << pos, protLive, botCloseLive, actCloseLive >>
-  /\ UNCHANGED << botVars, signerVars, envVars, ctlVars, actVars, planVars, flagVars, crashBudget >>
+  /\ actLandedUnfenced' = (actLandedUnfenced \/ ~latched)
+  /\ UNCHANGED << pos, protLive, botCloseLive, actCloseLive, botLandedPostLatch >>
+  /\ UNCHANGED << botVars, signerVars, envVars, ctlVars, actVars, planVars, crashBudget >>
 
 ActQuiesceCancelProt ==
-  /\ actPhase = "quiesce" /\ protLive
+  /\ actPhase = "quiesce" /\ protLive /\ actReadyOK
   /\ protLive' = FALSE
-  /\ UNCHANGED << pos, entryLive, botCloseLive, actCloseLive >>
-  /\ UNCHANGED << botVars, signerVars, envVars, ctlVars, actVars, planVars, flagVars, crashBudget >>
+  /\ actLandedUnfenced' = (actLandedUnfenced \/ ~latched)
+  /\ UNCHANGED << pos, entryLive, botCloseLive, actCloseLive, botLandedPostLatch >>
+  /\ UNCHANGED << botVars, signerVars, envVars, ctlVars, actVars, planVars, crashBudget >>
 
 ActQuiesceCancelBotClose ==
-  /\ actPhase = "quiesce" /\ botCloseLive
+  /\ actPhase = "quiesce" /\ botCloseLive /\ actReadyOK
   /\ botCloseLive' = FALSE
-  /\ UNCHANGED << pos, entryLive, protLive, actCloseLive >>
-  /\ UNCHANGED << botVars, signerVars, envVars, ctlVars, actVars, planVars, flagVars, crashBudget >>
+  /\ actLandedUnfenced' = (actLandedUnfenced \/ ~latched)
+  /\ UNCHANGED << pos, entryLive, protLive, actCloseLive, botLandedPostLatch >>
+  /\ UNCHANGED << botVars, signerVars, envVars, ctlVars, actVars, planVars, crashBudget >>
 
 ActQuiesceCancelOwnStale ==
-  /\ actPhase = "quiesce" /\ actCloseLive
+  /\ actPhase = "quiesce" /\ actCloseLive /\ actReadyOK
   /\ actCloseLive' = FALSE
-  /\ UNCHANGED << pos, entryLive, protLive, botCloseLive >>
-  /\ UNCHANGED << botVars, signerVars, envVars, ctlVars, actVars, planVars, flagVars, crashBudget >>
+  /\ actLandedUnfenced' = (actLandedUnfenced \/ ~latched)
+  /\ UNCHANGED << pos, entryLive, protLive, botCloseLive, botLandedPostLatch >>
+  /\ UNCHANGED << botVars, signerVars, envVars, ctlVars, actVars, planVars, crashBudget >>
+
+\* Mid-takeover ActuatorReady loss: the actuator can no longer perform
+\* venue writes, so the takeover escalates to HeldIncident -- fence stays
+\* latched, plan Active, operator escalated [-> Cx6-2] (the latch-phase
+\* case times out to FenceUnavailable via ActLatchFail).
+ActReadyLostMidTakeover ==
+  /\ actPhase \in { "quiesce", "reconcile", "reduce", "closeInFlight" }
+  /\ ~actReadyOK
+  /\ actPhase' = "held"
+  /\ UNCHANGED << attemptsLeft, actuatedFlat >>
+  /\ UNCHANGED << venueVars, botVars, signerVars, envVars, ctlVars, planVars, flagVars, crashBudget >>
 
 \* The finality barrier holds only when EVERY order surface is final.
 ActQuiesceDone ==
@@ -490,7 +528,7 @@ ActReconcileDone ==
 \* close (post-quiesce it would sit unprotected/unmanaged, host dead).
 \* Each attempt consumes the replicated budget (Cx5-1).
 ActReduceIssue ==
-  /\ actPhase = "reduce" /\ pos # "flat" /\ attemptsLeft > 0
+  /\ actPhase = "reduce" /\ pos # "flat" /\ attemptsLeft > 0 /\ actReadyOK
   /\ actCloseLive' = TRUE /\ attemptsLeft' = attemptsLeft - 1
   /\ actPhase' = "closeInFlight"
   /\ actLandedUnfenced' = (actLandedUnfenced \/ ~latched)
@@ -596,12 +634,20 @@ VProtFire ==
   /\ pos' = CASE pos = "neutral" -> "naked"
               [] pos = "naked"   -> "flat"
               [] pos = "flat"    -> "naked"
-  /\ UNCHANGED << entryLive, botCloseLive, actCloseLive >>
-  /\ UNCHANGED << botVars, signerVars, envVars, ctlVars, actVars, planVars, flagVars, crashBudget >>
+  \* A stop firing from flat CREATES exposure -- it counts for terminality
+  \* (FM-1: "any flatten of the trade" after it has held exposure).
+  /\ hadExposure' = (hadExposure \/ pos = "flat")
+  /\ UNCHANGED << entryLive, botCloseLive, actCloseLive, plan, leaseFree >>
+  /\ UNCHANGED << botVars, signerVars, envVars, ctlVars, actVars, flagVars, crashBudget >>
 
+\* A close filling when the package is ALREADY flat over-closes -- it
+\* creates reverse (naked) exposure [-> Cx6-1]: the late-fill-after-manual-
+\* flatten / double-close hazard family the quiesce barrier and the SS2
+\* single gate exist for. (Spot legs have no reduceOnly; core SS5.3.)
 VBotCloseFill ==
   /\ botCloseLive
-  /\ botCloseLive' = FALSE /\ pos' = "flat"
+  /\ botCloseLive' = FALSE
+  /\ pos' = IF pos = "flat" THEN "naked" ELSE "flat"
   /\ UNCHANGED << entryLive, protLive, actCloseLive >>
   /\ UNCHANGED << botVars, signerVars, envVars, ctlVars, actVars, planVars, flagVars, crashBudget >>
 
@@ -613,7 +659,8 @@ VBotCloseZeroFill ==
 
 VActCloseFill ==
   /\ actCloseLive
-  /\ actCloseLive' = FALSE /\ pos' = "flat"
+  /\ actCloseLive' = FALSE
+  /\ pos' = IF pos = "flat" THEN "naked" ELSE "flat"
   /\ UNCHANGED << entryLive, protLive, botCloseLive >>
   /\ UNCHANGED << botVars, signerVars, envVars, ctlVars, actVars, planVars, flagVars, crashBudget >>
 
@@ -631,25 +678,39 @@ VActCloseZeroFill ==
 \* fence-unavailable floor all escalate here -- and during ANY incident the
 \* operator's venue-UI kill is available (alerting runs in parallel from
 \* the first-safe-action; core SS7.4). Uses neither modeled credential (no
-\* writer flags). Atomically flattens + clears resting orders (a UI
-\* cancel-all + close; abstraction noted in the map).
-OpManualKill ==
-  /\ incidentActive
-  /\ (pos # "flat" \/ ~NoLiveOrders)
+\* writer flags). DELIBERATELY NON-ATOMIC [-> Cx6-1]: the flatten and the
+\* cancel-all are separate steps, and live orders keep racing both -- a
+\* previously-accepted close can fill AFTER the manual flatten (over-close
+\* -> reverse exposure, see the venue fill semantics below), which is the
+\* real UI race an atomic kill would erase.
+OpManualFlatten ==
+  /\ OPERATOR_INTERVENES /\ incidentActive /\ pos # "flat"
   /\ pos' = "flat"
+  /\ UNCHANGED << entryLive, protLive, botCloseLive, actCloseLive >>
+  /\ UNCHANGED << botVars, signerVars, envVars, ctlVars, actVars, planVars, flagVars, crashBudget >>
+
+OpManualCancelAll ==
+  /\ OPERATOR_INTERVENES /\ incidentActive /\ ~NoLiveOrders
   /\ entryLive' = FALSE /\ protLive' = FALSE
   /\ botCloseLive' = FALSE /\ actCloseLive' = FALSE
+  /\ UNCHANGED << pos >>
   /\ UNCHANGED << botVars, signerVars, envVars, ctlVars, actVars, planVars, flagVars, crashBudget >>
 
 \* Return to normal operation (R1d-F6): only after the branch's terminal
 \* outcome (flat/reconciled), with explicit operator clearance + a fresh
-\* propagation test (abstracted into this atomic action). Un-latches the
-\* epoch ("honored across restart until explicit operator clearance").
+\* VerifyFence propagation test. The propagation test CANNOT pass while
+\* the signer daemon, primary-revoke readiness, or ActuatorReady are still
+\* failed [-> Cx6-3] -- clearance is health-gated, and a still-failed
+\* BACKUP returns to FenceDegraded (its defining posture), never "ready".
+\* Un-latches the epoch ("honored across restart until explicit operator
+\* clearance").
 OpClearIncident ==
   /\ incidentActive /\ pos = "flat" /\ NoLiveOrders
   /\ actPhase \in { "standby", "done", "unavail" }
+  /\ signerUp /\ latchable /\ actReadyOK
   /\ latched' = FALSE /\ incidentActive' = FALSE
-  /\ fenceCtl' = "ready" /\ branchMax' = 0
+  /\ fenceCtl' = IF backupOK THEN "ready" ELSE "degraded"
+  /\ branchMax' = 0
   /\ actPhase' = "standby"
   /\ botPhase' = IF botUp THEN "normal" ELSE botPhase
   /\ UNCHANGED << signerUp, botUp, attemptsLeft, actuatedFlat >>
@@ -670,13 +731,14 @@ Next ==
   \/ ActCanaryUnfencedClose
   \/ ActQuiesceCancelEntry \/ ActQuiesceCancelProt
   \/ ActQuiesceCancelBotClose \/ ActQuiesceCancelOwnStale
+  \/ ActReadyLostMidTakeover
   \/ ActQuiesceDone \/ ActReconcileDone
   \/ ActReduceIssue \/ ActReduceExhausted \/ ActCloseResolve
   \/ ActMarkFlat \/ ActDeactivate \/ ActDone \/ ActCrash \/ ActResume
   \/ VEntryFill \/ VEntryTerminal \/ VProtFire
   \/ VBotCloseFill \/ VBotCloseZeroFill
   \/ VActCloseFill \/ VActCloseZeroFill
-  \/ OpManualKill \/ OpClearIncident
+  \/ OpManualFlatten \/ OpManualCancelAll \/ OpClearIncident
 
 Spec == Init /\ [][Next]_vars
 
@@ -689,6 +751,18 @@ WatchdogFireObligated == WatchdogFire /\ ~botUp
 \* SM SS3 branch 1: the wind-down is a bot OBLIGATION (composite RTO),
 \* not an option -- close submission and protection disarm must progress.
 ObligatedWindDown == botPhase = "winddown" /\ (BotCloseSubmit \/ BotCancelProt)
+\* Core SS6.7: a determined naked residual carries a <=5s reduction
+\* OBLIGATION wherever the bot can act (exempt from stop-opening) -- not
+\* only in wind-down. (In-model a naked pos is always determined; the
+\* ambiguity machinery is model (a)'s scope.)
+ObligatedReduce == pos = "naked" /\ BotCloseSubmit
+
+\* Liveness is claimed for behaviors whose environment EVENTUALLY
+\* STABILIZES healthy -- the honest operational claim ("after the outage
+\* ends, the system recovers"): no fairness scheme can force progress
+\* through guards a fully-adversarial environment keeps permanently
+\* unaligned (anti-phase flapping defeats conjunction guards forever).
+EnvStabilizes == <>[] (signerUp /\ latchable /\ actReadyOK)
 
 \* Fairness for the liveness config only: venue orders eventually resolve;
 \* the engine's arbitration logic, the actuator protocol, the obligated
@@ -705,10 +779,17 @@ Fairness ==
   /\ WF_vars(VProtFire)
   /\ WF_vars(VBotCloseFill \/ VBotCloseZeroFill)
   /\ WF_vars(VActCloseFill \/ VActCloseZeroFill)
-  /\ WF_vars(CtlLoss)
-  /\ WF_vars(CtlBranch1) /\ WF_vars(CtlBranch2) /\ WF_vars(CtlBranch3)
-  /\ WF_vars(CtlEscalate1to2) /\ WF_vars(CtlEscalate1to3) /\ WF_vars(CtlEscalate3to2)
+  \* STRONG fairness on arbitration steps: branch selection is a point-in-
+  \* time decision on sampled dimensions; anti-phase dimension flapping can
+  \* make each guard intermittent forever, but an arbitration enabled
+  \* infinitely often eventually decides (flapping changes WHICH branch,
+  \* never WHETHER).
+  /\ SF_vars(CtlLoss)
+  /\ SF_vars(CtlBranch1) /\ SF_vars(CtlBranch2) /\ SF_vars(CtlBranch3)
+  /\ SF_vars(CtlEscalate1to2) /\ SF_vars(CtlEscalate1to3) /\ SF_vars(CtlEscalate3to2)
   /\ WF_vars(WatchdogFireObligated) /\ WF_vars(ObligatedWindDown)
+  /\ WF_vars(ObligatedReduce)
+  /\ WF_vars(ActUnavailRetry)
   \* STRONG fairness on the latch: an anti-phase flapping environment can
   \* make ActLatch's enabling window intermittent forever; SF encodes "a
   \* latch mechanism available infinitely often eventually latches" (the
@@ -717,6 +798,7 @@ Fairness ==
   /\ SF_vars(ActLatch) /\ WF_vars(ActLatchFail)
   /\ WF_vars(ActQuiesceCancelEntry) /\ WF_vars(ActQuiesceCancelProt)
   /\ WF_vars(ActQuiesceCancelBotClose) /\ WF_vars(ActQuiesceCancelOwnStale)
+  /\ WF_vars(ActReadyLostMidTakeover)
   /\ WF_vars(ActQuiesceDone) /\ WF_vars(ActReconcileDone)
   /\ WF_vars(ActReduceIssue) /\ WF_vars(ActReduceExhausted)
   /\ WF_vars(ActCloseResolve) /\ WF_vars(ActMarkFlat)
@@ -729,9 +811,18 @@ Fairness ==
   \* scheduler that only offers the operator disabled moments. SF says: an
   \* escalated incident that is actionable infinitely often is eventually
   \* acted on.
-  /\ SF_vars(OpManualKill) /\ SF_vars(OpClearIncident)
+  /\ SF_vars(OpManualFlatten) /\ SF_vars(OpManualCancelAll)
+  /\ SF_vars(OpClearIncident)
 
 LiveSpec == Spec /\ Fairness
+
+\* Automated-convergence variant [-> Cx6-5]: run with OPERATOR_INTERVENES
+\* = FALSE (manual flatten/cancel-all cannot rescue a stalled branch) and
+\* STRONG fairness on fills -- "a close submitted infinitely often
+\* eventually fills" -- so the property below checks the SS9 branch-1/2
+\* composite-guarantee SHAPE: automated flat, or an honest escalation
+\* terminal, with no operator in the loop.
+LiveSpec2 == Spec /\ Fairness /\ SF_vars(VBotCloseFill) /\ SF_vars(VActCloseFill)
 
 (***************************************************************************)
 (* Invariants (design-doc numbering; I5 discharged by the port contract   *)
@@ -797,6 +888,24 @@ I7_EscalateOnly ==
 \* finitely many crashes). This is the SS7.4 honest guarantee plus the
 \* operator escalation targets, checked as one reachability claim.
 IncidentResolves ==
-  [] ( incidentActive => <> ~incidentActive )
+  EnvStabilizes => [] ( incidentActive => <> ~incidentActive )
+
+\* Liveness (LiveSpec2 only, OPERATOR_INTERVENES = FALSE): the automated
+\* branch-1/2 + takeover machinery, unassisted, always reaches automated
+\* flat-with-final-surfaces or an honest operator-escalation terminal
+\* (HeldIncident, the FenceUnavailable floor, or branch-3 ManualOnly) --
+\* never a silent stall [-> Cx6-5].
+Branch12AutoResolves ==
+  EnvStabilizes =>
+    [] ( (fenceCtl \in { "winddown", "takeover" } \/ actPhase \notin { "standby", "done" })
+          => <> ( (pos = "flat" /\ NoLiveOrders)
+                  \/ actPhase \in { "held", "unavail" }
+                  \/ fenceCtl = "manual"
+                  \/ (actPhase = "standby" /\ ~latched) ) )
+                \* standby/~latched: a PRE-latch takeover attempt that
+                \* stood down (crash before the epoch; the healthy bot
+                \* remains the writer) is an automated resolution; a
+                \* POST-latch crash keeps the obligation (ActResume
+                \* re-engages from latched standby).
 
 ===================================================================================

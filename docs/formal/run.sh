@@ -7,6 +7,9 @@
 set -u
 cd "$(dirname "$0")"
 
+# Prefer a real JDK over Apple's /usr/bin/java stub when Homebrew has one.
+[ -d /opt/homebrew/opt/openjdk/bin ] && PATH="/opt/homebrew/opt/openjdk/bin:$PATH"
+
 TOOLS_DIR=".tools"
 JAR="$TOOLS_DIR/tla2tools.jar"
 JAR_URL="https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar"
@@ -51,6 +54,8 @@ run "FenceTakeover"      pass                                            || fail
 echo
 run "FenceTakeover_Live" pass                                            || fails=$((fails+1))
 echo
+run "FenceTakeover_Live2" pass                                           || fails=$((fails+1))
+echo
 run "FenceTakeover_NC1"  fail "I1_NeverTwoWriters"                       || fails=$((fails+1))
 echo
 run "FenceTakeover_NC2"  fail "I2_HostIndependentCoverage|I3_EvidenceGatedTerminal" || fails=$((fails+1))
@@ -59,4 +64,4 @@ run "FenceTakeover_NC3"  fail "I1_NeverTwoWriters"                       || fail
 echo
 run "FenceTakeover_NC4"  fail "I2_HostIndependentCoverage|I3_EvidenceGatedTerminal" || fails=$((fails+1))
 echo
-if [ $fails -eq 0 ]; then echo "ALL 6 RUNS MATCH PREDICTIONS"; else echo "$fails RUN(S) OFF-PREDICTION"; exit 1; fi
+if [ $fails -eq 0 ]; then echo "ALL 7 RUNS MATCH PREDICTIONS"; else echo "$fails RUN(S) OFF-PREDICTION"; exit 1; fi
