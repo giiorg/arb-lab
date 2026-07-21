@@ -51,11 +51,13 @@ CONSTANTS
   \* crashes unbounded for the safety configs (counter frozen).
   BOUND_CRASHES,
   CRASH_BUDGET,
-  \* TRUE: the operator's manual flatten / cancel-all are available (all
-  \* safety configs + the operator-assisted liveness config). FALSE (the
-  \* automated-convergence liveness config only): checks that branch 1/2
-  \* reach flat or an honest escalation terminal WITHOUT manual rescue --
-  \* the SS9 composite-guarantee shape [-> Cx6-5].
+  \* TRUE: the operator's manual rescue actions -- kill-switch halt,
+  \* manual flatten, cancel-all -- are available (all safety configs + the
+  \* operator-assisted liveness config). FALSE (the automated-convergence
+  \* liveness config only): checks that branch 1/2 reach flat or an honest
+  \* escalation terminal WITHOUT manual rescue -- the SS9 composite-
+  \* guarantee shape [-> Cx6-5]. (Incident ADMINISTRATION -- clearance and
+  \* false-alarm dismissal -- is not rescue and stays ungated.)
   OPERATOR_INTERVENES
 
 VARIABLES
@@ -67,7 +69,8 @@ VARIABLES
   actCloseLive,  \* an actuator close order
   \* --- Bot / engine ---
   botUp,
-  botPhase,      \* "normal" | "winddown" | "reconcile" (fenced, awaiting clearance)
+  botPhase,      \* "normal" | "winddown" | "reconcile" (fenced, awaiting
+                 \* clearance) | "halted" (operator kill-switch trip)
   \* --- Signer (its own trust boundary, core SS7.3) ---
   signerUp,
   latched,       \* the durable, monotonic revoke epoch (SM SS4)
@@ -272,7 +275,10 @@ BotReboot ==
   /\ botUp' = TRUE
   \* A started branch survives reboot (one-way per incident, R1d-F6): the
   \* rebooted un-latched bot re-derives wind-down duty from durable state.
+  \* An operator kill-switch trip is durable POLICY (core SS5.2/SS7.4), not
+  \* process memory: reboot does not forget a halt.
   /\ botPhase' = IF latched THEN "reconcile"
+                 ELSE IF botPhase = "halted" THEN "halted"
                  ELSE IF fenceCtl = "winddown" THEN "winddown" ELSE "normal"
   /\ UNCHANGED << venueVars, signerVars, envVars, ctlVars, actVars, planVars, flagVars, crashBudget >>
 
@@ -696,6 +702,39 @@ OpManualCancelAll ==
   /\ UNCHANGED << pos >>
   /\ UNCHANGED << botVars, signerVars, envVars, ctlVars, actVars, planVars, flagVars, crashBudget >>
 
+\* Kill-switch trip (core SS7.4 modes (a)/(c); the SS7.3 control plane
+\* lists "trip the kill-switch" as the first operator power): during any
+\* incident the operator may halt the bot's trading. This is the first
+\* step of every real manual procedure -- "never two writers" includes the
+\* HUMAN: a manual kill against a still-writing bot is itself a two-writer
+\* race (the bot's obligated naked-reduce resubmits between the operator's
+\* cancel-all and flatten forever; the un-fenced Live lasso). The halt
+\* supersedes a branch-1 wind-down obligation: the operator now owns the
+\* exit (manual kill), the same escalation every branch targets.
+OpTripHalt ==
+  /\ OPERATOR_INTERVENES /\ incidentActive /\ botUp /\ botPhase # "halted"
+  /\ botPhase' = "halted"
+  /\ UNCHANGED << botUp >>
+  /\ UNCHANGED << venueVars, signerVars, envVars, ctlVars, actVars, planVars, flagVars, crashBudget >>
+
+\* False-alarm dismissal [-> FM-2]: a watchdog fire that latched nothing
+\* and started no branch (branchMax = 0, actuator stood back down, bot
+\* demonstrably alive and healthy) fenced nothing -- normal operation was
+\* never left, so there is no branch to "return" from: the R1d-F6 branch-
+\* exit preconditions (terminal outcome flat/reconciled + fresh propagation
+\* test) are scoped to a STARTED branch and do not apply. The operator
+\* dismisses the alert (and resumes a bot halted for the investigation).
+\* FM-2: the spec stated no exit at all for this incident class -- with
+\* only the R1d-F6 clearance available, acknowledging a false alarm would
+\* demand flattening a healthy trade (the Live lasso's root cause).
+OpDismissFalseAlarm ==
+  /\ incidentActive /\ botUp /\ ~latched /\ branchMax = 0
+  /\ fenceCtl \in { "ready", "degraded" } /\ actPhase = "standby"
+  /\ incidentActive' = FALSE
+  /\ botPhase' = "normal"
+  /\ UNCHANGED << botUp, fenceCtl, branchMax >>
+  /\ UNCHANGED << venueVars, signerVars, envVars, actVars, planVars, flagVars, crashBudget >>
+
 \* Return to normal operation (R1d-F6): only after the branch's terminal
 \* outcome (flat/reconciled), with explicit operator clearance + a fresh
 \* VerifyFence propagation test. The propagation test CANNOT pass while
@@ -738,7 +777,8 @@ Next ==
   \/ VEntryFill \/ VEntryTerminal \/ VProtFire
   \/ VBotCloseFill \/ VBotCloseZeroFill
   \/ VActCloseFill \/ VActCloseZeroFill
-  \/ OpManualFlatten \/ OpManualCancelAll \/ OpClearIncident
+  \/ OpManualFlatten \/ OpManualCancelAll \/ OpTripHalt
+  \/ OpDismissFalseAlarm \/ OpClearIncident
 
 Spec == Init /\ [][Next]_vars
 
@@ -779,22 +819,31 @@ Fairness ==
   /\ WF_vars(VProtFire)
   /\ WF_vars(VBotCloseFill \/ VBotCloseZeroFill)
   /\ WF_vars(VActCloseFill \/ VActCloseZeroFill)
-  \* STRONG fairness on arbitration steps: branch selection is a point-in-
-  \* time decision on sampled dimensions; anti-phase dimension flapping can
-  \* make each guard intermittent forever, but an arbitration enabled
-  \* infinitely often eventually decides (flapping changes WHICH branch,
-  \* never WHETHER).
-  /\ SF_vars(CtlLoss)
-  /\ SF_vars(CtlBranch1) /\ SF_vars(CtlBranch2) /\ SF_vars(CtlBranch3)
-  /\ SF_vars(CtlEscalate1to2) /\ SF_vars(CtlEscalate1to3) /\ SF_vars(CtlEscalate3to2)
+  \* Arbitration fairness is WEAK, deliberately: both liveness claims are
+  \* conditioned on EnvStabilizes, and in the stabilized suffix the health
+  \* dimensions stop flapping -- within an incident, `latched` is monotone
+  \* (un-latch = clearance = resolution), so each arbitration guard that
+  \* becomes relevant there holds PERSISTENTLY until its decision fires,
+  \* and WF forces it. The v0.9.1 SF-for-anti-phase-flapping rationale is
+  \* subsumed by the antecedent; claiming liveness under the weaker
+  \* fairness assumption is the stronger theorem -- and it keeps the
+  \* fairness tableau tractable (SF promises dominate TLC's single-
+  \* threaded temporal phase).
+  /\ WF_vars(CtlLoss)
+  /\ WF_vars(CtlBranch1) /\ WF_vars(CtlBranch2) /\ WF_vars(CtlBranch3)
+  /\ WF_vars(CtlEscalate1to2) /\ WF_vars(CtlEscalate1to3) /\ WF_vars(CtlEscalate3to2)
   /\ WF_vars(WatchdogFireObligated) /\ WF_vars(ObligatedWindDown)
   /\ WF_vars(ObligatedReduce)
   /\ WF_vars(ActUnavailRetry)
-  \* STRONG fairness on the latch: an anti-phase flapping environment can
-  \* make ActLatch's enabling window intermittent forever; SF encodes "a
-  \* latch mechanism available infinitely often eventually latches" (the
-  \* actuator keeps retrying across T_fence windows), after which the
-  \* takeover runs to completion against the fenced bot (SM SS4).
+  \* The latch KEEPS strong fairness -- the one non-operator SF the WF
+  \* downgrade sweep cannot take: ActLatch's enabling is made intermittent
+  \* by the latch<->unavail PHASE ALTERNATION itself (ActLatchFail is
+  \* deliberately always available as the T_fence timeout), so even in a
+  \* stable environment a WF-fair ping-pong latch -> fail -> unavail ->
+  \* retry -> ... could starve the latch forever. SF encodes "a latch
+  \* attemptable infinitely often eventually latches" (the actuator keeps
+  \* retrying across T_fence windows), after which the takeover runs to
+  \* completion against the fenced bot (SM SS4).
   /\ SF_vars(ActLatch) /\ WF_vars(ActLatchFail)
   /\ WF_vars(ActQuiesceCancelEntry) /\ WF_vars(ActQuiesceCancelProt)
   /\ WF_vars(ActQuiesceCancelBotClose) /\ WF_vars(ActQuiesceCancelOwnStale)
@@ -812,6 +861,15 @@ Fairness ==
   \* escalated incident that is actionable infinitely often is eventually
   \* acted on.
   /\ SF_vars(OpManualFlatten) /\ SF_vars(OpManualCancelAll)
+  \* The halt and the false-alarm dismissal are the two operator steps the
+  \* Live lasso proved necessary: without the halt the operator must race
+  \* the un-fenced bot's obligated resubmissions forever (flatten always
+  \* over-closed by a live close); without the dismissal an incident that
+  \* latched nothing and started no branch has NO reachable exit at all
+  \* [-> FM-2]. Same SF rationale as above: the enabling windows are made
+  \* intermittent by crashes/flaps, and an escalated alert that is
+  \* actionable infinitely often is eventually acted on.
+  /\ SF_vars(OpTripHalt) /\ SF_vars(OpDismissFalseAlarm)
   /\ SF_vars(OpClearIncident)
 
 LiveSpec == Spec /\ Fairness
@@ -833,7 +891,7 @@ TypeOK ==
   /\ entryLive \in BOOLEAN /\ protLive \in BOOLEAN
   /\ botCloseLive \in BOOLEAN /\ actCloseLive \in BOOLEAN
   /\ botUp \in BOOLEAN
-  /\ botPhase \in { "normal", "winddown", "reconcile" }
+  /\ botPhase \in { "normal", "winddown", "reconcile", "halted" }
   /\ signerUp \in BOOLEAN /\ latched \in BOOLEAN
   /\ latchable \in BOOLEAN /\ backupOK \in BOOLEAN /\ actReadyOK \in BOOLEAN
   /\ fenceCtl \in { "ready", "degraded", "lost", "winddown", "manual", "takeover" }

@@ -33,8 +33,16 @@ run() {
   local cfg="$1" expect="$2" want="${3:-}"
   local out="$TOOLS_DIR/$cfg.out"
   echo "=== $cfg (expect: $expect${want:+ on $want}) ==="
+  # -lncheck final: liveness is checked ONCE over the completed state
+  # graph. TLC's default periodic liveness passes re-walk the growing
+  # graph inside its single-threaded temporal phase -- with this model's
+  # fairness set that made the liveness configs impractically slow (>1 h);
+  # final-only checking is minutes. (No effect on the safety/NC configs:
+  # no PROPERTIES there. Trade-off: a liveness VIOLATION is now reported
+  # only after the full graph is built -- acceptable for a verification
+  # suite whose liveness configs are expected green.)
   java -XX:+UseParallelGC -cp "$JAR" tlc2.TLC \
-    -workers auto -config "$cfg.cfg" -metadir "$TOOLS_DIR/states-$cfg" \
+    -workers auto -lncheck final -config "$cfg.cfg" -metadir "$TOOLS_DIR/states-$cfg" \
     FenceTakeover.tla >"$out" 2>&1
   local rc=$?
   grep -E "Model checking completed|Error:|violated|states generated" "$out" | head -6
