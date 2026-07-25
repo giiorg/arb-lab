@@ -910,6 +910,29 @@ var GuidePure = (function () {
     { part: "edge",  id: "forks",          route: "edge/forks",           title: "When the gate fails" }
   ];
 
+  var LANGS = ["en", "ka"];
+  var DEFAULT_LANG = "en";
+
+  // The hash carries the language as an optional first segment: "#/ka/edge/costs".
+  // English omits it, so every link written before localization still resolves.
+  // A segment counts as a language only if it is exactly "en" or "ka" — no part id
+  // collides with those, and treating a near-miss as a language would silently
+  // swallow a real route segment.
+  function parseHash(hash) {
+    var raw = String(hash || "").replace(/^#\/?/, "");
+    var segs = raw.split("/").filter(function (s) { return s.length > 0; });
+    var lang = DEFAULT_LANG;
+    if (segs.length && LANGS.indexOf(segs[0]) !== -1) lang = segs.shift();
+    var route = segs.join("/");
+    return { lang: lang, route: route || ROUTES[0].route };
+  }
+
+  function formatHash(state) {
+    var lang = LANGS.indexOf(state.lang) !== -1 ? state.lang : DEFAULT_LANG;
+    var prefix = lang === DEFAULT_LANG ? "" : lang + "/";
+    return "#/" + prefix + state.route;
+  }
+
   function buildSearchIndex(records) {
     return records.map(function (r) {
       return {
@@ -1061,6 +1084,10 @@ var GuidePure = (function () {
   return {
     PARTS: PARTS,
     ROUTES: ROUTES,
+    LANGS: LANGS,
+    DEFAULT_LANG: DEFAULT_LANG,
+    parseHash: parseHash,
+    formatHash: formatHash,
     buildSearchIndex: buildSearchIndex,
     searchIndex: searchIndex,
     computeEconomics: computeEconomics,
