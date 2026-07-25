@@ -51,6 +51,15 @@
   }
   .nav-link:hover { background: var(--chip-bg); }
   .nav-link[aria-current="true"] { background: var(--chip-bg); color: var(--accent); font-weight: 600; }
+  .search { width: 100%; padding: 0.4rem 0.55rem; font: inherit; font-size: 0.85rem;
+    background: var(--bg); color: var(--fg); border: 1px solid var(--rule); border-radius: 0.3rem; }
+  .results { list-style: none; margin: 0.5rem 0 0; padding: 0; }
+  .results li { margin-bottom: 0.5rem; }
+  .results a { color: var(--fg); text-decoration: none; display: block;
+    padding: 0.3rem 0.5rem; border-radius: 0.3rem; }
+  .results a:hover { background: var(--chip-bg); }
+  .results .snippet { display: block; font-size: 0.75rem; color: var(--muted); }
+  .rail.searching h2, .rail.searching .nav-link { display: none; }
   .pane { overflow-y: auto; }
   article[data-route] { display: none; }
   article[data-route].is-active { display: block; }
@@ -64,7 +73,10 @@
 </style>
 
 <div class="guide">
-  <nav class="rail" id="rail" aria-label="Guide contents"></nav>
+  <nav class="rail" id="rail" aria-label="Guide contents">
+    <input class="search" id="search" type="search" placeholder="Search the guide" aria-label="Search the guide">
+    <ul class="results" id="results"></ul>
+  </nav>
   <div class="pane">
     <div class="status">spec v0.9.4 · 0 lines of Go</div>
     <main class="content" id="content">
@@ -98,7 +110,44 @@ var GuidePure = (function () {
     { part: "world", id: "perps", route: "world/perps", title: "Spot, futures, perpetuals" }
   ];
 
-  return { PARTS: PARTS, ROUTES: ROUTES };
+  function buildSearchIndex(records) {
+    return records.map(function (r) {
+      return {
+        route: r.route,
+        title: r.title,
+        text: r.text,
+        haystack: (r.title + " " + r.text).toLowerCase()
+      };
+    });
+  }
+
+  function searchIndex(index, query) {
+    var q = String(query || "").trim().toLowerCase();
+    if (q.length < 2) return [];
+    var out = [];
+    index.forEach(function (entry) {
+      var at = entry.haystack.indexOf(q);
+      if (at === -1) return;
+      var source = entry.text;
+      var pos = source.toLowerCase().indexOf(q);
+      var snippet;
+      if (pos === -1) {
+        snippet = source.slice(0, 90);
+      } else {
+        var from = Math.max(0, pos - 35);
+        snippet = (from > 0 ? "…" : "") + source.slice(from, pos + q.length + 55).trim();
+      }
+      out.push({ route: entry.route, title: entry.title, snippet: snippet });
+    });
+    return out;
+  }
+
+  return {
+    PARTS: PARTS,
+    ROUTES: ROUTES,
+    buildSearchIndex: buildSearchIndex,
+    searchIndex: searchIndex
+  };
 })();
 </script>
 
@@ -147,5 +196,38 @@ var GuidePure = (function () {
 
   window.addEventListener("hashchange", function () { show(routeFromHash()); });
   show(routeFromHash());
+
+  var records = [];
+  document.querySelectorAll("article[data-route]").forEach(function (el) {
+    var meta = GuidePure.ROUTES.filter(function (r) { return r.route === el.dataset.route; })[0];
+    records.push({
+      route: el.dataset.route,
+      title: meta ? meta.title : el.dataset.route,
+      text: el.textContent.replace(/\s+/g, " ").trim()
+    });
+  });
+  var index = GuidePure.buildSearchIndex(records);
+
+  var box = document.getElementById("search");
+  var results = document.getElementById("results");
+  box.addEventListener("input", function () {
+    var hits = GuidePure.searchIndex(index, box.value);
+    rail.classList.toggle("searching", box.value.trim().length >= 2);
+    results.innerHTML = "";
+    hits.forEach(function (hit) {
+      var li = document.createElement("li");
+      var a = document.createElement("a");
+      a.href = "#/" + hit.route;
+      var strong = document.createElement("strong");
+      strong.textContent = hit.title;
+      var span = document.createElement("span");
+      span.className = "snippet";
+      span.textContent = hit.snippet;
+      a.appendChild(strong);
+      a.appendChild(span);
+      li.appendChild(a);
+      results.appendChild(li);
+    });
+  });
 })();
 </script>
