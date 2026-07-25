@@ -27,30 +27,24 @@ Design: `docs/superpowers/specs/2026-07-25-interactive-guide-design.md`. Plan (s
 
 **Stage 1 = Parts 1–2 + the economics calculator.** Parts 3–6 (why the design looks like this · what we're building + the state-machine explorer · the Go build · the operator runbook) are **pending the voice-review gate** — do not write them until the user has reviewed stage 1's voice and density. Tests: `cd docs/guide && bun test` (40 tests). The calculator is pinned to five figures printed in `tutorial §3.9`/`core §2.4` — $90 funding, $38 round trip, 8.4 days to break even, 5.68% in-position, **3.41% at 60% utilization vs the 4.60% hurdle**, plus the 7.12% the `C_legs` denominator would wrongly show. **If any of those assertions ever fails, the spec and the guide disagree — that is a finding, not a test to relax.**
 
-### NEXT REQUEST (2026-07-25, not started): localize the guide to English + Georgian with a language switcher
+### Localization to English + Georgian — **DONE (2026-07-25)**
 
-The user asked for this in a **fresh conversation** (the building session ended at ~343 K context). Start it with `superpowers:brainstorming` — the decisions below are real forks, not details.
+The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localization-design.md`. Plan: `docs/superpowers/plans/2026-07-25-guide-localization.md`. Operating instructions live in `docs/guide/README.md` under "Languages".
 
-**Tooling is verified working — don't re-derive it.** `agy` v1.1.4 is installed, with `Gemini 3.1 Pro (High)` available (`agy models` lists it). Non-interactive form, confirmed to return natural Georgian:
+**Three decisions the user took:**
+1. **Georgian renders serif** — Noto Serif Georgian (OFL 1.1) instanced to two weights, subset to Mkhedruli + Latin, inlined as a data URI by `tools/build-font.sh` (21.5 KB + 22.8 KB raw; the file went 58 KB → ~200 KB). Verified in-browser: Georgian text measures 145.8 px in the inlined face vs 135.2 px in the system fallback. Without it, asking for `serif` silently got a *sans* face — `serif` and `sans-serif` measured within 0.5 px of each other for Georgian.
+2. **Borrowed trading terms stay in Latin script** inside Georgian prose (`funding rate`, `spot`, `perp`, `mark price`, `leg`), per `docs/guide/i18n/glossary.md`.
+3. **English is the default and language rides in the hash** — `#/ka/edge/costs`; `#/edge/costs` means English, so every pre-existing link and the published Artifact URL still work.
 
-```bash
-agy --model "Gemini 3.1 Pro (High)" -p 'Translate to natural Georgian. Output ONLY the translation, no preamble.
+**The organizing rule — prose duplicates, controls localize in place.** The calculator article holds 16 element ids; duplicating it per language would duplicate those ids and every `getElementById` in `#guide-ui` would silently bind to the English copy. So prose is sibling `<article lang="en">` / `<article lang="ka">` blocks, while the calculator, search box and theme toggle stay single instances reading from `GuidePure.UI`. That refactor also moved ~40 strings out of `#guide-ui` (which `bun test` cannot reach) and into `#guide-pure`, putting the verdict sentences and output row names under test for the first time.
 
-<text>'
-```
+**`leg` is why the glossary is frozen — keep it that way.** The first bulk run omitted `leg` (41 occurrences, the most frequent domain noun in the guide) and produced **three different words across three sections**: `ნაწილი` (part), `ეტაპი` (stage), `მხარე` (side). All sections were re-translated against the corrected glossary. Never edit `i18n/glossary.md` mid-run; if a rule needs to change, change it and re-run **every** section.
 
-Sample output for the funding-rate paragraph: *"პერპეტუალი შეიძლება სპოტს დაშორდეს. არაფერი აიძულებს მათ დაახლოებას, რადგან არ არსებობს ანგარიშსწორების თარიღი…"* — fluent, not literal. A call takes a while; budget for it and batch sections.
+**Two file-text traps found during the work, both invisible to the browser:**
+- Citation chips written into a JS string with escaped quotes (`data-src=\"core §2.1\"`) render perfectly but vanish from the `data-src` drift grep the guide's governing rule depends on. The string is single-quoted so the chips survive as literal file text; `tests/structure.test.js` enforces it.
+- An attribute selector built as a string literal (`'article[data-route="' + route + '"]'`) registers as a **phantom route** in the raw-text scans. The article fallback is found by iteration instead.
 
-**Sequencing — the thing to decide first.** The guide is paused at the stage-1 voice-review gate and Parts 3–6 are unwritten, so translating finished prose now risks translating twice. The resolution that makes "meanwhile" safe: **build the localization *machinery* now** (switcher, string architecture, `lang` handling, font strategy, parity tests) and treat the translated prose as regenerable — **re-translation is one `agy` call per section, not human work**, so a voice change at the gate costs minutes, not a rewrite. Build the machinery to assume content will be re-run.
-
-**Decisions the brainstorm must settle:**
-1. **Georgian typography (a real constraint, not a detail).** The body stack is `"Iowan Old Style", Charter, Palatino, Georgia, serif` — **none of these have Georgian (Mkhedruli) coverage**, and the CSP blocks font CDNs. This Mac has only `.SF Georgian` / `.SF Georgian Rounded` (system, sans). So Georgian body text would silently fall back to *sans* while English renders *serif* — the identity diverges by accident. Options: `:lang(ka)` font stacks that make the divergence deliberate · inline a Georgian face (Noto Serif Georgian / BPG) as a data URI, costing file size · unify both languages on sans. Pick one on purpose.
-2. **Glossary policy — the biggest quality lever.** Georgian crypto/trading usage borrows heavily from English (perp, funding, spot, mark, basis). Decide per-term: translate · transliterate · keep English. Fix a glossary **before** bulk translation and pass it in every prompt, or terminology drifts between sections.
-3. **Citation chips MUST NOT be translated.** `core §7.4`, `tutorial §3.9`, `Profiles §1` point into English normative documents. They stay verbatim in both languages — and that should be a *test*, not a convention.
-4. **Where the two languages live.** The Artifact publishes exactly one file, already ~1,100 lines. Both languages in the DOM behind the switcher · a JS string table · per-language article blocks. Note the search index (`GuidePure.buildSearchIndex`) is built by walking article text and must become per-language, and the calculator's labels/presets/verdict strings are currently English literals in `#guide-ui` and `PRESETS`.
-5. **Persistence + routing.** Language is in-page state today (no storage in scope). Consider carrying it in the hash (`#/ka/edge/costs`) so a link preserves language. Set `lang="ka"` on the containers — it drives correct font fallback *and* accessibility.
-
-**The existing 40 tests assert English strings** (`spec v0.9.4 · 0 lines of Go`, the Part 1/2 route lists). They will need updating, and the valuable new tests are **parity** ones: every route has content in both languages · no citation chip differs between languages · no Georgian block is accidentally still English.
+**To re-translate after the voice review** (the English prose is still pending it): `./tools/translate.sh <route>` writes a reviewable fragment to `i18n/ka/`, then `node tools/i18n.mjs splice <route>` — idempotent, and it refuses any fragment whose citation chips differ from the English original. Parts 3–6 translate the same way as they are written.
 
 **Open finding raised while building it (needs a tag + ADR §3 entry):** `core §12` cites §2.4 for "spot maker entry ≈ **−40% round-trip cost**", but `core §2.4` says maker spot entry "roughly **halves** round-trip cost and shortens **break-even** by ~40%" — a −50% cost effect and a separate −40% break-even effect, which §12's paraphrase appears to have collapsed. The guide models §2.4's own wording. Not yet triaged.
 
