@@ -1483,26 +1483,26 @@ var GuidePure = (function () {
   "use strict";
 
   var PARTS = [
-    { id: "world",   n: 1, title: { en: "The world" } },
-    { id: "edge",    n: 2, title: { en: "The edge, honestly" } },
-    { id: "why",     n: 3, title: { en: "Why the design looks like this" } },
-    { id: "build",   n: 4, title: { en: "What we're building" } },
-    { id: "go",      n: 5, title: { en: "The Go build" } },
-    { id: "runbook", n: 6, title: { en: "Operator runbook" } }
+    { id: "world",   n: 1, title: { en: "The world", ka: "სამყარო" } },
+    { id: "edge",    n: 2, title: { en: "The edge, honestly", ka: "უპირატესობა, გულწრფელად" } },
+    { id: "why",     n: 3, title: { en: "Why the design looks like this", ka: "რატომ გამოიყურება დიზაინი ასე" } },
+    { id: "build",   n: 4, title: { en: "What we're building", ka: "რას ვაშენებთ" } },
+    { id: "go",      n: 5, title: { en: "The Go build", ka: "Go ბილდი" } },
+    { id: "runbook", n: 6, title: { en: "Operator runbook", ka: "ოპერატორის runbook" } }
   ];
 
   var ROUTES = [
-    { part: "world", id: "perps",          route: "world/perps",          title: { en: "Spot, futures, perpetuals" } },
-    { part: "world", id: "funding",        route: "world/funding",        title: { en: "The funding rate" } },
-    { part: "world", id: "prices",         route: "world/prices",         title: { en: "Mark, index, last" } },
-    { part: "world", id: "liquidation",    route: "world/liquidation",    title: { en: "Liquidation, margin, ADL" } },
-    { part: "world", id: "venues",         route: "world/venues",         title: { en: "Binance and Bybit" } },
-    { part: "world", id: "counterparties", route: "world/counterparties", title: { en: "Who is on the other side" } },
-    { part: "edge",  id: "two-trades",     route: "edge/two-trades",      title: { en: "Two trades that look alike" } },
-    { part: "edge",  id: "costs",          route: "edge/costs",           title: { en: "What it actually costs" } },
-    { part: "edge",  id: "calculator",     route: "edge/calculator",      title: { en: "Will this make money?" } },
-    { part: "edge",  id: "gate",           route: "edge/gate",            title: { en: "The economic gate" } },
-    { part: "edge",  id: "forks",          route: "edge/forks",           title: { en: "When the gate fails" } }
+    { part: "world", id: "perps",          route: "world/perps",          title: { en: "Spot, futures, perpetuals", ka: "spot, futures, perpetual-ები" } },
+    { part: "world", id: "funding",        route: "world/funding",        title: { en: "The funding rate", ka: "funding rate" } },
+    { part: "world", id: "prices",         route: "world/prices",         title: { en: "Mark, index, last", ka: "mark, index, last" } },
+    { part: "world", id: "liquidation",    route: "world/liquidation",    title: { en: "Liquidation, margin, ADL", ka: "ლიკვიდაცია, მარჟა, ADL" } },
+    { part: "world", id: "venues",         route: "world/venues",         title: { en: "Binance and Bybit", ka: "Binance და Bybit" } },
+    { part: "world", id: "counterparties", route: "world/counterparties", title: { en: "Who is on the other side", ka: "ვინ არის მეორე მხარეს" } },
+    { part: "edge",  id: "two-trades",     route: "edge/two-trades",      title: { en: "Two trades that look alike", ka: "ორი მსგავსი გარიგება" } },
+    { part: "edge",  id: "costs",          route: "edge/costs",           title: { en: "What it actually costs", ka: "რა ღირს ეს სინამდვილეში" } },
+    { part: "edge",  id: "calculator",     route: "edge/calculator",      title: { en: "Will this make money?", ka: "ეს რეალურად მოიტანს მოგებას?" } },
+    { part: "edge",  id: "gate",           route: "edge/gate",            title: { en: "The economic gate", ka: "ეკონომიკური ბარიერი" } },
+    { part: "edge",  id: "forks",          route: "edge/forks",           title: { en: "When the gate fails", ka: "როცა ბარიერი არ მუშაობს" } }
   ];
 
   var LANGS = ["en", "ka"];
@@ -1646,54 +1646,52 @@ var GuidePure = (function () {
   // blocks; these are the strings attached to controls, which exist once and cannot
   // be duplicated (the calculator alone holds 16 element ids).
   var UI = {
-    status:       { en: "spec v0.9.4 · 0 lines of Go" },
-    searchLabel:  { en: "Search the guide" },
-    searchPlace:  { en: "Search the guide" },
-    railLabel:    { en: "Guide contents" },
-    themeLabel:   { en: "Switch colour theme" },
-    themeText:    { en: "◐ theme" },
+    status:       { en: "spec v0.9.4 · 0 lines of Go", ka: "spec v0.9.4 · 0 ხაზი Go" },
+    searchLabel:  { en: "Search the guide", ka: "ძიება გზამკვლევში" },
+    searchPlace:  { en: "Search the guide", ka: "ძიება გზამკვლევში" },
+    railLabel:    { en: "Guide contents", ka: "გზამკვლევის სარჩევი" },
+    themeLabel:   { en: "Switch colour theme", ka: "ფერთა თემის შეცვლა" },
+    themeText:    { en: "◐ theme", ka: "◐ თემა" },
     calc: {
-      title: { en: "Will this actually make money?" },
+      title: { en: "Will this actually make money?", ka: "რეალურად მოიტანს ეს მოგებას?" },
       // Single-quoted so the HTML attribute quotes stay literal in the file. Escaping
       // them would render fine but hide these chips from the raw-text drift check
       // (the data-src grep in the guide README) — a test in structure.test.js
       // enforces it. This comment deliberately avoids spelling the pattern out,
       // since a literal occurrence here would itself show up in that inventory.
       intro: {
-        en: 'Move the inputs. The verdict is the same test milestone 2 runs, on the same '
-          + 'denominator the spec insists on — the full allocated bankroll, never posted '
-          + 'margin. <span class="cite" data-src="core §2.1">core §2.1</span> '
-          + '<span class="cite" data-src="core §2.2">core §2.2</span>'
+        en: 'Move the inputs. The verdict is the same test milestone 2 runs, on the same denominator the spec insists on — the full allocated bankroll, never posted margin. <span class="cite" data-src="core §2.1">core §2.1</span> <span class="cite" data-src="core §2.2">core §2.2</span>',
+        ka: 'შეცვალეთ მონაცემები. დასკვნა იგივეა, რასაც milestone 2-ის ტესტი უშვებს, იმავე მნიშვნელზე, რასაც spec ითხოვს — სრულად გამოყოფილ კაპიტალზე, და არა განთავსებულ მარჟაზე. <span class="cite" data-src="core §2.1">core §2.1</span> <span class="cite" data-src="core §2.2">core §2.2</span>'
       },
       field: {
-        rate:     { en: "Funding rate (% per settlement)" },
-        interval: { en: "Funding interval (hours)" },
-        hold:     { en: "Hold length (days)" },
-        notional: { en: "Notional N (USD)" },
-        leverage: { en: "Perp leverage" },
-        rescue:   { en: "Rescue margin (USD)" },
-        spotfee:  { en: "Spot fee (%)" },
-        perpfee:  { en: "Perp fee (%)" },
-        slip:     { en: "Slippage per leg (%)" },
-        mult:     { en: "Round-trip multiplier" },
-        util:     { en: "Utilization (%)" },
-        hurdle:   { en: "Hurdle (%)" }
+        rate:     { en: "Funding rate (% per settlement)", ka: "funding rate (% settlement-ზე)" },
+        interval: { en: "Funding interval (hours)", ka: "funding interval (საათი)" },
+        hold:     { en: "Hold length (days)", ka: "პოზიციის ხანგრძლივობა (დღე)" },
+        notional: { en: "Notional N (USD)", ka: "notional N (USD)" },
+        leverage: { en: "Perp leverage", ka: "perp ბერკეტი" },
+        rescue:   { en: "Rescue margin (USD)", ka: "სამაშველო მარჟა (USD)" },
+        spotfee:  { en: "Spot fee (%)", ka: "spot საკომისიო (%)" },
+        perpfee:  { en: "Perp fee (%)", ka: "perp საკომისიო (%)" },
+        slip:     { en: "Slippage per leg (%)", ka: "slippage თითო leg-ზე (%)" },
+        mult:     { en: "Round-trip multiplier", ka: "round trip მულტიპლიკატორი" },
+        util:     { en: "Utilization (%)", ka: "utilization (%)" },
+        hurdle:   { en: "Hurdle (%)", ka: "hurdle (%)" }
       },
       row: {
-        cLegs:        { en: "Leg-capital floor C_legs" },
-        cAllocated:   { en: "Allocated bankroll C_allocated" },
-        settlements:  { en: "Settlements in the hold" },
-        funding:      { en: "Funding collected" },
-        roundTrip:    { en: "Round-trip cost" },
-        breakEven:    { en: "Days to break even" },
-        net:          { en: "Net over the hold" },
-        inPosition:   { en: "Annualized while in position" },
-        utilization:  { en: "× utilization" },
-        netApy:       { en: "Net APY on the bankroll" },
-        hurdle:       { en: "Hurdle" }
+        cLegs:        { en: "Leg-capital floor C_legs", ka: "leg-კაპიტალის მინიმუმი C_legs" },
+        cAllocated:   { en: "Allocated bankroll C_allocated", ka: "გამოყოფილი კაპიტალი C_allocated" },
+        settlements:  { en: "Settlements in the hold", ka: "settlement-ების რაოდენობა პოზიციაში" },
+        funding:      { en: "Funding collected", ka: "დაგროვილი funding" },
+        roundTrip:    { en: "Round-trip cost", ka: "round trip ხარჯი" },
+        breakEven:    { en: "Days to break even", ka: "დღე უზარალობამდე" },
+        net:          { en: "Net over the hold", ka: "წმინდა მოგება პოზიციაზე" },
+        inPosition:   { en: "Annualized while in position", ka: "წლიური პოზიციაში ყოფნისას" },
+        utilization:  { en: "× utilization", ka: "× utilization" },
+        netApy:       { en: "Net APY on the bankroll", ka: "წმინდა APY კაპიტალზე" },
+        hurdle:       { en: "Hurdle", ka: "hurdle" }
       },
-      verdictPass: { en: "Clears the hurdle by {pts} points." },
-      verdictFail: { en: "Fails the hurdle by {pts} points." }
+      verdictPass: { en: "Clears the hurdle by {pts} points.", ka: "hurdle-ს ლახავს {pts} პუნქტით." },
+      verdictFail: { en: "Fails the hurdle by {pts} points.", ka: "{pts} პუნქტით ვერ აღწევს hurdle-ს." }
     }
   };
 
@@ -1705,26 +1703,26 @@ var GuidePure = (function () {
 
   var PRESETS = {
     worked: {
-      label: { en: "The worked trade (tutorial §3.9)" },
-      note: { en: "A good major regime at VIP0 taker fees. Nets ~3.4% at 60% time-in-position — below the hurdle." },
+      label: { en: "The worked trade (tutorial §3.9)", ka: "გარჩეული გარიგება (tutorial §3.9)" },
+      note: { en: "A good major regime at VIP0 taker fees. Nets ~3.4% at 60% time-in-position — below the hurdle.", ka: "კარგი მთავარი რეჟიმი VIP0 taker საკომისიოებით. წმინდა ~3.4% პოზიციაში 60% დროით — hurdle-ს ქვემოთ." },
       cite: "tutorial §3.9",
       input: withInput({})
     },
     baseline: {
-      label: { en: "Baseline BTC, VIP0 — what milestone 2 expects to find" },
-      note: { en: "Funding at +0.01%/8h. Roughly 12-13 days just to cover the round trip." },
+      label: { en: "Baseline BTC, VIP0 — what milestone 2 expects to find", ka: "საბაზისო BTC, VIP0 — რასაც milestone 2 ელის" },
+      note: { en: "Funding at +0.01%/8h. Roughly 12-13 days just to cover the round trip.", ka: "funding +0.01%/8h. დაახლოებით 12-13 დღე მხოლოდ round trip ხარჯის დასაფარად." },
       cite: "core §2.4",
       input: withInput({ fundingRatePerSettlement: 0.0001 })
     },
     maker: {
-      label: { en: "Fork (a) — maker spot entry" },
-      note: { en: "core §2.4: routing the spot entry maker roughly halves round-trip cost. It just clears the hurdle." },
+      label: { en: "Fork (a) — maker spot entry", ka: "განშტოება (a) — maker spot შესვლა" },
+      note: { en: "core §2.4: routing the spot entry maker roughly halves round-trip cost. It just clears the hurdle.", ka: "core §2.4: spot შესვლის maker-ად მარშრუტიზაცია round trip ხარჯს ანახევრებს. ის ზუსტად ლახავს hurdle-ს." },
       cite: "core §2.4, core §12",
       input: withInput({ roundTripMultiplier: 0.5 })
     },
     regime: {
-      label: { en: "Fork (b) — regime-selective deployment" },
-      note: { en: "Trade only measured-positive regimes: a richer rate bought with lower utilization." },
+      label: { en: "Fork (b) — regime-selective deployment", ka: "განშტოება (b) — რეჟიმზე შერჩევითი განთავსება" },
+      note: { en: "Trade only measured-positive regimes: a richer rate bought with lower utilization.", ka: "გარიგება მხოლოდ დადებით რეჟიმებში: უკეთესი funding rate, ნაკლები utilization-ის ხარჯზე." },
       cite: "core §12",
       input: withInput({ fundingRatePerSettlement: 0.0002, utilization: 0.35 })
     }

@@ -51,4 +51,8 @@ route.edge/forks	როცა ბარიერი არ მუშაობს
 preset.worked.label	გარჩეული გარიგება (tutorial §3.9)
 preset.worked.note	კარგი მთავარი რეჟიმი VIP0 taker საკომისიოებით. წმინდა ~3.4% პოზიციაში 60% დროით — hurdle-ს ქვემოთ.
 preset.baseline.label	საბაზისო BTC, VIP0 — რასაც milestone 2 ელის
-preset.baseline.note	fund
+preset.baseline.note	funding +0.01%/8h. დაახლოებით 12-13 დღე მხოლოდ round trip ხარჯის დასაფარად.
+preset.maker.label	განშტოება (a) — maker spot შესვლა
+preset.maker.note	core §2.4: spot შესვლის maker-ად მარშრუტიზაცია round trip ხარჯს ანახევრებს. ის ზუსტად ლახავს hurdle-ს.
+preset.regime.label	განშტოება (b) — რეჟიმზე შერჩევითი განთავსება
+preset.regime.note	გარიგება მხოლოდ დადებით რეჟიმებში: უკეთესი funding rate, ნაკლები utilization-ის ხარჯზე.

@@ -64,6 +64,49 @@ test("preset labels and notes are bundles", () => {
   }
 });
 
+const MKHEDRULI = /[Ⴀ-ჿᲐ-Ჿ]/;
+
+test("every UI string has a Georgian value", () => {
+  const pure = loadPure();
+  for (const [path, b] of bundles(pure.UI)) {
+    expect(typeof b.ka, `UI.${path} has no Georgian`).toBe("string");
+  }
+});
+
+test("every route and part title has a Georgian value", () => {
+  const pure = loadPure();
+  for (const p of pure.PARTS) expect(typeof p.title.ka, `part ${p.id}`).toBe("string");
+  for (const r of pure.ROUTES) expect(typeof r.title.ka, `route ${r.route}`).toBe("string");
+});
+
+test("the Georgian verdict templates keep the placeholder", () => {
+  const pure = loadPure();
+  expect(pure.UI.calc.verdictPass.ka).toContain("{pts}");
+  expect(pure.UI.calc.verdictFail.ka).toContain("{pts}");
+});
+
+test("Georgian UI strings are actually Georgian where they are prose", () => {
+  const pure = loadPure();
+  expect(MKHEDRULI.test(pure.UI.calc.title.ka)).toBe(true);
+  expect(MKHEDRULI.test(pure.UI.calc.verdictFail.ka)).toBe(true);
+  expect(MKHEDRULI.test(pure.UI.searchPlace.ka)).toBe(true);
+});
+
+test("the Georgian calculator intro keeps both citation chips", () => {
+  const pure = loadPure();
+  expect(pure.UI.calc.intro.ka).toContain('data-src="core §2.1"');
+  expect(pure.UI.calc.intro.ka).toContain('data-src="core §2.2"');
+});
+
+test("the Georgian preset notes keep their spec citations verbatim", () => {
+  const pure = loadPure();
+  for (const id of Object.keys(pure.PRESETS)) {
+    expect(MKHEDRULI.test(pure.PRESETS[id].cite), `${id} cite was translated`).toBe(false);
+    expect(typeof pure.PRESETS[id].label.ka, `${id} label`).toBe("string");
+    expect(typeof pure.PRESETS[id].note.ka, `${id} note`).toBe("string");
+  }
+});
+
 test("the calculator markup binds its text through i18n keys", () => {
   const html = readGuide();
   const calc = html.match(/<article data-route="edge\/calculator"[\s\S]*?<\/article>/)[0];
