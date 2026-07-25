@@ -45,8 +45,10 @@ force a reload after editing.
 
 Cool instrument neutrals rather than paper; the accent is steel blue and deliberately
 avoids green and red, which are reserved as semantic pass/fail on the calculator
-verdict. Three type roles, all system faces so nothing is fetched: sans for headings,
-serif for body prose, mono for data, code and chrome.
+verdict. Three type roles: sans for headings, serif for body prose, mono for data,
+code and chrome. All system faces except one — Noto Serif Georgian is inlined as a
+data URI, because no system serif covers Mkhedruli (see Languages, below). Nothing
+is ever fetched; the CSP forbids it.
 
 ## Languages
 
@@ -94,5 +96,6 @@ Stages 2–4 redeploy to that same URL by publishing this same file path — kee
 favicon (📉) stable so the browser tab stays recognisable. There is no build step:
 what is committed is what is published.
 
-**Stage 1 covers Parts 1–2 only, in both languages.** Parts 3–6 (why the design looks like this, what
-we're building, the Go build, the operator runbook) are pending the voice review.
+**Stage 1 covers Parts 1–2 only, in both languages.** Parts 3–6 (why the design looks
+like this, what we're building, the Go build, the operator runbook) are pending the
+voice review, and translate as they are written.
