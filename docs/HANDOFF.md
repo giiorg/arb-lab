@@ -46,7 +46,27 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **To re-translate after the voice review** (the English prose is still pending it): `./tools/translate.sh <route>` writes a reviewable fragment to `i18n/ka/`, then `node tools/i18n.mjs splice <route>` — idempotent, and it refuses any fragment whose citation chips differ from the English original. Parts 3–6 translate the same way as they are written.
 
-### NEXT REQUEST (2026-07-25, not started): translate `docs/tutorial.md` into Georgian
+## Georgian translation of `tutorial.md` — **DONE (2026-07-25)**
+
+`docs/tutorial.ka.md` (112 KB) is the Georgian teaching companion. **It is generated — never hand-edit it.** Design: `docs/superpowers/specs/2026-07-25-tutorial-georgian-translation-design.md`. Operating instructions: `docs/i18n/README.md`. Tests: `cd docs/i18n && bun test` (16 tests). The guide's suite is unaffected (86 tests, still green) — the only shared object is its glossary, read in place and **not edited**.
+
+**Three decisions the user took:** the Georgian is a sibling file `docs/tutorial.ka.md`; **section numbers are frozen and section titles are translated** (`### 3.9 ` byte-identical, title Georgian — every `§3.9` pointer addresses the number); and the `**Status:**` / `**Doc set:**` provenance lines stay **verbatim English** behind a Georgian banner that names the file as generated.
+
+**55 fragments at `###` granularity**, IDed by spec section number (`s-3-9`, `part-8`) — *not* by ordinal, so an English edit that inserts or deletes a section never renames its neighbours. This is what makes R2d cheap: when it edits `tutorial.md`, the Georgian is one `./tools/translate.sh <id>` per changed section. The handoff's "~12 calls by `##`" estimate was wrong on measurement — **Part 3 is 11.2 KB**, 3× the size the guide's sections translated cleanly at, and it holds the §3.9 ledger.
+
+**Assembled, not spliced.** `tutorial.ka.md` is a pure function of the fragments, so there is no insert-vs-replace branch and no regex ever runs over translated prose (the guide needed function replacements to survive `$&`). A test asserts the file equals a fresh assemble — a hand-edit fails the suite instead of diverging silently.
+
+**Six raw-text invariants gate assembly** (`tools/invariants.mjs`, re-run file-wide by the tests): heading number + trailing `` `[→ …]` `` tag · numeric multiset (452 tokens) · inline-code multiset (140 spans) · §-pointer multiset (three syntactic shapes — `§spec §2.2`, `SM §2`, bare `§3.9`) · table shape · link targets. **Invariant 2 closes the gap the handoff flagged as the third fork:** §3.9 is the *source* of the five figures the guide's calculator is pinned to, and the guide asserts them against hard-coded values rather than against this file — so without it the two documents could disagree with nothing failing. Verified independently of the JS checker by a shell `diff` of the two numeric multisets.
+
+**One prompt rule the numeric check depends on:** numbers never cross the digit/word boundary in either direction ("two legs" stays a word; `20 days` stays `20`), or a *correct* translation would fail invariant 2.
+
+**Results:** 54 of 55 fragments passed all six invariants untouched, including `s-3-9` (96 numeric tokens, 34 code spans, 11 pointers, 2 tables) on the first attempt. The single violation was `### 1.6 Mark vs index vs last` — a heading made entirely of glossary-pinned Latin terms, so identity was the model's correct output and the check's complaint was also correct. Fixed in the heading, not the check (recorded in `docs/i18n/README.md`).
+
+**The glossary is shared and stays at `docs/guide/i18n/glossary.md`,** read by both toolchains, never copied. A test fails if a second `glossary.md` appears anywhere under `docs/` — two copies would drift, which is exactly the `leg` failure this project already paid for once.
+
+**Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
+
+### Superseded — the original NEXT REQUEST brief (2026-07-25)
 
 Asked for in a **fresh conversation**, to run while the user reads the published guide. Start with `superpowers:brainstorming` — items 1–3 below are real forks.
 
@@ -73,7 +93,7 @@ Asked for in a **fresh conversation**, to run while the user reads the published
 1. **`docs/build-spec.md`** — the **normative core**, v0.9. Requirements + `[→ …]` tags live here; mechanism detail lives behind `[mechanism: …]` pointers into the other four.
 2. **`docs/state-machines.md`** — the **seven safety-kernel/execution state machines** (OMS order lifecycle, ambiguous-order classifier, FenceReadyLost arbitration, actuator takeover, protective-order disarm, EmergencyPlan lifecycle, PackageDelever generations): state lists, transition tables, invariants, chaos cases; **normative mechanism incorporated by reference from the core's `[mechanism:]` pointers (R1d-11); the 7 FLAGs are resolved in place (R1d rulings)**.
 3. **`docs/venue-profiles.md`** — dated venue capability facts for Binance + Bybit (quirk matrix, account/margin posture, spot-leg surface, verification citations).
-4. **`docs/tutorial.md`** — teaching companion (worked ledger on `C_allocated`; ADL re-hedge, crash-boundary, denominator, mark-driven liq + `PackageDelever` fallback corrected); now cross-references `state-machines.md` (SM) and `venue-profiles.md` (Profiles) where the taught mechanism moved.
+4. **`docs/tutorial.md`** — teaching companion (Georgian: `docs/tutorial.ka.md`, **generated** — see `docs/i18n/README.md`) (worked ledger on `C_allocated`; ADL re-hedge, crash-boundary, denominator, mark-driven liq + `PackageDelever` fallback corrected); now cross-references `state-machines.md` (SM) and `venue-profiles.md` (Profiles) where the taught mechanism moved.
 5. **`docs/adr-history.md`** — the convergence narrative (ADR §1), review-records index (ADR §2), the finding→resolution traceability table (ADR §3), and the v0.8 doc-split map + flagged ambiguities (ADR §4).
 6. **`docs/review/2026-07-19-08-v0.7.1-review-and-verification-record.md`** — the **round-3 R1c/R2c** findings + resolution + the Codex convergence pass.
 7. **`docs/review/2026-07-19-07-v0.7-review-and-verification-record.md`** — the round-2 R1/R2 findings + resolution + the Codex convergence findings + the venue/tooling verification citations (URLs).
