@@ -107,3 +107,40 @@ test("the maker-entry fork halves round-trip cost and just clears the hurdle —
   expect(r.clearsHurdle).toBe(true);
   expect(r.netApy * 100).toBeCloseTo(4.65, 1);
 });
+
+test("formats USD without false precision", () => {
+  const pure = loadPure();
+  expect(pure.formatUsd(16706.33)).toBe("$16,706");
+  expect(pure.formatUsd(52)).toBe("$52");
+  expect(pure.formatUsd(-38)).toBe("−$38");
+});
+
+test("formats percentages to two decimals", () => {
+  const pure = loadPure();
+  expect(pure.formatPct(0.034084)).toBe("3.41%");
+  expect(pure.formatPct(0.046)).toBe("4.60%");
+});
+
+// Rescaling a preset back into its input field divides by the field's scale, which
+// reintroduces binary-float noise: 0.00015 / 0.01 is 0.014999999999999998.
+test("strips float noise when rescaling a value back into an input", () => {
+  const pure = loadPure();
+  expect(pure.tidyNumber(0.00015 / 0.01)).toBe(0.015);
+  expect(pure.tidyNumber(0.046 / 0.01)).toBe(4.6);
+  expect(pure.tidyNumber(0.6 / 0.01)).toBe(60);
+  expect(pure.tidyNumber(10000)).toBe(10000);
+  expect(pure.tidyNumber(0)).toBe(0);
+});
+
+test("every preset round-trips through tidyNumber without drift", () => {
+  const pure = loadPure();
+  const scales = { fundingRatePerSettlement: 0.01, spotFeeRate: 0.01, perpFeeRate: 0.01,
+    slippagePerLegRate: 0.01, utilization: 0.01, hurdleApy: 0.01 };
+  for (const [id, preset] of Object.entries(pure.PRESETS)) {
+    for (const [key, scale] of Object.entries(scales)) {
+      const shown = pure.tidyNumber(preset.input[key] / scale);
+      expect(shown * scale, `preset ${id} field ${key}`).toBeCloseTo(preset.input[key], 12);
+      expect(String(shown), `preset ${id} field ${key} is not display-clean`).not.toMatch(/\d{8,}/);
+    }
+  }
+});

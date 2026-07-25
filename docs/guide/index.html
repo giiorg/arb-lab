@@ -66,6 +66,35 @@
   table { border-collapse: collapse; width: 100%; }
   .scroll-x { overflow-x: auto; }
 
+  .calc { border: 1px solid var(--rule); border-radius: 0.5rem; padding: 1rem; margin: 1.25rem 0; }
+  .calc-presets { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.9rem; }
+  .calc-presets button {
+    font: inherit; font-size: 0.78rem; padding: 0.3rem 0.6rem; cursor: pointer;
+    background: var(--chip-bg); color: var(--fg); border: 1px solid var(--rule); border-radius: 0.3rem;
+  }
+  .calc-presets button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  .calc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 0.6rem; }
+  .calc-grid label { display: flex; flex-direction: column; font-size: 0.75rem; color: var(--muted); gap: 0.2rem; }
+  .calc-grid input, .calc-grid select {
+    font: inherit; font-size: 0.9rem; padding: 0.3rem 0.4rem;
+    background: var(--bg); color: var(--fg); border: 1px solid var(--rule); border-radius: 0.25rem;
+  }
+  .calc-out { margin-top: 1rem; font-size: 0.9rem; }
+  .calc-out td { padding: 0.22rem 0.6rem 0.22rem 0; border-bottom: 1px solid var(--rule); }
+  .calc-out td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+  .calc-out tr.total td { font-weight: 700; border-bottom: 2px solid var(--rule); }
+  .verdict { font-weight: 700; margin-top: 0.8rem; }
+  .verdict.pass { color: #1f7a3d; }
+  .verdict.fail { color: #a12d2d; }
+  @media (prefers-color-scheme: dark) {
+    .verdict.pass { color: #58c07d; } .verdict.fail { color: #e07070; }
+  }
+  :root[data-theme="dark"] .verdict.pass { color: #58c07d; }
+  :root[data-theme="dark"] .verdict.fail { color: #e07070; }
+  :root[data-theme="light"] .verdict.pass { color: #1f7a3d; }
+  :root[data-theme="light"] .verdict.fail { color: #a12d2d; }
+  .calc-note { font-size: 0.8rem; color: var(--muted); }
+
   @media (max-width: 860px) {
     .guide { grid-template-columns: 1fr; }
     .rail { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--rule); }
@@ -89,6 +118,49 @@
           <span class="cite" data-src="tutorial §1.1">tutorial §1.1</span>
         </p>
       </article>
+
+      <article data-route="edge/calculator">
+        <h1>Will this actually make money?</h1>
+        <p>
+          Move the inputs. The verdict is the same test milestone 2 runs, on the same
+          denominator the spec insists on — the full allocated bankroll, never posted
+          margin. <span class="cite" data-src="core §2.1">core §2.1</span>
+          <span class="cite" data-src="core §2.2">core §2.2</span>
+        </p>
+
+        <div class="calc">
+          <div class="calc-presets" id="calc-presets"></div>
+          <div class="calc-grid">
+            <label>Funding rate (% per settlement)
+              <input id="in-rate" type="number" step="0.001" value="0.015"></label>
+            <label>Funding interval (hours)
+              <select id="in-interval"><option value="8">8</option><option value="1">1</option></select></label>
+            <label>Hold length (days)
+              <input id="in-hold" type="number" step="1" value="20"></label>
+            <label>Notional N (USD)
+              <input id="in-notional" type="number" step="1000" value="10000"></label>
+            <label>Perp leverage
+              <input id="in-leverage" type="number" step="1" value="3"></label>
+            <label>Rescue margin (USD)
+              <input id="in-rescue" type="number" step="100" value="3333"></label>
+            <label>Spot fee (%)
+              <input id="in-spotfee" type="number" step="0.005" value="0.10"></label>
+            <label>Perp fee (%)
+              <input id="in-perpfee" type="number" step="0.005" value="0.05"></label>
+            <label>Slippage per leg (%)
+              <input id="in-slip" type="number" step="0.005" value="0.02"></label>
+            <label>Round-trip multiplier
+              <input id="in-mult" type="number" step="0.1" value="1"></label>
+            <label>Utilization (%)
+              <input id="in-util" type="number" step="5" value="60"></label>
+            <label>Hurdle (%)
+              <input id="in-hurdle" type="number" step="0.1" value="4.6"></label>
+          </div>
+          <div class="scroll-x"><table class="calc-out" id="calc-out"></table></div>
+          <p class="verdict" id="calc-verdict"></p>
+          <p class="calc-note" id="calc-note"></p>
+        </div>
+      </article>
     </main>
   </div>
 </div>
@@ -107,7 +179,8 @@ var GuidePure = (function () {
   ];
 
   var ROUTES = [
-    { part: "world", id: "perps", route: "world/perps", title: "Spot, futures, perpetuals" }
+    { part: "world", id: "perps",      route: "world/perps",      title: "Spot, futures, perpetuals" },
+    { part: "edge",  id: "calculator", route: "edge/calculator",  title: "Will this make money?" }
   ];
 
   function buildSearchIndex(records) {
@@ -240,13 +313,34 @@ var GuidePure = (function () {
     }
   };
 
+  function formatUsd(n) {
+    var sign = n < 0 ? "−" : "";
+    var whole = Math.round(Math.abs(n));
+    return sign + "$" + whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+
+  function formatPct(x) {
+    return (x * 100).toFixed(2) + "%";
+  }
+
+  // Dividing a rate by its display scale reintroduces binary-float noise
+  // (0.00015 / 0.01 === 0.014999999999999998). Twelve significant digits is far
+  // more precision than any input here carries, and it renders cleanly.
+  function tidyNumber(x) {
+    if (!isFinite(x) || x === 0) return 0;
+    return Number(x.toPrecision(12));
+  }
+
   return {
     PARTS: PARTS,
     ROUTES: ROUTES,
     buildSearchIndex: buildSearchIndex,
     searchIndex: searchIndex,
     computeEconomics: computeEconomics,
-    PRESETS: PRESETS
+    PRESETS: PRESETS,
+    formatUsd: formatUsd,
+    formatPct: formatPct,
+    tidyNumber: tidyNumber
   };
 })();
 </script>
@@ -329,5 +423,106 @@ var GuidePure = (function () {
       results.appendChild(li);
     });
   });
+
+  var FIELDS = {
+    "in-rate":     { key: "fundingRatePerSettlement", scale: 0.01 },
+    "in-interval": { key: "fundingIntervalHours",     scale: 1 },
+    "in-hold":     { key: "holdDays",                 scale: 1 },
+    "in-notional": { key: "notional",                 scale: 1 },
+    "in-leverage": { key: "perpLeverage",             scale: 1 },
+    "in-rescue":   { key: "rescueMarginUsd",          scale: 1 },
+    "in-spotfee":  { key: "spotFeeRate",              scale: 0.01 },
+    "in-perpfee":  { key: "perpFeeRate",              scale: 0.01 },
+    "in-slip":     { key: "slippagePerLegRate",       scale: 0.01 },
+    "in-mult":     { key: "roundTripMultiplier",      scale: 1 },
+    "in-util":     { key: "utilization",              scale: 0.01 },
+    "in-hurdle":   { key: "hurdleApy",                scale: 0.01 }
+  };
+
+  var calcOut = document.getElementById("calc-out");
+  if (calcOut) {
+    var verdictEl = document.getElementById("calc-verdict");
+    var noteEl = document.getElementById("calc-note");
+    var presetBar = document.getElementById("calc-presets");
+
+    var readInputs = function () {
+      var input = { feeReserveUsd: 40, committedFloatUsd: 0 };
+      Object.keys(FIELDS).forEach(function (id) {
+        var f = FIELDS[id];
+        input[f.key] = parseFloat(document.getElementById(id).value) * f.scale;
+      });
+      return input;
+    };
+
+    var writeInputs = function (input) {
+      Object.keys(FIELDS).forEach(function (id) {
+        var f = FIELDS[id];
+        document.getElementById(id).value = String(GuidePure.tidyNumber(input[f.key] / f.scale));
+      });
+    };
+
+    var render = function () {
+      var input = readInputs();
+      var r = GuidePure.computeEconomics(input);
+      var rows = [
+        ["Leg-capital floor C_legs", GuidePure.formatUsd(r.cLegs)],
+        ["Allocated bankroll C_allocated", GuidePure.formatUsd(r.cAllocated)],
+        ["Settlements in the hold", String(r.settlements)],
+        ["Funding collected", GuidePure.formatUsd(r.fundingUsd)],
+        ["Round-trip cost", GuidePure.formatUsd(-r.roundTripCostUsd)],
+        ["Days to break even", r.breakEvenDays.toFixed(1)],
+        ["Net over the hold", GuidePure.formatUsd(r.netUsd)],
+        ["Annualized while in position", GuidePure.formatPct(r.inPositionApy)],
+        ["× utilization", GuidePure.formatPct(input.utilization)]
+      ];
+      calcOut.innerHTML = "";
+      rows.forEach(function (row) {
+        var tr = calcOut.insertRow();
+        tr.insertCell().textContent = row[0];
+        tr.insertCell().textContent = row[1];
+      });
+      var totalRow = calcOut.insertRow();
+      totalRow.className = "total";
+      totalRow.insertCell().textContent = "Net APY on the bankroll";
+      totalRow.insertCell().textContent = GuidePure.formatPct(r.netApy);
+      var hurdleRow = calcOut.insertRow();
+      hurdleRow.insertCell().textContent = "Hurdle";
+      hurdleRow.insertCell().textContent = GuidePure.formatPct(input.hurdleApy);
+
+      verdictEl.className = "verdict " + (r.clearsHurdle ? "pass" : "fail");
+      verdictEl.textContent = r.clearsHurdle
+        ? "Clears the hurdle by " + r.shortfallPts.toFixed(2) + " points."
+        : "Fails the hurdle by " + Math.abs(r.shortfallPts).toFixed(2) + " points.";
+    };
+
+    Object.keys(GuidePure.PRESETS).forEach(function (id) {
+      var preset = GuidePure.PRESETS[id];
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = preset.label;
+      b.setAttribute("aria-pressed", "false");
+      b.addEventListener("click", function () {
+        writeInputs(preset.input);
+        render();
+        noteEl.textContent = preset.note + "  [" + preset.cite + "]";
+        presetBar.querySelectorAll("button").forEach(function (o) {
+          o.setAttribute("aria-pressed", String(o === b));
+        });
+      });
+      presetBar.appendChild(b);
+    });
+
+    Object.keys(FIELDS).forEach(function (id) {
+      document.getElementById(id).addEventListener("input", function () {
+        render();
+        presetBar.querySelectorAll("button").forEach(function (o) {
+          o.setAttribute("aria-pressed", "false");
+        });
+        noteEl.textContent = "";
+      });
+    });
+
+    render();
+  }
 })();
 </script>
