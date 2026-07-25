@@ -1,0 +1,58 @@
+status	spec v0.9.4 · 0 lines of Go
+searchLabel	Search the guide
+searchPlace	Search the guide
+railLabel	Guide contents
+themeLabel	Switch colour theme
+themeText	◐ theme
+calc.title	Will this actually make money?
+calc.intro	Move the inputs. The verdict is the same test milestone 2 runs, on the same denominator the spec insists on — the full allocated bankroll, never posted margin. <span class="cite" data-src="core §2.1">core §2.1</span> <span class="cite" data-src="core §2.2">core §2.2</span>
+calc.field.rate	Funding rate (% per settlement)
+calc.field.interval	Funding interval (hours)
+calc.field.hold	Hold length (days)
+calc.field.notional	Notional N (USD)
+calc.field.leverage	Perp leverage
+calc.field.rescue	Rescue margin (USD)
+calc.field.spotfee	Spot fee (%)
+calc.field.perpfee	Perp fee (%)
+calc.field.slip	Slippage per leg (%)
+calc.field.mult	Round-trip multiplier
+calc.field.util	Utilization (%)
+calc.field.hurdle	Hurdle (%)
+calc.row.cLegs	Leg-capital floor C_legs
+calc.row.cAllocated	Allocated bankroll C_allocated
+calc.row.settlements	Settlements in the hold
+calc.row.funding	Funding collected
+calc.row.roundTrip	Round-trip cost
+calc.row.breakEven	Days to break even
+calc.row.net	Net over the hold
+calc.row.inPosition	Annualized while in position
+calc.row.utilization	× utilization
+calc.row.netApy	Net APY on the bankroll
+calc.row.hurdle	Hurdle
+calc.verdictPass	Clears the hurdle by {pts} points.
+calc.verdictFail	Fails the hurdle by {pts} points.
+part.world	The world
+part.edge	The edge, honestly
+part.why	Why the design looks like this
+part.build	What we're building
+part.go	The Go build
+part.runbook	Operator runbook
+route.world/perps	Spot, futures, perpetuals
+route.world/funding	The funding rate
+route.world/prices	Mark, index, last
+route.world/liquidation	Liquidation, margin, ADL
+route.world/venues	Binance and Bybit
+route.world/counterparties	Who is on the other side
+route.edge/two-trades	Two trades that look alike
+route.edge/costs	What it actually costs
+route.edge/calculator	Will this make money?
+route.edge/gate	The economic gate
+route.edge/forks	When the gate fails
+preset.worked.label	The worked trade (tutorial §3.9)
+preset.worked.note	A good major regime at VIP0 taker fees. Nets ~3.4% at 60% time-in-position — below the hurdle.
+preset.baseline.label	Baseline BTC, VIP0 — what milestone 2 expects to find
+preset.baseline.note	Funding at +0.01%/8h. Roughly 12-13 days just to cover the round trip.
+preset.maker.label	Fork (a) — maker spot entry
+preset.maker.note	core §2.4: routing the spot entry maker roughly halves round-trip cost. It just clears the hurdle.
+preset.regime.label	Fork (b) — regime-selective deployment
+preset.regime.note	Trade only measured-positive regimes: a richer rate bought with lower utilization.

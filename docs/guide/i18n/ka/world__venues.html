@@ -1,0 +1,72 @@
+<article data-route="world/venues" lang="ka">
+        <h1>Binance და Bybit</h1>
+
+        <p>
+          MVP-სთვის შერჩეული ორი ბირჟა, რომლებიც ერთი ადაპტერის კონტრაქტის მიღმა დგას, რათა მათი
+          განსხვავებები ერთ ადგილას დარჩეს იზოლირებული. ეს განსხვავებები მხოლოდ კოსმეტიკური არ არის —
+          აი, რისი დამალვა უწევს ადაპტერს.
+          <span class="cite" data-src="core §4">core §4</span>
+          <span class="cite" data-src="tutorial §4.2">tutorial §4.2</span>
+        </p>
+
+        <h2>ნაკადი, რომელიც გაფრთხილების გარეშე კვდება</h2>
+
+        <p>
+          Binance-მა 2026-04-23-ში გააუქმა თავისი ძველი <code>/ws/</code> გზა. Funding
+          ახლა <code>/market</code>-ზე იგზავნება, order book — <code>/public</code>-ზე, მომხმარებლის მონაცემები
+          კი — <code>/private</code>-ზე. კლიენტი, რომელმაც მიგრაცია არ გაიარა, შეცდომას არ აბრუნებს — ის
+          უკავშირდება ბირჟას, რჩება კავშირზე და funding-ისთვის ჩუმად არაფერს იღებს. ეს
+          ავარიის ყველაზე ცუდი ფორმაა: გარედან ჯანსაღი და რეალურად მცდარი.
+          <span class="cite" data-src="tutorial §4.2">tutorial §4.2</span>
+          <span class="cite" data-src="Profiles §1">Profiles §1</span>
+        </p>
+
+        <h2>ველები, რომლებიც მხოლოდ ახალ კლიენტებში არსებობს</h2>
+
+        <p>
+          Bybit-მა თავის ტიკერს <code>fundingIntervalHour</code> და <code>fundingCap</code>
+          დაამატა (WebSocket 2025-10-16, REST 2025-10-23). 2025 წლის ოქტომბერზე ძველ ვერსიაზე
+          მიმაგრებული კლიენტი მათ ვერ წაიკითხავს — არადა, funding interval-ის გადართვის ამოცნობა
+          ზუსტად ამ ველებზეა დამოკიდებული.
+          <span class="cite" data-src="tutorial §4.2">tutorial §4.2</span>
+          <span class="cite" data-src="Profiles §1">Profiles §1</span>
+        </p>
+
+        <h2>ერთი და იგივე მიზანი, ორი შეუთავსებელი გამოხატულება</h2>
+
+        <p>
+          პოზიციის დახურვა ერთი API გამოძახება არ არის. Binance ჰეჯის რეჟიმში <em>უარყოფს</em>
+          <code>reduceOnly</code>-ს −2022 შეცდომით, მაშინ როცა ცალმხრივი (one-way) რეჟიმი მას იყენებს; Bybit-ი
+          ამის ნაცვლად <code>positionIdx</code>-ს ეყრდნობა. სწორედ ამიტომ პოზიციის რეჟიმი წინასწარ ფიქსირდება
+          და მოწმდება, ნაცვლად იმისა, რომ დახურვის მომენტში მოხდეს მისი გარკვევა.
+          <span class="cite" data-src="tutorial §4.2">tutorial §4.2</span>
+          <span class="cite" data-src="core §4.1">core §4.1</span>
+        </p>
+
+        <h2>Rate limit-ები და ის, რომლის მოახლოებასაც ვერ შეამჩნევ</h2>
+
+        <p>
+          Binance გამოყენების სტატისტიკას <code>X-MBX-USED-WEIGHT</code> header-ში აქვეყნებს, რაც ჯერ 429-ში
+          იზრდება, შემდეგ კი 418 IP ბანში გადადის. Bybit-საც აქვს header-ები — <em>და ასევე</em> IP
+          gateway-ს ბანი header-ების გარეშე, რომელსაც მხოლოდ header-ებზე დაკვირვებით ვერასდროს დაიჭერ.
+          მას მხოლოდ მაშინ აღმოაჩენ, როცა პირისპირ შეეჯახები.
+          <span class="cite" data-src="tutorial §4.2">tutorial §4.2</span>
+          <span class="cite" data-src="Profiles §1">Profiles §1</span>
+        </p>
+
+        <h2>ასიმეტრია, რომელიც უსაფრთხოების მთლიან დიზაინს აყალიბებს</h2>
+
+        <p>
+          Bybit-ს შეუძლია შესვლის ორდერს take-profit/stop-loss ატომურად მიაბას. Binance
+          USDⓈ-M-ს ეს არ შეუძლია — მისი პირობითი ორდერები განცალკევებით თავსდება, რაც ნიშნავს,
+          რომ არსებობს ფანჯარა, როდესაც პოზიცია უკვე არსებობს, ხოლო მისი დაცვა ჯერ არა.
+          <span class="cite" data-src="Profiles §1">Profiles §1</span>
+        </p>
+
+        <p>
+          სწორედ ეს ერთი განსხვავებაა იმის მიზეზი, თუ რატომ არის დამოუკიდებელი off-host actuator
+          <em>სავალდებულო</em> Binance-ზე და არა უბრალოდ სასურველი დამატება. მე-4 ნაწილის უმეტესობა
+          სწორედ ამის გამო არსებობს.
+          <span class="cite" data-src="core §7.4">core §7.4</span>
+        </p>
+      </article>

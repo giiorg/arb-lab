@@ -13,6 +13,14 @@ mark price, index price, last price, basis, maker, taker, slippage, notional,
 APY, hurdle, round trip, utilization, ADL, auto-deleveraging, fence, actuator,
 order book, VIP0, Binance, Bybit, BTC, USDT, USDC, bracket, IOC
 
+**leg** — always Latin, never translated. A *leg* is one side of the two-sided
+position (the `spot leg`, the `perp leg`), which is what `C_legs`, "one-leg
+failure" and "two-leg close" all refer to. Do NOT render it as "ეტაპი" (stage),
+"ნაწილი" (part) or "ფეხი" — those lose the meaning the whole strategy rests on.
+Write `spot leg` and `perp leg` exactly so.
+
+**spread**, **fill**, **open interest** — Latin, same reason.
+
 ## Translate into Georgian
 
 | English | Georgian |
@@ -30,6 +38,9 @@ order book, VIP0, Binance, Bybit, BTC, USDT, USDC, bracket, IOC
 | margin | მარჟა |
 | liquidation | ლიკვიდაცია |
 | leverage | ბერკეტი |
+| hedge | ჰეჯი (verb: ჰეჯირება) |
+| break-even | უზარალობა |
+| collateral | უზრუნველყოფა |
 
 ## Never touched in either language
 

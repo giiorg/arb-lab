@@ -1,0 +1,54 @@
+status	spec v0.9.4 · 0 ხაზი Go
+searchLabel	ძიება გზამკვლევში
+searchPlace	ძიება გზამკვლევში
+railLabel	გზამკვლევის სარჩევი
+themeLabel	ფერთა თემის შეცვლა
+themeText	◐ თემა
+calc.title	რეალურად მოიტანს ეს მოგებას?
+calc.intro	შეცვალეთ მონაცემები. დასკვნა იგივეა, რასაც milestone 2-ის ტესტი უშვებს, იმავე მნიშვნელზე, რასაც spec ითხოვს — სრულად გამოყოფილ კაპიტალზე, და არა განთავსებულ მარჟაზე. <span class="cite" data-src="core §2.1">core §2.1</span> <span class="cite" data-src="core §2.2">core §2.2</span>
+calc.field.rate	funding rate (% settlement-ზე)
+calc.field.interval	funding interval (საათი)
+calc.field.hold	პოზიციის ხანგრძლივობა (დღე)
+calc.field.notional	notional N (USD)
+calc.field.leverage	perp ბერკეტი
+calc.field.rescue	სამაშველო მარჟა (USD)
+calc.field.spotfee	spot საკომისიო (%)
+calc.field.perpfee	perp საკომისიო (%)
+calc.field.slip	slippage თითო leg-ზე (%)
+calc.field.mult	round trip მულტიპლიკატორი
+calc.field.util	utilization (%)
+calc.field.hurdle	hurdle (%)
+calc.row.cLegs	leg-კაპიტალის მინიმუმი C_legs
+calc.row.cAllocated	გამოყოფილი კაპიტალი C_allocated
+calc.row.settlements	settlement-ების რაოდენობა პოზიციაში
+calc.row.funding	დაგროვილი funding
+calc.row.roundTrip	round trip ხარჯი
+calc.row.breakEven	დღე უზარალობამდე
+calc.row.net	წმინდა მოგება პოზიციაზე
+calc.row.inPosition	წლიური პოზიციაში ყოფნისას
+calc.row.utilization	× utilization
+calc.row.netApy	წმინდა APY კაპიტალზე
+calc.row.hurdle	hurdle
+calc.verdictPass	hurdle-ს ლახავს {pts} პუნქტით.
+calc.verdictFail	{pts} პუნქტით ვერ აღწევს hurdle-ს.
+part.world	სამყარო
+part.edge	უპირატესობა, გულწრფელად
+part.why	რატომ გამოიყურება დიზაინი ასე
+part.build	რას ვაშენებთ
+part.go	Go ბილდი
+part.runbook	ოპერატორის runbook
+route.world/perps	spot, futures, perpetual-ები
+route.world/funding	funding rate
+route.world/prices	mark, index, last
+route.world/liquidation	ლიკვიდაცია, მარჟა, ADL
+route.world/venues	Binance და Bybit
+route.world/counterparties	ვინ არის მეორე მხარეს
+route.edge/two-trades	ორი მსგავსი გარიგება
+route.edge/costs	რა ღირს ეს სინამდვილეში
+route.edge/calculator	ეს რეალურად მოიტანს მოგებას?
+route.edge/gate	ეკონომიკური ბარიერი
+route.edge/forks	როცა ბარიერი არ მუშაობს
+preset.worked.label	გარჩეული გარიგება (tutorial §3.9)
+preset.worked.note	კარგი მთავარი რეჟიმი VIP0 taker საკომისიოებით. წმინდა ~3.4% პოზიციაში 60% დროით — hurdle-ს ქვემოთ.
+preset.baseline.label	საბაზისო BTC, VIP0 — რასაც milestone 2 ელის
+preset.baseline.note	fund

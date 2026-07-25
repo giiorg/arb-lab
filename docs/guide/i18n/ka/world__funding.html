@@ -1,0 +1,73 @@
+<article data-route="world/funding" lang="ka">
+        <h1>funding rate</h1>
+
+        <p>
+          perpetual შეიძლება დაშორდეს spot-ს. არაფერი აიძულებს მათ კვლავ დაახლოებას,
+          რადგან არ არსებობს settlement თარიღი, რომელზეც ისინი უნდა დაემთხვეს. ამიტომ ბირჟა აიძულებს
+          გადატვირთულ მხარეს გადაუხადოს მეორე მხარეს ფიქსირებულ ინტერვალებში.
+          <span class="cite" data-src="tutorial §1.2">tutorial §1.2</span>
+        </p>
+
+        <ul>
+          <li>perp ივაჭრება spot-ის <strong>ზემოთ</strong> — longs გადატვირთულია — funding
+            არის <strong>დადებითი</strong>, და longs უხდიან shorts-ს.</li>
+          <li>perp ივაჭრება spot-ის <strong>ქვემოთ</strong> — funding არის
+            <strong>უარყოფითი</strong>, და shorts უხდიან longs-ს.</li>
+        </ul>
+
+        <p>
+          ბირჟა მართავს გადარიცხვას და არ იჭერს არცერთ მხარეს. funding ნიშნავს, რომ
+          კონტრაგენტები უხდიან ერთმანეთს კავშირის შესანარჩუნებლად. როცა ხარ short perp-ზე და
+          long spot-ზე, სწორედ ასე იღებ გადახდას ამისთვის.
+          <span class="cite" data-src="tutorial §1.2">tutorial §1.2</span>
+        </p>
+
+        <h2>damper არ არის cap</h2>
+
+        <p>
+          გამარტივებულად, განაკვეთი არის
+          <code>F ≈ premium_index + clamp(interest − premium, ±damper)</code>. ორი
+          განსხვავებული შეზღუდვაა ამ წინადადებაში და მათ მუდმივად ურევენ ერთმანეთში.
+          <span class="cite" data-src="tutorial §1.4">tutorial §1.4</span>
+        </p>
+
+        <div class="scroll-x">
+          <table>
+            <tr><td><strong>damper</strong> (Binance ~±0.05%)</td>
+                <td>მცირე დიაპაზონი ფორმულის <em>შიგნით</em>. ინარჩუნებს განაკვეთს
+                    interest წევრთან ახლოს, როდესაც premium მცირეა. აყალიბებს ნორმალურ განაკვეთებს.</td></tr>
+            <tr><td><strong>cap / floor</strong> (სიმბოლოს მიხედვით; BTC ±0.3%, alts ±2%)</td>
+                <td>მკაცრი ლიმიტი <em>საბოლოო</em> განაკვეთზე. ზღუდავს ექსტრემალურებს.</td></tr>
+          </table>
+        </div>
+
+        <p>
+          ორივე იკითხება რეალურ დროში, არასდროს არის ხისტად გაწერილი — Bybit აჩვენებს <code>fundingCap</code>-ს
+          თავის ტიკერზე, ხოლო Binance ადებს მას <code>fundingInfo</code>-ს მეშვეობით.
+          <span class="cite" data-src="core §4">core §4</span>
+          <span class="cite" data-src="Profiles §1">Profiles §1</span>
+        </p>
+
+        <h2>funding არის გადახდა, და არა ნაკადი</h2>
+
+        <p>
+          სწორედ აქ ცდება ერთი შეხედვით დამაჯერებელი შეფასება. funding გადაიხდება
+          <em>კონკრეტულ timestamp-ზე</em>. ის არ გროვდება წამების მიხედვით. შენ იღებ
+          settlement-ს მხოლოდ იმ შემთხვევაში, თუ პოზიცია გიჭირავს მისი დადგომის მომენტში — ამიტომ მოსალოდნელმა მიღებამ უნდა
+          ჩამოთვალოს რეალური settlement timestamp-ები დაგეგმილი პოზიციის შენარჩუნებისას და შეაჯამოს
+          ისინი. საათობრივი განაკვეთის გამრავლება დაკავებული საათების რაოდენობაზე არ არის ამის
+          მიახლოება; ეს სრულიად სხვა რიცხვია.
+          <span class="cite" data-src="tutorial §1.7">tutorial §1.7</span>
+          <span class="cite" data-src="core C2">core C2</span>
+        </p>
+
+        <p>
+          უფრო უარესი, თავად ინტერვალი არის ლაივ მდგომარეობა. 2025-10-30-დან Bybit
+          ავტომატურად რთავს alt-ს 8h-სა და 1h-ს შორის, როდესაც funding ურტყამს cap-ს, და
+          აბრუნებს უკან <em>გაფრთხილების გარეშე</em>. ერთ ინტერვალში გახსნილი პოზიცია შეიძლება
+          ერთი საათის შემდეგ სხვა ინტერვალით გადიოდეს settlement-ს, ამიტომ მონიტორმა უნდა დააფიქსიროს ცვლილება,
+          ნაცვლად იმისა, რომ ენდოს ინტერვალს, რომელიც შესვლისას დაინახა.
+          <span class="cite" data-src="tutorial §1.7">tutorial §1.7</span>
+          <span class="cite" data-src="core C8">core C8</span>
+        </p>
+      </article>

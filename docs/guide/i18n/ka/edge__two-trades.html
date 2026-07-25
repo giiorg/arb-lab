@@ -1,0 +1,56 @@
+<article data-route="edge/two-trades" lang="ka">
+        <h1>ორი გარიგება, რომელიც ერთმანეთს ჰგავს</h1>
+
+        <p>
+          funding rate-ებიდან ფულის შოვნის ორი გზა არსებობს. ისინი მსგავსი სიტყვებით აღიწერება, მაგრამ ერთი და იგივე გარიგება არ არის.
+        </p>
+
+        <div class="scroll-x">
+          <table>
+            <tr><td><strong>Funding <em>level</em></strong><br>cash-and-carry</td>
+                <td>Long spot და short perp <strong>ერთ</strong> ბირჟაზე. თქვენ იღებთ ამ ბირჟის funding-ს, როცა ის დადებითია. <strong>ეს level არის edge.</strong></td></tr>
+            <tr><td><strong>Funding <em>spread</em></strong><br>cross-exchange</td>
+                <td>Long perp იმ ბირჟაზე, სადაც funding დაბალია, short perp იქ, სადაც მაღალია. თქვენ იღებთ <em>სხვაობას</em>, <code>F_high − F_low</code>.</td></tr>
+          </table>
+        </div>
+
+        <p>
+          პირველი აგროვებს level-ს; მეორე — level-ების სხვაობას. სწორედ ეს განსხვავება წყვეტს, თუ რა რისკებს იღებთ.
+          <span class="cite" data-src="tutorial §2.1">tutorial §2.1</span>
+        </p>
+
+        <h2>რატომ არის cash-and-carry ფლაგმანი</h2>
+
+        <p>
+          level ძირითად აქტივებზე (majors) შემთხვევათა უმეტესობაში რეალური, მუდმივი და დადებითი რიცხვია — დაახლოებით ის 5–10% APY, რასაც კვლევები აღწერს და რისი ინდუსტრიალიზაციაც Ethena-მ მოახდინა. spread ძირითადებზე ასეთი არ არის: ის საშუალოს უბრუნდება მანამ, სანამ round trip-ს გამოიმუშავებთ.
+          <span class="cite" data-src="tutorial §2.1">tutorial §2.1</span>
+          <span class="cite" data-src="tutorial §2.2">tutorial §2.2</span>
+        </p>
+
+        <p>
+          ასე რომ, cross-exchange <strong>სტრატეგია #2-ია</strong>, რომელიც ფოკუსირებულია იქ, სადაც ის რეალურად არსებობს — ალტკოინების წყვილებზე, სადაც რომელიმე ბირჟის funding სცდება ნორმას (dislocates), და ამ გადახრის ფანჯრებზე — და შენდება იმავე ბაზაზე, და არა როგორც ცალკეული სისტემა.
+          <span class="cite" data-src="core §2.3">core §2.3</span>
+          <span class="cite" data-src="tutorial §5.1">tutorial §5.1</span>
+        </p>
+
+        <h2>რა გიჯდებათ სტრატეგია #2 რისკის სახით</h2>
+
+        <ul>
+          <li><strong>ბირჟებს შორის basis.</strong> ახლა უკვე ორი განსხვავებული mark არსებობს და ჰეჯი მხოლოდ იმდენად ეფექტურია, რამდენადაც მათი კორელაცია <em>სტრესის დროს</em> — ანუ ზუსტად მაშინ, როცა კორელაცია ირღვევა.</li>
+          <li><strong>მეორე კონტრაგენტი</strong> ჰეჯისთვის, რაც აორმაგებს ქასთოდის და ბირჟის რისკს, ნაცვლად მისი დივერსიფიკაციისა.</li>
+          <li><strong>ინვენტარის ცვლილება (inventory drift).</strong> მოგება / ზარალი სხვადასხვა ბირჟაზე გროვდება და ბალანსირებას საჭიროებს — იმ პულებს შორის, რომლებსაც, როგორც 1-ელ ნაწილში აღინიშნა, არცერთი ერთიანი ქსელი არ აკავშირებს.</li>
+        </ul>
+
+        <p>
+          <span class="cite" data-src="tutorial §5.2">tutorial §5.2</span>
+          <span class="cite" data-src="core §2.3">core §2.3</span>
+        </p>
+
+        <h2>მოქმედების არეალის საზღვარი, რომლის გაგებაც ღირს</h2>
+
+        <p>
+          თანაბარი საბაზისო რაოდენობა დელტა-ნეიტრალურია მხოლოდ <strong>linear</strong> perp-ებისთვის. ინვერსიული (COIN-M) perp-ის გადახდა ხდება <code>1/P</code>-ში, რასაც არანულოვანი სიმრუდე აქვს — ამიტომ საბაზისო რაოდენობების დამთხვევა მას არ ანეიტრალებს. სწორედ ამიტომ, მხოლოდ-linear არის მოქმედების არეალის მკაფიო საზღვარი და ამიტომაც ითვალისწინებს ბირჟის ადაპტერი კონტრაქტის ტიპს საერთოდ.
+          <span class="cite" data-src="tutorial §5.3">tutorial §5.3</span>
+          <span class="cite" data-src="core C6">core C6</span>
+        </p>
+      </article>
