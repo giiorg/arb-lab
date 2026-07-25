@@ -48,7 +48,13 @@ avoids green and red, which are reserved as semantic pass/fail on the calculator
 verdict. Three type roles, all system faces so nothing is fetched: sans for headings,
 serif for body prose, mono for data, code and chrome.
 
-## Publishing
+## Published
 
-The file is published as an Artifact and redeploys to the same URL. There is no
-build step — what is committed is what is published.
+<https://claude.ai/code/artifact/710d7ac1-98b2-45e7-9464-309829ebaa4d>
+
+Stages 2–4 redeploy to that same URL by publishing this same file path — keep the
+favicon (📉) stable so the browser tab stays recognisable. There is no build step:
+what is committed is what is published.
+
+**Stage 1 covers Parts 1–2 only.** Parts 3–6 (why the design looks like this, what
+we're building, the Go build, the operator runbook) are pending the voice review.
