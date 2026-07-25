@@ -101,6 +101,17 @@
     border: 1px solid var(--rule); border-radius: 0.3rem; letter-spacing: 0.03em;
   }
   .theme-toggle:hover { color: var(--accent); border-color: var(--accent); }
+  .lang-switch { display: flex; gap: 0.25rem; margin: 0 0 0.6rem; }
+  .lang-switch button {
+    flex: 1; font: 0.72rem/1 var(--mono); letter-spacing: 0.03em;
+    padding: 0.35rem 0.3rem; cursor: pointer;
+    color: var(--muted); background: transparent;
+    border: 1px solid var(--rule); border-radius: 0.3rem;
+  }
+  .lang-switch button:hover { color: var(--accent); border-color: var(--accent); }
+  .lang-switch button[aria-pressed="true"] {
+    color: var(--surface); background: var(--accent); border-color: var(--accent);
+  }
   .search { width: 100%; padding: 0.45rem 0.6rem; font: 0.85rem var(--sans);
     background: var(--surface); color: var(--fg); border: 1px solid var(--rule); border-radius: 0.3rem; }
   .results { list-style: none; margin: 0.5rem 0 0; padding: 0; }
@@ -181,16 +192,23 @@
   }
 </style>
 
-<div class="guide">
+<div class="guide" data-lang="en">
   <nav class="rail" id="rail" aria-label="Guide contents">
     <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch colour theme">◐ theme</button>
+    <!-- The group label is deliberately bilingual and static, and is not in the UI
+         table: a language switcher has to stay legible to someone who cannot read
+         the language currently active. -->
+    <div class="lang-switch" id="lang-switch" role="group" aria-label="Language · ენა">
+      <button type="button" data-lang-choice="en" aria-pressed="true">EN</button>
+      <button type="button" data-lang-choice="ka" aria-pressed="false" lang="ka">ქარ</button>
+    </div>
     <input class="search" id="search" type="search" placeholder="Search the guide" aria-label="Search the guide">
     <ul class="results" id="results"></ul>
   </nav>
   <div class="pane">
-    <div class="status">spec v0.9.4 · 0 lines of Go</div>
+    <div class="status" data-i18n="status"></div>
     <main class="content" id="content">
-      <article data-route="world/perps">
+      <article data-route="world/perps" lang="en">
         <h1>Spot, futures, perpetuals</h1>
 
         <p>
@@ -239,7 +257,7 @@
         </p>
       </article>
 
-      <article data-route="world/funding">
+      <article data-route="world/funding" lang="en">
         <h1>The funding rate</h1>
 
         <p>
@@ -313,7 +331,7 @@
         </p>
       </article>
 
-      <article data-route="world/prices">
+      <article data-route="world/prices" lang="en">
         <h1>Mark, index, last</h1>
 
         <p>
@@ -360,7 +378,7 @@
         </p>
       </article>
 
-      <article data-route="world/liquidation">
+      <article data-route="world/liquidation" lang="en">
         <h1>Liquidation, margin, and ADL</h1>
 
         <p>
@@ -433,7 +451,7 @@
         </p>
       </article>
 
-      <article data-route="world/venues">
+      <article data-route="world/venues" lang="en">
         <h1>Binance and Bybit</h1>
 
         <p>
@@ -506,7 +524,7 @@
         </p>
       </article>
 
-      <article data-route="world/counterparties">
+      <article data-route="world/counterparties" lang="en">
         <h1>Who is on the other side</h1>
 
         <p>
@@ -575,7 +593,7 @@
         </p>
       </article>
 
-      <article data-route="edge/two-trades">
+      <article data-route="edge/two-trades" lang="en">
         <h1>Two trades that look alike</h1>
 
         <p>
@@ -650,7 +668,7 @@
         </p>
       </article>
 
-      <article data-route="edge/costs">
+      <article data-route="edge/costs" lang="en">
         <h1>What it actually costs</h1>
 
         <p>
@@ -770,7 +788,7 @@
         </div>
       </article>
 
-      <article data-route="edge/gate">
+      <article data-route="edge/gate" lang="en">
         <h1>The economic gate</h1>
 
         <p>
@@ -842,7 +860,7 @@
         </p>
       </article>
 
-      <article data-route="edge/forks">
+      <article data-route="edge/forks" lang="en">
         <h1>When the gate fails</h1>
 
         <p>
@@ -1196,6 +1214,10 @@ var GuidePure = (function () {
   "use strict";
   var rail = document.getElementById("rail");
   var currentLang = GuidePure.parseHash(location.hash).lang;
+  var guideEl = document.querySelector(".guide");
+  // Assigned at the end of the calculator block below. setLanguage runs before that
+  // block exists, so it guards on typeof rather than assuming a function.
+  var rerenderCalculator = null;
 
   // "calc.field.rate" -> GuidePure.UI.calc.field.rate
   function lookup(path) {
@@ -1225,57 +1247,114 @@ var GuidePure = (function () {
     root.setAttribute("data-theme", current === "dark" ? "light" : "dark");
   });
 
-  GuidePure.PARTS.forEach(function (part) {
-    var routes = GuidePure.ROUTES.filter(function (r) { return r.part === part.id; });
-    if (!routes.length) return;
-    var h = document.createElement("h2");
-    h.textContent = part.n + " · " + GuidePure.pick(part.title, currentLang);
-    rail.appendChild(h);
-    routes.forEach(function (r) {
-      var a = document.createElement("a");
-      a.className = "nav-link";
-      a.href = "#/" + r.route;
-      a.dataset.navRoute = r.route;
-      a.textContent = GuidePure.pick(r.title, currentLang);
-      rail.appendChild(a);
+  function renderNav(lang) {
+    rail.querySelectorAll("h2, .nav-link").forEach(function (el) { el.remove(); });
+    GuidePure.PARTS.forEach(function (part) {
+      var routes = GuidePure.ROUTES.filter(function (r) { return r.part === part.id; });
+      if (!routes.length) return;
+      var h = document.createElement("h2");
+      h.textContent = part.n + " · " + GuidePure.pick(part.title, lang);
+      h.setAttribute("lang", lang);
+      rail.appendChild(h);
+      routes.forEach(function (r) {
+        var a = document.createElement("a");
+        a.className = "nav-link";
+        a.href = GuidePure.formatHash({ lang: lang, route: r.route });
+        a.dataset.navRoute = r.route;
+        a.setAttribute("lang", lang);
+        a.textContent = GuidePure.pick(r.title, lang);
+        rail.appendChild(a);
+      });
     });
-  });
+  }
 
-  function show(route) {
+  function show(route, lang) {
     var articles = document.querySelectorAll("article[data-route]");
     var found = false;
     articles.forEach(function (el) {
-      var on = el.dataset.route === route;
+      var articleLang = el.getAttribute("lang");
+      // An article with no lang (the calculator) belongs to every language.
+      var on = el.dataset.route === route && (!articleLang || articleLang === lang);
       el.classList.toggle("is-active", on);
       if (on) found = true;
     });
-    if (!found && articles.length) {
-      articles[0].classList.add("is-active");
-      route = articles[0].dataset.route;
+    if (!found) {
+      // Unknown route, or that route has no article in this language yet: fall back
+      // to the same route in the default language, then to the first article.
+      // Found by iteration rather than a built selector — an attribute selector
+      // written as a string literal here would register as a phantom route in the
+      // raw-text scans the tests and the drift check rely on.
+      var fallback = null;
+      articles.forEach(function (el) {
+        if (!fallback && el.dataset.route === route
+            && el.getAttribute("lang") === GuidePure.DEFAULT_LANG) fallback = el;
+      });
+      fallback = fallback || articles[0];
+      if (fallback) {
+        fallback.classList.add("is-active");
+        route = fallback.dataset.route;
+      }
     }
-    document.querySelectorAll(".nav-link").forEach(function (a) {
+    rail.querySelectorAll(".nav-link").forEach(function (a) {
       a.setAttribute("aria-current", a.dataset.navRoute === route ? "true" : "false");
     });
     // The pane is the scroller on wide viewports; the window is on narrow ones.
     var pane = document.querySelector(".pane");
     if (pane) pane.scrollTop = 0;
     window.scrollTo(0, 0);
+    return route;
   }
 
-  function routeFromHash() {
-    return (location.hash || "").replace(/^#\/?/, "") || GuidePure.ROUTES[0].route;
+  function setLanguage(lang) {
+    currentLang = lang;
+    guideEl.setAttribute("data-lang", lang);
+    document.getElementById("lang-switch").querySelectorAll("button").forEach(function (b) {
+      b.setAttribute("aria-pressed", String(b.dataset.langChoice === lang));
+    });
+    applyStrings(lang);
+    renderNav(lang);
+    var searchBox = document.getElementById("search");
+    searchBox.placeholder = GuidePure.pick(GuidePure.UI.searchPlace, lang);
+    searchBox.setAttribute("aria-label", GuidePure.pick(GuidePure.UI.searchLabel, lang));
+    rail.setAttribute("aria-label", GuidePure.pick(GuidePure.UI.railLabel, lang));
+    var theme = document.getElementById("theme-toggle");
+    theme.setAttribute("aria-label", GuidePure.pick(GuidePure.UI.themeLabel, lang));
+    theme.textContent = GuidePure.pick(GuidePure.UI.themeText, lang);
+    if (typeof rerenderCalculator === "function") rerenderCalculator();
   }
 
-  window.addEventListener("hashchange", function () { show(routeFromHash()); });
-  show(routeFromHash());
+  function applyState() {
+    var state = GuidePure.parseHash(location.hash);
+    if (state.lang !== currentLang) setLanguage(state.lang);
+    show(state.route, state.lang);
+  }
+
+  document.getElementById("lang-switch").addEventListener("click", function (e) {
+    var choice = e.target && e.target.dataset ? e.target.dataset.langChoice : null;
+    if (!choice) return;
+    location.hash = GuidePure.formatHash({
+      lang: choice,
+      route: GuidePure.parseHash(location.hash).route
+    });
+  });
+
+  window.addEventListener("hashchange", applyState);
+  setLanguage(currentLang);
+  applyState();
 
   var records = [];
   document.querySelectorAll("article[data-route]").forEach(function (el) {
     var meta = GuidePure.ROUTES.filter(function (r) { return r.route === el.dataset.route; })[0];
-    records.push({
-      route: el.dataset.route,
-      title: meta ? GuidePure.pick(meta.title, currentLang) : el.dataset.route,
-      text: el.textContent.replace(/\s+/g, " ").trim()
+    // A control article (no lang) is indexed under every language; its text is
+    // whatever the string table currently renders.
+    var langs = el.getAttribute("lang") ? [el.getAttribute("lang")] : GuidePure.LANGS;
+    langs.forEach(function (lang) {
+      records.push({
+        route: el.dataset.route,
+        lang: lang,
+        title: meta ? GuidePure.pick(meta.title, lang) : el.dataset.route,
+        text: el.textContent.replace(/\s+/g, " ").trim()
+      });
     });
   });
   var index = GuidePure.buildSearchIndex(records);
@@ -1283,13 +1362,14 @@ var GuidePure = (function () {
   var box = document.getElementById("search");
   var results = document.getElementById("results");
   box.addEventListener("input", function () {
-    var hits = GuidePure.searchIndex(index, box.value);
+    var hits = GuidePure.searchIndex(index, box.value, currentLang);
     rail.classList.toggle("searching", box.value.trim().length >= 2);
     results.innerHTML = "";
     hits.forEach(function (hit) {
       var li = document.createElement("li");
       var a = document.createElement("a");
-      a.href = "#/" + hit.route;
+      a.href = GuidePure.formatHash({ lang: hit.lang, route: hit.route });
+      a.setAttribute("lang", hit.lang);
       var strong = document.createElement("strong");
       strong.textContent = hit.title;
       var span = document.createElement("span");
@@ -1402,8 +1482,8 @@ var GuidePure = (function () {
       });
     });
 
-    applyStrings(currentLang);
-    render();
+    rerenderCalculator = function () { applyStrings(currentLang); render(); };
+    rerenderCalculator();
   }
 })();
 </script>

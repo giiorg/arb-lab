@@ -151,6 +151,33 @@ test("both Georgian weights are present", () => {
   expect(faces.some((f) => /font-weight:\s*600/.test(f))).toBe(true);
 });
 
+test("the guide container declares an active language", () => {
+  expect(readGuide()).toMatch(/<div class="guide" data-lang="en">/);
+});
+
+test("a language switch offers both languages with pressed state", () => {
+  const html = readGuide();
+  const group = html.match(/<div class="lang-switch"[\s\S]*?<\/div>/);
+  expect(group, "no .lang-switch group found").not.toBeNull();
+  expect(group[0]).toMatch(/data-lang-choice="en"/);
+  expect(group[0]).toMatch(/data-lang-choice="ka"/);
+  expect(group[0]).toMatch(/aria-pressed=/);
+  expect(html).toMatch(/<div class="lang-switch"[^>]*role="group"[^>]*aria-label=/);
+});
+
+test("every prose article declares its language", () => {
+  const html = readGuide();
+  const opens = [...html.matchAll(/<article data-route="([^"]+)"([^>]*)>/g)];
+  for (const [, route, rest] of opens) {
+    if (route === "edge/calculator") continue; // a control, localized in place
+    expect(rest, `article ${route} has no lang attribute`).toMatch(/lang="(en|ka)"/);
+  }
+});
+
+test("navigation links are built through formatHash, not string concatenation", () => {
+  expect(readGuide()).not.toMatch(/a\.href\s*=\s*"#\/"\s*\+/);
+});
+
 test("Part 2 covers the five topics the design names", () => {
   const routes = new Set(loadPure().ROUTES.map((r) => r.route));
   for (const r of [
