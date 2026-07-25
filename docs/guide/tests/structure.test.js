@@ -34,3 +34,30 @@ test("states the honest build status", () => {
 test("defines a pure script block", () => {
   expect(readGuide()).toMatch(/<script id="guide-pure">/);
 });
+
+function routesInMarkup(html, attr) {
+  return new Set([...html.matchAll(new RegExp(`${attr}="([^"]+)"`, "g"))].map((m) => m[1]));
+}
+
+test("every declared route has exactly one content article", () => {
+  const pure = loadPure();
+  const articles = routesInMarkup(readGuide(), "data-route");
+  for (const r of pure.ROUTES) expect(articles.has(r.route)).toBe(true);
+});
+
+test("every content article is a declared route", () => {
+  const declared = new Set(loadPure().ROUTES.map((r) => r.route));
+  for (const route of routesInMarkup(readGuide(), "data-route")) {
+    expect(declared.has(route)).toBe(true);
+  }
+});
+
+test("route ids are unique", () => {
+  const routes = loadPure().ROUTES.map((r) => r.route);
+  expect(new Set(routes).size).toBe(routes.length);
+});
+
+test("every route belongs to one of the six parts", () => {
+  const parts = new Set(["world", "edge", "why", "build", "go", "runbook"]);
+  for (const r of loadPure().ROUTES) expect(parts.has(r.part)).toBe(true);
+});
