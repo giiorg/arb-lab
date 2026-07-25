@@ -182,4 +182,6 @@ Notation: SM row → model action(s). "OOS" = deliberately out of scope with the
 cd docs/formal && ./run.sh
 ```
 
-Fetches `tla2tools.jar` v1.7.4 (SHA-256 pinned) into gitignored `.tools/`, then runs all seven configs and checks each against its prediction (nominal safety + both liveness configs must pass; NC1–4 must fail on the predicted invariant). Requires Java 17+. Full outputs land in `.tools/*.out`. **≈20 min** on 18 cores; the `_Live2` config dominates (three temporal branches over its graph).
+Fetches `tla2tools.jar` v1.7.4 (SHA-256 pinned) into gitignored `.tools/`, then runs all **eight** configs and checks each against its prediction (nominal safety + both liveness configs must pass; NC1–4 must fail on the predicted invariant; **NC5 must fail on the predicted temporal property**). Requires Java 17+. Full outputs land in `.tools/*.out`. **≈32 min** on 18 cores; the `_Live2` config dominates at 23 min (five temporal properties over its graph).
+
+**Reviewer-authored probes — `docs/formal/probes/`** (not part of `run.sh`). The Cx8 round's two properties, written by the independent reviewer rather than by this model's author, kept under version control for exactly that reason. `ExhaustedHeldEventuallyParks` **passes** on the current module and is the independent confirmation of Cx8-2; `LostEventuallyLeaves` **still fails by design** on a benign watchdog-park trace (§2d's scoping correction). Read `probes/README.md` before running them — the failure is expected and must not be "fixed" into the model.
