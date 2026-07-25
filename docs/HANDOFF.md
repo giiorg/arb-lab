@@ -46,6 +46,25 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **To re-translate after the voice review** (the English prose is still pending it): `./tools/translate.sh <route>` writes a reviewable fragment to `i18n/ka/`, then `node tools/i18n.mjs splice <route>` — idempotent, and it refuses any fragment whose citation chips differ from the English original. Parts 3–6 translate the same way as they are written.
 
+### NEXT REQUEST (2026-07-25, not started): translate `docs/tutorial.md` into Georgian
+
+Asked for in a **fresh conversation**, to run while the user reads the published guide. Start with `superpowers:brainstorming` — items 1–3 below are real forks.
+
+**Do not re-derive any of this.** `agy` v1.1.7 + `Gemini 3.1 Pro (High)` is working; the invocation pattern, the three hard prompt rules and the **frozen glossary** are all in `docs/guide/tools/translate.sh` and `docs/guide/i18n/glossary.md` — **reuse that glossary unchanged**, it is what makes the two Georgian documents agree with each other. `tutorial.md` is 43 KB / 285 lines / **12 `##` sections** / 28 table rows / **0 code fences** / 20 cross-refs. Chunk by `##` → ~12 calls at ~3.5 KB, the same size the guide's sections translated cleanly at. Budget ~20 min and run the batch in the background.
+
+**Why this is safe to do now, unlike the guide's prose.** `tutorial.md` is part of the reviewed five-doc set — its English has been through four review rounds and is stable. The guide's English is the thing paused at a voice gate, and it is a different file. Nothing here waits on that gate.
+
+**The forks to settle:**
+1. **Where the Georgian lives.** A parallel `docs/tutorial.ka.md` is the obvious default for Markdown (the guide's sibling-block trick exists only because an Artifact publishes exactly one file — that constraint does not apply here). Confirm it, and decide whether the Georgian file joins the Artifacts list in this handoff or stays an unlisted derived artifact.
+2. **Section numbering MUST NOT drift — this is the sharp one.** The guide's citation chips say `tutorial §3.9`, and `build-spec.md`'s `[mechanism: …]` pointers and ADR §3 traceability reference tutorial sections by number. If the Georgian renumbers or reorders, every one of those pointers silently goes wrong. Rule: the `## Part N — ` / `### N.M` skeleton and all 20 cross-refs stay **byte-identical**; only prose after a heading is translated. Make it a test, not a convention — the guide's `tests/parity.test.js` is the model.
+3. **The worked ledger is a new risk class the guide's tests cannot see.** `tutorial §3.9` is the *source* of the five figures the guide's calculator is pinned to ($90 funding, $38 round trip, 8.4 days, 5.68% in-position, 3.41% vs the 4.60% hurdle). The guide asserts those against hard-coded values, **not against the tutorial** — so a number mangled in translation makes the Georgian tutorial and everything else disagree with nothing failing. Assert the **multiset of numbers and currency/percent tokens is identical** between `tutorial.md` and `tutorial.ka.md`.
+
+**Reuse, don't rebuild.** `docs/guide/tools/i18n.mjs` is HTML-specific (it extracts `<article>` blocks); a Markdown sibling that splits on `^## ` and reassembles is a small script, and the *pattern* is what matters — fragments on disk, one command per section, a splice step that refuses structurally-wrong output. Keep 28 Markdown tables' alignment rows intact.
+
+**Two lessons from the guide's localization that apply directly.** (a) The glossary is **frozen**: the first bulk run there omitted `leg` and produced three different Georgian words across three sections, each fluent in isolation — fix the glossary and re-run **everything**, never patch sections. (b) When a guarantee lives in the file's raw text rather than the rendered output, it needs a **raw-text test**; cross-refs and numbers here are exactly that.
+
+**Also derived, so also regenerable:** when R2d lands and changes `tutorial.md`, the Georgian is re-run per changed section — same property the guide's fragments have.
+
 **Open finding raised while building it (needs a tag + ADR §3 entry):** `core §12` cites §2.4 for "spot maker entry ≈ **−40% round-trip cost**", but `core §2.4` says maker spot entry "roughly **halves** round-trip cost and shortens **break-even** by ~40%" — a −50% cost effect and a separate −40% break-even effect, which §12's paraphrase appears to have collapsed. The guide models §2.4's own wording. Not yet triaged.
 
 ## Artifacts (read in this order)
