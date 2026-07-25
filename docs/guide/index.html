@@ -1,0 +1,66 @@
+<title>Funding-Rate Arbitrage — The Whole Thing</title>
+
+<style>
+  :root {
+    --bg: #fbfaf8; --fg: #1a1a1a; --muted: #5a5a5a;
+    --rule: #e2ded7; --accent: #7a4a1e; --chip-bg: #efeae1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17171a; --fg: #e8e6e3; --muted: #9a9791;
+      --rule: #2e2e33; --accent: #d9a066; --chip-bg: #24242a;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #fbfaf8; --fg: #1a1a1a; --muted: #5a5a5a;
+    --rule: #e2ded7; --accent: #7a4a1e; --chip-bg: #efeae1;
+  }
+  :root[data-theme="dark"] {
+    --bg: #17171a; --fg: #e8e6e3; --muted: #9a9791;
+    --rule: #2e2e33; --accent: #d9a066; --chip-bg: #24242a;
+  }
+
+  * { box-sizing: border-box; }
+  .guide {
+    background: var(--bg); color: var(--fg);
+    font: 16px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    min-height: 100vh;
+  }
+  .status {
+    font-size: 0.78rem; color: var(--muted); letter-spacing: 0.02em;
+    padding: 0.6rem 1.25rem; border-bottom: 1px solid var(--rule);
+  }
+  .content { padding: 1.5rem 1.25rem; max-width: 46rem; }
+  .cite {
+    font-size: 0.75rem; color: var(--accent); background: var(--chip-bg);
+    padding: 0.1rem 0.4rem; border-radius: 0.25rem; white-space: nowrap;
+  }
+</style>
+
+<div class="guide">
+  <div class="status">spec v0.9.4 · 0 lines of Go</div>
+  <main class="content">
+    <article data-route="world/perps">
+      <h1>The world</h1>
+      <p>
+        A <strong>perpetual</strong> is a futures contract with no expiry. To keep its
+        price tethered to spot without a settlement date it uses a funding rate — the
+        anchor this entire business is built on.
+        <span class="cite" data-src="tutorial §1.1">tutorial §1.1</span>
+      </p>
+    </article>
+  </main>
+</div>
+
+<script id="guide-pure">
+var GuidePure = (function () {
+  "use strict";
+  return {};
+})();
+</script>
+
+<script id="guide-ui">
+(function () {
+  "use strict";
+})();
+</script>
