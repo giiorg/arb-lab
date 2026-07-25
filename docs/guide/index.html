@@ -142,11 +142,111 @@ var GuidePure = (function () {
     return out;
   }
 
+  // All terms in one unit — USD over the hold, then a return on C_allocated (core §2.4).
+  // The reporting denominator is C_allocated, never the C_legs floor and never posted
+  // margin (core §2.1/§2.2).
+  function computeEconomics(input) {
+    var N = input.notional;
+    var perpInitialMargin = N / input.perpLeverage;
+    var cLegs = N + perpInitialMargin;
+    var cAllocated = cLegs + input.rescueMarginUsd + input.feeReserveUsd + input.committedFloatUsd;
+
+    var perDay = 24 / input.fundingIntervalHours;
+    var settlements = Math.floor(input.holdDays * perDay);
+    var fundingUsd = input.fundingRatePerSettlement * N * settlements;
+
+    var roundTripRate =
+      (2 * input.spotFeeRate + 2 * input.perpFeeRate + 4 * input.slippagePerLegRate) *
+      input.roundTripMultiplier;
+    var roundTripCostUsd = N * roundTripRate;
+
+    var netUsd = fundingUsd - roundTripCostUsd;
+    var annualize = 365 / input.holdDays;
+    var periodReturn = netUsd / cAllocated;
+    var inPositionApy = periodReturn * annualize;
+    var netApy = inPositionApy * input.utilization;
+    var apyOnLegsFloor = (netUsd / cLegs) * annualize;
+
+    var perSettlementUsd = input.fundingRatePerSettlement * N;
+    var breakEvenSettlements = perSettlementUsd > 0 ? roundTripCostUsd / perSettlementUsd : Infinity;
+
+    return {
+      cLegs: cLegs,
+      cAllocated: cAllocated,
+      settlements: settlements,
+      fundingUsd: fundingUsd,
+      roundTripRate: roundTripRate,
+      roundTripCostUsd: roundTripCostUsd,
+      netUsd: netUsd,
+      periodReturn: periodReturn,
+      inPositionApy: inPositionApy,
+      netApy: netApy,
+      apyOnLegsFloor: apyOnLegsFloor,
+      breakEvenSettlements: breakEvenSettlements,
+      breakEvenDays: breakEvenSettlements / perDay,
+      clearsHurdle: netApy >= input.hurdleApy,
+      shortfallPts: (netApy - input.hurdleApy) * 100
+    };
+  }
+
+  var WORKED_TRADE = {
+    notional: 10000,
+    perpLeverage: 3,
+    rescueMarginUsd: 3333,
+    feeReserveUsd: 40,
+    committedFloatUsd: 0,
+    fundingRatePerSettlement: 0.00015,
+    fundingIntervalHours: 8,
+    holdDays: 20,
+    spotFeeRate: 0.0010,
+    perpFeeRate: 0.0005,
+    slippagePerLegRate: 0.0002,
+    roundTripMultiplier: 1,
+    utilization: 0.6,
+    hurdleApy: 0.046
+  };
+
+  function withInput(overrides) {
+    var out = {}, k;
+    for (k in WORKED_TRADE) out[k] = WORKED_TRADE[k];
+    for (k in overrides) out[k] = overrides[k];
+    return out;
+  }
+
+  var PRESETS = {
+    worked: {
+      label: "The worked trade (tutorial §3.9)",
+      note: "A good major regime at VIP0 taker fees. Nets ~3.4% at 60% time-in-position — below the hurdle.",
+      cite: "tutorial §3.9",
+      input: withInput({})
+    },
+    baseline: {
+      label: "Baseline BTC, VIP0 — what milestone 2 expects to find",
+      note: "Funding at +0.01%/8h. Roughly 12-13 days just to cover the round trip.",
+      cite: "core §2.4",
+      input: withInput({ fundingRatePerSettlement: 0.0001 })
+    },
+    maker: {
+      label: "Fork (a) — maker spot entry",
+      note: "core §2.4: routing the spot entry maker roughly halves round-trip cost. It just clears the hurdle.",
+      cite: "core §2.4, core §12",
+      input: withInput({ roundTripMultiplier: 0.5 })
+    },
+    regime: {
+      label: "Fork (b) — regime-selective deployment",
+      note: "Trade only measured-positive regimes: a richer rate bought with lower utilization.",
+      cite: "core §12",
+      input: withInput({ fundingRatePerSettlement: 0.0002, utilization: 0.35 })
+    }
+  };
+
   return {
     PARTS: PARTS,
     ROUTES: ROUTES,
     buildSearchIndex: buildSearchIndex,
-    searchIndex: searchIndex
+    searchIndex: searchIndex,
+    computeEconomics: computeEconomics,
+    PRESETS: PRESETS
   };
 })();
 </script>
