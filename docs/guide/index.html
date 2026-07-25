@@ -711,40 +711,35 @@
       </article>
 
       <article data-route="edge/calculator">
-        <h1>Will this actually make money?</h1>
-        <p>
-          Move the inputs. The verdict is the same test milestone 2 runs, on the same
-          denominator the spec insists on — the full allocated bankroll, never posted
-          margin. <span class="cite" data-src="core §2.1">core §2.1</span>
-          <span class="cite" data-src="core §2.2">core §2.2</span>
-        </p>
+        <h1 data-i18n="calc.title"></h1>
+        <p data-i18n-html="calc.intro"></p>
 
         <div class="calc">
           <div class="calc-presets" id="calc-presets"></div>
           <div class="calc-grid">
-            <label>Funding rate (% per settlement)
+            <label><span data-i18n="calc.field.rate"></span>
               <input id="in-rate" type="number" step="0.001" value="0.015"></label>
-            <label>Funding interval (hours)
+            <label><span data-i18n="calc.field.interval"></span>
               <select id="in-interval"><option value="8">8</option><option value="1">1</option></select></label>
-            <label>Hold length (days)
+            <label><span data-i18n="calc.field.hold"></span>
               <input id="in-hold" type="number" step="1" value="20"></label>
-            <label>Notional N (USD)
+            <label><span data-i18n="calc.field.notional"></span>
               <input id="in-notional" type="number" step="1000" value="10000"></label>
-            <label>Perp leverage
+            <label><span data-i18n="calc.field.leverage"></span>
               <input id="in-leverage" type="number" step="1" value="3"></label>
-            <label>Rescue margin (USD)
+            <label><span data-i18n="calc.field.rescue"></span>
               <input id="in-rescue" type="number" step="100" value="3333"></label>
-            <label>Spot fee (%)
+            <label><span data-i18n="calc.field.spotfee"></span>
               <input id="in-spotfee" type="number" step="0.005" value="0.10"></label>
-            <label>Perp fee (%)
+            <label><span data-i18n="calc.field.perpfee"></span>
               <input id="in-perpfee" type="number" step="0.005" value="0.05"></label>
-            <label>Slippage per leg (%)
+            <label><span data-i18n="calc.field.slip"></span>
               <input id="in-slip" type="number" step="0.005" value="0.02"></label>
-            <label>Round-trip multiplier
+            <label><span data-i18n="calc.field.mult"></span>
               <input id="in-mult" type="number" step="0.1" value="1"></label>
-            <label>Utilization (%)
+            <label><span data-i18n="calc.field.util"></span>
               <input id="in-util" type="number" step="5" value="60"></label>
-            <label>Hurdle (%)
+            <label><span data-i18n="calc.field.hurdle"></span>
               <input id="in-hurdle" type="number" step="0.1" value="4.6"></label>
           </div>
           <div class="scroll-x"><table class="calc-out" id="calc-out"></table></div>
@@ -1047,28 +1042,89 @@ var GuidePure = (function () {
     return out;
   }
 
+  // Chrome and calculator strings. Prose lives in the markup as sibling <article>
+  // blocks; these are the strings attached to controls, which exist once and cannot
+  // be duplicated (the calculator alone holds 16 element ids).
+  var UI = {
+    status:       { en: "spec v0.9.4 · 0 lines of Go" },
+    searchLabel:  { en: "Search the guide" },
+    searchPlace:  { en: "Search the guide" },
+    railLabel:    { en: "Guide contents" },
+    themeLabel:   { en: "Switch colour theme" },
+    themeText:    { en: "◐ theme" },
+    calc: {
+      title: { en: "Will this actually make money?" },
+      // Single-quoted so the HTML attribute quotes stay literal in the file. Escaping
+      // them would render fine but hide these chips from the raw-text drift check
+      // (the data-src grep in the guide README) — a test in structure.test.js
+      // enforces it. This comment deliberately avoids spelling the pattern out,
+      // since a literal occurrence here would itself show up in that inventory.
+      intro: {
+        en: 'Move the inputs. The verdict is the same test milestone 2 runs, on the same '
+          + 'denominator the spec insists on — the full allocated bankroll, never posted '
+          + 'margin. <span class="cite" data-src="core §2.1">core §2.1</span> '
+          + '<span class="cite" data-src="core §2.2">core §2.2</span>'
+      },
+      field: {
+        rate:     { en: "Funding rate (% per settlement)" },
+        interval: { en: "Funding interval (hours)" },
+        hold:     { en: "Hold length (days)" },
+        notional: { en: "Notional N (USD)" },
+        leverage: { en: "Perp leverage" },
+        rescue:   { en: "Rescue margin (USD)" },
+        spotfee:  { en: "Spot fee (%)" },
+        perpfee:  { en: "Perp fee (%)" },
+        slip:     { en: "Slippage per leg (%)" },
+        mult:     { en: "Round-trip multiplier" },
+        util:     { en: "Utilization (%)" },
+        hurdle:   { en: "Hurdle (%)" }
+      },
+      row: {
+        cLegs:        { en: "Leg-capital floor C_legs" },
+        cAllocated:   { en: "Allocated bankroll C_allocated" },
+        settlements:  { en: "Settlements in the hold" },
+        funding:      { en: "Funding collected" },
+        roundTrip:    { en: "Round-trip cost" },
+        breakEven:    { en: "Days to break even" },
+        net:          { en: "Net over the hold" },
+        inPosition:   { en: "Annualized while in position" },
+        utilization:  { en: "× utilization" },
+        netApy:       { en: "Net APY on the bankroll" },
+        hurdle:       { en: "Hurdle" }
+      },
+      verdictPass: { en: "Clears the hurdle by {pts} points." },
+      verdictFail: { en: "Fails the hurdle by {pts} points." }
+    }
+  };
+
+  function fmt(template, vars) {
+    return String(template).replace(/\{(\w+)\}/g, function (whole, key) {
+      return Object.prototype.hasOwnProperty.call(vars, key) ? String(vars[key]) : whole;
+    });
+  }
+
   var PRESETS = {
     worked: {
-      label: "The worked trade (tutorial §3.9)",
-      note: "A good major regime at VIP0 taker fees. Nets ~3.4% at 60% time-in-position — below the hurdle.",
+      label: { en: "The worked trade (tutorial §3.9)" },
+      note: { en: "A good major regime at VIP0 taker fees. Nets ~3.4% at 60% time-in-position — below the hurdle." },
       cite: "tutorial §3.9",
       input: withInput({})
     },
     baseline: {
-      label: "Baseline BTC, VIP0 — what milestone 2 expects to find",
-      note: "Funding at +0.01%/8h. Roughly 12-13 days just to cover the round trip.",
+      label: { en: "Baseline BTC, VIP0 — what milestone 2 expects to find" },
+      note: { en: "Funding at +0.01%/8h. Roughly 12-13 days just to cover the round trip." },
       cite: "core §2.4",
       input: withInput({ fundingRatePerSettlement: 0.0001 })
     },
     maker: {
-      label: "Fork (a) — maker spot entry",
-      note: "core §2.4: routing the spot entry maker roughly halves round-trip cost. It just clears the hurdle.",
+      label: { en: "Fork (a) — maker spot entry" },
+      note: { en: "core §2.4: routing the spot entry maker roughly halves round-trip cost. It just clears the hurdle." },
       cite: "core §2.4, core §12",
       input: withInput({ roundTripMultiplier: 0.5 })
     },
     regime: {
-      label: "Fork (b) — regime-selective deployment",
-      note: "Trade only measured-positive regimes: a richer rate bought with lower utilization.",
+      label: { en: "Fork (b) — regime-selective deployment" },
+      note: { en: "Trade only measured-positive regimes: a richer rate bought with lower utilization." },
       cite: "core §12",
       input: withInput({ fundingRatePerSettlement: 0.0002, utilization: 0.35 })
     }
@@ -1100,6 +1156,8 @@ var GuidePure = (function () {
     parseHash: parseHash,
     formatHash: formatHash,
     pick: pick,
+    UI: UI,
+    fmt: fmt,
     buildSearchIndex: buildSearchIndex,
     searchIndex: searchIndex,
     computeEconomics: computeEconomics,
@@ -1116,6 +1174,24 @@ var GuidePure = (function () {
   "use strict";
   var rail = document.getElementById("rail");
   var currentLang = GuidePure.parseHash(location.hash).lang;
+
+  // "calc.field.rate" -> GuidePure.UI.calc.field.rate
+  function lookup(path) {
+    return path.split(".").reduce(function (node, key) {
+      return node == null ? null : node[key];
+    }, GuidePure.UI);
+  }
+
+  function applyStrings(lang) {
+    document.querySelectorAll("[data-i18n]").forEach(function (el) {
+      el.textContent = GuidePure.pick(lookup(el.dataset.i18n), lang);
+    });
+    // data-i18n-html is used only where a string carries citation chips. Its values
+    // are authored in the UI table above — never anything from outside this file.
+    document.querySelectorAll("[data-i18n-html]").forEach(function (el) {
+      el.innerHTML = GuidePure.pick(lookup(el.dataset.i18nHtml), lang);
+    });
+  }
 
   document.getElementById("theme-toggle").addEventListener("click", function () {
     var root = document.documentElement;
@@ -1244,16 +1320,17 @@ var GuidePure = (function () {
     var render = function () {
       var input = readInputs();
       var r = GuidePure.computeEconomics(input);
+      var U = GuidePure.UI.calc;
       var rows = [
-        ["Leg-capital floor C_legs", GuidePure.formatUsd(r.cLegs)],
-        ["Allocated bankroll C_allocated", GuidePure.formatUsd(r.cAllocated)],
-        ["Settlements in the hold", String(r.settlements)],
-        ["Funding collected", GuidePure.formatUsd(r.fundingUsd)],
-        ["Round-trip cost", GuidePure.formatUsd(-r.roundTripCostUsd)],
-        ["Days to break even", r.breakEvenDays.toFixed(1)],
-        ["Net over the hold", GuidePure.formatUsd(r.netUsd)],
-        ["Annualized while in position", GuidePure.formatPct(r.inPositionApy)],
-        ["× utilization", GuidePure.formatPct(input.utilization)]
+        [GuidePure.pick(U.row.cLegs, currentLang),       GuidePure.formatUsd(r.cLegs)],
+        [GuidePure.pick(U.row.cAllocated, currentLang),  GuidePure.formatUsd(r.cAllocated)],
+        [GuidePure.pick(U.row.settlements, currentLang), String(r.settlements)],
+        [GuidePure.pick(U.row.funding, currentLang),     GuidePure.formatUsd(r.fundingUsd)],
+        [GuidePure.pick(U.row.roundTrip, currentLang),   GuidePure.formatUsd(-r.roundTripCostUsd)],
+        [GuidePure.pick(U.row.breakEven, currentLang),   r.breakEvenDays.toFixed(1)],
+        [GuidePure.pick(U.row.net, currentLang),         GuidePure.formatUsd(r.netUsd)],
+        [GuidePure.pick(U.row.inPosition, currentLang),  GuidePure.formatPct(r.inPositionApy)],
+        [GuidePure.pick(U.row.utilization, currentLang), GuidePure.formatPct(input.utilization)]
       ];
       calcOut.innerHTML = "";
       rows.forEach(function (row) {
@@ -1263,28 +1340,29 @@ var GuidePure = (function () {
       });
       var totalRow = calcOut.insertRow();
       totalRow.className = "total";
-      totalRow.insertCell().textContent = "Net APY on the bankroll";
+      totalRow.insertCell().textContent = GuidePure.pick(U.row.netApy, currentLang);
       totalRow.insertCell().textContent = GuidePure.formatPct(r.netApy);
       var hurdleRow = calcOut.insertRow();
-      hurdleRow.insertCell().textContent = "Hurdle";
+      hurdleRow.insertCell().textContent = GuidePure.pick(U.row.hurdle, currentLang);
       hurdleRow.insertCell().textContent = GuidePure.formatPct(input.hurdleApy);
 
       verdictEl.className = "verdict " + (r.clearsHurdle ? "pass" : "fail");
-      verdictEl.textContent = r.clearsHurdle
-        ? "Clears the hurdle by " + r.shortfallPts.toFixed(2) + " points."
-        : "Fails the hurdle by " + Math.abs(r.shortfallPts).toFixed(2) + " points.";
+      verdictEl.textContent = GuidePure.fmt(
+        GuidePure.pick(r.clearsHurdle ? U.verdictPass : U.verdictFail, currentLang),
+        { pts: Math.abs(r.shortfallPts).toFixed(2) }
+      );
     };
 
     Object.keys(GuidePure.PRESETS).forEach(function (id) {
       var preset = GuidePure.PRESETS[id];
       var b = document.createElement("button");
       b.type = "button";
-      b.textContent = preset.label;
+      b.textContent = GuidePure.pick(preset.label, currentLang);
       b.setAttribute("aria-pressed", "false");
       b.addEventListener("click", function () {
         writeInputs(preset.input);
         render();
-        noteEl.textContent = preset.note + "  [" + preset.cite + "]";
+        noteEl.textContent = GuidePure.pick(preset.note, currentLang) + "  [" + preset.cite + "]";
         presetBar.querySelectorAll("button").forEach(function (o) {
           o.setAttribute("aria-pressed", String(o === b));
         });
@@ -1302,6 +1380,7 @@ var GuidePure = (function () {
       });
     });
 
+    applyStrings(currentLang);
     render();
   }
 })();

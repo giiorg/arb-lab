@@ -67,8 +67,34 @@ test("every article carries at least one citation chip", () => {
   const articles = [...html.matchAll(/<article data-route="([^"]+)"[\s\S]*?<\/article>/g)];
   expect(articles.length).toBeGreaterThan(0);
   for (const [block, route] of articles) {
+    // The calculator is a control, not prose: its text is bound from GuidePure.UI so
+    // it can be localized without duplicating its 16 element ids. Its chips live in
+    // UI.calc.intro instead of the markup — asserted separately, below.
+    if (route === "edge/calculator") continue;
     expect(block, `article ${route} has no citation chip`).toMatch(/class="cite" data-src="/);
   }
+});
+
+test("the calculator's citations live in the string table", () => {
+  const intro = loadPure().UI.calc.intro.en;
+  expect(intro).toContain('class="cite" data-src="core §2.1"');
+  expect(intro).toContain('class="cite" data-src="core §2.2"');
+});
+
+// Drift against a future review round is detected by grepping the raw file:
+//   grep -o 'data-src="[^"]*"' index.html | sort | uniq -c
+// A chip written into a JS string with escaped quotes (data-src=\"…\") renders fine
+// but is invisible to that grep, so every chip must survive as literal file text.
+test("every citation chip is visible to the raw-text drift check", () => {
+  const html = readGuide();
+  const inFile = new Set([...html.matchAll(/data-src="([^"]*)"/g)].map((m) => m[1]));
+  const bundle = loadPure().UI.calc.intro;
+  for (const lang of Object.keys(bundle)) {
+    for (const m of bundle[lang].matchAll(/data-src="([^"]*)"/g)) {
+      expect(inFile.has(m[1]), `UI.calc.intro.${lang} chip "${m[1]}" is escaped in the file`).toBe(true);
+    }
+  }
+  expect(html).not.toMatch(/data-src=\\"/);
 });
 
 test("Part 1 covers the six topics the design names", () => {
