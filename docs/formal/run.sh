@@ -37,8 +37,10 @@ run() {
   # graph. TLC's default periodic liveness passes re-walk the growing
   # graph inside its single-threaded temporal phase -- with this model's
   # fairness set that made the liveness configs impractically slow (>1 h);
-  # final-only checking is minutes. (No effect on the safety/NC configs:
-  # no PROPERTIES there. Trade-off: a liveness VIOLATION is now reported
+  # final-only checking is minutes. (No effect on the NC configs: no
+  # PROPERTIES there. The nominal safety config now carries one ACTION
+  # property -- P1, the Cx7-3 completion-capability check -- which the
+  # same final pass covers. Trade-off: a liveness VIOLATION is now reported
   # only after the full graph is built -- acceptable for a verification
   # suite whose liveness configs are expected green.)
   java -XX:+UseParallelGC -cp "$JAR" tlc2.TLC \

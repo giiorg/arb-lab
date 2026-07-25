@@ -513,9 +513,28 @@ ActReadyLostMidTakeover ==
   /\ UNCHANGED << attemptsLeft, actuatedFlat >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, ctlVars, planVars, flagVars, crashBudget >>
 
+\* The OTHER half of SM SS4:"Recovery is the held-incident path: operator
+\* manual kill, OR the actuator's reconcile-only re-entry from durable
+\* state once ready again" [-> Cx7-1]. The park is not a terminal state:
+\* with execution readiness restored the actuator re-enters the protocol at
+\* the quiesce barrier -- the same durable-state re-entry as ActResume, and
+\* the reason removing `held` from ActMarkFlat closes an escape without
+\* creating a dead end. Safe because the fence is still latched (I6): the
+\* actuator is still the sole writer, so re-quiescing its own and the
+\* venue's surfaces is idempotent.
+ActHeldReentry ==
+  /\ actPhase = "held" /\ actReadyOK /\ latched
+  /\ actPhase' = "quiesce"
+  /\ UNCHANGED << attemptsLeft, actuatedFlat >>
+  /\ UNCHANGED << venueVars, botVars, signerVars, envVars, ctlVars, planVars, flagVars, crashBudget >>
+
 \* The finality barrier holds only when EVERY order surface is final.
+\* Requires execution readiness like every other intra-takeover step
+\* [-> Cx7-1]: with ActuatorReady failed the protocol does not progress, it
+\* parks (ActReadyLostMidTakeover -> held; SM SS4:"the protocol cannot
+\* progress and parks honestly").
 ActQuiesceDone ==
-  /\ actPhase = "quiesce" /\ NoLiveOrders
+  /\ actPhase = "quiesce" /\ NoLiveOrders /\ actReadyOK
   /\ actPhase' = "reconcile"
   /\ UNCHANGED << attemptsLeft, actuatedFlat >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, ctlVars, planVars, flagVars, crashBudget >>
@@ -523,8 +542,11 @@ ActQuiesceDone ==
 \* SM SS4 Reconcile at the watermark. Sound here because post-quiesce no
 \* order is live and the bot is fenced (nominal), so pos is stable; the
 \* takeover then acts on reconciled LIVE state (never pre-allocated qty).
+\* Reconciliation reads venue truth on the actuator's own credential from
+\* its own IP -- ActuatorReady dimensions -- so it too requires execution
+\* readiness [-> Cx7-1].
 ActReconcileDone ==
-  /\ actPhase = "reconcile"
+  /\ actPhase = "reconcile" /\ actReadyOK
   /\ actPhase' = "reduce"
   /\ UNCHANGED << attemptsLeft, actuatedFlat >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, ctlVars, planVars, flagVars, crashBudget >>
@@ -561,8 +583,15 @@ ActCloseResolve ==
 \* SS2 finality of every order + zero reconciled allocations -- then the
 \* durable ActuatedFlat record. NC2 (EVIDENCE_GATED=FALSE): issuance-gated
 \* -- "complete" as soon as a close was issued, pos unchecked.
+\* [-> Cx7-1] Requires execution readiness, and `held` is NOT in the phase
+\* set: writing the durable ActuatedFlat record and tombstoning the plan
+\* are exactly the writes ActuatorReady covers (its dimension list includes
+\* PLAN-STORE INTEGRITY), so `held -> finalize -> tombstone` would walk
+\* straight back out of the Cx6-2 park and assert a plan-store write the
+\* health state says is impossible. Exit from held is the operator path or
+\* ActHeldReentry once ready again (SM SS4:264's own two exits).
 ActMarkFlat ==
-  /\ actPhase \in { "reduce", "closeInFlight", "held" }
+  /\ actPhase \in { "reduce", "closeInFlight" } /\ actReadyOK
   /\ IF EVIDENCE_GATED
        THEN pos = "flat" /\ NoLiveOrders
        ELSE actPhase = "closeInFlight"
@@ -573,9 +602,13 @@ ActMarkFlat ==
 \* SM SS6 actuator-side deactivation: drive the idempotent tombstone from
 \* the durable ActuatedFlat record; enabled from finalize AND from standby
 \* after a crash (the re-drive; R1d-F7). Tombstoning without ActuatedFlat
-\* is impossible -- "a premature tombstone is forbidden".
+\* is impossible -- "a premature tombstone is forbidden". The tombstone is
+\* a PLAN-STORE write, and plan-store integrity is an ActuatorReady
+\* dimension (SM SS3), so it requires execution readiness like every other
+\* actuator write [-> Cx7-1]; the re-drive obligation is durable and simply
+\* waits for readiness (R1d-F7).
 ActDeactivate ==
-  /\ actuatedFlat /\ plan = "active"
+  /\ actuatedFlat /\ plan = "active" /\ actReadyOK
   /\ plan' = "tombstone"
   /\ UNCHANGED << leaseFree, hadExposure >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, ctlVars, actVars, flagVars, crashBudget >>
@@ -604,12 +637,33 @@ ActCrash ==
 \* tombstoned plan is never returned/re-actioned), resume from durable
 \* state: with the epoch latched, re-enter at the quiesce barrier (safe,
 \* idempotent; own stale orders are re-quiesced). ActuatedFlat re-drive is
-\* ActDeactivate above. An un-latched standby with an active plan re-enters
-\* via WatchdogFire.
+\* ActDeactivate above. The UN-LATCHED sibling is ActReengage below.
 ActResume ==
   /\ actPhase = "standby" /\ incidentActive /\ latched
   /\ plan = "active" /\ ~actuatedFlat
   /\ actPhase' = "quiesce"
+  /\ UNCHANGED << attemptsLeft, actuatedFlat >>
+  /\ UNCHANGED << venueVars, botVars, signerVars, envVars, ctlVars, planVars, flagVars, crashBudget >>
+
+\* Branch-2 re-engagement [-> FM-3]: the un-latched sibling of ActResume.
+\* An actuator that boots (or stands down) into an ACTIVE branch-2 incident
+\* with an active plan and NO latched epoch MUST re-attempt the latch: the
+\* SS3 hand-off is DURABLE state (one-way per incident, R1d-F6), so the
+\* obligation survives the crash -- and the actuator keys off that durable
+\* record, not off a delivered hand-off message, so a lost hand-off and a
+\* crashed actuator are the same case. Without it the incident stalls
+\* forever with BOTH writers idle: the Cx6-1 write gate bars the healthy
+\* bot for the whole branch (a restored signer never aborts a started
+\* branch) while the actuator never engages. A re-attempt that cannot latch
+\* times out to the FenceUnavailable floor via ActLatchFail, exactly as the
+\* watchdog path does (SM SS3's tiered floor). Deliberately NOT gated on
+\* actReadyOK -- the gate belongs to ActLatch (Cx6-2): the attempt is made,
+\* and a failed-ready attempt times out to the floor rather than silently
+\* never happening.
+ActReengage ==
+  /\ actPhase = "standby" /\ incidentActive /\ ~latched
+  /\ fenceCtl = "takeover" /\ plan = "active" /\ ~actuatedFlat
+  /\ actPhase' = "latch"
   /\ UNCHANGED << attemptsLeft, actuatedFlat >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, ctlVars, planVars, flagVars, crashBudget >>
 
@@ -770,10 +824,11 @@ Next ==
   \/ ActCanaryUnfencedClose
   \/ ActQuiesceCancelEntry \/ ActQuiesceCancelProt
   \/ ActQuiesceCancelBotClose \/ ActQuiesceCancelOwnStale
-  \/ ActReadyLostMidTakeover
+  \/ ActReadyLostMidTakeover \/ ActHeldReentry
   \/ ActQuiesceDone \/ ActReconcileDone
   \/ ActReduceIssue \/ ActReduceExhausted \/ ActCloseResolve
-  \/ ActMarkFlat \/ ActDeactivate \/ ActDone \/ ActCrash \/ ActResume
+  \/ ActMarkFlat \/ ActDeactivate \/ ActDone \/ ActCrash
+  \/ ActResume \/ ActReengage
   \/ VEntryFill \/ VEntryTerminal \/ VProtFire
   \/ VBotCloseFill \/ VBotCloseZeroFill
   \/ VActCloseFill \/ VActCloseZeroFill
@@ -852,6 +907,18 @@ Fairness ==
   /\ WF_vars(ActReduceIssue) /\ WF_vars(ActReduceExhausted)
   /\ WF_vars(ActCloseResolve) /\ WF_vars(ActMarkFlat)
   /\ WF_vars(ActDeactivate) /\ WF_vars(ActDone) /\ WF_vars(ActResume)
+  \* [-> FM-3] The branch-2 re-engagement is an OBLIGATION, not an option:
+  \* the durable hand-off says a takeover is owed on this incident. WF is
+  \* the right (weaker) assumption -- in the EnvStabilizes suffix the
+  \* re-engagement guard holds PERSISTENTLY until the actuator engages
+  \* (nothing else can clear fenceCtl = "takeover" while un-latched except
+  \* operator clearance, which is itself a resolution).
+  /\ WF_vars(ActReengage)
+  \* [-> Cx7-1] The held park's non-operator exit: SM SS4's "reconcile-only
+  \* re-entry from durable state once ready again" is an obligation too --
+  \* without it, removing `held` from ActMarkFlat would convert the Cx7-1
+  \* safety escape into a liveness dead end.
+  /\ WF_vars(ActHeldReentry)
   \* STRONG fairness for the operator: branch 3 / HeldIncident / the $1K+
   \* fence-unavailable floor are explicitly operator-resolution states (a
   \* manual-kill escalation TARGET, not an automated RTO), and an
@@ -948,22 +1015,77 @@ I7_EscalateOnly ==
 IncidentResolves ==
   EnvStabilizes => [] ( incidentActive => <> ~incidentActive )
 
+\* P1 -- no completion without execution capability [-> Cx7-3]. The
+\* verification gap Cx7-1 walked through: I1..I7 constrain writers,
+\* coverage, evidence-gating, the lease, held-honesty and escalation, but
+\* NOTHING tied a completion transition to ActuatorReady -- which is why
+\* seven green runs missed a takeover that recorded ActuatedFlat and
+\* tombstoned the plan with plan-store integrity failed. Stated as an
+\* ACTION property because ActMarkFlat is the unique action setting
+\* actPhase' = "finalize", so this isolates it exactly; the state form
+\* (actPhase = "finalize" => actReadyOK) would be vacuously violated by
+\* ActReadyFlip dropping readiness AFTER the legitimate transition.
+\* Scoped to the EDGE into finalize (actPhase # "finalize" in the pre-
+\* state): the round's probe form -- actPhase' = "finalize" alone -- also
+\* constrains every step that merely REMAINS in finalize, so once the fix
+\* is in it reports a false violation on any unrelated step taken while
+\* readiness is down (found by this property's own first green-suite run:
+\* ActMarkFlat -> ActReadyFlip -> BotDeactivate, 9 states).
+P1_NoCompletionWithoutCapability ==
+  [][ (actPhase # "finalize" /\ actPhase' = "finalize") => actReadyOK ]_vars
+
 \* Liveness (LiveSpec2 only, OPERATOR_INTERVENES = FALSE): the automated
 \* branch-1/2 + takeover machinery, unassisted, always reaches automated
 \* flat-with-final-surfaces or an honest operator-escalation terminal
 \* (HeldIncident, the FenceUnavailable floor, or branch-3 ManualOnly) --
-\* never a silent stall [-> Cx6-5].
-Branch12AutoResolves ==
+\* never a silent stall [-> Cx6-5]. SPLIT PER BRANCH [-> Cx7-2]: the single
+\* combined property was vacuous for branch 1, because the pre-latch
+\* stand-down disjunct (actPhase = "standby" /\ ~latched) holds on ENTRY to
+\* every wind-down -- the actuator is not involved in branch 1 at all -- so
+\* the Cx6-5 check only ever exercised branch 2 despite its name.
+\*
+\* Branch 1 (bot-driven wind-down, SM SS3): converges to flat with final
+\* surfaces, escalates OUT of branch 1 (escalate-only 1->2/1->3, where the
+\* branch-2/3 claims take over), or parks in an honest escalation terminal.
+Branch1AutoResolves ==
   EnvStabilizes =>
-    [] ( (fenceCtl \in { "winddown", "takeover" } \/ actPhase \notin { "standby", "done" })
+    [] ( fenceCtl = "winddown"
+          => <> ( (pos = "flat" /\ NoLiveOrders)
+                  \/ fenceCtl \in { "manual", "takeover" }
+                  \/ actPhase \in { "held", "unavail" } ) )
+
+\* Branch 2 + the watchdog takeover path.
+Branch2AutoResolves ==
+  EnvStabilizes =>
+    [] ( (fenceCtl = "takeover" \/ actPhase \notin { "standby", "done" })
           => <> ( (pos = "flat" /\ NoLiveOrders)
                   \/ actPhase \in { "held", "unavail" }
                   \/ fenceCtl = "manual"
-                  \/ (actPhase = "standby" /\ ~latched) ) )
+                  \/ (actPhase = "standby" /\ ~latched
+                        /\ fenceCtl \notin { "manual", "takeover" }) ) )
                 \* standby/~latched: a PRE-latch takeover attempt that
-                \* stood down (crash before the epoch; the healthy bot
-                \* remains the writer) is an automated resolution; a
-                \* POST-latch crash keeps the obligation (ActResume
-                \* re-engages from latched standby).
+                \* stood down is an automated resolution ONLY where no
+                \* branch has transferred the writer -- i.e. a watchdog
+                \* false positive during normal operation, where the
+                \* healthy bot really does remain the writer. Under
+                \* fenceCtl = "takeover" that stated premise is FALSE
+                \* (Cx6-1's write gate bars the bot for the whole branch),
+                \* so the disjunct was certifying FM-3's stall as
+                \* "resolved" [-> Cx7-2]. A POST-latch crash keeps the
+                \* obligation via ActResume; the un-latched branch-2 case
+                \* is now ActReengage [-> FM-3].
+Branch12AutoResolves == Branch1AutoResolves /\ Branch2AutoResolves
+
+\* P2 -- the FM-3 stall named directly, as a permanent regression check
+\* (this was the round's probe; promoted so the fix cannot silently regress
+\* behind a property that accepts the stall). LiveSpec2 only: under
+\* LiveSpec the operator always breaks the stall, which is exactly how the
+\* v0.9.2 suite stayed green over it.
+IdleStall ==
+  pos # "flat" /\ fenceCtl = "takeover" /\ actPhase = "standby"
+    /\ ~latched /\ botUp
+P2_NoBranch2Stall ==
+  EnvStabilizes =>
+    [] ( IdleStall => <> (pos = "flat" \/ latched \/ actPhase # "standby") )
 
 ===================================================================================
