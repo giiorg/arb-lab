@@ -888,26 +888,26 @@ var GuidePure = (function () {
   "use strict";
 
   var PARTS = [
-    { id: "world",   n: 1, title: "The world" },
-    { id: "edge",    n: 2, title: "The edge, honestly" },
-    { id: "why",     n: 3, title: "Why the design looks like this" },
-    { id: "build",   n: 4, title: "What we're building" },
-    { id: "go",      n: 5, title: "The Go build" },
-    { id: "runbook", n: 6, title: "Operator runbook" }
+    { id: "world",   n: 1, title: { en: "The world" } },
+    { id: "edge",    n: 2, title: { en: "The edge, honestly" } },
+    { id: "why",     n: 3, title: { en: "Why the design looks like this" } },
+    { id: "build",   n: 4, title: { en: "What we're building" } },
+    { id: "go",      n: 5, title: { en: "The Go build" } },
+    { id: "runbook", n: 6, title: { en: "Operator runbook" } }
   ];
 
   var ROUTES = [
-    { part: "world", id: "perps",          route: "world/perps",          title: "Spot, futures, perpetuals" },
-    { part: "world", id: "funding",        route: "world/funding",        title: "The funding rate" },
-    { part: "world", id: "prices",         route: "world/prices",         title: "Mark, index, last" },
-    { part: "world", id: "liquidation",    route: "world/liquidation",    title: "Liquidation, margin, ADL" },
-    { part: "world", id: "venues",         route: "world/venues",         title: "Binance and Bybit" },
-    { part: "world", id: "counterparties", route: "world/counterparties", title: "Who is on the other side" },
-    { part: "edge",  id: "two-trades",     route: "edge/two-trades",      title: "Two trades that look alike" },
-    { part: "edge",  id: "costs",          route: "edge/costs",           title: "What it actually costs" },
-    { part: "edge",  id: "calculator",     route: "edge/calculator",      title: "Will this make money?" },
-    { part: "edge",  id: "gate",           route: "edge/gate",            title: "The economic gate" },
-    { part: "edge",  id: "forks",          route: "edge/forks",           title: "When the gate fails" }
+    { part: "world", id: "perps",          route: "world/perps",          title: { en: "Spot, futures, perpetuals" } },
+    { part: "world", id: "funding",        route: "world/funding",        title: { en: "The funding rate" } },
+    { part: "world", id: "prices",         route: "world/prices",         title: { en: "Mark, index, last" } },
+    { part: "world", id: "liquidation",    route: "world/liquidation",    title: { en: "Liquidation, margin, ADL" } },
+    { part: "world", id: "venues",         route: "world/venues",         title: { en: "Binance and Bybit" } },
+    { part: "world", id: "counterparties", route: "world/counterparties", title: { en: "Who is on the other side" } },
+    { part: "edge",  id: "two-trades",     route: "edge/two-trades",      title: { en: "Two trades that look alike" } },
+    { part: "edge",  id: "costs",          route: "edge/costs",           title: { en: "What it actually costs" } },
+    { part: "edge",  id: "calculator",     route: "edge/calculator",      title: { en: "Will this make money?" } },
+    { part: "edge",  id: "gate",           route: "edge/gate",            title: { en: "The economic gate" } },
+    { part: "edge",  id: "forks",          route: "edge/forks",           title: { en: "When the gate fails" } }
   ];
 
   var LANGS = ["en", "ka"];
@@ -933,10 +933,19 @@ var GuidePure = (function () {
     return "#/" + prefix + state.route;
   }
 
+  // Georgian keys are added section by section. Until one lands, pick returns the
+  // English string rather than nothing — a half-translated guide stays usable.
+  function pick(bundle, lang) {
+    if (bundle == null) return "";
+    if (typeof bundle === "string") return bundle;
+    return bundle[lang] != null ? bundle[lang] : bundle[DEFAULT_LANG];
+  }
+
   function buildSearchIndex(records) {
     return records.map(function (r) {
       return {
         route: r.route,
+        lang: r.lang || DEFAULT_LANG,
         title: r.title,
         text: r.text,
         haystack: (r.title + " " + r.text).toLowerCase()
@@ -944,11 +953,13 @@ var GuidePure = (function () {
     });
   }
 
-  function searchIndex(index, query) {
+  function searchIndex(index, query, lang) {
     var q = String(query || "").trim().toLowerCase();
     if (q.length < 2) return [];
+    var want = lang || DEFAULT_LANG;
     var out = [];
     index.forEach(function (entry) {
+      if (entry.lang !== want) return;
       var at = entry.haystack.indexOf(q);
       if (at === -1) return;
       var source = entry.text;
@@ -960,7 +971,7 @@ var GuidePure = (function () {
         var from = Math.max(0, pos - 35);
         snippet = (from > 0 ? "…" : "") + source.slice(from, pos + q.length + 55).trim();
       }
-      out.push({ route: entry.route, title: entry.title, snippet: snippet });
+      out.push({ route: entry.route, lang: entry.lang, title: entry.title, snippet: snippet });
     });
     return out;
   }
@@ -1088,6 +1099,7 @@ var GuidePure = (function () {
     DEFAULT_LANG: DEFAULT_LANG,
     parseHash: parseHash,
     formatHash: formatHash,
+    pick: pick,
     buildSearchIndex: buildSearchIndex,
     searchIndex: searchIndex,
     computeEconomics: computeEconomics,
@@ -1103,6 +1115,7 @@ var GuidePure = (function () {
 (function () {
   "use strict";
   var rail = document.getElementById("rail");
+  var currentLang = GuidePure.parseHash(location.hash).lang;
 
   document.getElementById("theme-toggle").addEventListener("click", function () {
     var root = document.documentElement;
@@ -1118,14 +1131,14 @@ var GuidePure = (function () {
     var routes = GuidePure.ROUTES.filter(function (r) { return r.part === part.id; });
     if (!routes.length) return;
     var h = document.createElement("h2");
-    h.textContent = part.n + " · " + part.title;
+    h.textContent = part.n + " · " + GuidePure.pick(part.title, currentLang);
     rail.appendChild(h);
     routes.forEach(function (r) {
       var a = document.createElement("a");
       a.className = "nav-link";
       a.href = "#/" + r.route;
       a.dataset.navRoute = r.route;
-      a.textContent = r.title;
+      a.textContent = GuidePure.pick(r.title, currentLang);
       rail.appendChild(a);
     });
   });
@@ -1163,7 +1176,7 @@ var GuidePure = (function () {
     var meta = GuidePure.ROUTES.filter(function (r) { return r.route === el.dataset.route; })[0];
     records.push({
       route: el.dataset.route,
-      title: meta ? meta.title : el.dataset.route,
+      title: meta ? GuidePure.pick(meta.title, currentLang) : el.dataset.route,
       text: el.textContent.replace(/\s+/g, " ").trim()
     });
   });

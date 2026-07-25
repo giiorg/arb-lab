@@ -37,3 +37,31 @@ test("returns a snippet containing the match", () => {
   const hits = pure.searchIndex(pure.buildSearchIndex(RECORDS), "funding");
   expect(hits[0].snippet.toLowerCase()).toContain("funding");
 });
+
+const BILINGUAL = [
+  { route: "world/funding", lang: "en", title: "The funding rate", text: "The crowded side pays the other side." },
+  { route: "world/funding", lang: "ka", title: "funding rate", text: "ბირჟა ხალხმრავალ მხარეს აიძულებს გადახდას." }
+];
+
+test("search returns only results in the requested language", () => {
+  const pure = loadPure();
+  const index = pure.buildSearchIndex(BILINGUAL);
+  const en = pure.searchIndex(index, "crowded", "en");
+  expect(en.length).toBe(1);
+  expect(en[0].lang).toBe("en");
+  expect(pure.searchIndex(index, "crowded", "ka")).toEqual([]);
+});
+
+test("a Latin glossary term finds the Georgian section too", () => {
+  const pure = loadPure();
+  const index = pure.buildSearchIndex(BILINGUAL);
+  const hits = pure.searchIndex(index, "funding", "ka");
+  expect(hits.length).toBe(1);
+  expect(hits[0].lang).toBe("ka");
+});
+
+test("records without a language default to English", () => {
+  const pure = loadPure();
+  const index = pure.buildSearchIndex([{ route: "a/b", title: "T", text: "body text here" }]);
+  expect(pure.searchIndex(index, "body", "en").length).toBe(1);
+});
