@@ -80,3 +80,12 @@ test("Part 1 covers the six topics the design names", () => {
     expect(routes.has(r)).toBe(true);
   }
 });
+
+test("Part 2 covers the five topics the design names", () => {
+  const routes = new Set(loadPure().ROUTES.map((r) => r.route));
+  for (const r of [
+    "edge/two-trades", "edge/costs", "edge/calculator", "edge/gate", "edge/forks"
+  ]) {
+    expect(routes.has(r)).toBe(true);
+  }
+});

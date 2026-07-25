@@ -494,6 +494,163 @@
         </p>
       </article>
 
+      <article data-route="edge/two-trades">
+        <h1>Two trades that look alike</h1>
+
+        <p>
+          There are two ways to make money from funding rates. They are described in
+          similar words and they are not the same trade.
+        </p>
+
+        <div class="scroll-x">
+          <table>
+            <tr><td><strong>Funding <em>level</em></strong><br>cash-and-carry</td>
+                <td>Long spot and short perp on <strong>one</strong> venue. You collect
+                    that venue's funding whenever it is positive. <strong>The level is
+                    the edge.</strong></td></tr>
+            <tr><td><strong>Funding <em>spread</em></strong><br>cross-exchange</td>
+                <td>Long the perp on the low-funding venue, short it on the high-funding
+                    venue. You collect the <em>difference</em>, <code>F_high − F_low</code>.</td></tr>
+          </table>
+        </div>
+
+        <p>
+          One harvests a level; the other harvests a difference of levels. That
+          distinction decides which risks you are taking.
+          <span class="cite" data-src="tutorial §2.1">tutorial §2.1</span>
+        </p>
+
+        <h2>Why cash-and-carry is the flagship</h2>
+
+        <p>
+          The level on majors is a real, persistent, positive number most of the time —
+          the roughly 5–10% APY the research documents and Ethena industrialises. The
+          spread on majors is not: it mean-reverts before you have earned the round trip.
+          <span class="cite" data-src="tutorial §2.1">tutorial §2.1</span>
+          <span class="cite" data-src="tutorial §2.2">tutorial §2.2</span>
+        </p>
+
+        <p>
+          So cross-exchange is <strong>strategy #2</strong>, scoped to where it is
+          actually real — alt pairs where one venue's funding dislocates, and dislocation
+          windows — and built on the same foundation rather than a separate system.
+          <span class="cite" data-src="core §2.3">core §2.3</span>
+          <span class="cite" data-src="tutorial §5.1">tutorial §5.1</span>
+        </p>
+
+        <h2>What strategy #2 costs you in risk</h2>
+
+        <ul>
+          <li><strong>Inter-venue basis.</strong> Now there are two different marks, and
+            the hedge is only as good as their correlation <em>under stress</em> — which
+            is exactly when correlation breaks.</li>
+          <li><strong>A second counterparty</strong> for the hedge, doubling custody and
+            exchange risk rather than diversifying it.</li>
+          <li><strong>Inventory drift.</strong> PnL accrues on different venues and has
+            to be rebalanced — across pools that, as Part 1 noted, no single rail
+            connects.</li>
+        </ul>
+
+        <p>
+          <span class="cite" data-src="tutorial §5.2">tutorial §5.2</span>
+          <span class="cite" data-src="core §2.3">core §2.3</span>
+        </p>
+
+        <h2>A scope boundary worth understanding</h2>
+
+        <p>
+          Equal base quantity is delta-neutral for <strong>linear</strong> perps only. An
+          inverse (COIN-M) perp pays out in <code>1/P</code>, which has non-zero
+          curvature — so matching base quantities does not neutralise it. That is why
+          linear-only is an explicit scope boundary and why the venue adapter carries a
+          contract type at all.
+          <span class="cite" data-src="tutorial §5.3">tutorial §5.3</span>
+          <span class="cite" data-src="core C6">core C6</span>
+        </p>
+      </article>
+
+      <article data-route="edge/costs">
+        <h1>What it actually costs</h1>
+
+        <p>
+          The edge is a few basis points per settlement. The costs are paid up front and
+          in full. Getting the cost side wrong by a factor that looks small turns a
+          working strategy into a losing one, so this is where the spec is most insistent.
+        </p>
+
+        <h2>Spot fees are not perp fees</h2>
+
+        <p>
+          Spot taker fees are materially higher than perp — roughly 0.075–0.10% against
+          roughly 0.05%. They must be fetched separately, per leg and per venue. Reusing
+          the perp round-trip figure for a cash-and-carry trade understates the cost of
+          the leg you actually pay most for.
+          <span class="cite" data-src="core §2.4">core §2.4</span>
+        </p>
+
+        <p>
+          And the cost model has exactly <em>one</em> source of truth: fees come from
+          programmatically-fetched per-leg, per-venue rates plus a measured slippage
+          model. No hardcoded fee constants, and no second copy of the number living in
+          another module.
+          <span class="cite" data-src="core §2.4">core §2.4</span>
+        </p>
+
+        <h2>The round trip, and what it implies</h2>
+
+        <p>
+          At VIP0 taker rates the round trip is spot twice at ~0.10%, perp twice at
+          ~0.05%, and four legs of ~0.02% slippage — call it <strong>0.34–0.38% of
+          notional</strong>. Against baseline funding of +0.01% per 8h, that is
+          <strong>roughly 12–13 days just to break even</strong>, and about four weeks to
+          clear the hurdle. Even a rich +0.02%/8h regime still needs around six days
+          before the first cent of profit.
+          <span class="cite" data-src="core §2.4">core §2.4</span>
+        </p>
+
+        <p>
+          Which produces the consequence that shapes the entire strategy:
+          <strong>minimum holds are measured in weeks</strong> — the same length-scale as
+          the negative funding regimes you are trying to avoid, including the documented
+          46-day streak. Regime persistence is therefore the <em>dominant</em> driver of
+          PnL, not a tail risk. That is why entry and exit ride a forecast with a
+          hysteresis band rather than a spot reading of the current funding rate.
+          <span class="cite" data-src="core §2.4">core §2.4</span>
+        </p>
+
+        <h2>Utilization is part of the edge</h2>
+
+        <p>
+          While the strategy is correctly standing down, the bankroll earns roughly
+          nothing on-exchange — and the hurdle keeps compounding elsewhere regardless. So
+          the headline number has to be quoted at expected <em>time-in-position</em>, never
+          at the in-position rate. A gross 8% carry at 60% utilization is a ~4.8% business
+          before operational risk, not an 8% one.
+          <span class="cite" data-src="core §2.4">core §2.4</span>
+          <span class="cite" data-src="core §2.1">core §2.1</span>
+        </p>
+
+        <h2>The denominator, and the mirage</h2>
+
+        <p>
+          Short $100,000 of perp at +0.01%/8h and you receive $10 every 8h — $30 a day,
+          about 10.95% a year on the notional. If you posted only $10,000 of margin, that
+          same $30 reads as roughly <strong>110% APR on margin</strong>.
+          <span class="cite" data-src="tutorial §1.5">tutorial §1.5</span>
+        </p>
+
+        <p>
+          That number is a mirage. It ignores the liquidation risk you took on to
+          manufacture it. Returns are reported on the full allocated bankroll — spot
+          principal, perp margin, rescue margin, fee and slippage reserve, committed float
+          — never on posted margin, and never on the leg-capital floor either. The
+          calculator on the next page enforces that denominator, which is most of why its
+          answers are less flattering than the ones you will read elsewhere.
+          <span class="cite" data-src="core §2.1">core §2.1</span>
+          <span class="cite" data-src="core §2.2">core §2.2</span>
+        </p>
+      </article>
+
       <article data-route="edge/calculator">
         <h1>Will this actually make money?</h1>
         <p>
@@ -536,6 +693,133 @@
           <p class="calc-note" id="calc-note"></p>
         </div>
       </article>
+
+      <article data-route="edge/gate">
+        <h1>The economic gate</h1>
+
+        <p>
+          A number on its own cannot tell you whether to build this. It has to beat
+          something. The something is the <strong>near-risk-free floor</strong> — what the
+          same capital earns sitting in tokenized T-bills, around 4.6%.
+          <span class="cite" data-src="core §2.1">core §2.1</span>
+        </p>
+
+        <p>
+          Two things about that benchmark are deliberate. It is called
+          <em>near</em>-risk-free, because it still carries smart-contract, counterparty
+          and depeg risk, so it is haircut-adjusted rather than taken at face value. And
+          it is a <strong>dated, sourced, revision-controlled input</strong> — source,
+          as-of timestamp, access cost, liquidity haircut and counterparty haircut all
+          recorded — never a hardcoded 4.6% constant. The number quoted here is
+          illustrative; the real one is whatever the current revision says.
+          <span class="cite" data-src="core §2.1">core §2.1</span>
+        </p>
+
+        <h2>Why the thresholds are frozen before the test is run</h2>
+
+        <p>
+          The gate's numeric thresholds — adverse-move size, latency, window length,
+          regime segmentation, standby benchmark, drawdown ceiling, confidence level,
+          expected utilization — are a <strong>pre-registered, versioned calibration
+          artifact</strong>. It is produced and approved <em>before</em> the promotion
+          sample is scored, and it carries a frozen dataset with holdout identifiers, a
+          schema and content hash, the rationale, and an approval record. Changing any of
+          it forces a new version and a complete rerun.
+          <span class="cite" data-src="core §8">core §8</span>
+        </p>
+
+        <p>
+          This is not bureaucracy, it is the only defence against the failure mode that
+          kills backtested strategies: adjusting the threshold until the result passes.
+          The spec is blunt about what does <em>not</em> help — two independent
+          implementations agreeing on the same artifact proves <em>determinism, not
+          independence</em>. Only the governance (pre-registered, holdout-frozen) prevents
+          tuning-until-it-passes.
+          <span class="cite" data-src="core §8">core §8</span>
+        </p>
+
+        <p>
+          For a solo operator, mechanically-derived thresholds are the default governance.
+          A named independent approver is required only if the operation is actually
+          staffed — the spec refuses to pretend a second person exists.
+          <span class="cite" data-src="core §8">core §8</span>
+          <span class="cite" data-src="core §9">core §9</span>
+        </p>
+
+        <h2>A negative regime is not a failing grade</h2>
+
+        <p>
+          One subtlety that took a review round to get right. Demanding the hurdle
+          <em>inside</em> a negative-funding regime is unsatisfiable — a strategy that
+          correctly stands down earns roughly zero there, and that is the correct
+          behaviour, not a failure.
+          <span class="cite" data-src="core §2.4">core §2.4</span>
+        </p>
+
+        <p>
+          So regime classification takes precedence: negative-classified windows are
+          judged on <em>correct stand-down and a bounded loss versus a defined standby
+          benchmark</em>, while only non-negative or mixed windows, plus the full sample,
+          are held to the hurdle — and on the lower confidence bound of the net return,
+          not the point estimate.
+          <span class="cite" data-src="core §8">core §8</span>
+        </p>
+      </article>
+
+      <article data-route="edge/forks">
+        <h1>When the gate fails</h1>
+
+        <p>
+          Milestone 2 exists to answer one question cheaply, before the OMS, the safety
+          kernel, the fence and the actuator are built: <strong>does this make
+          money?</strong> The spec's own arithmetic predicts the answer is no — roughly
+          3.4% at 60% utilization against a ~4.6% hurdle, for BTC at VIP0 fees.
+          <span class="cite" data-src="core §12">core §12</span>
+          <span class="cite" data-src="tutorial §3.9">tutorial §3.9</span>
+        </p>
+
+        <p>
+          That is the gate working as designed, not a surprise. The forks were written
+          down <em>now</em>, in advance, precisely so the decision is not made in the
+          disappointment of the moment.
+          <span class="cite" data-src="core §12">core §12</span>
+        </p>
+
+        <div class="scroll-x">
+          <table>
+            <tr><td><strong>(a) Maker spot entry</strong></td>
+                <td>Route the non-time-critical leg as a maker order. Roughly halves the
+                    round-trip cost — a bigger effect than most modelled refinements. It
+                    trades against the taker-IOC leg-risk mandate, so it is an opt-in,
+                    documented tactic with a fill-timeout fallback to taker, never a
+                    silent default.</td></tr>
+            <tr><td><strong>(b) Regime-selective</strong></td>
+                <td>Trade only measured-positive regimes and accept lower utilization.
+                    A richer average rate bought with more idle time.</td></tr>
+            <tr><td><strong>(c) The alt / dislocation niche</strong></td>
+                <td>Strategy #2 arriving earlier than planned — with the extra risks
+                    that come with it.</td></tr>
+            <tr><td><strong>(d) Tuition</strong></td>
+                <td>Consciously accept sub-hurdle returns as the price of building the
+                    platform. A legitimate choice, as long as it is made rather than
+                    drifted into.</td></tr>
+          </table>
+        </div>
+
+        <p>
+          Which fork to take is explicitly a user decision, not an automatic one.
+          <span class="cite" data-src="core §12">core §12</span>
+          <span class="cite" data-src="core §2.4">core §2.4</span>
+        </p>
+
+        <p>
+          The calculator's presets cover (a) and (b) — worth spending a few minutes with
+          before committing to a direction, because the answers are not obvious. Fork (a)
+          clears the hurdle, but by a margin thin enough that it should not feel like a
+          rescue.
+          <span class="cite" data-src="core §2.4">core §2.4</span>
+        </p>
+      </article>
     </main>
   </div>
 </div>
@@ -560,7 +844,11 @@ var GuidePure = (function () {
     { part: "world", id: "liquidation",    route: "world/liquidation",    title: "Liquidation, margin, ADL" },
     { part: "world", id: "venues",         route: "world/venues",         title: "Binance and Bybit" },
     { part: "world", id: "counterparties", route: "world/counterparties", title: "Who is on the other side" },
-    { part: "edge",  id: "calculator",     route: "edge/calculator",      title: "Will this make money?" }
+    { part: "edge",  id: "two-trades",     route: "edge/two-trades",      title: "Two trades that look alike" },
+    { part: "edge",  id: "costs",          route: "edge/costs",           title: "What it actually costs" },
+    { part: "edge",  id: "calculator",     route: "edge/calculator",      title: "Will this make money?" },
+    { part: "edge",  id: "gate",           route: "edge/gate",            title: "The economic gate" },
+    { part: "edge",  id: "forks",          route: "edge/forks",           title: "When the gate fails" }
   ];
 
   function buildSearchIndex(records) {
