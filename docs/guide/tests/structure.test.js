@@ -128,6 +128,29 @@ test("interactive controls carry accessible names", () => {
   expect(html).toMatch(/<button class="theme-toggle"[^>]*aria-label=/);
 });
 
+test("the only embedded resource is the inlined Georgian font", () => {
+  const html = readGuide();
+  const urls = [...html.matchAll(/url\(\s*(['"]?)([^)'"]*)\1\s*\)/g)].map((m) => m[2]);
+  expect(urls.length).toBeGreaterThan(0);
+  for (const u of urls) {
+    expect(u.startsWith("data:font/woff2;base64,"), `non-inlined resource: ${u.slice(0, 40)}`).toBe(true);
+  }
+});
+
+test("declares a Georgian face scoped to the Georgian unicode blocks", () => {
+  const html = readGuide();
+  expect(html).toMatch(/font-family:\s*"Noto Serif Georgian"/);
+  expect(html).toMatch(/unicode-range:\s*U\+10A0-10FF/i);
+  expect(html).toMatch(/:lang\(ka\)/);
+});
+
+test("both Georgian weights are present", () => {
+  const faces = [...readGuide().matchAll(/@font-face\s*\{[\s\S]*?\}/g)].map((m) => m[0]);
+  expect(faces.length).toBe(2);
+  expect(faces.some((f) => /font-weight:\s*400/.test(f))).toBe(true);
+  expect(faces.some((f) => /font-weight:\s*600/.test(f))).toBe(true);
+});
+
 test("Part 2 covers the five topics the design names", () => {
   const routes = new Set(loadPure().ROUTES.map((r) => r.route));
   for (const r of [
