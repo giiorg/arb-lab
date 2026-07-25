@@ -31,7 +31,8 @@
     font-size: 0.78rem; color: var(--muted); letter-spacing: 0.02em;
     padding: 0.6rem 1.25rem; border-bottom: 1px solid var(--rule);
   }
-  .content { padding: 1.5rem 1.25rem; max-width: 46rem; }
+  .content { padding: 1.5rem 1.25rem; max-width: 46rem; overflow-wrap: break-word; }
+  code { font-size: 0.9em; overflow-wrap: break-word; }
   .cite {
     font-size: 0.75rem; color: var(--accent); background: var(--chip-bg);
     padding: 0.1rem 0.4rem; border-radius: 0.25rem; white-space: nowrap;
@@ -39,7 +40,6 @@
 
   .rail {
     border-right: 1px solid var(--rule); padding: 1rem 0.75rem;
-    position: sticky; top: 0; height: 100vh; overflow-y: auto;
   }
   .rail h2 {
     font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em;
@@ -65,10 +65,22 @@
   .results a:hover { background: var(--chip-bg); }
   .results .snippet { display: block; font-size: 0.75rem; color: var(--muted); }
   .rail.searching h2, .rail.searching .nav-link { display: none; }
-  .pane { overflow-y: auto; }
+  /* Wide: an app shell — the rail and the pane each scroll independently, so the
+     rail stays put while long articles scroll. Narrow: one column, page scrolls. */
+  @media (min-width: 861px) {
+    .guide { height: 100vh; }
+    .rail { height: 100vh; overflow-y: auto; }
+    .pane { height: 100vh; overflow-y: auto; }
+  }
   article[data-route] { display: none; }
   article[data-route].is-active { display: block; }
   table { border-collapse: collapse; width: 100%; }
+  table:not(.calc-out) td {
+    padding: 0.5rem 0.9rem 0.5rem 0; border-bottom: 1px solid var(--rule);
+    vertical-align: top; font-size: 0.92rem;
+  }
+  table:not(.calc-out) tr:last-child td { border-bottom: 0; }
+  table:not(.calc-out) td:first-child { width: 30%; min-width: 9rem; }
   .scroll-x { overflow-x: auto; }
 
   .calc { border: 1px solid var(--rule); border-radius: 0.5rem; padding: 1rem; margin: 1.25rem 0; }
@@ -101,8 +113,10 @@
   .calc-note { font-size: 0.8rem; color: var(--muted); }
 
   @media (max-width: 860px) {
-    .guide { grid-template-columns: 1fr; }
-    .rail { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--rule); }
+    .guide { grid-template-columns: 1fr; height: auto; }
+    .rail { height: auto; border-right: 0; border-bottom: 1px solid var(--rule); }
+    .pane { height: auto; }
+    .content { padding: 1.25rem 1rem; }
   }
 </style>
 
@@ -1065,7 +1079,10 @@ var GuidePure = (function () {
     document.querySelectorAll(".nav-link").forEach(function (a) {
       a.setAttribute("aria-current", a.dataset.navRoute === route ? "true" : "false");
     });
-    document.getElementById("content").scrollTop = 0;
+    // The pane is the scroller on wide viewports; the window is on narrow ones.
+    var pane = document.querySelector(".pane");
+    if (pane) pane.scrollTop = 0;
+    window.scrollTo(0, 0);
   }
 
   function routeFromHash() {
