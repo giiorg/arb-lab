@@ -81,6 +81,27 @@ test("Part 1 covers the six topics the design names", () => {
   }
 });
 
+test("styles both themes, with data-theme overriding the OS preference", () => {
+  const html = readGuide();
+  expect(html).toMatch(/@media \(prefers-color-scheme: dark\)/);
+  expect(html).toMatch(/:root\[data-theme="dark"\]/);
+  expect(html).toMatch(/:root\[data-theme="light"\]/);
+});
+
+test("wide content is wrapped in a horizontal scroll container", () => {
+  const html = readGuide();
+  const tables = [...html.matchAll(/<table[\s>]/g)].length;
+  const wrappers = [...html.matchAll(/class="scroll-x"/g)].length;
+  expect(wrappers).toBeGreaterThanOrEqual(tables);
+});
+
+test("interactive controls carry accessible names", () => {
+  const html = readGuide();
+  expect(html).toMatch(/<input class="search"[^>]*aria-label=/);
+  expect(html).toMatch(/<nav class="rail"[^>]*aria-label=/);
+  expect(html).toMatch(/<button class="theme-toggle"[^>]*aria-label=/);
+});
+
 test("Part 2 covers the five topics the design names", () => {
   const routes = new Set(loadPure().ROUTES.map((r) => r.route));
   for (const r of [

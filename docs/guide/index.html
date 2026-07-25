@@ -51,6 +51,11 @@
   }
   .nav-link:hover { background: var(--chip-bg); }
   .nav-link[aria-current="true"] { background: var(--chip-bg); color: var(--accent); font-weight: 600; }
+  .theme-toggle {
+    font: inherit; font-size: 0.75rem; padding: 0.25rem 0.5rem; margin-bottom: 0.5rem;
+    cursor: pointer; background: transparent; color: var(--muted);
+    border: 1px solid var(--rule); border-radius: 0.3rem;
+  }
   .search { width: 100%; padding: 0.4rem 0.55rem; font: inherit; font-size: 0.85rem;
     background: var(--bg); color: var(--fg); border: 1px solid var(--rule); border-radius: 0.3rem; }
   .results { list-style: none; margin: 0.5rem 0 0; padding: 0; }
@@ -103,6 +108,7 @@
 
 <div class="guide">
   <nav class="rail" id="rail" aria-label="Guide contents">
+    <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch colour theme">◐ theme</button>
     <input class="search" id="search" type="search" placeholder="Search the guide" aria-label="Search the guide">
     <ul class="results" id="results"></ul>
   </nav>
@@ -1017,6 +1023,16 @@ var GuidePure = (function () {
 (function () {
   "use strict";
   var rail = document.getElementById("rail");
+
+  document.getElementById("theme-toggle").addEventListener("click", function () {
+    var root = document.documentElement;
+    var current = root.getAttribute("data-theme");
+    if (!current) {
+      var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      current = prefersDark ? "dark" : "light";
+    }
+    root.setAttribute("data-theme", current === "dark" ? "light" : "dark");
+  });
 
   GuidePure.PARTS.forEach(function (part) {
     var routes = GuidePure.ROUTES.filter(function (r) { return r.part === part.id; });
