@@ -61,3 +61,22 @@ test("every route belongs to one of the six parts", () => {
   const parts = new Set(["world", "edge", "why", "build", "go", "runbook"]);
   for (const r of loadPure().ROUTES) expect(parts.has(r.part)).toBe(true);
 });
+
+test("every article carries at least one citation chip", () => {
+  const html = readGuide();
+  const articles = [...html.matchAll(/<article data-route="([^"]+)"[\s\S]*?<\/article>/g)];
+  expect(articles.length).toBeGreaterThan(0);
+  for (const [block, route] of articles) {
+    expect(block, `article ${route} has no citation chip`).toMatch(/class="cite" data-src="/);
+  }
+});
+
+test("Part 1 covers the six topics the design names", () => {
+  const routes = new Set(loadPure().ROUTES.map((r) => r.route));
+  for (const r of [
+    "world/perps", "world/funding", "world/prices",
+    "world/liquidation", "world/venues", "world/counterparties"
+  ]) {
+    expect(routes.has(r)).toBe(true);
+  }
+});

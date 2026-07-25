@@ -110,12 +110,387 @@
     <div class="status">spec v0.9.4 · 0 lines of Go</div>
     <main class="content" id="content">
       <article data-route="world/perps">
-        <h1>The world</h1>
+        <h1>Spot, futures, perpetuals</h1>
+
         <p>
-          A <strong>perpetual</strong> is a futures contract with no expiry. To keep its
-          price tethered to spot without a settlement date it uses a funding rate — the
-          anchor this entire business is built on.
+          Three instruments, and the differences between them are the whole reason this
+          trade exists.
+        </p>
+
+        <div class="scroll-x">
+          <table>
+            <tr><td><strong>Spot</strong></td>
+                <td>You buy the asset and own it. No leverage, no funding, and nobody
+                    force-closes it.</td></tr>
+            <tr><td><strong>Futures</strong></td>
+                <td>An agreement to trade at a future date and price. It expires, and at
+                    expiry its price must meet spot.</td></tr>
+            <tr><td><strong>Perpetual</strong></td>
+                <td>A future with <em>no expiry</em>. Nothing forces it back to spot,
+                    so something else has to.</td></tr>
+          </table>
+        </div>
+
+        <p>
+          That last row is the interesting one. A future converges on spot because it has
+          to settle. A perpetual never settles, so the exchange needs a different tether —
+          and that tether is the funding rate.
           <span class="cite" data-src="tutorial §1.1">tutorial §1.1</span>
+        </p>
+
+        <h2>One caveat about "nobody force-closes your spot"</h2>
+
+        <p>
+          Holding 1 BTC outright means no liquidation engine can take it from you. But
+          whether that spot can be pulled in to cover losses on your <em>derivatives</em>
+          position is a different question, and the answer depends on how the account is
+          configured. This project deliberately pins a posture where it cannot — segregated,
+          isolated, verified at boot and before every trade — because the spot leg being
+          untouchable is the premise the entire hedge rests on.
+          <span class="cite" data-src="core §4.1">core §4.1</span>
+        </p>
+
+        <p>
+          If that premise is wrong, a bad enough move on the perp leg starts eating the
+          spot leg that was supposed to be hedging it, and the position is not what you
+          think it is. Which is why posture is verified rather than assumed.
+          <span class="cite" data-src="tutorial §9">tutorial §9</span>
+        </p>
+      </article>
+
+      <article data-route="world/funding">
+        <h1>The funding rate</h1>
+
+        <p>
+          A perpetual can drift away from spot. Nothing forces them back together,
+          because there is no settlement date to converge on. So the exchange makes
+          the crowded side pay the other side, at fixed intervals.
+          <span class="cite" data-src="tutorial §1.2">tutorial §1.2</span>
+        </p>
+
+        <ul>
+          <li>Perp trading <strong>above</strong> spot — longs are crowded — funding
+            is <strong>positive</strong>, and longs pay shorts.</li>
+          <li>Perp trading <strong>below</strong> spot — funding is
+            <strong>negative</strong>, and shorts pay longs.</li>
+        </ul>
+
+        <p>
+          The exchange orchestrates the transfer and takes no side. Funding is
+          counterparties paying each other to hold the tether. Being short the perp
+          while long the spot is how you get paid for it.
+          <span class="cite" data-src="tutorial §1.2">tutorial §1.2</span>
+        </p>
+
+        <h2>The damper is not the cap</h2>
+
+        <p>
+          Simplified, the rate is
+          <code>F ≈ premium_index + clamp(interest − premium, ±damper)</code>. Two
+          different clamps live in that sentence and they get conflated constantly.
+          <span class="cite" data-src="tutorial §1.4">tutorial §1.4</span>
+        </p>
+
+        <div class="scroll-x">
+          <table>
+            <tr><td><strong>The damper</strong> (Binance ~±0.05%)</td>
+                <td>A small band <em>inside</em> the formula. Keeps the rate near the
+                    interest term when the premium is small. Shapes normal rates.</td></tr>
+            <tr><td><strong>The cap / floor</strong> (per-symbol; BTC ±0.3%, alts ±2%)</td>
+                <td>The hard limit on the <em>final</em> rate. Bounds extreme ones.</td></tr>
+          </table>
+        </div>
+
+        <p>
+          Both are read live, never hardcoded — Bybit exposes <code>fundingCap</code> on
+          its ticker and Binance overlays it via <code>fundingInfo</code>.
+          <span class="cite" data-src="core §4">core §4</span>
+          <span class="cite" data-src="Profiles §1">Profiles §1</span>
+        </p>
+
+        <h2>Funding is a payment, not a stream</h2>
+
+        <p>
+          This is where a plausible-looking estimate goes wrong. Funding is paid
+          <em>at a timestamp</em>. It does not accrue by the second. You capture a
+          settlement only if you are holding across it — so expected capture has to
+          enumerate the actual settlement timestamps inside the planned hold and sum
+          them. Multiplying a per-hour rate by hours held is not an approximation of
+          that; it is a different number.
+          <span class="cite" data-src="tutorial §1.7">tutorial §1.7</span>
+          <span class="cite" data-src="core C2">core C2</span>
+        </p>
+
+        <p>
+          Worse, the interval itself is live state. Since 2025-10-30 Bybit
+          auto-switches an alt between 8h and 1h when funding pins the cap, and
+          reverts <em>without notice</em>. A position opened under one interval can be
+          settling on another an hour later, so the monitor has to detect the flip
+          rather than trust the interval it saw at entry.
+          <span class="cite" data-src="tutorial §1.7">tutorial §1.7</span>
+          <span class="cite" data-src="core C8">core C8</span>
+        </p>
+      </article>
+
+      <article data-route="world/prices">
+        <h1>Mark, index, last</h1>
+
+        <p>
+          Three prices exist for the same instrument at the same moment, and using the
+          wrong one is a silent, expensive mistake.
+        </p>
+
+        <div class="scroll-x">
+          <table>
+            <tr><td><strong>Last</strong></td>
+                <td>The last trade on <em>this</em> venue. Noisy, and manipulable by
+                    anyone willing to print one bad trade.</td></tr>
+            <tr><td><strong>Index</strong></td>
+                <td>A basket of spot prices across several venues. The "true" reference,
+                    hard to move.</td></tr>
+            <tr><td><strong>Mark</strong></td>
+                <td>A smoothed price derived from index plus basis. <strong>This is the
+                    one that drives liquidation and funding.</strong></td></tr>
+          </table>
+        </div>
+
+        <p>
+          Your live funding estimate is anchored to mark, not last.
+          <span class="cite" data-src="tutorial §1.6">tutorial §1.6</span>
+        </p>
+
+        <h2>Why this shows up in the architecture</h2>
+
+        <p>
+          If mark drives liquidation, then your distance to liquidation moves whenever
+          mark moves — not only when something happens to your account. An engine that
+          recomputes liquidation distance on position and margin events alone will sit
+          quietly while the market walks toward the price that closes it out.
+          <span class="cite" data-src="tutorial §6.2">tutorial §6.2</span>
+        </p>
+
+        <p>
+          So liquidation distance is recomputed on <em>every fresh mark update</em>, and
+          a mark feed that goes stale is itself an emergency: it blocks new openings and
+          escalates, failing over to the venue's REST mark surface, and if both stay
+          blind past a budget a pre-authorized de-lever or close fires.
+          <span class="cite" data-src="core §7.1">core §7.1</span>
+          <span class="cite" data-src="core §6">core §6</span>
+        </p>
+      </article>
+
+      <article data-route="world/liquidation">
+        <h1>Liquidation, margin, and ADL</h1>
+
+        <p>
+          The cash-and-carry position is delta-neutral: long spot, short perp, equal
+          size. Neutral does not mean safe. The perp leg is leveraged and can be
+          liquidated on a sharp rally even while the spot leg gains exactly as much —
+          because the two legs live in different wallets and the liquidation engine
+          only looks at one of them.
+        </p>
+
+        <h2>Rescue margin is an action, not a buffer</h2>
+
+        <p>
+          The intuitive fix — keep spare cash in the account — does not work under an
+          isolated-margin posture. The isolated liquidation engine cannot see free
+          wallet balance. Margin sitting nearby is margin that does not exist as far as
+          the engine is concerned.
+          <span class="cite" data-src="core §7.1">core §7.1</span>
+        </p>
+
+        <p>
+          So the rescue is an active <code>add-margin</code> API call that moves margin
+          into the position, from a float staged <em>at the venue in advance</em>. It has
+          to be pre-staged, because reactive spot-to-futures transfers are unavailable
+          exactly during the stress that needs them, and it carries a reserved
+          rate-limit budget so it is not queued behind routine traffic.
+          <span class="cite" data-src="core §7.1">core §7.1</span>
+          <span class="cite" data-src="tutorial §6.2">tutorial §6.2</span>
+        </p>
+
+        <h2>And if the top-up is too slow</h2>
+
+        <p>
+          The fallback is <code>PackageDelever</code> — a perp-short-first reduction of
+          <em>both</em> legs, keeping the package neutral as it shrinks. It is
+          deliberately not the ordinary exposure-reduction path: the package is still
+          hedged, so reducing a single leg would <em>create</em> a naked leg in the
+          middle of the rally that triggered the emergency.
+          <span class="cite" data-src="core §7.1">core §7.1</span>
+          <span class="cite" data-src="core §5.3">core §5.3</span>
+        </p>
+
+        <h2>ADL — the hedge failing while you watch</h2>
+
+        <p>
+          Auto-deleveraging is not a footnote. In October 2025 exchanges force-closed
+          <em>profitable short</em> legs, which left desks naked long into a still-falling
+          market. The hedge was removed by the venue, at the worst moment, without asking.
+          <span class="cite" data-src="core P3">core P3</span>
+          <span class="cite" data-src="tutorial §6.2">tutorial §6.2</span>
+        </p>
+
+        <p>
+          Cash-and-carry has one narrow but real advantage here: the spot leg is not
+          ADL'd or seized under the posture this project pins, so the whole position is
+          never lost at once. But a force-closed short still leaves directional exposure
+          that has to be detected from a private ADL event and reduced immediately.
+          <span class="cite" data-src="core §4.1">core §4.1</span>
+        </p>
+
+        <p>
+          There is a detail here that the first draft of the spec got wrong, and it is a
+          good illustration of how specific this domain gets: to re-hedge a perp that was
+          ADL'd <em>to zero</em>, you must place an ordinary short — <strong>not</strong> a
+          reduce-only one. Reduce-only cannot open a position, so the venue would reject
+          it. And to flatten a naked spot long you place a plain sell, because
+          <code>reduceOnly</code> does not exist for spot on either venue.
+          <span class="cite" data-src="tutorial §6.2">tutorial §6.2</span>
+          <span class="cite" data-src="core §5.3">core §5.3</span>
+        </p>
+      </article>
+
+      <article data-route="world/venues">
+        <h1>Binance and Bybit</h1>
+
+        <p>
+          Two venues, chosen for the MVP, sitting behind one adapter contract so their
+          differences stay contained in one place. The differences are not cosmetic —
+          here is the flavour of what the adapter has to hide.
+          <span class="cite" data-src="core §4">core §4</span>
+          <span class="cite" data-src="tutorial §4.2">tutorial §4.2</span>
+        </p>
+
+        <h2>A feed that dies without telling you</h2>
+
+        <p>
+          Binance decommissioned its legacy <code>/ws/</code> path on 2026-04-23. Funding
+          now routes to <code>/market</code>, the book to <code>/public</code>, user data
+          to <code>/private</code>. A client that was not migrated does not error — it
+          connects, stays connected, and silently receives nothing for funding. That is
+          the worst failure shape there is: healthy-looking and wrong.
+          <span class="cite" data-src="tutorial §4.2">tutorial §4.2</span>
+          <span class="cite" data-src="Profiles §1">Profiles §1</span>
+        </p>
+
+        <h2>Fields that only exist on new clients</h2>
+
+        <p>
+          Bybit added <code>fundingIntervalHour</code> and <code>fundingCap</code> to its
+          ticker (WebSocket 2025-10-16, REST 2025-10-23). A client pinned older than
+          October 2025 will not parse them — and those are exactly the fields the
+          interval-flip detection depends on.
+          <span class="cite" data-src="tutorial §4.2">tutorial §4.2</span>
+          <span class="cite" data-src="Profiles §1">Profiles §1</span>
+        </p>
+
+        <h2>The same intent, two incompatible expressions</h2>
+
+        <p>
+          Closing a position is not one API call. Binance in Hedge Mode <em>rejects</em>
+          <code>reduceOnly</code> with error −2022, while one-way mode uses it; Bybit
+          keys off <code>positionIdx</code> instead. This is why position mode is pinned
+          and verified rather than discovered at the moment you need to close.
+          <span class="cite" data-src="tutorial §4.2">tutorial §4.2</span>
+          <span class="cite" data-src="core §4.1">core §4.1</span>
+        </p>
+
+        <h2>Rate limits, and the one you cannot see coming</h2>
+
+        <p>
+          Binance publishes usage in an <code>X-MBX-USED-WEIGHT</code> header, escalating
+          429 then a 418 IP ban. Bybit has headers too — <em>and</em> an unheadered IP
+          gateway ban that header-watching alone will never catch. You find that one by
+          hitting it.
+          <span class="cite" data-src="tutorial §4.2">tutorial §4.2</span>
+          <span class="cite" data-src="Profiles §1">Profiles §1</span>
+        </p>
+
+        <h2>The asymmetry that shapes the whole safety design</h2>
+
+        <p>
+          Bybit can attach a take-profit/stop-loss to an entry order atomically. Binance
+          USDⓈ-M cannot — its conditional orders are separate placements, which means
+          there is a window where the position exists and its protection does not.
+          <span class="cite" data-src="Profiles §1">Profiles §1</span>
+        </p>
+
+        <p>
+          That single difference is why an independent off-host actuator is
+          <em>mandatory</em> on Binance rather than a nice-to-have. Most of Part 4 exists
+          because of it.
+          <span class="cite" data-src="core §7.4">core §7.4</span>
+        </p>
+      </article>
+
+      <article data-route="world/counterparties">
+        <h1>Who is on the other side</h1>
+
+        <p>
+          Funding is not yield the exchange pays you. It is a transfer between traders,
+          which the exchange orchestrates while taking no side. When you collect positive
+          funding on a short perp, the money comes from crowded longs — leveraged traders
+          paying to keep a position the market has made expensive to hold.
+          <span class="cite" data-src="tutorial §1.2">tutorial §1.2</span>
+        </p>
+
+        <p>
+          That is worth sitting with, because it tells you what the edge is and is not.
+          It is not mispricing. It is a fee for providing the other side of a crowded
+          trade, and it persists only as long as the crowd does.
+        </p>
+
+        <h2>You are not the only one who noticed</h2>
+
+        <p>
+          The cash-and-carry level on majors is a real, persistent, positive number most
+          of the time — and it is industrialised. Ethena runs this trade at scale as a
+          product. Better-capitalized desks with better fee tiers are in the same
+          position you are trying to open.
+          <span class="cite" data-src="tutorial §2.1">tutorial §2.1</span>
+        </p>
+
+        <p>
+          The honest conclusion the spec draws from that, and does not soften: the edge is
+          thin and commoditized, so the durable value is operational excellence in the
+          plumbing — never losing a leg, never mis-reconciling, never being liquidated by
+          a margin-tier transition you did not model. The money is in not bleeding the
+          edge back through bugs.
+          <span class="cite" data-src="tutorial Closing thoughts">tutorial Closing thoughts</span>
+          <span class="cite" data-src="core §2.1">core §2.1</span>
+        </p>
+
+        <h2>The other counterparty is the exchange itself</h2>
+
+        <p>
+          For the MVP the assets sit on-exchange, deliberately, at small size, in isolated
+          per-venue subaccounts with hard collateral caps of roughly 20–30% of the bankroll
+          per venue — so one venue freezing cannot sink the operation.
+          <span class="cite" data-src="core §7.2">core §7.2</span>
+          <span class="cite" data-src="tutorial §6.3">tutorial §6.3</span>
+        </p>
+
+        <p>
+          Off-exchange settlement is the documented scale-up path, not a skipped step —
+          with two corrections worth knowing now. There is <em>no single rail spanning
+          Binance and Bybit</em> (Binance reaches Ceffu MirrorX, Bybit reaches Copper and
+          Fireblocks), so crossing pools needs two custodians. And off-exchange settlement
+          protects <em>custody</em>, not <em>margin</em>: October 2025 liquidated those
+          users too.
+          <span class="cite" data-src="tutorial §5.2">tutorial §5.2</span>
+          <span class="cite" data-src="core S1">core S1</span>
+        </p>
+
+        <p>
+          One more correction, because it is widely misremembered: the October 2025 USDe
+          low of roughly $0.65 was a local-venue dislocation, not a protocol depeg —
+          Ethena processed over $2B of redemptions with zero downtime. Do not over-fit to
+          a depeg that did not happen; do keep margin in USDT/USDC so a collateral wobble
+          cannot cascade.
+          <span class="cite" data-src="tutorial §6.3">tutorial §6.3</span>
+          <span class="cite" data-src="core S1">core S1</span>
         </p>
       </article>
 
@@ -179,8 +554,13 @@ var GuidePure = (function () {
   ];
 
   var ROUTES = [
-    { part: "world", id: "perps",      route: "world/perps",      title: "Spot, futures, perpetuals" },
-    { part: "edge",  id: "calculator", route: "edge/calculator",  title: "Will this make money?" }
+    { part: "world", id: "perps",          route: "world/perps",          title: "Spot, futures, perpetuals" },
+    { part: "world", id: "funding",        route: "world/funding",        title: "The funding rate" },
+    { part: "world", id: "prices",         route: "world/prices",         title: "Mark, index, last" },
+    { part: "world", id: "liquidation",    route: "world/liquidation",    title: "Liquidation, margin, ADL" },
+    { part: "world", id: "venues",         route: "world/venues",         title: "Binance and Bybit" },
+    { part: "world", id: "counterparties", route: "world/counterparties", title: "Who is on the other side" },
+    { part: "edge",  id: "calculator",     route: "edge/calculator",      title: "Will this make money?" }
   ];
 
   function buildSearchIndex(records) {
