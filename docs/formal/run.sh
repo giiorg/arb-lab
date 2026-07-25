@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Model-check the FenceTakeover spec: nominal safety + liveness must PASS;
-# the three negative controls must FAIL on their predicted invariant
-# (proving the model actually catches the documented hazards).
+# every negative control must FAIL on its predicted invariant (NC1-4) or
+# temporal property (NC5) -- proving the model actually catches the
+# documented hazards, and that the properties are not passing vacuously.
 #
 # Requires: java (17+). Fetches a pinned tla2tools.jar on first run.
 set -u
@@ -51,6 +52,13 @@ run() {
   if [ "$expect" = "pass" ]; then
     if [ $rc -eq 0 ]; then echo "RESULT: PASS (as predicted)"; return 0
     else echo "RESULT: UNEXPECTED FAILURE (rc=$rc) -- see $out"; return 1; fi
+  elif [ "$expect" = "failprop" ]; then
+    # A temporal-property violation, not an invariant one. TLC does not name
+    # the offending property, so the config MUST list exactly one (NC5) for
+    # the attribution to be unambiguous.
+    if [ $rc -ne 0 ] && grep -q "Temporal properties were violated" "$out"; then
+      echo "RESULT: VIOLATED $want (as predicted)"; return 0
+    else echo "RESULT: UNEXPECTED (rc=$rc; wanted temporal violation of $want) -- see $out"; return 1; fi
   else
     if [ $rc -ne 0 ] && grep -qE "Invariant ($want) is violated" "$out"; then
       echo "RESULT: VIOLATED $want (as predicted)"; return 0
@@ -74,4 +82,6 @@ run "FenceTakeover_NC3"  fail "I1_NeverTwoWriters"                       || fail
 echo
 run "FenceTakeover_NC4"  fail "I2_HostIndependentCoverage|I3_EvidenceGatedTerminal" || fails=$((fails+1))
 echo
-if [ $fails -eq 0 ]; then echo "ALL 7 RUNS MATCH PREDICTIONS"; else echo "$fails RUN(S) OFF-PREDICTION"; exit 1; fi
+run "FenceTakeover_NC5"  failprop "P4_ArbitrationCompletes"              || fails=$((fails+1))
+echo
+if [ $fails -eq 0 ]; then echo "ALL 8 RUNS MATCH PREDICTIONS"; else echo "$fails RUN(S) OFF-PREDICTION"; exit 1; fi

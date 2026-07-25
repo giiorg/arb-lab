@@ -58,7 +58,16 @@ CONSTANTS
   \* escalation terminal WITHOUT manual rescue -- the SS9 composite-
   \* guarantee shape [-> Cx6-5]. (Incident ADMINISTRATION -- clearance and
   \* false-alarm dismissal -- is not rescue and stays ungated.)
-  OPERATOR_INTERVENES
+  OPERATOR_INTERVENES,
+  \* Nominal TRUE: the FM-4 resolution -- the arbitration branches on the
+  \* RECORDED failure (signingAtLoss), so exactly one branch guard stays
+  \* enabled throughout fenceCtl = "lost". FALSE = negative control NC5:
+  \* restores the pre-FM-4 live-health guards and reproduces the strand the
+  \* round-2 review found -- a loss that repairs before its branch fires
+  \* disables all three guards at once. NC5 exists to prove P4 BITES: a
+  \* property that has never been seen to fail is not evidence, which is
+  \* the lesson Cx7-2 and this round both taught.
+  ARBITRATION_SNAPSHOT
 
 VARIABLES
   \* --- Venue truth (abstract: one package, one venue-abstract account) ---
@@ -82,11 +91,22 @@ VARIABLES
   fenceCtl,      \* "ready"|"degraded"|"lost"|"winddown"|"manual"|"takeover"
   branchMax,     \* highest branch rank entered this incident (escalate-only, R1d-F6)
   incidentActive,
+  signingAtLoss, \* [-> FM-4] was SIGNING intact when the loss was detected?
+                 \* The arbitration branches on this RECORD, not on live
+                 \* health. One bit, not a full dimension set, because it is
+                 \* the only snapshot the branch rule reads: signing splits
+                 \* branch 1 from branches 2/3, while the 2-vs-3 choice is a
+                 \* LIVE capability question (see CtlBranch2). Recording the
+                 \* unread dimensions cost 4.2x the state space for nothing.
   \* --- Actuator takeover (SM SS4) ---
   actPhase,      \* "standby"|"latch"|"quiesce"|"reconcile"|"reduce"|
                  \* "closeInFlight"|"held"|"unavail"|"finalize"|"done"
   attemptsLeft,  \* remaining close-attempt budget (durable/replicated, Cx5-1)
   actuatedFlat,  \* durable ActuatedFlat evidence record (R1d-F7)
+  heldCause,     \* [-> Cx8-2] why the takeover parked: "none" | "ready"
+                 \* (mid-takeover ActuatorReady loss) | "bounds" (close-
+                 \* budget exhausted). SM SS4 gives the two parks DIFFERENT
+                 \* exits; only the readiness park self-re-enters.
   \* --- EmergencyPlan store (SM SS6; store-visible state, ListActive view) ---
   plan,          \* "none" | "active" | "tombstone"
   leaseFree,     \* hedge-group lease released (admits successor trade)
@@ -102,8 +122,8 @@ VARIABLES
 vars == << pos, entryLive, protLive, botCloseLive, actCloseLive,
            botUp, botPhase, signerUp, latched,
            latchable, backupOK, actReadyOK,
-           fenceCtl, branchMax, incidentActive,
-           actPhase, attemptsLeft, actuatedFlat,
+           fenceCtl, branchMax, incidentActive, signingAtLoss,
+           actPhase, attemptsLeft, actuatedFlat, heldCause,
            plan, leaseFree, hadExposure,
            botLandedPostLatch, actLandedUnfenced, crashBudget >>
 
@@ -111,8 +131,8 @@ venueVars  == << pos, entryLive, protLive, botCloseLive, actCloseLive >>
 botVars    == << botUp, botPhase >>
 signerVars == << signerUp, latched >>
 envVars    == << latchable, backupOK, actReadyOK >>
-ctlVars    == << fenceCtl, branchMax, incidentActive >>
-actVars    == << actPhase, attemptsLeft, actuatedFlat >>
+ctlVars    == << fenceCtl, branchMax, incidentActive, signingAtLoss >>
+actVars    == << actPhase, attemptsLeft, actuatedFlat, heldCause >>
 planVars   == << plan, leaseFree, hadExposure >>
 flagVars   == << botLandedPostLatch, actLandedUnfenced >>
 
@@ -168,8 +188,9 @@ Init ==
   /\ signerUp = TRUE /\ latched = FALSE
   /\ latchable = TRUE /\ backupOK = TRUE /\ actReadyOK = TRUE
   /\ fenceCtl = "ready" /\ branchMax = 0 /\ incidentActive = FALSE
+  /\ signingAtLoss = TRUE
   /\ actPhase = "standby" /\ attemptsLeft = MAX_CLOSE_ATTEMPTS
-  /\ actuatedFlat = FALSE
+  /\ actuatedFlat = FALSE /\ heldCause = "none"
   /\ plan = "none" /\ leaseFree = TRUE /\ hadExposure = FALSE
   /\ botLandedPostLatch = FALSE /\ actLandedUnfenced = FALSE
   /\ crashBudget = CRASH_BUDGET
@@ -187,7 +208,7 @@ BotReplicatePlan ==
   /\ botUp /\ botPhase = "normal" /\ plan \in { "none", "tombstone" } /\ leaseFree
   /\ plan' = "active" /\ leaseFree' = FALSE /\ hadExposure' = FALSE
   /\ attemptsLeft' = MAX_CLOSE_ATTEMPTS /\ actuatedFlat' = FALSE
-  /\ UNCHANGED << actPhase >>
+  /\ UNCHANGED << actPhase, heldCause >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, ctlVars, flagVars, crashBudget >>
 
 \* Core SS6 step 5/6 + SM SS6 ack-before-entry + SM SS3 first-safe-action:
@@ -328,7 +349,7 @@ CtlDegrade ==
   /\ botUp /\ fenceCtl = "ready"
   /\ ~backupOK /\ SigningOK /\ RevokeOK /\ actReadyOK
   /\ fenceCtl' = "degraded"
-  /\ UNCHANGED << branchMax, incidentActive >>
+  /\ UNCHANGED << branchMax, incidentActive, signingAtLoss >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, actVars, planVars, flagVars, crashBudget >>
 
 \* SM SS3: FenceDegraded -> FenceReady on repair -- the sole health-driven
@@ -336,47 +357,78 @@ CtlDegrade ==
 CtlDegradedRepair ==
   /\ botUp /\ fenceCtl = "degraded" /\ backupOK
   /\ fenceCtl' = "ready"
-  /\ UNCHANGED << branchMax, incidentActive >>
+  /\ UNCHANGED << branchMax, incidentActive, signingAtLoss >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, actVars, planVars, flagVars, crashBudget >>
 
 \* SM SS3: loss of any non-backup-only dimension -> FenceReadyLost.
 \* First-safe-action (block openings) is the fenceCtl guard on entry submit.
+\* [-> FM-4] The arbitration "branches on WHICH dimension failed" (SM SS3),
+\* so the failure is SNAPSHOTTED here and the branch guards below read the
+\* RECORD, not live health. Without the snapshot a loss that repaired
+\* itself before the branch fired disabled all three guards at once
+\* (branch 1 needs a failed dimension; branches 2/3 need ~SigningOK), and
+\* the incident stranded in un-arbitrated "lost" with exposure open and no
+\* automated exit -- a fair lasso under LiveSpec2. Committing is also what
+\* the doc already implies: the health-driven return is permissible "from
+\* FenceDegraded only ... the one-way rule governs FenceReadyLost onward".
 CtlLoss ==
   /\ botUp /\ fenceCtl \in { "ready", "degraded" }
   /\ (~SigningOK \/ ~RevokeOK \/ ~actReadyOK)
   /\ fenceCtl' = "lost" /\ incidentActive' = TRUE
+  /\ signingAtLoss' = SigningOK
   /\ UNCHANGED << branchMax >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, actVars, planVars, flagVars, crashBudget >>
 
 \* Branch 1: revoke-control (or ActuatorReady, R1d-4) lost, signing works ->
 \* bot-driven wind-down (overrides a configured hard-halt, SM SS3).
+\* Keyed on the SNAPSHOT [-> FM-4]: signing was intact at the loss, so the
+\* bot itself drives the exit. The second conjunct of the old guard
+\* (~RevokeOK \/ ~actReadyOK) is now implied -- CtlLoss fires only on a real
+\* dimension loss, so signing intact at loss means revoke or ActuatorReady
+\* was the one that failed. A dimension that repairs before the branch fires
+\* does NOT abort the arbitration; a dimension that fails AFTER it is the
+\* escalate-only re-arbitration below, which reads live health by design.
 CtlBranch1 ==
-  /\ botUp /\ fenceCtl = "lost" /\ SigningOK /\ (~RevokeOK \/ ~actReadyOK)
+  /\ botUp /\ fenceCtl = "lost"
+  /\ IF ARBITRATION_SNAPSHOT THEN signingAtLoss
+       ELSE SigningOK /\ (~RevokeOK \/ ~actReadyOK)   \* NC5: pre-FM-4
   /\ fenceCtl' = "winddown" /\ branchMax' = 1
   /\ botPhase' = "winddown"
-  /\ UNCHANGED << incidentActive, botUp >>
+  /\ UNCHANGED << incidentActive, botUp, signingAtLoss >>
   /\ UNCHANGED << venueVars, signerVars, envVars, actVars, planVars, flagVars, crashBudget >>
 
 \* Branch 2: signing unavailable, a durable revoke latchable, AND
 \* ActuatorReady confirmed (R1d-4) -> hand-off IS the takeover's fence-first
 \* step (SM SS3/SS4): the actuator enters FenceLatch.
+\* [-> FM-4] The FAILURE is read from the snapshot; the positive CAPABILITY
+\* checks stay LIVE and deliberately so -- "a durable revoke is latchable
+\* AND ActuatorReady is confirmed" is a statement about the actuator's
+\* ability to act NOW, and handing off to an actuator that cannot trade
+\* would transfer the writer to nobody (the branch-3 rationale). Branches 2
+\* and 3 partition the live health space under ~signingAtLoss, so
+\* exactly one of the three guards is enabled while fenceCtl = "lost" --
+\* which is what makes the WF fairness on them non-vacuous.
 CtlBranch2 ==
-  /\ botUp /\ fenceCtl = "lost" /\ ~SigningOK /\ RevokeOK /\ actReadyOK
+  /\ botUp /\ fenceCtl = "lost"
+  /\ IF ARBITRATION_SNAPSHOT THEN ~signingAtLoss ELSE ~SigningOK
+  /\ RevokeOK /\ actReadyOK
   /\ fenceCtl' = "takeover" /\ branchMax' = 3 /\ incidentActive' = TRUE
   \* The takeover machine is plan-scoped (SM SS4 standby/ListActive): the
   \* hand-off engages it only when a plan exists to take over; with no
   \* active plan the incident resolves administratively via clearance.
   /\ actPhase' = IF actPhase = "standby" /\ plan = "active" THEN "latch" ELSE actPhase
-  /\ UNCHANGED << attemptsLeft, actuatedFlat >>
+  /\ UNCHANGED << attemptsLeft, actuatedFlat, heldCause, signingAtLoss >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, planVars, flagVars, crashBudget >>
 
 \* Branch 3: fence state uncertain -- no durable latch achievable, or
 \* signing down with ActuatorReady unconfirmable -> bounded protection +
 \* operator manual kill only; never an un-latched takeover (SM SS3).
 CtlBranch3 ==
-  /\ botUp /\ fenceCtl = "lost" /\ ~SigningOK /\ (~RevokeOK \/ ~actReadyOK)
+  /\ botUp /\ fenceCtl = "lost"
+  /\ IF ARBITRATION_SNAPSHOT THEN ~signingAtLoss ELSE ~SigningOK
+  /\ (~RevokeOK \/ ~actReadyOK)
   /\ fenceCtl' = "manual" /\ branchMax' = 2
-  /\ UNCHANGED << incidentActive >>
+  /\ UNCHANGED << incidentActive, signingAtLoss >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, actVars, planVars, flagVars, crashBudget >>
 
 \* Escalate-only re-arbitration (R1d-F6; the 1->3 edge is Cx5-2's restored
@@ -388,13 +440,13 @@ CtlEscalate1to2 ==
   \* hand-off engages it only when a plan exists to take over; with no
   \* active plan the incident resolves administratively via clearance.
   /\ actPhase' = IF actPhase = "standby" /\ plan = "active" THEN "latch" ELSE actPhase
-  /\ UNCHANGED << incidentActive, attemptsLeft, actuatedFlat >>
+  /\ UNCHANGED << incidentActive, attemptsLeft, actuatedFlat, heldCause, signingAtLoss >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, planVars, flagVars, crashBudget >>
 
 CtlEscalate1to3 ==
   /\ botUp /\ fenceCtl = "winddown" /\ ~SigningOK /\ (~RevokeOK \/ ~actReadyOK)
   /\ fenceCtl' = "manual" /\ branchMax' = 2
-  /\ UNCHANGED << incidentActive >>
+  /\ UNCHANGED << incidentActive, signingAtLoss >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, actVars, planVars, flagVars, crashBudget >>
 
 \* 3 -> 2: a durable latch becomes achievable with ActuatorReady confirmed --
@@ -406,7 +458,7 @@ CtlEscalate3to2 ==
   \* hand-off engages it only when a plan exists to take over; with no
   \* active plan the incident resolves administratively via clearance.
   /\ actPhase' = IF actPhase = "standby" /\ plan = "active" THEN "latch" ELSE actPhase
-  /\ UNCHANGED << incidentActive, attemptsLeft, actuatedFlat >>
+  /\ UNCHANGED << incidentActive, attemptsLeft, actuatedFlat, heldCause, signingAtLoss >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, planVars, flagVars, crashBudget >>
 
 (***************************************************************************)
@@ -420,7 +472,7 @@ CtlEscalate3to2 ==
 WatchdogFire ==
   /\ actPhase = "standby" /\ plan = "active"
   /\ actPhase' = "latch" /\ incidentActive' = TRUE
-  /\ UNCHANGED << fenceCtl, branchMax, attemptsLeft, actuatedFlat >>
+  /\ UNCHANGED << fenceCtl, branchMax, attemptsLeft, actuatedFlat, heldCause, signingAtLoss >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, planVars, flagVars, crashBudget >>
 
 \* SM SS4 FenceLatch: latch the durable, monotonic revoke epoch; VerifyFence
@@ -432,7 +484,7 @@ WatchdogFire ==
 ActLatch ==
   /\ actPhase = "latch" /\ latchable /\ actReadyOK
   /\ latched' = TRUE /\ actPhase' = "quiesce"
-  /\ UNCHANGED << signerUp, attemptsLeft, actuatedFlat >>
+  /\ UNCHANGED << signerUp, attemptsLeft, actuatedFlat, heldCause >>
   /\ UNCHANGED << venueVars, botVars, envVars, ctlVars, planVars, flagVars, crashBudget >>
 
 \* SM SS4: "no durable fence latch can be established" -> FenceUnavailable;
@@ -444,14 +496,14 @@ ActLatch ==
 ActLatchFail ==
   /\ actPhase = "latch"
   /\ actPhase' = "unavail"
-  /\ UNCHANGED << attemptsLeft, actuatedFlat >>
+  /\ UNCHANGED << attemptsLeft, actuatedFlat, heldCause >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, ctlVars, planVars, flagVars, crashBudget >>
 
 \* SM SS4: a durable latch established within T_fence -> fence-first resumes.
 ActUnavailRetry ==
   /\ actPhase = "unavail" /\ latchable
   /\ actPhase' = "latch"
-  /\ UNCHANGED << attemptsLeft, actuatedFlat >>
+  /\ UNCHANGED << attemptsLeft, actuatedFlat, heldCause >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, ctlVars, planVars, flagVars, crashBudget >>
 
 \* NC3 ONLY (CANARY_UNFENCED): the pre-$1K canary's unfenced de-minimis
@@ -463,7 +515,7 @@ ActCanaryUnfencedClose ==
   /\ actCloseLive' = TRUE /\ attemptsLeft' = attemptsLeft - 1
   /\ actPhase' = "closeInFlight"
   /\ actLandedUnfenced' = (actLandedUnfenced \/ ~latched)
-  /\ UNCHANGED << pos, entryLive, protLive, botCloseLive, botLandedPostLatch, actuatedFlat >>
+  /\ UNCHANGED << pos, entryLive, protLive, botCloseLive, botLandedPostLatch, actuatedFlat, heldCause >>
   /\ UNCHANGED << botVars, signerVars, envVars, ctlVars, planVars, crashBudget >>
 
 \* SM SS4 QuiesceSurfaces: cancel every bot-owned order across all cancel
@@ -509,7 +561,7 @@ ActQuiesceCancelOwnStale ==
 ActReadyLostMidTakeover ==
   /\ actPhase \in { "quiesce", "reconcile", "reduce", "closeInFlight" }
   /\ ~actReadyOK
-  /\ actPhase' = "held"
+  /\ actPhase' = "held" /\ heldCause' = "ready"
   /\ UNCHANGED << attemptsLeft, actuatedFlat >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, ctlVars, planVars, flagVars, crashBudget >>
 
@@ -522,9 +574,32 @@ ActReadyLostMidTakeover ==
 \* creating a dead end. Safe because the fence is still latched (I6): the
 \* actuator is still the sole writer, so re-quiescing its own and the
 \* venue's surfaces is idempotent.
+\* [-> Cx8-2] Scoped to the READINESS park. SM SS4 gives the two ways into
+\* HeldIncident DIFFERENT exits: mid-takeover ActuatorReady loss recovers
+\* via "operator manual kill, OR the actuator's reconcile-only re-entry
+\* from durable state once ready again", while close-budget exhaustion is
+\* "unconditional ... alert -> operator manual kill (venue UI) is the
+\* escalation; any later fill re-classifies". The un-scoped guard exited
+\* BOTH, and WF then forced it: with attemptsLeft = 0 and pos # "flat" the
+\* re-entry walks quiesce -> reconcile -> reduce -> ActReduceExhausted ->
+\* held forever, issuing no close and never staying parked -- a fair lasso
+\* that Branch2AutoResolves could not see, because one transient visit to
+\* "held" already satisfies its <> consequent.
+\* The pos = "flat" disjunct is the exhaustion row's OWN second exit -- "any
+\* later fill re-classifies (SS2)" -- and it is load-bearing, not cosmetic:
+\* scoping re-entry to heldCause = "ready" alone made the exhaustion park
+\* unclearable. OpClearIncident requires actPhase \in {standby, done,
+\* unavail}, so after the operator manually flattens a budget-exhausted
+\* park the actuator sat in "held" forever and the incident could never be
+\* cleared -- IncidentResolves violated under LiveSpec. Proving flat is
+\* exactly what re-classification means here: nothing is left to close, so
+\* the actuator walks the barrier to evidence-gated completion. It cannot
+\* revive the no-progress cycle, which needs pos # "flat" to reach
+\* ActReduceExhausted.
 ActHeldReentry ==
-  /\ actPhase = "held" /\ actReadyOK /\ latched
-  /\ actPhase' = "quiesce"
+  /\ actPhase = "held" /\ (heldCause = "ready" \/ pos = "flat")
+  /\ actReadyOK /\ latched
+  /\ actPhase' = "quiesce" /\ heldCause' = "none"
   /\ UNCHANGED << attemptsLeft, actuatedFlat >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, ctlVars, planVars, flagVars, crashBudget >>
 
@@ -536,7 +611,7 @@ ActHeldReentry ==
 ActQuiesceDone ==
   /\ actPhase = "quiesce" /\ NoLiveOrders /\ actReadyOK
   /\ actPhase' = "reconcile"
-  /\ UNCHANGED << attemptsLeft, actuatedFlat >>
+  /\ UNCHANGED << attemptsLeft, actuatedFlat, heldCause >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, ctlVars, planVars, flagVars, crashBudget >>
 
 \* SM SS4 Reconcile at the watermark. Sound here because post-quiesce no
@@ -548,7 +623,7 @@ ActQuiesceDone ==
 ActReconcileDone ==
   /\ actPhase = "reconcile" /\ actReadyOK
   /\ actPhase' = "reduce"
-  /\ UNCHANGED << attemptsLeft, actuatedFlat >>
+  /\ UNCHANGED << attemptsLeft, actuatedFlat, heldCause >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, ctlVars, planVars, flagVars, crashBudget >>
 
 \* SM SS4 ReduceResidual -> CloseInFlight: the state-dependent terminal
@@ -560,13 +635,13 @@ ActReduceIssue ==
   /\ actCloseLive' = TRUE /\ attemptsLeft' = attemptsLeft - 1
   /\ actPhase' = "closeInFlight"
   /\ actLandedUnfenced' = (actLandedUnfenced \/ ~latched)
-  /\ UNCHANGED << pos, entryLive, protLive, botCloseLive, botLandedPostLatch, actuatedFlat >>
+  /\ UNCHANGED << pos, entryLive, protLive, botCloseLive, botLandedPostLatch, actuatedFlat, heldCause >>
   /\ UNCHANGED << botVars, signerVars, envVars, ctlVars, planVars, crashBudget >>
 
 \* Budget already exhausted at reduce time -> HeldIncident unconditionally.
 ActReduceExhausted ==
   /\ actPhase = "reduce" /\ pos # "flat" /\ attemptsLeft = 0
-  /\ actPhase' = "held"
+  /\ actPhase' = "held" /\ heldCause' = "bounds"
   /\ UNCHANGED << attemptsLeft, actuatedFlat >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, ctlVars, planVars, flagVars, crashBudget >>
 
@@ -576,6 +651,7 @@ ActReduceExhausted ==
 ActCloseResolve ==
   /\ actPhase = "closeInFlight" /\ ~actCloseLive /\ pos # "flat"
   /\ actPhase' = IF attemptsLeft > 0 THEN "reduce" ELSE "held"
+  /\ heldCause' = IF attemptsLeft > 0 THEN "none" ELSE "bounds"
   /\ UNCHANGED << attemptsLeft, actuatedFlat >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, ctlVars, planVars, flagVars, crashBudget >>
 
@@ -596,7 +672,7 @@ ActMarkFlat ==
        THEN pos = "flat" /\ NoLiveOrders
        ELSE actPhase = "closeInFlight"
   /\ actuatedFlat' = TRUE /\ actPhase' = "finalize"
-  /\ UNCHANGED << attemptsLeft >>
+  /\ UNCHANGED << attemptsLeft, heldCause >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, ctlVars, planVars, flagVars, crashBudget >>
 
 \* SM SS6 actuator-side deactivation: drive the idempotent tombstone from
@@ -622,14 +698,18 @@ ActDone ==
   /\ actPhase = "finalize"
   /\ (plan = "tombstone" \/ (plan = "active" /\ ~actuatedFlat))
   /\ actPhase' = "done"
-  /\ UNCHANGED << attemptsLeft, actuatedFlat >>
+  /\ UNCHANGED << attemptsLeft, actuatedFlat, heldCause >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, ctlVars, planVars, flagVars, crashBudget >>
 
 \* Actuator crash: volatile phase lost; durable state (the latched epoch,
 \* ActuatedFlat, the replicated budget, the plan) survives.
 ActCrash ==
   /\ actPhase # "standby" /\ CrashAllowed
-  /\ actPhase' = "standby" /\ crashBudget' = CrashSpend
+  \* The park cause is volatile, not durable: the reconcile-only boot
+  \* re-derives it from durable state (the replicated budget + readiness),
+  \* which is why a crash out of an exhausted park cannot launder it into a
+  \* re-entry -- ActResume walks back to ActReduceExhausted and re-parks.
+  /\ actPhase' = "standby" /\ crashBudget' = CrashSpend /\ heldCause' = "none"
   /\ UNCHANGED << attemptsLeft, actuatedFlat >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, ctlVars, planVars, flagVars >>
 
@@ -642,7 +722,7 @@ ActResume ==
   /\ actPhase = "standby" /\ incidentActive /\ latched
   /\ plan = "active" /\ ~actuatedFlat
   /\ actPhase' = "quiesce"
-  /\ UNCHANGED << attemptsLeft, actuatedFlat >>
+  /\ UNCHANGED << attemptsLeft, actuatedFlat, heldCause >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, ctlVars, planVars, flagVars, crashBudget >>
 
 \* Branch-2 re-engagement [-> FM-3]: the un-latched sibling of ActResume.
@@ -664,7 +744,7 @@ ActReengage ==
   /\ actPhase = "standby" /\ incidentActive /\ ~latched
   /\ fenceCtl = "takeover" /\ plan = "active" /\ ~actuatedFlat
   /\ actPhase' = "latch"
-  /\ UNCHANGED << attemptsLeft, actuatedFlat >>
+  /\ UNCHANGED << attemptsLeft, actuatedFlat, heldCause >>
   /\ UNCHANGED << venueVars, botVars, signerVars, envVars, ctlVars, planVars, flagVars, crashBudget >>
 
 (***************************************************************************)
@@ -786,7 +866,7 @@ OpDismissFalseAlarm ==
   /\ fenceCtl \in { "ready", "degraded" } /\ actPhase = "standby"
   /\ incidentActive' = FALSE
   /\ botPhase' = "normal"
-  /\ UNCHANGED << botUp, fenceCtl, branchMax >>
+  /\ UNCHANGED << botUp, fenceCtl, branchMax, signingAtLoss >>
   /\ UNCHANGED << venueVars, signerVars, envVars, actVars, planVars, flagVars, crashBudget >>
 
 \* Return to normal operation (R1d-F6): only after the branch's terminal
@@ -806,6 +886,9 @@ OpClearIncident ==
   /\ branchMax' = 0
   /\ actPhase' = "standby"
   /\ botPhase' = IF botUp THEN "normal" ELSE botPhase
+  \* Clearance ends the incident, so both incident-scoped records reset:
+  \* the arbitration snapshot [-> FM-4] and the park cause [-> Cx8-2].
+  /\ signingAtLoss' = TRUE /\ heldCause' = "none"
   /\ UNCHANGED << signerUp, botUp, attemptsLeft, actuatedFlat >>
   /\ UNCHANGED << venueVars, envVars, planVars, flagVars, crashBudget >>
 
@@ -879,7 +962,14 @@ Fairness ==
   \* dimensions stop flapping -- within an incident, `latched` is monotone
   \* (un-latch = clearance = resolution), so each arbitration guard that
   \* becomes relevant there holds PERSISTENTLY until its decision fires,
-  \* and WF forces it. The v0.9.1 SF-for-anti-phase-flapping rationale is
+  \* and WF forces it. [-> FM-4] That persistence claim was FALSE as
+  \* written before the arbitration snapshot: the branch guards read LIVE
+  \* health, so a loss that repaired before its branch fired disabled all
+  \* three at once and WF forced nothing -- the guard had been enabled, but
+  \* not persistently. It is now true BY CONSTRUCTION, because branches
+  \* 1/2/3 partition the health space on the signingAtLoss bit, so
+  \* exactly one of them is enabled throughout fenceCtl = "lost". The
+  \* downgrade is sound because of that partition, not in spite of it. The v0.9.1 SF-for-anti-phase-flapping rationale is
   \* subsumed by the antecedent; claiming liveness under the weaker
   \* fairness assumption is the stronger theorem -- and it keeps the
   \* fairness tableau tractable (SF promises dominate TLC's single-
@@ -964,10 +1054,12 @@ TypeOK ==
   /\ fenceCtl \in { "ready", "degraded", "lost", "winddown", "manual", "takeover" }
   /\ branchMax \in 0..3
   /\ incidentActive \in BOOLEAN
+  /\ signingAtLoss \in BOOLEAN
   /\ actPhase \in { "standby", "latch", "quiesce", "reconcile", "reduce",
                     "closeInFlight", "held", "unavail", "finalize", "done" }
   /\ attemptsLeft \in 0..MAX_CLOSE_ATTEMPTS
   /\ actuatedFlat \in BOOLEAN
+  /\ heldCause \in { "none", "ready", "bounds" }
   /\ plan \in { "none", "active", "tombstone" }
   /\ leaseFree \in BOOLEAN /\ hadExposure \in BOOLEAN
   /\ botLandedPostLatch \in BOOLEAN /\ actLandedUnfenced \in BOOLEAN
@@ -999,6 +1091,13 @@ I4_LeaseTombstone == leaseFree => plan # "active"
 \* tombstone a manually-killed flat trade while the actuator's phase
 \* variable still reads "held" -- unsynchronized processes, not a defect.
 I6_HeldHonest == actPhase = "held" => latched
+
+\* I8 -- the park cause is scoped to the park [-> Cx8-2]. Not a doc claim:
+\* a threading self-check on the new variable, so a future edit that parks
+\* without recording a cause (or leaves a stale one behind on the way out)
+\* fails loudly at the widest crash scope instead of silently re-opening
+\* the ActHeldReentry hole this round closed.
+I8_HeldCauseScoped == heldCause # "none" => actPhase = "held"
 
 \* I7 -- escalate-only, one-way-per-incident arbitration (R1d-F6).
 I7_EscalateOnly ==
@@ -1087,5 +1186,35 @@ IdleStall ==
 P2_NoBranch2Stall ==
   EnvStabilizes =>
     [] ( IdleStall => <> (pos = "flat" \/ latched \/ actPhase # "standby") )
+
+\* P3 -- a park stays parked [-> Cx8-2]. The regression check for the
+\* held-cause fix, and a direct answer to the property weakness that hid
+\* it: Branch2AutoResolves accepts actPhase \in {"held","unavail"} as an
+\* honest escalation terminal, but <> is satisfied by a single transient
+\* visit -- so an actuator that cycles THROUGH held forever passes it.
+\* This says the escalation terminal must actually be TERMINAL (<>[]).
+\* Adopted from the round-2 reviewer's own probe. LiveSpec2 only: under
+\* LiveSpec the operator flattens or clears, which the disjuncts admit.
+P3_ExhaustedParkIsStable ==
+  EnvStabilizes =>
+    [] ( ( incidentActive /\ actPhase = "held" /\ attemptsLeft = 0
+           /\ pos # "flat" /\ NoLiveOrders /\ actReadyOK )
+          => <>[] ( actPhase = "held" \/ pos = "flat" \/ ~incidentActive ) )
+
+\* P4 -- arbitration completes [-> FM-4]. The regression check for the
+\* snapshot: a detected loss with the bot ALIVE and no branch yet selected
+\* must leave the pre-branch state. Scoped deliberately tightly -- botUp
+\* because the branch guards are bot actions (a dead bot is the watchdog
+\* path's job), branchMax = 0 because this is about SELECTION, not about
+\* what a selected branch then achieves. The consequent admits actuator
+\* engagement (actPhase # "standby") because that hands the obligation to
+\* Branch2AutoResolves + P3, NOT because engagement is itself a resolution
+\* -- the escape-hatch failure mode Cx7-2 and this round both punished.
+P4_ArbitrationCompletes ==
+  EnvStabilizes =>
+    [] ( ( fenceCtl = "lost" /\ branchMax = 0 /\ botUp
+           /\ actPhase = "standby" )
+          => <> ( fenceCtl # "lost" \/ ~incidentActive
+                  \/ actPhase # "standby" ) )
 
 ===================================================================================
