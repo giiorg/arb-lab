@@ -1,69 +1,93 @@
 <title>Funding-Rate Arbitrage — The Whole Thing</title>
 
 <style>
+  /* Cool instrument neutrals — screens, not paper. The accent is steel blue and
+     deliberately not green or red: those are reserved as semantic pass/fail on the
+     calculator verdict, and an accent that collided with them would make the one
+     number that matters ambiguous. */
   :root {
-    --bg: #fbfaf8; --fg: #1a1a1a; --muted: #5a5a5a;
-    --rule: #e2ded7; --accent: #7a4a1e; --chip-bg: #efeae1;
+    --bg: #f7f8f9; --surface: #ffffff; --fg: #14181d; --muted: #5c6672;
+    --rule: #dfe3e8; --accent: #1f5f8b; --chip-bg: #eaeef2;
+    --pass: #15803d; --fail: #b3261e;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --serif: "Iowan Old Style", "Charter", "Palatino Linotype", Palatino, Georgia, serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #17171a; --fg: #e8e6e3; --muted: #9a9791;
-      --rule: #2e2e33; --accent: #d9a066; --chip-bg: #24242a;
+      --bg: #111418; --surface: #171b21; --fg: #e3e7ea; --muted: #8b95a1;
+      --rule: #262c34; --accent: #6fb3dd; --chip-bg: #1c222a;
+      --pass: #4ade80; --fail: #f87171;
     }
   }
   :root[data-theme="light"] {
-    --bg: #fbfaf8; --fg: #1a1a1a; --muted: #5a5a5a;
-    --rule: #e2ded7; --accent: #7a4a1e; --chip-bg: #efeae1;
+    --bg: #f7f8f9; --surface: #ffffff; --fg: #14181d; --muted: #5c6672;
+    --rule: #dfe3e8; --accent: #1f5f8b; --chip-bg: #eaeef2;
+    --pass: #15803d; --fail: #b3261e;
   }
   :root[data-theme="dark"] {
-    --bg: #17171a; --fg: #e8e6e3; --muted: #9a9791;
-    --rule: #2e2e33; --accent: #d9a066; --chip-bg: #24242a;
+    --bg: #111418; --surface: #171b21; --fg: #e3e7ea; --muted: #8b95a1;
+    --rule: #262c34; --accent: #6fb3dd; --chip-bg: #1c222a;
+    --pass: #4ade80; --fail: #f87171;
   }
 
   * { box-sizing: border-box; }
   .guide {
     background: var(--bg); color: var(--fg);
-    font: 16px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font: 16.5px/1.7 var(--serif);
     min-height: 100vh;
     display: grid; grid-template-columns: 16rem 1fr;
   }
-  .status {
-    font-size: 0.78rem; color: var(--muted); letter-spacing: 0.02em;
-    padding: 0.6rem 1.25rem; border-bottom: 1px solid var(--rule);
+  .guide h1, .guide h2, .guide h3 {
+    font-family: var(--sans); font-weight: 640; letter-spacing: -0.011em;
+    text-wrap: balance; line-height: 1.22;
   }
-  .content { padding: 1.5rem 1.25rem; max-width: 46rem; overflow-wrap: break-word; }
-  code { font-size: 0.9em; overflow-wrap: break-word; }
+  .guide h1 { font-size: 1.85rem; margin: 0 0 1.1rem; }
+  .guide h2 { font-size: 1.14rem; margin: 2rem 0 0.6rem; }
+  .guide p { margin: 0 0 1rem; }
+  .guide ul { margin: 0 0 1rem; padding-left: 1.1rem; }
+  .guide li { margin-bottom: 0.4rem; }
+  .guide strong { font-weight: 680; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+  .status {
+    font: 0.72rem/1 var(--mono); color: var(--muted); letter-spacing: 0.04em;
+    padding: 0.7rem 1.5rem; border-bottom: 1px solid var(--rule);
+  }
+  .content { padding: 2rem 1.5rem 4rem; max-width: 42rem; overflow-wrap: break-word; }
+  code { font: 0.86em var(--mono); overflow-wrap: break-word; color: var(--fg); }
   .cite {
-    font-size: 0.75rem; color: var(--accent); background: var(--chip-bg);
-    padding: 0.1rem 0.4rem; border-radius: 0.25rem; white-space: nowrap;
+    font: 0.7rem var(--mono); color: var(--accent); background: var(--chip-bg);
+    padding: 0.12rem 0.4rem; border-radius: 0.2rem; white-space: nowrap;
   }
 
   .rail {
     border-right: 1px solid var(--rule); padding: 1rem 0.75rem;
   }
   .rail h2 {
-    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em;
-    color: var(--muted); margin: 1rem 0 0.35rem;
+    font: 640 0.66rem/1 var(--mono); text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--muted); margin: 1.4rem 0 0.4rem; padding-left: 0.5rem;
   }
   .nav-link {
-    display: block; padding: 0.28rem 0.5rem; border-radius: 0.3rem;
-    color: var(--fg); text-decoration: none; font-size: 0.9rem;
+    display: block; padding: 0.3rem 0.5rem; border-radius: 0.3rem;
+    color: var(--fg); text-decoration: none; font: 0.875rem var(--sans);
   }
   .nav-link:hover { background: var(--chip-bg); }
   .nav-link[aria-current="true"] { background: var(--chip-bg); color: var(--accent); font-weight: 600; }
   .theme-toggle {
-    font: inherit; font-size: 0.75rem; padding: 0.25rem 0.5rem; margin-bottom: 0.5rem;
+    font: 0.7rem var(--mono); padding: 0.3rem 0.55rem; margin-bottom: 0.6rem;
     cursor: pointer; background: transparent; color: var(--muted);
-    border: 1px solid var(--rule); border-radius: 0.3rem;
+    border: 1px solid var(--rule); border-radius: 0.3rem; letter-spacing: 0.03em;
   }
-  .search { width: 100%; padding: 0.4rem 0.55rem; font: inherit; font-size: 0.85rem;
-    background: var(--bg); color: var(--fg); border: 1px solid var(--rule); border-radius: 0.3rem; }
+  .theme-toggle:hover { color: var(--accent); border-color: var(--accent); }
+  .search { width: 100%; padding: 0.45rem 0.6rem; font: 0.85rem var(--sans);
+    background: var(--surface); color: var(--fg); border: 1px solid var(--rule); border-radius: 0.3rem; }
   .results { list-style: none; margin: 0.5rem 0 0; padding: 0; }
   .results li { margin-bottom: 0.5rem; }
   .results a { color: var(--fg); text-decoration: none; display: block;
     padding: 0.3rem 0.5rem; border-radius: 0.3rem; }
   .results a:hover { background: var(--chip-bg); }
-  .results .snippet { display: block; font-size: 0.75rem; color: var(--muted); }
+  .results a strong { font: 640 0.85rem var(--sans); }
+  .results .snippet { display: block; font: 0.75rem/1.45 var(--sans); color: var(--muted); margin-top: 0.15rem; }
   .rail.searching h2, .rail.searching .nav-link { display: none; }
   /* Wide: an app shell — the rail and the pane each scroll independently, so the
      rail stays put while long articles scroll. Narrow: one column, page scrolls. */
@@ -74,43 +98,58 @@
   }
   article[data-route] { display: none; }
   article[data-route].is-active { display: block; }
-  table { border-collapse: collapse; width: 100%; }
+  /* color is set explicitly rather than inherited: tables do not inherit color from
+     an ancestor in quirks mode, which is what a raw preview of this file (no doctype,
+     since the host supplies it) renders in. */
+  table { border-collapse: collapse; width: 100%; color: var(--fg); }
+  td, th { color: inherit; }
   table:not(.calc-out) td {
-    padding: 0.5rem 0.9rem 0.5rem 0; border-bottom: 1px solid var(--rule);
-    vertical-align: top; font-size: 0.92rem;
+    padding: 0.6rem 1rem 0.6rem 0; border-bottom: 1px solid var(--rule);
+    vertical-align: top; font-size: 0.95rem;
   }
   table:not(.calc-out) tr:last-child td { border-bottom: 0; }
-  table:not(.calc-out) td:first-child { width: 30%; min-width: 9rem; }
+  table:not(.calc-out) td:first-child {
+    width: 30%; min-width: 9rem; font-family: var(--sans); font-size: 0.86rem;
+  }
   .scroll-x { overflow-x: auto; }
 
-  .calc { border: 1px solid var(--rule); border-radius: 0.5rem; padding: 1rem; margin: 1.25rem 0; }
-  .calc-presets { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.9rem; }
-  .calc-presets button {
-    font: inherit; font-size: 0.78rem; padding: 0.3rem 0.6rem; cursor: pointer;
-    background: var(--chip-bg); color: var(--fg); border: 1px solid var(--rule); border-radius: 0.3rem;
+  .calc {
+    border: 1px solid var(--rule); border-radius: 0.4rem; padding: 1.1rem;
+    margin: 1.5rem 0; background: var(--surface);
+    display: flex; flex-direction: column; gap: 1rem;
   }
-  .calc-presets button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
-  .calc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 0.6rem; }
-  .calc-grid label { display: flex; flex-direction: column; font-size: 0.75rem; color: var(--muted); gap: 0.2rem; }
+  .calc-presets { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .calc-presets button {
+    font: 0.75rem var(--sans); padding: 0.32rem 0.6rem; cursor: pointer;
+    background: transparent; color: var(--muted);
+    border: 1px solid var(--rule); border-radius: 0.3rem;
+  }
+  .calc-presets button:hover { color: var(--fg); border-color: var(--muted); }
+  .calc-presets button[aria-pressed="true"] {
+    border-color: var(--accent); color: var(--accent); background: var(--chip-bg);
+  }
+  /* align-items:end keeps the inputs on a common baseline when a label wraps */
+  .calc-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+    gap: 0.7rem; align-items: end;
+  }
+  .calc-grid label {
+    display: flex; flex-direction: column; gap: 0.25rem;
+    font: 0.68rem var(--mono); color: var(--muted); letter-spacing: 0.02em;
+  }
   .calc-grid input, .calc-grid select {
-    font: inherit; font-size: 0.9rem; padding: 0.3rem 0.4rem;
+    font: 0.9rem var(--mono); padding: 0.35rem 0.45rem; font-variant-numeric: tabular-nums;
     background: var(--bg); color: var(--fg); border: 1px solid var(--rule); border-radius: 0.25rem;
   }
-  .calc-out { margin-top: 1rem; font-size: 0.9rem; }
-  .calc-out td { padding: 0.22rem 0.6rem 0.22rem 0; border-bottom: 1px solid var(--rule); }
-  .calc-out td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
-  .calc-out tr.total td { font-weight: 700; border-bottom: 2px solid var(--rule); }
-  .verdict { font-weight: 700; margin-top: 0.8rem; }
-  .verdict.pass { color: #1f7a3d; }
-  .verdict.fail { color: #a12d2d; }
-  @media (prefers-color-scheme: dark) {
-    .verdict.pass { color: #58c07d; } .verdict.fail { color: #e07070; }
-  }
-  :root[data-theme="dark"] .verdict.pass { color: #58c07d; }
-  :root[data-theme="dark"] .verdict.fail { color: #e07070; }
-  :root[data-theme="light"] .verdict.pass { color: #1f7a3d; }
-  :root[data-theme="light"] .verdict.fail { color: #a12d2d; }
-  .calc-note { font-size: 0.8rem; color: var(--muted); }
+  .calc-out { font: 0.84rem var(--mono); }
+  .calc-out td { padding: 0.3rem 0.6rem 0.3rem 0; border-bottom: 1px solid var(--rule); }
+  .calc-out td:first-child { color: var(--muted); }
+  .calc-out td:last-child { text-align: right; font-variant-numeric: tabular-nums; color: var(--fg); }
+  .calc-out tr.total td { font-weight: 700; border-bottom: 2px solid var(--rule); color: var(--fg); }
+  .verdict { font: 640 0.95rem var(--sans); margin: 0; }
+  .verdict.pass { color: var(--pass); }
+  .verdict.fail { color: var(--fail); }
+  .calc-note { font: 0.78rem/1.5 var(--sans); color: var(--muted); margin: 0; }
 
   @media (max-width: 860px) {
     .guide { grid-template-columns: 1fr; height: auto; }

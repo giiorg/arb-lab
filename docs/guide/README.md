@@ -19,6 +19,35 @@ Plan: `docs/superpowers/plans/2026-07-25-interactive-guide-stage-1.md`.
 
     cd docs/guide && bun test
 
+## Previewing it locally
+
+Open `index.html` directly and the browser renders it in **quirks mode**, because the
+file has no doctype (the host supplies one). Quirks mode changes real behaviour —
+tables stop inheriting `color` from their ancestors, for one — so a raw preview is
+not representative. Preview through a wrapper that mimics the host instead:
+
+```js
+// preview.js — bun preview.js, then open http://localhost:8731
+Bun.serve({ port: 8731, async fetch() {
+  const body = await Bun.file("index.html").text();
+  return new Response(
+    `<!doctype html><html><head><meta charset="utf-8">`
+    + `<meta name="viewport" content="width=device-width,initial-scale=1">`
+    + `<style>*{margin:0;padding:0}</style></head><body>${body}</body></html>`,
+    { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+}});
+```
+
+Note that changing only the URL hash does not refetch — add a query string to
+force a reload after editing.
+
+## Design
+
+Cool instrument neutrals rather than paper; the accent is steel blue and deliberately
+avoids green and red, which are reserved as semantic pass/fail on the calculator
+verdict. Three type roles, all system faces so nothing is fetched: sans for headings,
+serif for body prose, mono for data, code and chrome.
+
 ## Publishing
 
 The file is published as an Artifact and redeploys to the same URL. There is no
