@@ -12,10 +12,12 @@ import (
 	"golang.org/x/tools/go/analysis/multichecker"
 
 	"github.com/giiorg/arb-lab/tools/lint/kernelpurity"
+	"github.com/giiorg/arb-lab/tools/lint/nofloat"
 )
 
 func main() {
 	multichecker.Main(
 		kernelpurity.Analyzer,
+		nofloat.Analyzer,
 	)
 }

@@ -173,10 +173,7 @@ func TestCalc_DoesNotAllocate(t *testing.T) {
 	b := mustMoney(t, usdt, "45")
 	r := mustRate(t, "0.0001")
 
-	got := testing.AllocsPerRun(100, func() {
+	mustNotAllocate(t, "a successful chain", func() {
 		_, _ = fixedpoint.Chain(a).Sub(b).Mul(r, fixedpoint.RoundHalfEven).Result()
 	})
-	if got != 0 {
-		t.Errorf("a successful chain allocated %.0f times per run; want 0", got)
-	}
 }

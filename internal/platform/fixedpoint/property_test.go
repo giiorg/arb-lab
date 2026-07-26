@@ -386,12 +386,18 @@ func TestProperty_ParseNegativeControls(t *testing.T) {
 			return v, err
 		},
 		// The classic float detour, which is exactly what §3.6 rule 4 forbids.
+		//
+		// The nofloat gate objects to this control, which is the correct
+		// outcome and worth keeping conspicuous: the escape is annotated
+		// in place rather than confined to a helper, because the whole
+		// purpose of these two lines is to BE the forbidden thing so that
+		// the property can be shown to reject it.
 		"routes through float64": func(s string) (int64, error) {
-			f, err := strconv.ParseFloat(s, 64)
+			f, err := strconv.ParseFloat(s, 64) //nofloat:allow the negative control that demonstrates rule 4
 			if err != nil {
 				return 0, ErrSyntax
 			}
-			return int64(f * scaleFactor), nil
+			return int64(f * scaleFactor), nil //nofloat:allow same control, completing the detour
 		},
 		// The exponent ignored.
 		"ignores the exponent": func(s string) (int64, error) {

@@ -170,8 +170,21 @@ func TestArithmeticDoesNotAllocate(t *testing.T) {
 		"Mantissa":     func() { _ = a.Mantissa() },
 	}
 	for name, op := range ops {
-		if got := testing.AllocsPerRun(100, op); got != 0 {
-			t.Errorf("%s allocated %.0f times per run; want 0", name, got)
-		}
+		mustNotAllocate(t, name, op)
+	}
+}
+
+// mustNotAllocate fails unless op allocates nothing at all.
+//
+// It exists to hold the package's only float64 in one place. testing.AllocsPerRun
+// returns a float64 *mean*, and the float cannot be converted away at the seam
+// the way a nofloat escape usually can: a mean of 0.5 means half the runs
+// allocated, so int(allocs) != 0 would silently accept exactly the result this
+// assertion exists to catch. So the escape is annotated here rather than at each
+// of the four call sites it used to span — which is what the gate is for.
+func mustNotAllocate(t *testing.T, name string, op func()) {
+	t.Helper()
+	if allocs := testing.AllocsPerRun(100, op); allocs != 0 { //nofloat:allow testing.AllocsPerRun returns a float64 mean by API
+		t.Errorf("%s allocated %v times per run; want 0", name, allocs) //nofloat:allow reporting the same mean
 	}
 }
