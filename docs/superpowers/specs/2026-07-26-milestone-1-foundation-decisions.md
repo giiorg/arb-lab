@@ -3,7 +3,7 @@
 **Status:** in progress. Milestone 1's **first slice (§1) is code-complete** as of session 3 — scaffolding,
 `platform/fixedpoint`, `platform/clock`, and the `nofloat`/`notimenow` gates. Branch
 `feat/milestone-1-foundation`, first commit `e92f9f0`, head `f146855`, **unpushed**.
-**Doc set:** implements `build-spec.md` §12.1 (v0.9.4). Deviations from the spec are marked **[SPEC EDIT OWED]**.
+**Doc set:** implements `build-spec.md` §12.1 (v0.9.4). Deviations from the spec are marked **[SPEC EDIT LANDED — v0.9.5]**.
 
 This record exists so a fresh session can resume without re-deriving anything. Every decision below was
 taken explicitly by the user during the session, with the rejected alternatives recorded — the same
@@ -73,7 +73,7 @@ implementation against the TLA+ model**, which the spec already plans (HANDOFF f
 which is *stronger* than exhaustiveness: exhaustiveness proves every case is handled, not that it is
 handled correctly.
 
-**[SPEC EDIT OWED]** Record this as an ADR §3 entry — evaluated-and-rejected, with the reasons above,
+**[SPEC EDIT LANDED — v0.9.5]** Record this as an ADR §3 entry — evaluated-and-rejected, with the reasons above,
 so it reads as a decided question rather than an unexamined assumption.
 
 ---
@@ -137,7 +137,7 @@ green-lit on a bug.
   `infrastructure/driven/`) and what is expected to be rewritten (pragma verification + online-backup
   durability story; the outbox reader's `LISTEN/NOTIFY`/`SKIP LOCKED`; upsert/DDL phrasing).
 
-### The `boundary/` grouping segment is dropped **[SPEC EDIT OWED]**
+### The `boundary/` grouping segment is dropped **[SPEC EDIT LANDED — v0.9.5]**
 
 Bounded contexts sit at **`internal/<ctx>/`** — `internal/oms/`, `internal/risk/`, `internal/marketdata/`
 — alongside the machinery groups `internal/{platform,engine,app}/`.
@@ -191,7 +191,7 @@ emission, later `engine/backtest` statistics.
 
 ---
 
-## 4. `kernelpurity` — a fifth structural rule **[SPEC EDIT OWED]**
+## 4. `kernelpurity` — a fifth gate, now §3.6 rule 9 **[SPEC EDIT LANDED — v0.9.5]**
 
 **Built and green.** A package under `internal/platform/` may import only the standard library and other
 `internal/platform/` packages. Catches two failure modes with one rule:
@@ -214,7 +214,7 @@ mistaken for part of the kernel.
 
 **Proven to bite:** neutering the `Reportf` makes both expected diagnostics vanish and the test fail.
 
-### `exhaustiveswitch` — a sixth rule, deferred **[SPEC EDIT OWED]**
+### `exhaustiveswitch` — a sixth gate, now §3.6 rule 10, deferred **[SPEC EDIT LANDED — v0.9.5]**
 
 The compensating measure for the strongest Rust argument (§0). A `switch` over a §3.6-rule-8 enum-like
 (`type X string` + constants + `Validate()`) must cover every declared constant, or fail the build.
@@ -227,12 +227,12 @@ the custom analyzer.
 
 | Analyzer | State | Notes |
 |---|---|---|
-| `kernelpurity` | **Built, green, bite-checked** | 5th rule, not in §3.6 |
+| `kernelpurity` | **Built, green, bite-checked** | §3.6 rule 9 (added in v0.9.5) |
 | `nofloat` | **Built, green, 8/8 mutations caught** | Type-aware; default-deny + enforced `//nofloat:allow` (§4b) |
-| `notimenow` | **Built, green, 7/7 mutations caught** | Whole ambient-time family, `go/types`-resolved (§4c) |
+| `notimenow` | **Built, green, 16/16 mutations caught** | Whole ambient-time family, `go/types`-resolved; `engine/` scope + transport escape (§4c, §4d) |
 | `hexboundary` | Deferred | No contexts to police |
 | `singlewriter` | Deferred | No OMS write repositories exist |
-| `exhaustiveswitch` | Deferred | No state machines yet; try `exhaustive` first |
+| `exhaustiveswitch` | Deferred | §3.6 rule 10, planned. No state machines yet; try `exhaustive` first |
 
 ---
 
@@ -328,6 +328,10 @@ gets switched off within a week.
 
 ### No escape hatch, unlike `nofloat` — and the asymmetry has a reason
 
+> **Superseded in part by §4d (session 4).** The reasoning below still governs `domain/` and
+> `application/`, which admit no escape. `engine/` — added to the rule's scope in session 4 — does
+> get one, because this argument does not transfer to transport.
+
 `nofloat` needs one because Prometheus takes `float64` at the wire and something must convert: a
 real seam with a real obligation. Here **the seam is `platform/clock` itself**, which sits outside
 `domain/` and `application/` by construction, so the exception is already expressed *structurally*.
@@ -341,7 +345,9 @@ A domain layer that needs wall time is a design error, not an exception, and the
 - **`engine/venue` pins the limit build-spec actually states.** Infrastructure stamping a received
   message with this machine's clock is arguably how a wrong timestamp enters the system, but
   widening the rule is **spec work, not an implementation choice**, so the fixture records the limit
-  rather than quietly exceeding it.
+  rather than quietly exceeding it. *(Session 4: the question was put to the user, who approved the
+  widening. The fixture is now offending-and-escaped, and a new clean `engine/state` fixture takes
+  over as the positive control — §4d.)*
 - **`application/` holds five legitimate uses** — `Date`, `Parse`, `Duration`, `Time.Add`,
   `Time.Before`. A rule that objected to the `time` *package* would be turned off, and then rule 5
   would not be enforced at all.
@@ -353,6 +359,88 @@ green `make lint` proves nothing about it. A probe `internal/oms/domain` package
 real module: `make lint` failed with exactly one diagnostic, and the `.After` on the same line was
 correctly ignored. Fixtures live in a GOPATH-style `testdata/src/` tree, and path handling that
 passes there can still mis-scope in production — which is the hazard `kernelpurity`'s own notes flag.
+
+---
+
+## 4d. Rule 5 widened to `engine/` (session 4) — the milestone's first user question
+
+The one item of the ten that was a question rather than a deviation. Asked, answered **yes**, built.
+
+### The argument that actually decided it is the clamp, not parity
+
+The obvious framing — "a venue adapter stamps a wrong timestamp, which breaks replay" — is the weak
+one, and it is worth recording *why* it is weak so a future session does not re-run it:
+
+- `engine/venue`'s live adapters **do not run under replay at all**: §3.5 substitutes a replay
+  `DataSource` and a fill-model `ExecutionVenue`. Ambient time in live-only transport cannot corrupt
+  a replay of code that is not replayed.
+- §3.5 already states that `SourceTime`/`RecvTime` are for freshness, cross-leg skew and analysis —
+  **never a reorder key**. So a raw-clock `RecvTime` does not touch `IngressSeq`, the replay key.
+
+The argument that survives is different and sharper: **`platform/clock`'s monotonic clamp is only a
+guarantee if everyone reads the same clock.** §5e decided that `Wall` *absorbs* backwards time
+(high-water clamp) because it has no error to return. `time.Now` does not clamp. So the moment a
+`RecvTime` stamped from the raw clock meets an age computed from the injected one, the subtraction
+spans two clocks that disagree — and they disagree **exactly across the NTP step backwards the clamp
+was built for**, yielding a negative or inflated age. That lands in code where freshness gates
+execution (§3.4) and stale marks drive liq-distance `[→ R2c-1]`. A negative age reads as *perfectly
+fresh*.
+
+**The defect is two clocks meeting at a subtraction. The ambient call is only where it starts** —
+which is also why policing the call site is the right intervention: the subtraction itself is
+innocent-looking and correct.
+
+`engine/state` is where this bites hardest, because unlike `engine/venue` it **runs under both live
+and replay wiring**, and freshness there is `now − RecvTime`. Read ambiently under replay it compares
+a replayed timestamp against real wall-clock now, so every snapshot reads as infinitely stale.
+
+### Three alternatives, and why each lost
+
+| Alternative | Why rejected |
+|---|---|
+| **Keep the narrow scope** (status quo) | Costs nothing today and everything later. `internal/` currently holds **only `platform/`** — no engine package exists — so widening now is one `policedLayers` entry and an escape mechanism lifted from `nofloat`. Widening after `engine/state` ships means retrofitting a freshness path that already passes its tests. §12.1 asks for the gates "from day one" for exactly this reason: the only moment a gate costs nothing is before the code it polices |
+| **Widen with no escape** (strictest) | A gate with no legitimate exit gets disabled the first time it is legitimately wrong. Transport genuinely needs wall-clock scheduling, and forcing a socket read deadline onto `Clock.SetTimer` would put transport liveness on the **dispatch** timer queue — coupling a keepalive to the state machine's scheduler. That is worse architecture, not stricter discipline |
+| **Police only the parity-shared engine packages** (`state`, `backtest`) | Sharpest against today's hazard, and **it is an allow-list** — the exact failure mode `notimenow`'s own design notes give as its reason for existing: "that list silently stops covering any bounded context added after it was written." A new parity-shared engine package added tomorrow would be unpoliced until somebody remembered. The principle does not get an exemption when it is inconvenient to itself |
+
+### The claim this rests on, stated so it can be falsified
+
+**Prediction: `engine/` transport will need wall-clock scheduling, so the escape will be used.** If
+`engine/venue` ships and **no escape is ever written**, the prediction was wrong and the strict
+no-escape variant was right — at which point *delete the mechanism*. That is a ten-minute change,
+whereas retrofitting a missing escape after `engine/state` ships is not. The asymmetry is the whole
+reason the escape exists rather than absolute denial, and it is recorded here as a claim to revisit
+rather than a settled fact.
+
+### What was built
+
+- `policedLayers` gains `"engine"`; `escapableLayer` is a **single constant, not a set** — the moment
+  it becomes a list it is the allow-list the design rejects.
+- `//notimenow:allow <reason>`, per line, honoured **only** in `engine/`. Written in a policed layer
+  that has no escape it suppresses nothing **and says so** — a directive that silently did nothing
+  would read as a working suppression to whoever wrote it.
+- Findings now **collapse to one per line**, because that is the unit the escape works in. Diagnosing
+  per reference while suppressing per line would let one annotation silently answer several findings.
+- The grammar is **duplicated from `nofloat`, not shared**: only the comment parsing is common, while
+  the *policy* differs (`nofloat` allows an escape anywhere under `internal/`; this one only in
+  `engine/`). A shared helper wrapping thirty lines of parsing under two policies would abstract the
+  wrong seam. **Extract at a third gate**, not before.
+
+### Bite-checked: 9/9, and the tenth was reported rather than counted
+
+The widening, both directions of the escape's layer test, the mandatory reason, the unused-escape
+report, the directive separator (`notimenow:allowance` must not read as a directive), the per-line
+collapse, the receiver check, and the layer predicate. **A tenth pattern failed to match and the
+harness printed `NO-OP!!` instead of `caught`** — the mutation script compares the file before and
+after and refuses to interpret an unapplied mutation as a passing test. That guard paid for itself on
+its first run, and it is the same lesson as the vacuous-coverage one: *a mutation that never applied
+and a mutation that was caught produce identical test output.*
+
+Two fixture gaps were closed by the same discipline. The per-line collapse had **no fixture with two
+ambient reads on one line**, so it was untested in both directions until one was added to `domain/`
+(two reads → one diagnostic) and one to `engine/venue` (two reads → one escape covers both). And
+`engine/venue` flipping from clean control to offending meant the widened scope had **no positive
+control at all** until `engine/state` was added — without it the suite would only ever show engine
+code being rejected, which a universally-objecting gate also does.
 
 ---
 
@@ -427,7 +515,7 @@ The user confirmed **the proposal as written**, unchanged: eight modes, `RoundIn
 "minimal set" of seven), and the full nine-mode `java.math.RoundingMode` parity set.
 
 **One thing the record did not say, decided during implementation:** `RoundingMode` is a
-`uint8` + `iota`, *not* the `type X string` shape §3.6 rule 8 prescribes. **[SPEC EDIT OWED]**
+`uint8` + `iota`, *not* the `type X string` shape §3.6 rule 8 prescribes. **[SPEC EDIT LANDED — v0.9.5]**
 Rule 8's shape exists for enums that cross a persistence or wire boundary, where a
 self-describing stored token is worth the width. A `RoundingMode` is an *argument* — never
 persisted, never transmitted — so the property that matters is the opposite one: that the zero
@@ -510,7 +598,7 @@ not fit", not one per operation. Three details that a shorter version gets wrong
    uses `rem` against `den/2` rather than `2*rem` — overflow-free, and it makes the
    odd-denominator case (where no exact tie exists) explicit rather than accidental.
 
-### Error precedence — a stated contract **[SPEC EDIT OWED]**
+### Error precedence — a stated contract **[SPEC EDIT LANDED — v0.9.5]**
 
 Invalid mode → divide-by-zero → **overflow** → precision loss. When a result is both out of
 range and inexact, **overflow wins**: a value that cannot be held at all is more fundamental
@@ -730,7 +818,7 @@ given on the strength of no data at all. Every funding boundary would then read 
 and `Uncertain` is the safe default**: a caller who skips the check stalls rather than acting on a
 clock it does not have.
 
-### Timer delivery is pull-based **[SPEC EDIT OWED — an addition, not a deviation]**
+### Timer delivery is pull-based **[SPEC EDIT LANDED — v0.9.5, an addition]**
 
 The obvious design is a sink the Clock pushes into as timers come due. It is wrong here: §3.5 gives
 the **dispatcher** one total order over events *and* timers, so a Clock pushing on its own goroutine
@@ -750,7 +838,7 @@ identical in a replay.
 §1 defers (it needs `platform/events` and a persisted `DispatchSeq`). Building it now would be
 guessing at a shape with nothing to check it against.
 
-### The ordering rule, and the priority direction **[SPEC EDIT OWED — spec does not state it]**
+### The ordering rule, and the priority direction **[SPEC EDIT LANDED — v0.9.5]**
 
 One `timerQueue`, shared by both implementations, so "earliest by `(At, Prio, ID)`" has one
 definition. Sharing is deliberate: a suite passing against two independent comparators would only
@@ -869,21 +957,23 @@ composition of four narrow interfaces, not a god-interface). **The risk to watch
 
 ---
 
-## RESUME HERE — updated end of session 3
+## RESUME HERE — updated end of session 4
 
 **Environment, verified — do not re-derive.** Go 1.26.0. Remote `github.com/giiorg/arb-lab`. Branch
-`feat/milestone-1-foundation` at **`f146855`**, tree clean, `make ci` green (fmt-check → vet both
+`feat/milestone-1-foundation` at **`86b71c6`**, tree clean, `make ci` green (fmt-check → vet both
 modules → custom gates → race tests both modules, `RAPID_SEED` pinned). Test-only dependency
 `pgregory.net/rapid v1.3.0` added; §11's "never a dependency" governs production code, untouched.
 `bitnet-backend-go` is **not on this machine** — a described style, not a readable source.
 
 **Two outward-facing actions are still owed and were deliberately not taken.** `main` was
-fast-forwarded locally to the v0.9.4 spec but **has never been pushed** (57 commits ahead of
-`origin/main`), and `feat/milestone-1-foundation` has never been pushed — it now carries 15
+fast-forwarded locally to the v0.9.4 spec but **has never been pushed** (58 commits ahead of
+`origin/main`), and `feat/milestone-1-foundation` has never been pushed — it now carries 20
 commits. Confirm with the user before pushing either.
 
-**Milestone 1's first slice (§1) is now CODE-COMPLETE.** Scaffolding, `platform/fixedpoint`,
-`platform/clock`, and both gates. What remains is documentation debt and two judgement calls, below.
+**Milestone 1's first slice (§1) is CODE-COMPLETE and its documentation debt is now DISCHARGED.**
+Scaffolding, `platform/fixedpoint`, `platform/clock`, three gates, and — as of session 4 — all ten
+[SPEC EDIT OWED] items landed as **build-spec v0.9.5** plus an ADR §3 implementation-decision block.
+**There are no open spec-edit items and no open questions.**
 
 ### Done, so do not redo
 
@@ -895,48 +985,40 @@ commits. Confirm with the user before pushing either.
    four total invariants, six negative controls, a gate on the oracle cross-check justified from
    `math/big` source, and its corpus reach measured rather than assumed (§5d). **`platform/fixedpoint`
    is COMPLETE.** Do not reopen it; `make fuzz` is available if a longer explorer run is wanted.
-5. ✅ **`nofloat` (§4b) and `notimenow` (§4c)** — both built, registered in the multichecker, and
-   bite-checked at 8/8 and 7/7 mutations. **The analyzer roster is 3 of 6 built**; the other three
+5. ✅ **`nofloat` (§4b) and `notimenow` (§4c, §4d)** — both built, registered in the multichecker, and
+   bite-checked at 8/8 and 16/16 mutations. **The analyzer roster is 3 of 6 built**; the other three
    stay deferred for the reasons §4 gives (nothing to police yet). `nofloat` fired on real code and
-   both hits were resolved, not suppressed.
+   both hits were resolved, not suppressed. **`notimenow` now polices `engine/` too, with a
+   transport-only escape** — user-approved, §4d, and it carries a falsifiable claim to revisit: if
+   `engine/venue` ships without ever using the escape, delete the mechanism.
 6. ✅ **`platform/clock`** (§5e) — the four spec'd methods, `Wall` + `TestClock`, `ServerTime` with a
    three-valued `Passed()`, the shared `(At, Prio, ID)` queue, and a conformance suite run against
    both implementations with **11 negative controls and a positive control**. 18/18 mutations caught.
    **Do not reopen it.** Timer *delivery* is pull-based via a separate `TimerSource`; waking a live
    consumer is deliberately left to the dispatcher.
 
+7. ✅ **All ten [SPEC EDIT OWED] items landed (session 4)** — `build-spec.md` is **v0.9.5**, ADR
+   `adr-history.md` carries the milestone-1 implementation-decision block, and the markers throughout
+   this record now read **[SPEC EDIT LANDED — v0.9.5]**. The `boundary/` flatten rewrote 26 path
+   occurrences and left `boundary/lint` in §3.6 alone, as instructed. **Do not re-apply any of them.**
+8. ✅ **Rule 5's `engine/` scope — the milestone's one user question, asked and answered YES**
+   (§4d). Built, bite-checked 9/9, committed. **Do not re-ask.**
+
 ### Next work, in order
 
-1. **Land the [SPEC EDIT OWED] items — now ten:**
-   - the `boundary/` flatten across `build-spec.md` §3.2/§11 (~30 occurrences, and **do not rewrite
-     `boundary/lint` in §3.6** — it means "a boundary-or-lint test", not a path)
-   - `kernelpurity` as a fifth structural rule
-   - `exhaustiveswitch` as a sixth (deferred; try `golangci-lint`'s `exhaustive` first)
-   - the Go-vs-Rust ADR §3 entry (evaluated-and-rejected)
-   - **`RoundingMode` as a documented exception to rule 8's `type X string` shape** (§5)
-   - **the error-precedence contract**: invalid mode → divide-by-zero → overflow → precision loss
-     (§5b)
-   - **`notimenow` covers the whole ambient-time family**, not literally `time.Now()`: rule 5's text
-     names one function, the gate bans nine. The scope it states (which packages) is unchanged, but
-     the text should say so rather than leaving the gate broader than the rule (§4c)
-   - **an open question, not a decision: should rule 5 reach `engine/` adapters?** A venue adapter
-     stamping a received message with this machine's clock is arguably how a wrong timestamp enters
-     the system. The `engine/venue` fixture currently pins the narrow scope deliberately. **Ask
-     before widening** (§4c)
-   - **`TimerSource` as an addition to §3.5** — timer consumption is pull-based on an interface
-     separate from `Clock`, and the spec's listing shows neither. Also record that waking a live
-     consumer is unbuilt and belongs to the dispatcher (§5e)
-   - **the timer priority direction** — lower `Prio` is more urgent, so the zero value is the most
-     urgent. §3.5 says "ties broken by prio then id" without stating the direction, and it is not
-     a detail: the opposite convention silently deprioritises an unset safety timer (§5e)
-2. **Still owed:** the timeboxed `gremlins` attempt, reported honestly either way. Note the negative
-   controls across `fixedpoint` and `clock` now cover much of what mutation testing would have (37
-   hand-applied mutations across the two, 37 caught after one gap was closed); the remaining value
-   is in finding *unanticipated* survivors.
-3. **Then milestone 1's second slice**, per §1's deferred table — the next packages up the spine are
+1. **The timeboxed `gremlins` attempt**, reported honestly either way. Note the negative controls
+   across `fixedpoint` and `clock` plus the analyzer mutation passes now cover much of what mutation
+   testing would have (**46 hand-applied mutations, 46 caught** after one gap was closed and one
+   no-op was reported rather than counted); the remaining value is in finding *unanticipated*
+   survivors. If `gremlins` is unmaintained to the point of not running on Go 1.26, **say so and stop**
+   — that is a real finding, and §0 already records Go's weak mutation tooling as a known cost.
+2. **Milestone 1's second slice**, per §1's deferred table — the next packages up the spine are
    `platform/apperror` and `platform/ids` (both import nothing), then `platform/events` (needs
    `clock`, which now exists). `hexboundary` and `singlewriter` stay deferred until a bounded
    context exists to police.
+3. **A `CLAUDE.md` line is owed for the flattened layout** (§2): `ls internal/` now shows contexts and
+   machinery groups as peers, so the taxonomy needs one sentence — first-class business capabilities
+   are top-level, supporting machinery is grouped under `platform/`, `engine/`, `app/`.
 
 ### Standing lessons — apply these, do not rediscover them
 
@@ -946,7 +1028,14 @@ commits. Confirm with the user before pushing either.
   test instead); one was simply a **bad mutation** that failed to allocate. A surviving mutant is
   either a test gap or a wrong mutant, and telling which is the actual work.
 - **Positive controls, always.** Any harness that reports "the broken thing failed" must also show
-  the real thing passes, or a universally-objecting predicate reads as a perfect result.
+  the real thing passes, or a universally-objecting predicate reads as a perfect result. Corollary
+  found the hard way in §4d: when a fixture changes role — `engine/venue` went from clean control to
+  offending — **check whether it was the only positive control**, and replace it before moving on.
+- **A mutation harness must prove the mutation applied.** A pattern that fails to match produces
+  *exactly* the output of a caught mutation: the suite is green before, red never happens, and the
+  script reports success. The mutation script therefore `cmp`s the file before and after and prints
+  `NO-OP!!` rather than `caught` when nothing changed. It fired on its first run (§4d). This is the
+  vacuous-coverage lesson again, one level up: **the harness itself needs a control.**
 - **Write the oracle before trusting the implementation.** The one real defect this session was
   found by the two disagreeing, not by review.
 - **Verify tooling semantics from source.** Twice now. `-rapid.seed`'s default turned out to be the
