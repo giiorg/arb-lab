@@ -1582,14 +1582,14 @@ exactly as it does for a failing test (session 7); and it runs **bounded** and r
 because a mutation can make a test *hang* rather than fail, and a hanging test names no defect
 (session 7). **A `caught` with 0 failing tests is a contradiction — that is what exposed `NOBUILD`.**
 
-**Both branches are PUSHED and in sync (re-verified at the end of session 6).**
+**Both branches are PUSHED and in sync (re-verified at the end of session 7).**
 `feat/milestone-1-foundation` tracks `origin/feat/milestone-1-foundation`. **Check it rather than
 trust this paragraph** — `git rev-list --left-right --count @{u}...HEAD` should print `0 0`. The
 head commit is deliberately not named here: a paragraph that cites its own commit hash is stale the
 moment the commit containing it is written, and a hash that a reader then finds does not match is
-worse than no hash. Session 6's push was a clean fast-forward, with divergence checked before
-pushing rather than assumed — the same discipline session 5 applied to `main` (a strict ancestor,
-verified with `git merge-base --is-ancestor`). **No outward-facing action is owed.**
+worse than no hash. Every push in sessions 5–7 was verified as a clean fast-forward **before**
+pushing rather than assumed — `git merge-base --is-ancestor @{u} HEAD` for the direction, and the
+left-right count for the magnitude. **No outward-facing action is owed.**
 
 **A PR has *not* been opened, and that is deliberate — the branch is pushed, not proposed.** Open
 one only if asked. Note that the branch now carries the whole of milestone 1 and will keep growing:
