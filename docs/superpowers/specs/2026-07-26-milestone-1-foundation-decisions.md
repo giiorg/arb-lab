@@ -2246,7 +2246,241 @@ test asserting the refusal.
 
 ---
 
-## RESUME HERE — updated end of session 11
+## 14. The second slice continued (session 12) — `platform/boot`
+
+§3.2's bootstrap phases and §7.5's reconcile-only boot. Seven files, 54 tests, and the kernel is
+**ten packages** — the last one §1's deferred table names. **62 hand mutations, 62 caught**, no
+survivors after diagnosis. Three `[SPEC EDIT OWED]`, taking the slice's total to **eight**.
+
+The package imports `platform/clock` and nothing else. It is the first kernel package whose subject
+is the *process* rather than a value, and the two questions that shaped it were both about type
+signatures rather than algorithms.
+
+### 14a. Reconcile-only is a POSTURE, not a stage — the defect the obvious shape has
+
+**Decision: `Sequence.Run` and `Checklist.Posture` return a four-valued `Posture`, not an error.**
+
+§7.5 reads as a sequence, and the obvious implementation follows the prose: a list of steps, each a
+`func() error`, trading starts when the last returns nil. That shape is wrong, and it is wrong in
+the *signature* — nowhere a test would look.
+
+A `func() error` has two outcomes. §7.5 has three. The third is **alive and refusing**, and the spec
+states it three separate times without ever naming it: foreign orders and unexplained position
+deltas "alert for operator clearance" and are "not auto-corrected"; an `Ambiguous` MarginOp blocks
+new openings "until the staged-float ledger is explicitly reconciled"; and §7.4 puts a bot that
+recovers mid-takeover in reconcile-only "until an operator clears it". None of the three is a boot
+failure and none is a boot success.
+
+Collapsing it costs money in **both** directions, which is what makes it worth a type rather than a
+convention:
+
+- **Folded into failure**, the process exits. A condition the spec answers with "alert an operator
+  and keep monitoring" is instead answered by making §7.4's actuator cover a host that died
+  *deliberately* — with the exposure it was watching now unmanaged by anything on the machine.
+- **Folded into success**, trading resumes over an unexplained position delta, which is §7.5's own
+  example of the thing that must not be auto-corrected.
+
+So the ladder is `PostureHalted` → `PostureReconcileOnly` → `PostureStopOpening` → `PostureTrading`,
+ordered by permissiveness with the **zero value the most restrictive**, and `Permits` is one `>=`.
+Four rather than a boolean because §7.5 states two *different* refusals in one paragraph — "new
+execution disabled while state is rebuilt", and an Ambiguous MarginOp blocking "new openings (not
+safety actions, which read live state)". A boolean may-I-trade collapses them, and again both
+directions cost: treating an ambiguous margin op as a full stop withholds a flatten the spec permits,
+and treating a mid-reconcile boot as stop-opening admits a reduction sized from a position the
+process has not finished rebuilding.
+
+`Act` is deliberately three values and **reads are not one of them**. §7.5's own wording — safety
+actions "read live state" — makes reading the thing that survives when writing does not, and §7.4's
+watcher observes with no trading key at all. A posture able to withhold a read could blind the
+monitoring that decides when to escalate.
+
+**Do not collapse `Posture` into a boolean, and do not add a read `Act`.**
+
+### 14b. §7.5's gates latch or they don't, and the spec never says which **[SPEC EDIT OWED]**
+
+**Decision: `OutcomeNeedsOperator` is latching. Only `Clear` lifts it, and `Clear` returns the gate
+to `OutcomeUnreported` — never to `OutcomePassed`.**
+
+§7.5 gives every one of its preconditions the same verb — asserted before trading resumes — and
+states, *in the same paragraph*, two conditions that do not clear the same way. A journaled MarginOp
+resolves itself through its evidence contract. A foreign order or an unexplained position delta
+"alert for operator clearance" and are "not auto-corrected". §7.4 then makes the second kind explicit
+for the fence: return to normal operation requires the terminal outcome, "explicit operator
+clearance, **and a fresh `VerifyFence` propagation test** — never health-flap re-entry".
+
+So the spec has latching preconditions and self-clearing ones, and nowhere says the distinction
+exists. A uniform checklist would let a gate that failed and then passed on its own retry re-admit
+trading — **which is exactly the health-flap re-entry §7.4 forbids, arriving through §7.5's door.**
+
+The `Clear`-to-`Unreported` half is the one that is easy to get wrong in the expensive direction.
+§7.4 requires clearance *and* a fresh test, so clearance restores the gate's **ability to pass**, not
+the pass. Clearing straight to `Passed` would turn an operator acknowledging an alert into an
+assertion about venue state they never made.
+
+**Do not make `Clear` pass the gate**, and **do not make every outcome freely re-reportable.**
+
+### 14c. The gate roster is a closed vocabulary — where the "machinery, not a table" precedent stops
+
+`ratelimit` §13, `config` §10a and `apperror` §8a all refused to hold data. `boot` holds §7.5's seven
+gate names, and the precedent genuinely does not carry: those packages refused data the spec
+**deliberately leaves to the caller** — venue budgets `venue-profiles.md` does not record, risk caps
+whose meaning belongs to the owning context. §7.5 is the opposite case. It *names* its preconditions
+normatively and the list is closed, so the roster is spec content, and holding it here is what lets
+an unreported gate be a refusal that says **which one**.
+
+What is still not here is *how* any gate is established. The journal join, the net-delta computation
+and the §4.1 posture REST calls belong to `oms`, `risk` and `engine/venue`.
+
+`GateWriterAuthority` is the one gate §7.5 does not list — §7.4 does, from the other end. It is also
+the gate whose clearance rule differs from the rest, which is how §14b was found.
+
+### 14d. The ordering constraints — the milestone's third user question **[SPEC EDIT OWED]**
+
+**Decision, put to the user and taken: enforce the constraints §3.2's order implies, with an open
+extension slot. Rejected: a closed five-value total order, and documentation only.**
+
+§3.2 states the roster in a table cell — "signal, config, obs, reconcile-only-boot, graceful
+shutdown" — as a list. Two of those positions are load-bearing, and **both failures are invisible
+when they happen**:
+
+- **Signal is first** because a Go process's default disposition for SIGINT and SIGTERM is to *die*.
+  Installed after a forty-second journal join, an operator's interrupt during that join terminates
+  the process outright — no graceful shutdown, no flush, no record that a shutdown was requested.
+  The window where a boot is slowest is the window where an operator is most likely to interrupt it.
+- **Observability precedes anything that can fail** because every later phase reports its failure
+  through the machinery this one installs. Started late, a boot that dies in the journal join does
+  not merely lose telemetry — it dies **silently**, leaving an exit code as the diagnosis.
+
+The rejected alternatives, with why:
+
+- **A closed five-value total order** was stronger but unwireable: §11 gives the three binaries
+  genuinely different phase sets, and a venue client or a WebSocket subscription would have to be
+  smuggled into a bucket that misnames it. `arblab-actuator` has no HTTP surface at all.
+- **Documentation only** matched the "machinery, not a table" precedent most literally, and left both
+  silent failures above to code review.
+
+`KindService` is the open slot; `KindReconcile` is optional (a backtest run has no venue truth to
+join to) but must be last if present. `KindSignal`/`KindConfig`/`KindObservability` are required, and
+that carries a **falsifiable claim** in the spirit of `notimenow`'s escape: if a binary lands that
+legitimately has none of one of them, relax the rule rather than declaring a phase that does nothing
+— a required check satisfied by a stub is worse than no check.
+
+Every refusal names the phase **and** the rule, because four constraints share `ErrPhaseOrder` and
+§10h already paid for a sentinel that could not say which check fired.
+
+### 14e. The shutdown budget is a safety number, not a timeout **[SPEC EDIT OWED]**
+
+§7.4 gives the watchdog a host-silence trigger. §7.5 gives the process a graceful shutdown. Nothing
+in the spec joins them — but they run against the same wall clock, and the join has a wrong side.
+
+**A total stop budget at or above the silence threshold makes an ordinary restart indistinguishable,
+to the watchdog, from a dead host.** It escalates, the actuator fences the bot's signer mid-flush and
+latches a takeover epoch, and the process that comes back up finds itself fenced and — §7.4 — "stays
+in reconcile-only until an operator clears it". **A deployment becomes an operator-cleared incident,
+and the cause is a sum of durations in a wiring file that nothing was adding up.** `Sequence.Validate`
+adds them up, and refuses at `>=` rather than `>`: at exactly the threshold the watchdog fires.
+
+`WatchdogSilence` is required — unset is refused rather than read as unbounded, the standing
+forgotten-field rule.
+
+### 14f. Every closer runs, including after the budget is gone
+
+The obvious design — stop calling closers once the budget is spent — is wrong here in a way specific
+to **reverse order**. Reverse order means the closers that run *last* are the ones that started
+*first*: the journal, the outbox, the log handler with records still buffered. A shared budget
+drained by whichever venue client hangs first would skip precisely the closers whose work is the
+reason a graceful shutdown exists — silently.
+
+Skipping also **buys nothing**. This package has no `os.Exit` and no goroutine to abandon a wedged
+closer on, so a skipped closer does not shorten the wall clock by one millisecond; it only means the
+flush did not happen while the process sat there anyway.
+
+So the bound is **declared, allotted and accounted for — not enforced**, and the package says so
+rather than pretending otherwise. The enforcement it lacks lives where an operator can reach it:
+`SignalImmediateHalt`. **Do not add an early exit to `Shutdown`, and do not give it a goroutine.**
+
+### 14g. Why handing an operator a kill switch is the SAFE direction here
+
+The instinct in a trading system runs the other way, so it is recorded. The signal policy escalates:
+first interrupt → graceful shutdown, **every** subsequent one → immediate halt (ratcheting rather
+than counting to two — an operator who has pressed twice and seen nothing presses again, and a
+policy that counted to exactly two would answer the third press with the graceful path it has
+already failed to complete).
+
+That is safe because **host death is a covered state**: §7.4's off-host actuator exists precisely to
+flatten exposure after the bot host and its journal die. A process that is *alive but wedged in
+shutdown* is **not** covered — the watchdog reads liveness, so it will not escalate, and the operator
+cannot fix it. Between a covered failure and an uncovered one, the second interrupt should produce
+the covered one.
+
+Two smaller decisions in the same file:
+
+- **SIGINT and SIGTERM are deliberately not distinguished.** A container runtime sends SIGTERM then
+  SIGKILL on its own schedule; treating the two stop signals differently would make the graceful path
+  depend on which arrived.
+- **`SignalBufferMin = 2`, and `Install` refuses a smaller channel.** `os/signal` never blocks on
+  delivery — a send to a full channel is **dropped, with nothing reported**. That makes the buffer a
+  correctness property, and it fails in the worst place: the second interrupt is *by construction*
+  the one that arrives while the first is being handled, so an unbuffered channel drops exactly the
+  signal an operator presses twice to send — the escape hatch of §14f goes missing.
+
+### 14h. What is deliberately absent — the §11a line, drawn again
+
+The journal is milestone 3, so absent **as a decision**: the join itself (`OrderByClientID`, `Fills`,
+`Positions`, `FundingLedger`), the write-ahead journal replay, the net-delta computation and the §4.1
+posture REST calls.
+
+A `Reconciler` port here would compile and would read as §7.5's contract, and it would be a shape
+guessed at with nothing to check it against — its arguments are the journal's cursors, which do not
+exist. Worse than `outbox`'s rejected `Append`, in one respect: it would make the checklist look
+**satisfiable**, since an implementation returning nil would report every gate `Passed` with nothing
+joined, and the boot would be green.
+
+What *is* buildable is everything that decides what the join's result **means** — the gates, their
+outcomes, the clearance rule, the posture ladder, the ordering constraints, the teardown bound — and
+none of it changes when the journal lands.
+
+### 14i. Bite-check — 62 mutations, 62 caught, and four findings from the exercise
+
+53 caught on the first pass; the other nine were the interesting ones, and none was a wrong mutant.
+
+- **Two `TIMEOUT!!`s, and they were a real test defect.** Breaking the subscription — dropping SIGHUP
+  from `Watched()`, and removing the `signal.Notify` call outright — made `TestInstallDelivers`
+  **hang** on an unbounded channel receive rather than fail. §5e's lesson arriving through the
+  harness for the second time: *a hanging test names no defect*. The two claims that file makes about
+  `Install` actually subscribing were **unchecked while looking covered**. `recvSignal` is now a
+  bounded receive, and both mutations kill.
+- **One `SURVIVED`, and it was neither a gap nor a wrong mutant.** `minPostureFor`'s final
+  `return PostureHalted` is unreachable from `Permits`, which validates the act one line earlier —
+  but Go requires the function to return on every path, so it is not deletable either. Pinned by an
+  internal test that calls it directly, the same treatment `fixedpoint` gave its unreachable-by-guard
+  branches. The *direction* is what the test asserts: an act nothing recognises must map to the
+  posture that permits nothing.
+- **Five `NOBUILD!!`s, all mine.** Every one was an `if <condition> { → if false {` that orphaned the
+  variable the condition read. Session 7's standing lesson, re-learned mechanically: **re-aim to
+  substitute a wrong value rather than delete a use** (`if current != X` → `if current != current`,
+  `if i < obs` → `if i < obs-100`). All five kill once re-aimed.
+- **One redundancy found before mutating, by predicting the verdict.** `Install` had an explicit
+  nil-channel guard that is unreachable: `cap` of a nil channel is 0, so the buffer check refuses it
+  first — and "buffer 0, minimum 2" is a *true* statement about a nil channel. Deleted, with the
+  surviving path bite-checked in its place. Likewise two lines in `unwind` (`r.started = nil`,
+  `r.done = true`) that no caller can observe, since every caller is a `Run` failure path returning a
+  nil `*Running`.
+
+**The fixture-dimension checklist was applied in advance this time, and it changed five fixtures:**
+
+| Fixture | What was pinned to the collapsing value |
+|---|---|
+| Reverse teardown | **Three** closers make "reverse" and "swap the ends" the same order. Five. |
+| `Checklist.Posture` | Every gate reported ⇒ the default-deny path is unreachable. One gate is now never reported. |
+| `Checklist.Posture` again | The worst outcome declared **first** ⇒ "name the first" and "weakest wins" agree. It is declared last, and the mirror order is asserted too. |
+| `Blocking()` | Gates declared in sorted order ⇒ "sorted" and "declaration order" agree. Declared descending. |
+| `Overran` / watchdog budget | Every case strictly inside or outside ⇒ `>` and `>=` agree. Both now have an **exact-equality** case, in opposite directions: a closer at exactly its budget has *not* overrun; a shutdown budget at exactly the silence threshold *is* refused. |
+| Signal ratchet | Two interrupts ⇒ "count to two" and "ratchet" agree. A **third** interrupt is sent. |
+
+Seven now, and the tell was constant again: **the fixture did not contain the thing under test.**
+
+## RESUME HERE — updated end of session 12
 
 **Environment, verified — do not re-derive.** **Go 1.26.5** (upgraded from 1.26.0 in session 5;
 both modules declare `go 1.26.0` as the minimum and `toolchain go1.26.5` as what to build with —
@@ -2265,7 +2499,9 @@ exactly as it does for a failing test (session 7); and it runs **bounded** and r
 because a mutation can make a test *hang* rather than fail, and a hanging test names no defect
 (session 7). **A `caught` with 0 failing tests is a contradiction — that is what exposed `NOBUILD`.**
 
-**Both branches were PUSHED and in sync at the end of session 10.**
+**`platform/ratelimit` (session 11) and `platform/boot` (session 12) are committed but NOT
+pushed** — check rather than trust this sentence. Both branches were in sync at the end of
+session 10.
 `feat/milestone-1-foundation` tracks `origin/feat/milestone-1-foundation`. **Check it rather than
 trust this paragraph** — `git rev-list --left-right --count @{u}...HEAD` should print `0 0`. The
 head commit is deliberately not named here: a paragraph that cites its own commit hash is stale the
@@ -2280,13 +2516,17 @@ if a PR is ever wanted, it is worth asking whether it should be one per slice ra
 the milestone.
 
 **Milestone 1's first slice (§1) is CODE-COMPLETE and closed out (session 5). The SECOND SLICE is
-seven packages in:** `platform/apperror` and `platform/ids` (session 6, with the `Venue` move out of
+EIGHT packages in:** `platform/apperror` and `platform/ids` (session 6, with the `Venue` move out of
 `platform/clock`), then `ids`'s instrument identity and **`platform/events`** (session 7), then
 **`platform/config`** (session 8), then **`platform/outbox`** (session 9), then
-**`platform/observability`** (session 10), then **`platform/ratelimit`** (session 11). The kernel is
-**nine packages** — `fixedpoint`, `clock`, `apperror`, `ids`, `events`, `config`, `outbox`,
-`observability`, `ratelimit` — plus three gates. **There are no open questions.** `platform/boot` is
-the next package up the spine, and it is the last one §1's table defers.
+**`platform/observability`** (session 10), then **`platform/ratelimit`** (session 11), then
+**`platform/boot`** (session 12). The kernel is **ten packages** — `fixedpoint`, `clock`, `apperror`,
+`ids`, `events`, `config`, `outbox`, `observability`, `ratelimit`, `boot` — plus three gates.
+**There are no open questions.**
+
+**§1's deferred kernel table is now EXHAUSTED — `boot` was the last one.** So the next work is not
+another kernel package: it is either closing the slice (land the eight spec edits as one release,
+the v0.9.5 precedent) or starting the first bounded context. See "Next work" below.
 
 **The engine module still has ZERO production dependencies** (only test-only `pgregory.net/rapid`).
 That is now a decision with a record rather than an accident: §12a put taking
@@ -2299,7 +2539,23 @@ where the per-binary `/metrics` decision lives (§11 gives `arblab-actuator` no 
 and tracing lands once §3.5's `DispatchSeq` exists to hang a span on. Both deferred on argument
 (§12a, §12f), not forgotten.
 
-**FIVE SPEC EDITS ARE OWED, and they are tracked by markers in the code, not by this paragraph.**
+**EIGHT SPEC EDITS ARE OWED, and they are tracked by markers in the code, not by this paragraph.**
+§14b: §7.5 gives every one of its preconditions the same verb — asserted before trading resumes —
+while stating IN THE SAME PARAGRAPH two conditions that do not clear the same way (a MarginOp
+resolves through its evidence contract; a foreign order "alerts for operator clearance" and is "not
+auto-corrected"). §7.4 then makes the second kind explicit for the fence — clearance AND a fresh
+propagation test, "never health-flap re-entry". So the spec has latching preconditions and
+self-clearing ones and never says the distinction exists; a uniform checklist lets a retry re-admit
+trading, which is §7.4's forbidden re-entry arriving through §7.5's door.
+§14d: §3.2 states boot's phase roster as a LIST in a table cell and never says the positions are
+constraints. Two are load-bearing and both failures are silent — signal installed late means an
+interrupt during a slow boot kills the process on the default disposition with no flush, and
+observability started late means a boot that dies in the journal join dies with an exit code as its
+only diagnosis.
+§14e: §7.4 gives the watchdog a host-silence trigger and §7.5 gives the process a graceful shutdown,
+and nothing joins them — but a total stop budget at or above the threshold makes an ORDINARY RESTART
+indistinguishable from a dead host, so the actuator fences a bot mid-flush and the restart comes back
+up fenced, needing operator clearance.
 §13a: §7.6 states a backoff THRESHOLD ("~70% weight") without saying what backs off, while §7.1 and
 §6.7 state a RESERVATION without saying how much or what happens when it runs out — so the spec
 relies, unstated, on the priority ordering that makes the two one mechanism, and on capacity being a
@@ -2319,7 +2575,7 @@ reproduce its source; the code makes the guarantee explicit and scopes it to the
 deliberately not landed yet:
 the v0.9.5 precedent is to batch a slice's spec edits into one coherent release at slice close.
 **Before closing the second slice, `grep -rn "SPEC EDIT OWED" internal/`** (code only — the doc set is full of PROSE about past markers, so a repo-wide grep is mostly false positives) and land what it
-finds. It should report exactly five.
+finds. It should report exactly **eight**.
 
 **The `CLAUDE.md` owed since §2 now exists** (repo root, written session 6). It carries the
 `internal/` taxonomy, the doc-set map, the build split, the three enforced gates, and the standing
@@ -2432,14 +2688,42 @@ working rules. That item is discharged.
     `clock`'s reason, plus §6.3 needs a predicate rather than a wait.
     **Do not report the EARLIEST release instant when several limits refuse** — §13f.
 
+18. ✅ **`platform/boot`** (§14a–§14i) — `Posture`/`Act`, `Gate`/`Outcome`/`Checklist`,
+    `PhaseKind`/`Phase`/`Sequence` with §3.2's ordering constraints, `Run`/`Shutdown`, and the signal
+    policy. 62 mutations, 62 caught, no survivors. **This exhausts §1's deferred kernel table.**
+    **Do not collapse `Posture` into a boolean or an error** — §14a; §7.5 has three outcomes and the
+    third is the one the package is named for, so a `func() error` loses it in the signature.
+    **Do not add a read `Act`** — §14a; a posture able to withhold a read could blind the monitoring
+    that decides when to escalate.
+    **Do not make `Clear` return a gate to `OutcomePassed`** — §14b; §7.4 requires clearance AND a
+    fresh propagation test, so clearance restores the ability to pass, not the pass.
+    **Do not make every outcome freely re-reportable** — §14b, the same rule from the other side.
+    **Do not add a `Reconciler` port** — §14h; worse than `outbox`'s rejected `Append`, because a
+    nil-returning implementation reports every gate `Passed` with nothing joined and the boot is
+    green. It lands with the journal, in milestone 3.
+    **Do not close the `PhaseKind` roster** — §14d, the user's decision, with both rejected shapes
+    recorded; §11's binaries have different phase sets.
+    **Do not add an early exit to `Shutdown` when the budget runs out, and do not give it a
+    goroutine** — §14f; reverse order makes the skipped closers the foundational ones, and skipping
+    shortens nothing because this package cannot make the process exit.
+    **Do not lower `SignalBufferMin` or drop the `Install` buffer check** — §14g; `os/signal` drops a
+    send to a full channel silently, and the dropped one is the second interrupt.
+    **Do not delete `minPostureFor`'s final return when a mutant survives on it** — §14i; it is
+    unreachable from `Permits` and not deletable either, and `posture_internal_test.go` pins it.
+
 ### Next work, in order
 
-1. **`platform/boot`** — §7.5's reconcile-only boot phase, and the last package §1's table defers.
-   Note what it can and cannot do yet: the journal is milestone 3, so the *phase* and its refuse-to-
-   trade posture gates are buildable while the journal join is not — read §11a's argument before
-   deciding where that line falls, because it is the same one. **The parity dispatcher is what
-   `events` was the last prerequisite for** — but it also needs a persisted `DispatchSeq` log, so it
-   is not simply "next" (§9b).
+0. **DECIDE WHAT CLOSES THE SLICE — the first real fork since the kernel table was written, because
+   the table is now empty.** Two candidates, and they are not obviously ordered:
+   (a) **land the eight `[SPEC EDIT OWED]` items as one release** (the v0.9.5 precedent — batch a
+   slice's edits into one coherent spec change at slice close, so external review reads deliberate
+   change rather than drift); or (b) **start the first bounded context**, which makes
+   `hexboundary`/`singlewriter`/`exhaustiveswitch` buildable for the first time (§1, §4 defer all
+   three on "a lint over an empty tree passes trivially"). (a) is the smaller, and it is the one the
+   slice's own convention says comes first. **Worth putting to the user**, since it is a scope call.
+1. ~~**`platform/boot`**~~ — **DONE (session 12, §14).** §1's deferred kernel table is exhausted.
+   **The parity dispatcher is what `events` was the last prerequisite for** — but it also needs a
+   persisted `DispatchSeq` log, so it is not simply "next" (§9b).
 1b. **`platform/outbox`'s store half is OWED, and it lands with the OMS journal in milestone 3** —
    the `Append` verb, the SQL, the migration and the driver. It is deferred on §11a's argument, not
    forgotten. When it lands, the thing to check first is that the append and the journal write are
@@ -2489,7 +2773,14 @@ working rules. That item is discharged.
   situation with the same 50/50 — was tested once, and a mutant survived on the coin flip (§9i). When a
   test earns a repetition, a bound or an isolation trick, go and look for the symmetric case
   immediately, because the defect will come back through the other door.
-- **The fixture-dimension lesson has now fired SIX times, so treat it as a checklist item rather
+- **A test that HANGS is not a test that fails, and the fix is a bounded receive — this is now
+  twice.** §5e found it in `clock`; §14i found it in `boot`, where breaking the signal subscription
+  made `TestInstallDelivers` block forever on an unbounded channel read rather than fail. Both
+  claims that test made about `Install` actually subscribing were **unchecked while looking
+  covered**, and the harness reported `TIMEOUT!!` rather than a kill. **Any test that receives from a
+  channel a mutation could stop feeding needs its own bound**, or the mutation that breaks the feed
+  reports nothing.
+- **The fixture-dimension lesson has now fired SEVEN times, so treat it as a checklist item rather
   than a war story.** §5d: 162 of 348 fuzz corpus entries reached the oracle. §9i: every coalescing
   test used a mailbox depth of 1, where "merge against the newest" and "merge against the oldest" are
   the same slot. §11f: every malformed-identifier fixture put its bad character mid-string, where
@@ -2501,8 +2792,10 @@ working rules. That item is discharged.
   worst" the same answer; and every `freeAt` case sat strictly inside or strictly outside the
   ceiling, where `<=` and `<` are the same predicate. **Before believing a validation suite, ask
   which fixture parameter is pinned to the value that collapses the distinction the code makes**, and
-  vary it. The tell is constant across all six: **the fixture does not contain the thing under
-  test.**
+  vary it. §14i applied the checklist **in advance** for the first time and it changed five
+  fixtures before a single mutation ran — most cheaply, a reverse-teardown test using three closers,
+  where reversing the slice and swapping only its ends are the same order. The tell is constant
+  across all seven: **the fixture does not contain the thing under test.**
 - **Check the FIXTURE dimension before believing the coverage.** Every coalescing test used a mailbox
   depth of 1, where "merge against the newest" and "merge against the oldest" are the same slot — so
   the branch was unreachable while looking covered (§9i). §5d's vacuous-run lesson generalises past

@@ -161,11 +161,21 @@ These are not style preferences. Each one was paid for.
   `ratelimit` did it twice in one session: two tests used a profile whose worst
   refusal was also the **first one evaluated**, so "name the first" and "name the
   worst" were the same answer; and every `freeAt` case sat strictly inside or
-  strictly outside the ceiling, where `<=` and `<` are the same predicate. **Six
-  times now**, which makes it a checklist item and not a war story: before
-  believing a suite, find the fixture parameter pinned to the value that
-  collapses the distinction the code makes, and vary it. The tell is that the
-  fixture does not contain the thing under test.
+  strictly outside the ceiling, where `<=` and `<` are the same predicate. Then
+  `boot`'s reverse-teardown test used **three** closers, where reversing the
+  slice and swapping only its ends produce the same order. **Seven times now**,
+  which makes it a checklist item and not a war story: before believing a suite,
+  find the fixture parameter pinned to the value that collapses the distinction
+  the code makes, and vary it. The tell is that the fixture does not contain the
+  thing under test. Run the checklist **before** the mutations rather than after
+  — in `boot` it changed five fixtures for free.
+- **A test that hangs is not a test that fails.** A mutation can make a test
+  *block* rather than break, so the harness reports `TIMEOUT!!` instead of a
+  kill and the claim was never checked while looking covered. `clock` found it
+  on a non-blocking send; `boot` found it on an unbounded channel receive, where
+  breaking the signal subscription left the test waiting for a signal that would
+  never arrive. Any test reading from a channel a mutation could stop feeding
+  needs its own bound.
 - **A fix applied in one place gets applied to its mirror.** `Receive` was tested
   across 200 trials because a Go `select` picks a ready case at random; `Send` —
   same situation, same coin flip — was tested once, and a mutant survived on it.
