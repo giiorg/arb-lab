@@ -221,16 +221,136 @@ falling through to `default`. **Deferred** because no state machines exist yet. 
 `exhaustive` linter is the off-the-shelf alternative to evaluate first — if it suffices, use it and skip
 the custom analyzer.
 
-### Analyzer roster: 6 planned, 1 built
+### Analyzer roster: 6 planned, 3 built
 
 | Analyzer | State | Notes |
 |---|---|---|
 | `kernelpurity` | **Built, green, bite-checked** | 5th rule, not in §3.6 |
-| `nofloat` | Pending, this slice | Type-aware; default-deny + `//nofloat:allow` |
-| `notimenow` | Pending, this slice | No `time.Now()` in `domain/`/`application/` |
+| `nofloat` | **Built, green, 8/8 mutations caught** | Type-aware; default-deny + enforced `//nofloat:allow` (§4b) |
+| `notimenow` | **Built, green, 7/7 mutations caught** | Whole ambient-time family, `go/types`-resolved (§4c) |
 | `hexboundary` | Deferred | No contexts to police |
 | `singlewriter` | Deferred | No OMS write repositories exist |
 | `exhaustiveswitch` | Deferred | No state machines yet; try `exhaustive` first |
+
+---
+
+## 4b. `nofloat` as built (session 3)
+
+Commit `d4846cf`. **The rule is not "the token `float64` does not appear", it is "no value here is a
+float"** — which is the whole reason it cannot be config. The three doors a regex cannot see:
+
+```go
+x := 1.5              // an untyped constant becoming float64 by inference
+return a / b          // both operands float-typed; no float token on the line
+s := d.Seconds()      // the standard library handing one over
+```
+
+The third is how it happens in practice: `time.Duration.Seconds()` and `strconv.ParseFloat` are the
+doors, and **neither spells "float" at the call site**.
+
+### Three implementation decisions
+
+- **`Underlying()`**, so `type Basis float64` is policed at every *use*, not only at its
+  declaration. Otherwise one type definition leaves the gate behind permanently.
+- **Tuples unwrapped.** A multi-value call's type is a `*types.Tuple`, not a `*types.Basic`, and
+  `strconv.ParseFloat` returns `(float64, error)` — without this the most likely single door is the
+  one case the rule misses.
+- **`complex` counts.** A pair of floats carries the same representation error, for one extra term
+  rather than a second analyzer later.
+
+### Diagnostics are per line because the escape is per line
+
+Deliberate: a finer granularity would let one annotation silently answer several findings. The
+suppression unit and the diagnostic unit are the same unit.
+
+### The escape is enforced, not merely offered
+
+- A bare `//nofloat:allow` **does not exempt** — an exception without a reason is an unexplained
+  hole, and a malformed escape that worked as well as a valid one would be the only escape anyone
+  ever wrote.
+- An escape on a line with **no float is reported as unused**. Otherwise it outlives the float it
+  was written for and pre-authorises the next one to land on that line.
+- A **misspelled** directive (`//nofloat:allowance`) gets no diagnostic of its own. None is needed:
+  the float it failed to suppress is still reported, which is how the author finds the typo.
+
+**Both `//` and `/* */` forms are recognised, and the block form is load-bearing rather than
+cosmetic.** Go allows one `//` comment per line, so a line-form directive followed by an
+`analysistest` expectation is a *single* comment whose reason text swallows the expectation — the
+escape would succeed and the fixture would prove nothing. Without the block form **the rule's own
+malformed-escape fixtures could not be written at all**. Greppability is unaffected.
+
+### Registering it made it fire on real code, correctly, twice
+
+Both were genuine, and they wanted **opposite** treatment:
+
+- **`testing.AllocsPerRun` returns a `float64` mean**, and the float *cannot* be converted away at
+  the seam: a mean of 0.5 means half the runs allocated, so `int(allocs) != 0` would accept exactly
+  what the assertion exists to catch. Confined to one `mustNotAllocate` helper — four annotated
+  lines across two files collapsed into one place, and a duplicated assertion removed. **This is the
+  behaviour the gate is for.**
+- **The `"routes through float64"` negative control** is annotated *in place* on purpose. Those two
+  lines exist to BE the forbidden thing so the property can be shown to reject it, so they should
+  stay conspicuous rather than be tidied behind a helper.
+
+Four escapes in the engine, each with a reason, all greppable.
+
+---
+
+## 4c. `notimenow` as built (session 3)
+
+Commit `5ba3ed4`. Scope per `build-spec.md` §3.6 rule 5, unchanged: `domain/` and `application/`
+segments, matched **whole-segment and at any depth** (so `oms/domain/order` is domain code and a
+subdirectory is not an escape, while `domainless` is not caught by accident).
+
+### The whole ambient-time family, not just `time.Now`
+
+Rule 5 names `time.Now()`, and a gate that stopped there would be bypassed **by idiom rather than
+by evasion**: `time.Since(start)` *is* `time.Now().Sub(start)`, and it is simply how elapsed time is
+written in Go. Likewise `After`/`Tick`/`NewTimer`/`NewTicker`/`AfterFunc`/`Sleep`, which §3.5
+assigns to `Clock.SetTimer` so the backtester can *drive* time rather than wait for it — a domain
+that sleeps is a domain that cannot be replayed. This is rule 5's **intent**; its stated scope is
+*which packages*, and that is untouched.
+
+### Resolved through `go/types`, and reported at the reference
+
+`import wall "time"; wall.Now()` and a dot-imported `Since(t)` are both caught; a textual
+`"time.Now"` match finds nothing in either. And the diagnostic is on the **reference**, not the
+call: `var deadline = time.Now` is the same violation, invisible to a call-shaped check.
+
+### The receiver check is load-bearing — the mutation pass found it
+
+`time.After` schedules against the clock. **`time.Time.After` is a pure comparison** between two
+instants the caller already had, and comparing timestamps is the most common legitimate thing domain
+code does with time. Without the `Recv() != nil` guard the rule reports every `t1.After(t2)` and
+gets switched off within a week.
+
+### No escape hatch, unlike `nofloat` — and the asymmetry has a reason
+
+`nofloat` needs one because Prometheus takes `float64` at the wire and something must convert: a
+real seam with a real obligation. Here **the seam is `platform/clock` itself**, which sits outside
+`domain/` and `application/` by construction, so the exception is already expressed *structurally*.
+A domain layer that needs wall time is a design error, not an exception, and the fix — inject the
+`Clock` — is always available. An annotation would only make it easy not to.
+
+### The clean fixtures carry more weight than the offending ones
+
+- **`platform/clock` must read the clock and must not be policed.** A rule that policed it could not
+  be satisfied. No annotation, no configured exemption — where the code lives *is* the seam.
+- **`engine/venue` pins the limit build-spec actually states.** Infrastructure stamping a received
+  message with this machine's clock is arguably how a wrong timestamp enters the system, but
+  widening the rule is **spec work, not an implementation choice**, so the fixture records the limit
+  rather than quietly exceeding it.
+- **`application/` holds five legitimate uses** — `Date`, `Parse`, `Duration`, `Time.Add`,
+  `Time.Before`. A rule that objected to the `time` *package* would be turned off, and then rule 5
+  would not be enforced at all.
+
+### Verified through the real driver, not only the fixture tree
+
+`notimenow` reports nothing on the engine today because **no `domain/` package exists yet**, so a
+green `make lint` proves nothing about it. A probe `internal/oms/domain` package was added to the
+real module: `make lint` failed with exactly one diagnostic, and the `.After` on the same line was
+correctly ignored. Fixtures live in a GOPATH-style `testdata/src/` tree, and path handling that
+passes there can still mis-scope in production — which is the hazard `kernelpurity`'s own notes flag.
 
 ---
 
@@ -654,18 +774,19 @@ commits. Confirm with the user before pushing either.
    four total invariants, six negative controls, a gate on the oracle cross-check justified from
    `math/big` source, and its corpus reach measured rather than assumed (§5d). **`platform/fixedpoint`
    is COMPLETE.** Do not reopen it; `make fuzz` is available if a longer explorer run is wanted.
+5. ✅ **`nofloat` (§4b) and `notimenow` (§4c)** — both built, registered in the multichecker, and
+   bite-checked at 8/8 and 7/7 mutations. **The analyzer roster is 3 of 6 built**; the other three
+   stay deferred for the reasons §4 gives (nothing to police yet). `nofloat` fired on real code and
+   both hits were resolved, not suppressed.
 
 ### Next work, in order
 
-1. **`nofloat` + `notimenow` analyzers**, each `analysistest`-proven and bite-checked; register both
-   in `tools/lint/cmd/arblab-lint` alongside `kernelpurity`. `nofloat` is default-deny under
-   `internal/` with a `//nofloat:allow <reason>` escape (§3).
-2. **`platform/clock`** + the two-implementation conformance suite (§3.5: `Now`, `ServerNow(Venue)`
+1. **`platform/clock`** + the two-implementation conformance suite (§3.5: `Now`, `ServerNow(Venue)`
    with uncertainty band, `SetTimer(id, at, prio)` with cancel/replace by id and ties broken by prio
    then id, `CancelTimer`). **Reuse the predicate/generator split from §5c** — write the conformance
    suite as predicates over a `Clock`, run them against both implementations, and give each
    invariant a negative control.
-3. **Land the [SPEC EDIT OWED] items — now six:**
+2. **Land the [SPEC EDIT OWED] items — now eight:**
    - the `boundary/` flatten across `build-spec.md` §3.2/§11 (~30 occurrences, and **do not rewrite
      `boundary/lint` in §3.6** — it means "a boundary-or-lint test", not a path)
    - `kernelpurity` as a fifth structural rule
@@ -674,7 +795,14 @@ commits. Confirm with the user before pushing either.
    - **`RoundingMode` as a documented exception to rule 8's `type X string` shape** (§5)
    - **the error-precedence contract**: invalid mode → divide-by-zero → overflow → precision loss
      (§5b)
-4. **Still owed:** the timeboxed `gremlins` attempt, reported honestly either way. Note the 19
+   - **`notimenow` covers the whole ambient-time family**, not literally `time.Now()`: rule 5's text
+     names one function, the gate bans nine. The scope it states (which packages) is unchanged, but
+     the text should say so rather than leaving the gate broader than the rule (§4c)
+   - **an open question, not a decision: should rule 5 reach `engine/` adapters?** A venue adapter
+     stamping a received message with this machine's clock is arguably how a wrong timestamp enters
+     the system. The `engine/venue` fixture currently pins the narrow scope deliberately. **Ask
+     before widening** (§4c)
+3. **Still owed:** the timeboxed `gremlins` attempt, reported honestly either way. Note the 19
    hand-written negative controls now cover much of what mutation testing would have; the remaining
    value is in finding *unanticipated* survivors.
 
