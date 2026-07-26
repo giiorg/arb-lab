@@ -2062,7 +2062,191 @@ the wrong spine, and it would be load-bearing by the time the right one arrived.
 
 ---
 
-## RESUME HERE — updated end of session 10
+## 13. The second slice continued (session 11) — `platform/ratelimit`
+
+§7.6's header-aware governors, plus the reserved allocation §6.7, §7.1 and §7.5 spend when the
+system is recovering rather than trading. Eight files, 42 tests, and the kernel is **nine packages**.
+**46 hand mutations, 46 caught**, two documented equivalents.
+
+Two questions were settled by precedent before any code was written, and stated here so a later
+session does not reopen them:
+
+- **Machinery, not a venue table.** `config` §10a kept §5.2's schema out of the kernel and `apperror`
+  §8a kept the venue-code → `Class` table out; a `Profile` is caller-supplied data for the same
+  reason. Here the argument is **stronger than precedent**, and that is worth recording:
+  `venue-profiles.md` records the rate-limit **header names** as verified facts and does **not**
+  record the numeric budgets. A table in this package would have to be populated with numbers nobody
+  verified, in a doc set whose standing rule is that nothing goes in unverified.
+- **Non-blocking, no goroutines.** `Acquire` is a decision, not a wait. §6.3 makes rate-limit budget
+  one of the things `risk.Gate` re-validates before a trade — a *predicate*, which a call that
+  blocked until budget appeared would answer by hanging. And a blocking governor needs a timer,
+  which needs a goroutine and an ambient clock: `clock` (§5e) and `outbox.Relay` (§11d) both refuse
+  one, because the instant a retry becomes eligible has to be reproducible in a replay.
+
+### 13a. The ladder — the milestone's second user question **[SPEC EDIT OWED]**
+
+**Decision, put to the user and taken: `Capacity` is a hard ceiling for EVERY priority.
+`PrioritySafety` gets an exclusive band, not a bypass.**
+
+§7.6 says "back off at ~70% weight" without saying *what* backs off. §7.1 says the margin top-up
+gets "a reserved rate-limit allocation so it is not starved by trading traffic". §6.7 says an
+ambiguous residual holds new trading and reserves budget for recovery. Those are **one mechanism
+stated three times in three sections**, and what is missing from all three is the priority ordering
+that joins them:
+
+```
+used ─────────────────────────────────────────►
+         │ Opening  │ Routine │ Safety │ ✗ refused
+         0        70%       90%     100%
+                            └─ reserve ─┘
+```
+
+Two things in that picture are not in the spec, and both are load-bearing.
+
+**One: monitoring outranks new exposure, and that is not the obvious ordering.** Shedding
+market-data and account reads to protect trading traffic would make the rate limiter itself the
+cause of a stale mark — which is §7.1's own escalation trigger — so the governor would fire the
+pre-authorized de-risk it exists to help avoid. `PriorityOpening` is shed first, and it is the same
+act §5.3 already names `stop-opening`, so budget pressure and a stop-opening condition degrade the
+system the same way rather than two different ways.
+
+**Two: safety stops at capacity.** *Rejected alternative, stated to the user:* let safety bypass the
+local ceiling and be refused only by an **observed** ban. Its merit is real — the local count is an
+estimate, and refusing a flatten on an estimate converts a throughput guess into open directional
+exposure. It loses on three counts. Past capacity the venue is expected to **refuse**, so an issued
+flatten is not a flatten. On Binance repeat violations escalate a 2-minute ban toward **three days**,
+so pushing lengthens the outage being pushed against. And the spec **already has a designed answer**
+for "cannot act at the venue" — §7.4's pre-placed venue-native protection and the off-host actuator.
+A governor that spent past the budget would substitute wishful throughput for that ladder, silently.
+
+The ceilings are declared as **absolute counts, not percentages**. A fraction of a count is a
+division this package would have to round, and every rounding decision in this repo is an explicit
+argument (§3.6 rule 4); the profile that already knows the capacity does the arithmetic once, in the
+open. `Limit.Reserve()` names the band rather than leaving it a subtraction, because it is the
+quantity an operator has to size against a real incident's concurrent query volume.
+
+### 13b. Header-aware means the venue's count wins, in ONE direction
+
+`Observe` folds a venue-reported consumption in **upward only**. A reading is always stale: it
+describes the server at the moment it processed some earlier request, with others in flight behind
+it. So a reading **below** the local count is exactly what staleness looks like, and adopting it
+would discard the record of every request sent after the one that carried the header. A reading
+**above** it is information there is no other way to get — an endpoint whose weight we
+under-estimated, or another consumer on the same IP.
+
+The two failure directions are not symmetric, which is what settles it: ignoring a legitimate
+decrease costs throughput until the window rolls; adopting an illegitimate one costs a ban.
+
+The correction is applied as a **synthetic charge at the observation instant** rather than as a
+separate floor. One mechanism instead of two, no floor/log reconciliation to drift, and it ages out
+conservatively — the real usage expired earlier than the correction models it expiring.
+
+`Penalize` carries the same ratchet twice over: a venue `RetryAfter` hint is a **floor, not a
+ceiling** (the longer of hint and configured pause wins, because a hint that undershoots puts us
+straight back into the ban being served), and a later, milder penalty neither shortens a running
+pause nor downgrades its recorded kind.
+
+### 13c. Two mechanisms, because there are two failure modes
+
+A family's weight budget is **headered**, so local counting is an estimate that gets corrected. The
+venue-scoped IP envelope is **not**: Bybit's ~600/5s gateway ban (retCode 10018) arrives with no
+header at all, and §7.6 states in its own words that IP-ban-track separation between Binance's spot
+and futures budgets is "**inferred, not documented**". For those, local counting is the only defence
+there will ever be. Hence a plain request counter at venue scope beside the weight buckets at family
+scope, and hence `Cost` having **no `Requests` field**: every `Acquire` charges exactly one to every
+`DimensionRequests` limit, so the one budget with no header to correct a mistake is also the one a
+caller cannot forget to charge.
+
+A pause is likewise **venue-wide across every family**, and that is §7.6's hedge rather than a
+simplification: scoping a pause to the family that earned it would encode exactly the separation the
+spec declines to assume.
+
+### 13d. `ids.ProductCategory` is the API-family key, and the fit is not a coincidence
+
+§7.6 governs per `(venue, API family)`. On Binance the product families **are** separate API hosts
+with separate budgets (spot, USDⓈ-M, COIN-M), which is precisely the distinction §5.1 already draws
+for an instrument — so reusing `ProductCategory` means an adapter naming a family and an adapter
+naming an instrument cannot drift apart. `Profile.Families` is nonetheless declared **explicitly**
+rather than derived from the limits, so that a family with only the venue envelope is still a family
+a request may legally name, and a **typo is not**: without it an undeclared family would match no
+family-scoped limit and sail past every product budget, charging only the envelope — a request that
+looks governed and is not.
+
+### 13e. A sliding window, deliberately stricter than the venue's own fixed one
+
+Binance meters over a fixed interval aligned to a server boundary we cannot observe. Modelling it as
+fixed locally means guessing that alignment, and a wrong guess lets a burst land at the end of our
+window **and again at the start of the next** — twice the intended rate across the seam, from a
+limiter that looks correct. A sliding window cannot produce that seam: budget returns only once a
+charge has been held for the whole interval. It errs by refusing.
+
+`used` is **re-summed on eviction rather than decremented**. Subtracting is O(1) and accumulates
+drift the moment any other path adjusts the total — and there is such a path, because `observe`
+folds in a venue reading. A counter that drifts low is a governor that admits past capacity while
+reporting that it did not. The cost is bounded by the budget itself: a charge is recorded only when
+it was admitted, and admission caps the total at `Capacity`.
+
+### 13f. Three smaller decisions whose absence would be quiet
+
+- **A refusal charges nothing.** All-or-nothing across every applicable limit. Partial charging would
+  mean a request the order budget turned away had still spent the weight budget that admitted it, so
+  a caller retrying in a loop would drain budgets on requests it never sent — fastest exactly when
+  the venue is most constrained.
+- **`NotBefore` is the LATEST of every refusing limit**, not the earliest. Naming the earliest sends
+  the caller back to be refused by another, turning a backoff into a poll against a venue already
+  declining traffic. The zero time means "**not by waiting**" — the charge exceeds the ceiling at any
+  consumption — and it has to dominate every real instant, which is why the comparison is a named
+  helper: `time.Time{}.After(anything)` is false, so a never-releasable limit written inline would
+  silently lose to every other refusal.
+- **`Decision.Err()` is `EffectNotApplied`, and this package is uniquely entitled to say so.**
+  `apperror.RateLimited` fixes that for a *venue* refusal; a *local* refusal is stronger evidence
+  still, because nothing was sent. §5.3 forbids inferring "not submitted" from a venue's not-found —
+  this is the one place where it is not an inference.
+
+### 13g. Bite-check — 46 mutations, 46 caught, and one real defect found by the exercise
+
+**The defect was found before a single mutation ran**, by working out what each mutation *should*
+catch. `Penalize` read "was a pause already running?" **after** applying the new pause — at which
+point it is a constant, because the hold is always positive. The clause was dead, its purpose had
+silently migrated to the severity comparison, and the live consequence was that a ban which expired
+last week kept outranking the throttle running now: `Snapshot.PauseKind` would report `PenaltyBan`
+for a pause that is not one, and §7.6 alerts on exactly that. Fixed by reading the flag first, and
+two tests now pin both directions (a ban that expired then a throttle; a throttle then a ban).
+
+`PenaltyKind.moreSevereThan` was also narrowed from `>=` to `>` on the same pass, because
+re-assigning a kind over itself changes nothing — the two forms are behaviourally identical, and
+only one of them can be shown to bite.
+
+**Five mutants survived the first pass. Three were real gaps and two are equivalent.**
+
+- **The fixture-dimension lesson fired for the FIFTH and SIXTH time, in one session.** Two survivors
+  were the same collapse: `TestNotBeforeIsTheLatestOfEveryRefusingLimit` and the never-releasable
+  test both used a profile where the worst refusal happened to be **first in profile order** — and
+  limits are evaluated in profile order, so "name the first refusal" and "name the worst refusal"
+  were the same answer. A dedicated `ladderedProfile()` now puts the slower-freeing budget
+  **second**, and both mutants die. Then `freeAt`'s already-fits boundary survived because every
+  case in its table sat strictly inside or strictly outside the ceiling, where `<=` and `<` are the
+  same predicate. **The tell is identical every time: the fixture does not contain the thing under
+  test.**
+- **A survivor reported redundant code rather than a missing test** (§10h's lesson, again).
+  `Limit.key()` special-cased `ScopeVenue` to zero the family — but `Validate` already refuses a
+  venue-scoped limit that names one, so the branch could not fire. Deleted, and the surviving path
+  bite-checked in its place.
+- **Two documented equivalents, both flagged in the code as expected survivors.** `Reserve`'s
+  `>=` narrowed to `>` and `admits`'s `used >= ceiling` narrowed to `>` are each equivalent at
+  exactly the boundary, because the subtraction already yields zero there. In both cases the guard's
+  real content is the strictly-above case, so both are bite-checked by **deleting** the guard
+  instead — and both die that way.
+
+**Also worth recording: `addSaturating` had no test at all**, because nothing in the behavioural
+suite drives a `uint64` anywhere near the top. It exists for one input class this package does not
+get to bound — a venue reading — and the direction is the point: wrapping turns an absurd reading
+into a *small* used value, which admits traffic. It now has both a direct table and a window-level
+test asserting the refusal.
+
+---
+
+## RESUME HERE — updated end of session 11
 
 **Environment, verified — do not re-derive.** **Go 1.26.5** (upgraded from 1.26.0 in session 5;
 both modules declare `go 1.26.0` as the minimum and `toolchain go1.26.5` as what to build with —
@@ -2099,9 +2283,10 @@ the milestone.
 seven packages in:** `platform/apperror` and `platform/ids` (session 6, with the `Venue` move out of
 `platform/clock`), then `ids`'s instrument identity and **`platform/events`** (session 7), then
 **`platform/config`** (session 8), then **`platform/outbox`** (session 9), then
-**`platform/observability`** (session 10). The kernel is **eight packages** — `fixedpoint`, `clock`,
-`apperror`, `ids`, `events`, `config`, `outbox`, `observability` — plus three gates. **There are no
-open questions.** `platform/ratelimit` is the next package up the spine, then `platform/boot`.
+**`platform/observability`** (session 10), then **`platform/ratelimit`** (session 11). The kernel is
+**nine packages** — `fixedpoint`, `clock`, `apperror`, `ids`, `events`, `config`, `outbox`,
+`observability`, `ratelimit` — plus three gates. **There are no open questions.** `platform/boot` is
+the next package up the spine, and it is the last one §1's table defers.
 
 **The engine module still has ZERO production dependencies** (only test-only `pgregory.net/rapid`).
 That is now a decision with a record rather than an accident: §12a put taking
@@ -2114,7 +2299,12 @@ where the per-binary `/metrics` decision lives (§11 gives `arblab-actuator` no 
 and tracing lands once §3.5's `DispatchSeq` exists to hang a span on. Both deferred on argument
 (§12a, §12f), not forgotten.
 
-**FOUR SPEC EDITS ARE OWED, and they are tracked by markers in the code, not by this paragraph.**
+**FIVE SPEC EDITS ARE OWED, and they are tracked by markers in the code, not by this paragraph.**
+§13a: §7.6 states a backoff THRESHOLD ("~70% weight") without saying what backs off, while §7.1 and
+§6.7 state a RESERVATION without saying how much or what happens when it runs out — so the spec
+relies, unstated, on the priority ordering that makes the two one mechanism, and on capacity being a
+ceiling rather than a bypass for the safety class. Both were decided in the code (the second by the
+user) and neither is in the spec.
 §12c: §10 requires metrics cut per venue and per symbol and says nothing about label CARDINALITY,
 while §3.4's lossy-lane guarantee covers only a stalled consumer — not the unbounded time-series
 growth that takes the process down with every scrape succeeding and zero drops reported; the code
@@ -2125,11 +2315,11 @@ configuration is "hot-reloadable where safe" and stops; the code makes "where sa
 **default-deny** `config:"hot"` tag, on rule 4's own argument. §11b: §3.2 and D2 describe the outbox as
 an at-least-once export and say nothing about ORDER, while relying on it — audit is called "a
 projection of the OMS journal", and a projection that applies a fill before its order does not
-reproduce its source; the code makes the guarantee explicit and scopes it to the Key. All three are
+reproduce its source; the code makes the guarantee explicit and scopes it to the Key. All five are
 deliberately not landed yet:
 the v0.9.5 precedent is to batch a slice's spec edits into one coherent release at slice close.
 **Before closing the second slice, `grep -rn "SPEC EDIT OWED" internal/`** (code only — the doc set is full of PROSE about past markers, so a repo-wide grep is mostly false positives) and land what it
-finds. It should report exactly four.
+finds. It should report exactly five.
 
 **The `CLAUDE.md` owed since §2 now exists** (repo root, written session 6). It carries the
 `internal/` taxonomy, the doc-set map, the build split, the three enforced gates, and the standing
@@ -2225,12 +2415,31 @@ working rules. That item is discharged.
     without reading their measurement tests first** — they assert what `encoding/json` does instead,
     and will say so if it ever changes.
 
+17. ✅ **`platform/ratelimit`** (§13a–§13g) — `Priority`/`Dimension`/`Scope`, `Limit`/`Cost`/
+    `Profile`, the sliding `window` with its upward-only ratchet, and `Governor` with
+    `Check`/`Acquire`/`Observe`/`Penalize`/`Snapshot`. 46 mutations, 46 caught, 2 documented
+    equivalents. **Do not put venue numbers in it** — §13's opening records why the argument is
+    stronger here than the `config`/`apperror` precedent it follows.
+    **Do not let `PrioritySafety` past `Capacity`** — §13a, the user's decision, with the rejected
+    alternative and its three counter-arguments recorded.
+    **Do not make `Observe` adopt a LOWER reading** — §13b; a stale header is exactly what a lower
+    reading looks like, and adopting one discards every request sent after it.
+    **Do not add a `Requests` field to `Cost`** — §13c; the IP envelope is the one budget with no
+    header to correct a mistake, so it is the one a caller must not be able to forget.
+    **Do not "simplify" the sliding window into a fixed one** — §13e; a wrong guess at the server's
+    boundary alignment doubles the rate across the seam.
+    **Do not give the governor a `Wait` or a goroutine** — §13's opening, `clock`'s call for
+    `clock`'s reason, plus §6.3 needs a predicate rather than a wait.
+    **Do not report the EARLIEST release instant when several limits refuse** — §13f.
+
 ### Next work, in order
 
-1. **`platform/observability`**, then `platform/ratelimit` (which will consume `apperror`'s
-   `ClassRateLimit` and `RetryAfter` — note `outbox.Relay` already honours the latter, §11e), then
-   `boot`. **The parity dispatcher is what `events` was the last prerequisite for** — but it also
-   needs a persisted `DispatchSeq` log, so it is not simply "next" (§9b).
+1. **`platform/boot`** — §7.5's reconcile-only boot phase, and the last package §1's table defers.
+   Note what it can and cannot do yet: the journal is milestone 3, so the *phase* and its refuse-to-
+   trade posture gates are buildable while the journal join is not — read §11a's argument before
+   deciding where that line falls, because it is the same one. **The parity dispatcher is what
+   `events` was the last prerequisite for** — but it also needs a persisted `DispatchSeq` log, so it
+   is not simply "next" (§9b).
 1b. **`platform/outbox`'s store half is OWED, and it lands with the OMS journal in milestone 3** —
    the `Append` verb, the SQL, the migration and the driver. It is deferred on §11a's argument, not
    forgotten. When it lands, the thing to check first is that the append and the journal write are
@@ -2280,13 +2489,20 @@ working rules. That item is discharged.
   situation with the same 50/50 — was tested once, and a mutant survived on the coin flip (§9i). When a
   test earns a repetition, a bound or an isolation trick, go and look for the symmetric case
   immediately, because the defect will come back through the other door.
-- **The fixture-dimension lesson has now fired THREE times, so treat it as a checklist item rather
+- **The fixture-dimension lesson has now fired SIX times, so treat it as a checklist item rather
   than a war story.** §5d: 162 of 348 fuzz corpus entries reached the oracle. §9i: every coalescing
   test used a mailbox depth of 1, where "merge against the newest" and "merge against the oldest" are
   the same slot. §11f: every malformed-identifier fixture put its bad character mid-string, where
   `i >= 0` and `i > 0` are the same predicate — so `" audit"` validated while the check looked
-  covered. **Before believing a validation suite, ask which fixture parameter is pinned to the value
-  that collapses the distinction the code makes**, and vary it.
+  covered. §12g: the series-key collision fixture `("ab","c")` vs `("a","bc")` contained no
+  separator, so it collided only under the *empty* separator and passed against every wrong choice a
+  person would actually make. §13g twice in one session: two `ratelimit` tests used a profile whose
+  worst refusal happened to be **first in evaluation order**, making "name the first" and "name the
+  worst" the same answer; and every `freeAt` case sat strictly inside or strictly outside the
+  ceiling, where `<=` and `<` are the same predicate. **Before believing a validation suite, ask
+  which fixture parameter is pinned to the value that collapses the distinction the code makes**, and
+  vary it. The tell is constant across all six: **the fixture does not contain the thing under
+  test.**
 - **Check the FIXTURE dimension before believing the coverage.** Every coalescing test used a mailbox
   depth of 1, where "merge against the newest" and "merge against the oldest" are the same slot — so
   the branch was unreachable while looking covered (§9i). §5d's vacuous-run lesson generalises past

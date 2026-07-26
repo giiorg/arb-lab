@@ -157,7 +157,11 @@ These are not style preferences. Each one was paid for.
   `i > 0` are the same predicate — so `" audit"` validated. Then
   `observability`'s series-key collision fixture, `("ab","c")` vs `("a","bc")`,
   contained **no separator** — so it collided only under the *empty* separator
-  and passed against every wrong choice a person would actually make. **Four
+  and passed against every wrong choice a person would actually make. Then
+  `ratelimit` did it twice in one session: two tests used a profile whose worst
+  refusal was also the **first one evaluated**, so "name the first" and "name the
+  worst" were the same answer; and every `freeAt` case sat strictly inside or
+  strictly outside the ceiling, where `<=` and `<` are the same predicate. **Six
   times now**, which makes it a checklist item and not a war story: before
   believing a suite, find the fixture parameter pinned to the value that
   collapses the distinction the code makes, and vary it. The tell is that the
