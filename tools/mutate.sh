@@ -35,6 +35,18 @@
 #    the printed diff: the file moving is not evidence about which function
 #    moved.
 #
+# 3. IT PROVES THE MUTANT COMPILED (session 7).
+#
+#    `go test` exits non-zero for a BUILD failure exactly as it does for a
+#    failing test, so a mutant that does not compile prints as `caught` and
+#    proves nothing. Go makes this easy to hit: deleting a call site leaves an
+#    unused import, which is a compile error, not a warning. Found on a real
+#    mutation of ids.VenueInstrument.Validate — replacing a
+#    strings.ContainsFunc(...) call with `false` orphaned two imports, and the
+#    only visible trace was the failing-test count printing as 0. A kill with
+#    zero failing tests is a contradiction, so the count is now checked rather
+#    than merely displayed.
+#
 # ---------------------------------------------------------------------------
 # Reading the result
 # ---------------------------------------------------------------------------
@@ -42,6 +54,9 @@
 #   caught    the test suite failed — the claim is checked
 #   SURVIVED  the suite passed with broken code
 #   NO-OP!!   the pattern did not match; the mutation never ran
+#   NOBUILD!! the mutant did not compile; the tests never ran, so nothing was
+#             proved. Re-aim the mutation so the code still builds — usually by
+#             substituting a WRONG value rather than deleting a call.
 #
 # A SURVIVED is either a test gap or a wrong mutant, and TELLING WHICH IS THE
 # ACTUAL WORK. Do not paper over it, and do not assume it is a gap: some
@@ -110,8 +125,20 @@ if out=$(go test "$target" 2>&1); then
     printf '  SURVIVED %-58s  <-- TEST GAP or an equivalent mutant; diagnose which\n' "$desc"
     printf '%s\n' "$applied"
     exit 1
-else
-    failing=$(printf '%s' "$out" | grep -cE '^\s*--- FAIL')
-    printf '  caught   %-58s  (%s failing test(s))\n' "$desc" "$failing"
-    exit 0
 fi
+
+# go test exits non-zero for a build failure exactly as it does for a failing
+# test, so a red run is not yet evidence. Two independent signals say "compiled
+# but failed": at least one `--- FAIL` line, and no build-failure banner. Both
+# are checked because either alone has a hole — a package can fail to build with
+# no banner on the tested package itself, and a `--- FAIL` can appear in output
+# that ALSO contains a build failure from a sibling package.
+failing=$(printf '%s' "$out" | grep -cE '^\s*--- FAIL')
+if [ "$failing" -eq 0 ] || printf '%s' "$out" | grep -qE '\[build failed\]|^# '; then
+    printf '  NOBUILD!! %-57s  (the mutant did not compile — the tests never ran)\n' "$desc"
+    printf '%s\n' "$out" | grep -E '^[^[:space:]].*\.go:[0-9]+:|\[build failed\]' | sed 's/^/           /' | head -5
+    exit 3
+fi
+
+printf '  caught   %-58s  (%s failing test(s))\n' "$desc" "$failing"
+exit 0
