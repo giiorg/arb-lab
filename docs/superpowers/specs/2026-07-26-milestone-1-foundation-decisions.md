@@ -1606,7 +1606,7 @@ is **five packages** — `fixedpoint`, `clock`, `apperror`, `ids`, `events` — 
 §3.5 declares `SourceID` as four flat fields; the code composes `ids.VenueInstrument` instead, because
 the flat form cannot express the `ContractType` §5.1 gives an instrument. It is deliberately not landed
 yet: the v0.9.5 precedent is to batch a slice's spec edits into one coherent release at slice close.
-**Before closing the second slice, `grep -rn "SPEC EDIT OWED" internal/ docs/`** and land what it
+**Before closing the second slice, `grep -rn "SPEC EDIT OWED" internal/`** (code only — the doc set is full of PROSE about past markers, so a repo-wide grep is mostly false positives) and land what it
 finds.
 
 **The `CLAUDE.md` owed since §2 now exists** (repo root, written session 6). It carries the

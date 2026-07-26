@@ -86,7 +86,7 @@ Load-bearing-tested as before: an independent `math/big` oracle for the base32 c
 
 **43 mutations, 41 caught, 2 diagnosed — and both survivors were real gaps, now closed.** `tools/mutate.sh` gained two verdicts, each found by a real mutation rather than designed in: **`NOBUILD!!`** (a mutant that does not compile printed as `caught` and proved nothing — the tell was a failing-test count of 0) and **`TIMEOUT!!`** (a mutation that made a non-blocking send block *hung* the suite instead of failing it — §5e's own lesson, arriving through the harness).
 
-**One `[SPEC EDIT OWED]`, tracked by a marker in the code:** §3.5 declares `SourceID` as four flat fields, and the implementation composes `ids.VenueInstrument` instead, because the flat form cannot express the `ContractType` §5.1 gives an instrument. Following v0.9.5's precedent it lands with the rest of the slice's edits as one release — **`grep -rn "SPEC EDIT OWED" internal/ docs/` before closing the slice.**
+**One `[SPEC EDIT OWED]`, tracked by a marker in the code:** §3.5 declares `SourceID` as four flat fields, and the implementation composes `ids.VenueInstrument` instead, because the flat form cannot express the `ContractType` §5.1 gives an instrument. Following v0.9.5's precedent it lands with the rest of the slice's edits as one release — **`grep -rn "SPEC EDIT OWED" internal/` before closing the slice.**
 
 **Also discharged: the `CLAUDE.md` owed since the layout flatten.** It now exists at the repo root with the `internal/` taxonomy, the doc-set map, the two-module build split, the three enforced gates and the standing working rules.
 
