@@ -1906,7 +1906,163 @@ it; nothing checked it. §10f's ruling applied without the test being written fi
 
 ---
 
-## RESUME HERE — updated end of session 9
+## 12. The second slice continued (session 10) — `platform/observability`
+
+§10's metrics and structured logs, on §3.4's isolated lossy lane. Eight files, 45 tests, and the
+kernel is **eight packages**. Two scope questions were put to the user before any code was written,
+because both are durable and neither is recoverable cheaply later.
+
+### 12a. The Prometheus adapter is deferred — the user's call, with the alternative stated
+
+**Decision: build the ports, the descriptor discipline and an in-memory meter now; the Prometheus
+adapter lands with `platform/boot` / `app/`.** The engine module therefore still has **zero
+production dependencies** — only test-only `pgregory.net/rapid`.
+
+This is not the same argument as §11a's outbox store, and it is weaker, which is why it was asked
+rather than assumed. §11 names `prometheus/client_golang` and §3.6 rule 9 scopes `kernelpurity` to
+in-module imports **specifically so this package may take it**, so the dependency is sanctioned. Two
+reasons to wait anyway:
+
+1. **Nothing under `internal/` emits a metric yet**, so a registered exporter is wiring that no test
+   can exercise end to end — the same "a lint over an empty tree passes trivially" reasoning that
+   defers `hexboundary` and deferred the outbox store.
+2. **Which binary exposes `/metrics`, on which interface, is a composition-root decision.** §11 gives
+   `arblab-actuator` *no dashboard and no general HTTP surface*, so a kernel that mounted a
+   `promhttp` handler would be wrong there and could not be argued out of it.
+
+**Rejected alternative:** take the dependency now and ship a Prometheus-backed meter alongside the
+in-memory one. Its real merit — proving the `Spec`→collector mapping against the actual backend
+rather than on paper — is genuine and was stated to the user as such. It loses on the observation
+that the HTTP surface defers regardless, so only part of the wiring would be proven, while the
+repo's first production dependency lands permanently.
+
+**What is NOT deferred is the float64 conversion** (`export.go`), and that distinction is the
+substance. It does not belong to any one client library: the Prometheus text and protobuf formats,
+OTLP and every other wire metric encoding carry a *double*. Whatever adapter arrives needs exactly
+that function, and if it is not already here the adapter writes its own — inline, at the call site,
+without the exactness argument — which is how a rounding decision stops being a decision.
+
+### 12b. The port is integer-typed, and this is `outbox.Append` in a new place
+
+`prometheus.Counter` has `Add(float64)`. **A port that mirrored it would be the §11a failure exactly:
+it compiles, it reads as the metrics contract, and it silently dismantles §3.6 rule 4.** Every call
+site reporting a fill count, a realized PnL or a funding rate would have to produce a `float64`, so
+rule 4's *single sanctioned metric seam* becomes a `//nofloat:allow` at every instrumented line in
+the system — each written by somebody thinking about a dashboard rather than about rounding.
+
+So `Counter.Add`, `Gauge.Set` and `Histogram.Observe` take a `Sample`: an `int64` mantissa at
+`fixedpoint`'s canonical scale, tagged with the unit it was converted into. `float64` appears in one
+file. **The gate proves the confinement rather than the comment claiming it** — verified by a positive
+control: deleting one escape makes `arblab-lint` fail on that exact line.
+
+**`Sample` carries its unit, and the mismatch is a runtime error naming both.** The defect this
+prevents is not exotic — it is observing `d.Milliseconds()` into a histogram whose buckets are in
+seconds, which compiles, produces plausible numbers, and is wrong by three orders of magnitude on
+every panel and alert threshold derived from it. Money samples additionally carry the **asset**, and
+that is `fixedpoint`'s own runtime tag check extended one layer out: `Money` is a distinct
+compile-time category so a `Quantity` cannot reach a money gauge, but BTC-`Money` and USD-`Money` are
+the same Go type, and the one that lands on the USD PnL panel is wrong by a factor of the BTC price
+with nothing failing.
+
+**One conversion is exact, and it is pinned rather than trusted.** `time.Duration` counts
+nanoseconds and `fixedpoint.Scale` is 9, so a duration's nanosecond count *is* its seconds mantissa —
+no multiply, no rounding mode. That is a coincidence a later scale change would break silently (every
+duration wrong by ten, in the same direction, on every panel — which reads as a system that got
+slower). Two `uint` constant expressions pin `Scale == 9` from both sides, because a one-sided bound
+on an equality is the kind of check that passes while the thing it guards is broken.
+
+### 12c. Cardinality is the fourth `[SPEC EDIT OWED]`
+
+§10 requires metrics cut per venue and per symbol and says nothing about label cardinality. §3.4
+states the observability lane's isolation as *"back-pressure here never blocks trading"* — a
+guarantee about a stalled **consumer**. Neither covers the way a metrics layer actually takes a
+trading process down.
+
+**A metric labelled by `ids.ClientOrderID` allocates one time series per order, forever, in the
+trading process's own heap. Nothing stalls.** Every scrape succeeds, the lane reports zero drops, and
+§3.4's guarantee holds perfectly for the entire duration of the outage it fails to prevent. This is
+the §11b shape again: the spec requires labelled metrics and relies, unstated, on somebody bounding
+their domains.
+
+The code makes it explicit and **default-deny**: a `Label` declares its permitted `Values`, or writes
+a `Unbounded` **reason**. Same shape as `//nofloat:allow <reason>` and `config:"hot"`, same purpose —
+the person adding the risk writes down why they are entitled to. `MaxLabelValues` bounds even the
+declared sets, because declaring ten thousand members satisfies the letter of the discipline and none
+of its intent, and the *product* across labels is what sizes the registry.
+
+**Rejected alternative:** enforce nothing and document the hazard. It fails the house rule about
+which direction a forgotten default should fail in — the failure would be a process OOM under load,
+not a refusal naming the label.
+
+**A deliberate second-order refusal:** `Values: []string{}` is an error (`ErrLabelValuesEmpty`) and is
+NOT read as unbounded. That reading would hand out the escape without the written reason, to a caller
+whose enumeration simply came back empty.
+
+### 12d. The logger exists because `slog` reads the wall clock where no seam reaches
+
+`slog.Logger.Info` and its siblings call `time.Now()` internally when they build the `Record`. It is
+not reachable through a `Handler`, an `Attr`, or any option. That is an ambient clock read on the far
+side of §3.5's parity seam: a backtest replaying a `TestClock` through 2024 emits log lines stamped
+with today's wall clock, and the log then cannot be joined to the replayed dispatch it describes,
+which is the one thing a replay log is for.
+
+**Note what does not catch this.** §3.6 rule 5's `notimenow` polices `domain/`, `application/` and
+`engine/` — `policedLayers` was read to confirm it, not assumed. `platform/` is deliberately outside,
+because `platform/clock` is where the ambient read has to live. **So the kernel is exactly the region
+where an ambient clock read is invisible to the gate**, and the only defence is that the code does not
+make one. `Logger` builds `slog.NewRecord` from `clock.Now` itself; everything else is a thin pass to
+the underlying `slog.Handler`, so the stdlib's JSON and Text handlers work unchanged.
+
+`BufferedHandler` is the **deliberate mirror of `events.ObservabilityLane`** — never blocks, drops the
+**newest**, exact never-reset drop count — and the symmetry is the argument, not a coincidence: same
+lane, same question, and a log line is not superseded by a later one, so refusing the newcomer is also
+the choice that touches nothing already accepted. **No internal goroutine**, deliberately: a channel
+and a drain goroutine would give the kernel a lifecycle to own (started by whom, stopped in what order
+relative to the control lane's drain, leaked if a caller forgets). `Drain` is a periodic sweep the
+caller schedules, exactly as the lane offers `TryReceive` and no blocking `Receive`. The mutex is held
+across a slice append and never across a syscall.
+
+### 12e. `NopMeter` validates, and that is the whole design decision
+
+The obvious no-op meter accepts everything and returns nil. It would be smaller, faster, and it would
+**make every test written against it vacuous**: a descriptor production would refuse — a missing unit
+suffix, an undeclared label set, a bucket in the wrong unit — passes under test, and the failure
+arrives at boot in the process that matters. So it runs the identical validation path and differs only
+in retaining nothing. A test drives both meters through the same refusals and asserts the **error
+strings match**, so the two cannot drift into disagreeing about which descriptors are legal.
+
+### 12f. Bite-check — 55 runs, 54 caught, one documented equivalent
+
+Both harness guards fired and both were right. Two **`NOBUILD!!`**, one of them on the package's
+headline claim — `l.clock.Now()` → `time.Now()` does not compile, because `logger.go` has no `time`
+import, so the mutation proved **nothing** while printing as a kill would have. Re-aimed per §9i's own
+advice to substitute a wrong value: `l.clock.ServerNow(clock.Venue("")).Instant()`, which yields the
+zero instant for an uncalibrated venue, compiles, and proves the stamp comes from `Clock.Now`
+specifically. One **`NO-OP!!`** on a stale line number after an edit.
+
+Four survivors were real gaps, and **the recurring fixture lesson fired for a fourth time**:
+
+| Survivor | Diagnosis |
+|---|---|
+| `Drain` reslices instead of allocating | **Gap.** The test drained and asserted immediately, where aliasing is invisible. The real failure needs the sweep to still be *holding* the slice when the next records arrive — an encoder reading records that later logging overwrites. |
+| Key separator changed to `_` | **Gap, and the fixture was the problem.** `("ab","c")` vs `("a","bc")` collide only under the *empty* separator, so the test passed against every wrong choice a person would actually make. Label **values** are not character-checked — only names are — so the fixture now drives a colliding pair per candidate separator (`_ . - : / | , ` and space). |
+| `addChecked` underflow side | **Gap.** `Counter.Add` refuses a negative delta, so a counter never exercises it. A **histogram's** sum does, because negative observations are permitted (cross-leg skew is signed) — testing only the overflow side is a half-checked guard on a symmetric predicate. |
+| Empty string admitted into a declared value set | **Gap.** `permits("")` would then return true, and `""` is what a caller passes when the value was never populated — every unlabelled observation merging into one series. |
+| `r.Clone()` → `r` | **Equivalent, and now named in the code.** Probed rather than argued: the only mutation available to a caller is `AddAttrs`, which *appends*, and an append never overwrites an element the retained copy can already see. It becomes observable only when two records derive from one base and both write the same shared slot — a shape no current caller produces and any future one might, so the `Clone` stays on the contract rather than on a reachability argument a later edit would silently invalidate. |
+
+**The fixture lesson, fourth occurrence.** Fuzz-corpus reach, mailbox depth of 1, a bad character
+never at index 0, and now **a separator-collision fixture that contains no separator**. The
+`TestBufferedHandlerDropsTheNewest` fixture was written at capacity **3** for this reason — at
+capacity 1, "drop the newest" and "drop the oldest" are the same slot.
+
+**Deferred with an argument, not forgotten:** tracing. §10 lists it beside metrics and logs. A span is
+a claim about a causal chain, and this system's causal chain is §3.5's `DispatchSeq` — which does not
+exist until the dispatcher does. A tracing API built now would model goroutine call trees, which is
+the wrong spine, and it would be load-bearing by the time the right one arrived.
+
+---
+
+## RESUME HERE — updated end of session 10
 
 **Environment, verified — do not re-derive.** **Go 1.26.5** (upgraded from 1.26.0 in session 5;
 both modules declare `go 1.26.0` as the minimum and `toolchain go1.26.5` as what to build with —
@@ -1925,7 +2081,7 @@ exactly as it does for a failing test (session 7); and it runs **bounded** and r
 because a mutation can make a test *hang* rather than fail, and a hanging test names no defect
 (session 7). **A `caught` with 0 failing tests is a contradiction — that is what exposed `NOBUILD`.**
 
-**Both branches were PUSHED and in sync at the end of session 9.**
+**Both branches were PUSHED and in sync at the end of session 10.**
 `feat/milestone-1-foundation` tracks `origin/feat/milestone-1-foundation`. **Check it rather than
 trust this paragraph** — `git rev-list --left-right --count @{u}...HEAD` should print `0 0`. The
 head commit is deliberately not named here: a paragraph that cites its own commit hash is stale the
@@ -1940,13 +2096,29 @@ if a PR is ever wanted, it is worth asking whether it should be one per slice ra
 the milestone.
 
 **Milestone 1's first slice (§1) is CODE-COMPLETE and closed out (session 5). The SECOND SLICE is
-six packages in:** `platform/apperror` and `platform/ids` (session 6, with the `Venue` move out of
+seven packages in:** `platform/apperror` and `platform/ids` (session 6, with the `Venue` move out of
 `platform/clock`), then `ids`'s instrument identity and **`platform/events`** (session 7), then
-**`platform/config`** (session 8), then **`platform/outbox`** (session 9). The kernel is **seven
-packages** — `fixedpoint`, `clock`, `apperror`, `ids`, `events`, `config`, `outbox` — plus three
-gates. **There are no open questions.** `platform/observability` is the next package up the spine.
+**`platform/config`** (session 8), then **`platform/outbox`** (session 9), then
+**`platform/observability`** (session 10). The kernel is **eight packages** — `fixedpoint`, `clock`,
+`apperror`, `ids`, `events`, `config`, `outbox`, `observability` — plus three gates. **There are no
+open questions.** `platform/ratelimit` is the next package up the spine, then `platform/boot`.
 
-**THREE SPEC EDITS ARE OWED, and they are tracked by markers in the code, not by this paragraph.**
+**The engine module still has ZERO production dependencies** (only test-only `pgregory.net/rapid`).
+That is now a decision with a record rather than an accident: §12a put taking
+`prometheus/client_golang` to the user and it was deferred to the composition roots. Do not add it
+casually — `kernelpurity` will not stop you, because §3.6 rule 9's scope is in-module imports and
+third-party is deliberately out.
+
+**`observability`'s PROMETHEUS ADAPTER and TRACING are owed** — the adapter lands with `boot`/`app`
+where the per-binary `/metrics` decision lives (§11 gives `arblab-actuator` no HTTP surface at all),
+and tracing lands once §3.5's `DispatchSeq` exists to hang a span on. Both deferred on argument
+(§12a, §12f), not forgotten.
+
+**FOUR SPEC EDITS ARE OWED, and they are tracked by markers in the code, not by this paragraph.**
+§12c: §10 requires metrics cut per venue and per symbol and says nothing about label CARDINALITY,
+while §3.4's lossy-lane guarantee covers only a stalled consumer — not the unbounded time-series
+growth that takes the process down with every scrape succeeding and zero drops reported; the code
+makes the bound explicit and default-deny.
 §9h: §3.5 declares `SourceID` as four flat fields; the code composes `ids.VenueInstrument` instead,
 because the flat form cannot express the `ContractType` §5.1 gives an instrument. §10b: §5.2 says
 configuration is "hot-reloadable where safe" and stops; the code makes "where safe" a per-field
@@ -1957,7 +2129,7 @@ reproduce its source; the code makes the guarantee explicit and scopes it to the
 deliberately not landed yet:
 the v0.9.5 precedent is to batch a slice's spec edits into one coherent release at slice close.
 **Before closing the second slice, `grep -rn "SPEC EDIT OWED" internal/`** (code only — the doc set is full of PROSE about past markers, so a repo-wide grep is mostly false positives) and land what it
-finds. It should report exactly three.
+finds. It should report exactly four.
 
 **The `CLAUDE.md` owed since §2 now exists** (repo root, written session 6). It carries the
 `internal/` taxonomy, the doc-set map, the build split, the three enforced gates, and the standing

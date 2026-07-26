@@ -100,8 +100,12 @@ These are not style preferences. Each one was paid for.
   forgets it.** `nofloat` denies `float64` until a reason is written down.
   `platform/config` denies hot-reload of a field until a `config:"hot"` tag says
   otherwise, so a field added next year is restart-required rather than silently
-  live. The failure you get from forgetting should be a refusal that names the
-  field, not a running process that picked up a new journal path mid-trade.
+  live. `platform/observability` denies a metric label with no declared value
+  set until an `Unbounded` reason is written, because a label with an open
+  domain is the metrics equivalent of an unbounded queue — one time series per
+  `ClientOrderID`, forever, with every scrape succeeding and zero drops
+  reported. The failure you get from forgetting should be a refusal that names
+  the field, not a running process that picked up a new journal path mid-trade.
   There is one deliberate exception, and it is instructive: an *unrecognised*
   `config` tag value is an error rather than a silent deny, because there the
   safe direction is also the silent one.
@@ -150,10 +154,14 @@ These are not style preferences. Each one was paid for.
   "merge against the newest" and "merge against the oldest" are the same slot, so
   a real defect was unreachable while looking covered. Every `outbox` malformed-
   identifier fixture then put its bad character mid-string, where `i >= 0` and
-  `i > 0` are the same predicate — so `" audit"` validated. **Three times now**,
-  which makes it a checklist item and not a war story: before believing a suite,
-  find the fixture parameter pinned to the value that collapses the distinction
-  the code makes, and vary it.
+  `i > 0` are the same predicate — so `" audit"` validated. Then
+  `observability`'s series-key collision fixture, `("ab","c")` vs `("a","bc")`,
+  contained **no separator** — so it collided only under the *empty* separator
+  and passed against every wrong choice a person would actually make. **Four
+  times now**, which makes it a checklist item and not a war story: before
+  believing a suite, find the fixture parameter pinned to the value that
+  collapses the distinction the code makes, and vary it. The tell is that the
+  fixture does not contain the thing under test.
 - **A fix applied in one place gets applied to its mirror.** `Receive` was tested
   across 200 trials because a Go `select` picks a ready case at random; `Send` —
   same situation, same coin flip — was tested once, and a mutant survived on it.
