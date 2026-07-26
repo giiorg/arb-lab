@@ -212,6 +212,21 @@ func TestMulDivMantissa(t *testing.T) {
 			name: "zero numerator", a: 0, b: 12345, den: 7,
 			want: allModes(0),
 		},
+		{
+			// (2^32+1)^2 / 2 = 2^63 + 2^32 + 0.5. The truncated magnitude is
+			// already past the positive bound *and* there is a remainder, so
+			// two failures apply at once and the package has to pick one.
+			//
+			// Overflow wins, for every mode including RoundExact. A value that
+			// cannot be held at all is a more fundamental failure than one
+			// that cannot be held exactly, and reporting precision loss would
+			// send a caller looking at their rounding policy when the actual
+			// problem is that the number is 2^63 times too big. Reporting it
+			// per-mode would be worse still: the classification would depend
+			// on which side of an internal 64-bit boundary the magnitude fell.
+			name: "out of range and inexact at once", a: 4_294_967_297, b: 4_294_967_297, den: 2,
+			wantErr: allModeErrs(ErrOverflow),
+		},
 	}
 
 	for _, tc := range cases {

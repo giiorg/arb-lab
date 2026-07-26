@@ -134,6 +134,21 @@ func mulDivMantissa(a, b, den int64, mode RoundingMode) (int64, error) {
 	}
 	quo, rem := bits.Div64(hi, lo, uden)
 
+	// The truncated magnitude must be representable before the mode is
+	// consulted at all. When a result is both out of range and inexact, two
+	// failures apply and one has to be reported: overflow wins, because a value
+	// that cannot be held is a more fundamental problem than one that cannot be
+	// held exactly, and telling a caller "precision loss" would send them to
+	// their rounding policy when the number is orders of magnitude too big.
+	//
+	// Doing it here rather than after rounding also stops the classification
+	// from depending on which side of an internal 64-bit boundary the magnitude
+	// happened to fall — the same condition would otherwise report overflow
+	// above 2^64 and precision loss between 2^63 and 2^64.
+	if _, err := signedFromMagnitude(quo, neg); err != nil {
+		return 0, err
+	}
+
 	inc, err := roundingIncrement(mode, neg, quo, rem, uden)
 	if err != nil {
 		return 0, err

@@ -10,6 +10,13 @@ coverage.*
 # corpus in $GOCACHE/fuzz; it writes into testdata/fuzz/ only when it finds a
 # FAILING input, and those are regression cases we want committed.
 
+# rapid writes a fail file next to the test whenever a property fails. Unlike a
+# fuzz corpus entry these are not a durable regression suite — they are keyed to
+# a rapid version and an internal bit stream, and they go stale. A real find
+# belongs in the hand-written table as a named case, so the fail file is a
+# working artifact only.
+testdata/rapid/
+
 # Local environment
 .env
 .env.*
