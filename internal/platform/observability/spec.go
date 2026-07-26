@@ -85,8 +85,8 @@ const (
 //
 // # Declaring the values is the point
 //
-// [SPEC EDIT OWED] §10 requires metrics cut per venue and per symbol and says
-// nothing about label cardinality, and §3.4 states the observability lane's
+// [SPEC EDIT LANDED — v0.9.6] §10 required metrics cut per venue and per symbol
+// and said nothing about label cardinality, and §3.4 states the observability lane's
 // isolation as "back-pressure here never blocks trading" — a guarantee about a
 // stalled CONSUMER. Neither covers the way a metrics layer actually takes a
 // trading process down, which is unbounded label cardinality: a metric labelled

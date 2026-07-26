@@ -110,9 +110,9 @@ func (g Gate) String() string {
 
 // Outcome is what a gate currently reports.
 //
-// [SPEC EDIT OWED] §7.5 gives every one of its preconditions the same verb —
-// asserted before trading resumes — and states, in the same paragraph, two
-// conditions that do NOT clear the same way. A journaled MarginOp resolves
+// [SPEC EDIT LANDED — v0.9.6] §7.5 gave every one of its preconditions the same
+// verb — asserted before trading resumes — while stating, in the same
+// paragraph, two conditions that do NOT clear the same way. A journaled MarginOp resolves
 // itself through its evidence contract; a foreign order or an unexplained
 // position delta "alert for operator clearance" and are "not auto-corrected".
 // §7.4 then makes the second kind explicit for the fence: return to normal

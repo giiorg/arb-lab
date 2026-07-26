@@ -1510,7 +1510,7 @@ becomes an assumption rather than a checked claim.
 remove the redundancy outright. That is a spec change rather than an implementation choice, and
 `ContractType` must exist regardless for `SymbolSpec`, which has no `Product` field.
 
-### 9h. One [SPEC EDIT OWED], following the v0.9.5 precedent
+### 9h. One [SPEC EDIT LANDED — v0.9.6], following the v0.9.5 precedent
 
 **§3.5's `SourceID` is declared as four flat fields** — `{Venue, Product, Symbol, Stream}` — with the
 trailing comment "= a VenueInstrument stream". The code **composes** `ids.VenueInstrument` instead.
@@ -1586,7 +1586,7 @@ import `risk` back.
 **Nothing here is a spec deviation.** §5.2 enumerates the schema's *content* and never says where it
 lives. This is an interpretation of an open question, recorded so it is not silently reopened.
 
-### 10b. "Hot-reloadable where safe" is default-deny `[user decision]` `[SPEC EDIT OWED]`
+### 10b. "Hot-reloadable where safe" is default-deny `[user decision]` `[SPEC EDIT LANDED — v0.9.6]`
 
 §5.2 says configuration is "hot-reloadable where safe" and stops there. Somebody has to decide *where*
 per field, and three mechanisms were put to the user.
@@ -1773,7 +1773,7 @@ transaction. A lost race between those two commits is the split-brain the patter
 So the value crossing the boundary is defined (it is knowable now) and the verb is not (its shape is
 not).
 
-### 11b. Per-key FIFO, scoped `[SPEC EDIT OWED]`
+### 11b. Per-key FIFO, scoped `[SPEC EDIT LANDED — v0.9.6]`
 
 §3.2 and D2 describe the outbox as an "at-least-once export to idempotent consumers" and say nothing
 about **order**. Order is nonetheless load-bearing, because D2 also calls audit "a projection of the
@@ -1971,7 +1971,7 @@ duration wrong by ten, in the same direction, on every panel — which reads as 
 slower). Two `uint` constant expressions pin `Scale == 9` from both sides, because a one-sided bound
 on an equality is the kind of check that passes while the thing it guards is broken.
 
-### 12c. Cardinality is the fourth `[SPEC EDIT OWED]`
+### 12c. Cardinality is the fourth `[SPEC EDIT LANDED — v0.9.6]`
 
 §10 requires metrics cut per venue and per symbol and says nothing about label cardinality. §3.4
 states the observability lane's isolation as *"back-pressure here never blocks trading"* — a
@@ -2083,7 +2083,7 @@ session does not reopen them:
   which needs a goroutine and an ambient clock: `clock` (§5e) and `outbox.Relay` (§11d) both refuse
   one, because the instant a retry becomes eligible has to be reproducible in a replay.
 
-### 13a. The ladder — the milestone's second user question **[SPEC EDIT OWED]**
+### 13a. The ladder — the milestone's second user question **[SPEC EDIT LANDED — v0.9.6]**
 
 **Decision, put to the user and taken: `Capacity` is a hard ceiling for EVERY priority.
 `PrioritySafety` gets an exclusive band, not a bypass.**
@@ -2296,7 +2296,7 @@ monitoring that decides when to escalate.
 
 **Do not collapse `Posture` into a boolean, and do not add a read `Act`.**
 
-### 14b. §7.5's gates latch or they don't, and the spec never says which **[SPEC EDIT OWED]**
+### 14b. §7.5's gates latch or they don't, and the spec never says which **[SPEC EDIT LANDED — v0.9.6]**
 
 **Decision: `OutcomeNeedsOperator` is latching. Only `Clear` lifts it, and `Clear` returns the gate
 to `OutcomeUnreported` — never to `OutcomePassed`.**
@@ -2334,7 +2334,7 @@ and the §4.1 posture REST calls belong to `oms`, `risk` and `engine/venue`.
 `GateWriterAuthority` is the one gate §7.5 does not list — §7.4 does, from the other end. It is also
 the gate whose clearance rule differs from the rest, which is how §14b was found.
 
-### 14d. The ordering constraints — the milestone's third user question **[SPEC EDIT OWED]**
+### 14d. The ordering constraints — the milestone's third user question **[SPEC EDIT LANDED — v0.9.6]**
 
 **Decision, put to the user and taken: enforce the constraints §3.2's order implies, with an open
 extension slot. Rejected: a closed five-value total order, and documentation only.**
@@ -2368,7 +2368,7 @@ legitimately has none of one of them, relax the rule rather than declaring a pha
 Every refusal names the phase **and** the rule, because four constraints share `ErrPhaseOrder` and
 §10h already paid for a sentinel that could not say which check fired.
 
-### 14e. The shutdown budget is a safety number, not a timeout **[SPEC EDIT OWED]**
+### 14e. The shutdown budget is a safety number, not a timeout **[SPEC EDIT LANDED — v0.9.6]**
 
 §7.4 gives the watchdog a host-silence trigger. §7.5 gives the process a graceful shutdown. Nothing
 in the spec joins them — but they run against the same wall clock, and the join has a wrong side.
@@ -2480,7 +2480,91 @@ none of it changes when the journal lands.
 
 Seven now, and the tell was constant again: **the fixture did not contain the thing under test.**
 
-## RESUME HERE — updated end of session 12
+## 15. The second slice CLOSED (session 13) — the eight spec edits landed as v0.9.6
+
+The fork §14's "Next work" left open was decided **(a): land the eight `[SPEC EDIT OWED]` items as
+one release**, on the slice's own convention — the v0.9.5 precedent batches a slice's edits into one
+coherent spec change at slice close, so external review reads deliberate change rather than drift.
+(b), the first bounded context, is now the next slice and is unblocked.
+
+**All eight landed as `build-spec.md` v0.9.6** (2026-07-27), with ADR §3 gaining a
+*milestone-1 second-slice block* and all five doc-set stamps bumped. Where each went:
+
+| # | Edit | Section | Record |
+|---|---|---|---|
+| 1 | Outbox export is at-least-once **and per-`Key` FIFO** | core §3.2 | §11b |
+| 2 | Bootstrap phase roster is a set of **constraints**, and the roster stays open | core §3.2 | §14d |
+| 3 | `SourceID` **composes `VenueInstrument`** | core §3.5 | §9h |
+| 4 | Hot-reload is per-field **default-DENY**, unrecognised tag an error | core §5.2 | §10b |
+| 5 | Total stop budget **< watchdog host-silence threshold**, refused at startup | core §7.4 | §14e |
+| 6 | §7.5's preconditions **latch or self-clear**; clearance → *unreported*, never *passed* | core §7.5 | §14b |
+| 7 | The **priority ladder** — one mechanism the core stated three times | core §7.6 (+ §7.1, §6 pointers) | §13a |
+| 8 | Metric **label cardinality is default-deny** | core §10 | §12c |
+
+**The eight are all one kind of finding, and that is the observation worth keeping.** Not one is a
+disagreement with the core. Every one is a **requirement the core relied on without stating** —
+an order guarantee behind a count guarantee, a constraint behind a list, a bound behind two numbers
+in different sections, a cardinality limit behind a lossy-lane guarantee about something else. The
+first slice's ten were a mix of deviations and additions; the second slice's eight are uniformly
+*gaps*, and they were found by having to write the code that would otherwise have relied on them
+silently. **That is the argument for building the kernel before the contexts, stated as evidence
+rather than as taste.**
+
+### 15a. No `M1-#` tag family — considered and rejected
+
+The core's Conventions paragraph enumerates tag families (`R1d-#`, `Cx8-#`, `FM-#`, …), and these
+eight went in **untagged**, matching v0.9.5's ten. A `[→ M1-#]` family was considered, since a
+greppable tag is exactly what makes deliberate change mechanically separable from drift.
+
+**Rejected on the project's own standing lesson.** Introducing it now would cover **eight of the
+eighteen** milestone-1 edits, and a reader who greps `M1-` would find eight and conclude those are
+all of them. A partial mechanism that reads as complete is the failure mode this repo has already
+paid for repeatedly. The two honest options were *no tags* or *retro-tag all eighteen*; the second is
+a larger change than the release needed, so the first was taken and the reason recorded here. ADR §3
+now carries both blocks, each row naming its section — traceability for all eighteen in one place.
+
+### 15b. Four unmarked candidates deliberately NOT landed — a scope call for the user
+
+The release was held to **exactly the eight markers**, because the marker count is what makes the
+gate mechanical: `grep -rn "SPEC EDIT OWED" internal/` returned eight before and returns **zero**
+after, and landing an unmarked ninth would break that correspondence permanently. Four normative
+statements the kernel makes are **not** in the spec and carry no marker — each was judged, at the
+time it was written, to be an *implementation of* an existing requirement rather than a deviation
+from it. That judgement is worth re-testing, but it is the user's scope call, not this session's:
+
+1. **`outbox`** — `Seq` is **named as the dedup key** (content-hash dedup forbidden, because two
+   legitimately identical funding accruals hash the same), and `Payload` is the **committed bytes**,
+   never a Go object re-marshalled at delivery time (which would let exported bytes differ from what
+   the §7.5/Z4 hash chain covers, reading downstream as tampering). Arguably part of D2's
+   "idempotent consumers" — but D2 never says idempotent *on what*.
+2. **`observability`** — the recording seam is **integer-typed**: a `Sample` at `fixedpoint`'s
+   canonical scale, tagged with its **unit** and, for money, its **asset**. Arguably an
+   implementation of §3.6 rule 4 — but the unit and asset tags are new normative content.
+3. **`ratelimit`** — the header correction **ratchets upward only** (a reading below the local count
+   is what staleness looks like; one above is information available no other way), and `Penalize`
+   treats a venue `RetryAfter` as a **floor, not a ceiling**. Arguably an implementation of
+   "header-aware governors".
+4. **`boot`** — reconcile-only is a **posture, not a stage**: four rungs (halted → reconcile-only →
+   stop-opening → trading) whose zero value is the most restrictive, reduced over the gates that
+   were **required** rather than the ones that were reported. Arguably already implicit in §7.5's own
+   "blocks new openings" / "stays in reconcile-only" language.
+
+### 15c. A process finding — the generated Georgian tutorial was a version behind, and its own check knew
+
+`docs/tutorial.ka.md` was stamped **v0.9.4** while `docs/tutorial.md` was **v0.9.5**: the v0.9.5
+release bumped the English status line and never re-ran the i18n pipeline. The drift was **entirely**
+in the frozen provenance line, and — the part that matters — **the invariant checker had already
+caught it**: `node i18n/tools/assemble.mjs` refuses outright with `header: numbers differs / missing:
+0.9.5 0.9.5 11 12 26 3.2 3.5 3.6`, and `bun test` in `docs/` reported **5 failing**. The mechanism
+worked perfectly. Nobody ran it.
+
+This is the fixture lesson wearing different clothes: a check that is never executed is
+indistinguishable from a check that passes. **Fixed here** (header fragment re-synced to the v0.9.6
+English line verbatim, re-assembled, `102 pass / 0 fail`), and the release checklist below now names
+it, because "the doc set is stamped" and "the generated doc set is stamped" were two different
+claims and only one of them was being checked.
+
+## RESUME HERE — updated end of session 13
 
 **Environment, verified — do not re-derive.** **Go 1.26.5** (upgraded from 1.26.0 in session 5;
 both modules declare `go 1.26.0` as the minimum and `toolchain go1.26.5` as what to build with —
@@ -2524,9 +2608,10 @@ EIGHT packages in:** `platform/apperror` and `platform/ids` (session 6, with the
 `ids`, `events`, `config`, `outbox`, `observability`, `ratelimit`, `boot` — plus three gates.
 **There are no open questions.**
 
-**§1's deferred kernel table is now EXHAUSTED — `boot` was the last one.** So the next work is not
-another kernel package: it is either closing the slice (land the eight spec edits as one release,
-the v0.9.5 precedent) or starting the first bounded context. See "Next work" below.
+**§1's deferred kernel table is EXHAUSTED (`boot` was the last one) and the SECOND SLICE IS CLOSED
+(session 13):** the eight spec edits landed as `build-spec.md` **v0.9.6**, the doc set is stamped,
+and nothing is owed. The next work is not another kernel package — it is **the first bounded
+context**. See "Next work" below.
 
 **The engine module still has ZERO production dependencies** (only test-only `pgregory.net/rapid`).
 That is now a decision with a record rather than an accident: §12a put taking
@@ -2539,7 +2624,11 @@ where the per-binary `/metrics` decision lives (§11 gives `arblab-actuator` no 
 and tracing lands once §3.5's `DispatchSeq` exists to hang a span on. Both deferred on argument
 (§12a, §12f), not forgotten.
 
-**EIGHT SPEC EDITS ARE OWED, and they are tracked by markers in the code, not by this paragraph.**
+**NOTHING IS OWED — the eight spec edits LANDED as `build-spec.md` v0.9.6 (session 13, §15).**
+`grep -rn "SPEC EDIT OWED" internal/` returns **zero**; the eight markers now read
+`[SPEC EDIT LANDED — v0.9.6]`, ADR §3 carries the milestone-1 second-slice block, and all five
+doc-set stamps are at v0.9.6. **Do not re-apply any of them.** What follows is the historical
+statement of what each one was, kept because the reasoning is why the rules exist:
 §14b: §7.5 gives every one of its preconditions the same verb — asserted before trading resumes —
 while stating IN THE SAME PARAGRAPH two conditions that do not clear the same way (a MarginOp
 resolves through its evidence contract; a foreign order "alerts for operator clearance" and is "not
@@ -2571,11 +2660,20 @@ configuration is "hot-reloadable where safe" and stops; the code makes "where sa
 **default-deny** `config:"hot"` tag, on rule 4's own argument. §11b: §3.2 and D2 describe the outbox as
 an at-least-once export and say nothing about ORDER, while relying on it — audit is called "a
 projection of the OMS journal", and a projection that applies a fill before its order does not
-reproduce its source; the code makes the guarantee explicit and scopes it to the Key. All five are
-deliberately not landed yet:
-the v0.9.5 precedent is to batch a slice's spec edits into one coherent release at slice close.
-**Before closing the second slice, `grep -rn "SPEC EDIT OWED" internal/`** (code only — the doc set is full of PROSE about past markers, so a repo-wide grep is mostly false positives) and land what it
-finds. It should report exactly **eight**.
+reproduce its source; the code makes the guarantee explicit and scopes it to the Key.
+
+**All eight landed together as v0.9.6 (session 13), on the v0.9.5 precedent** — batch a slice's spec
+edits into one coherent release at slice close, so external review reads deliberate change rather
+than drift. The gate was `grep -rn "SPEC EDIT OWED" internal/` (**code only** — the doc set is full
+of PROSE about past markers, so a repo-wide grep is mostly false positives): it returned exactly
+**eight** before, and returns **zero** now. The release was held to exactly those eight; four
+unmarked candidates are recorded in §15b as a scope call for the user, deliberately not smuggled in.
+
+**Release checklist, for the next slice that closes** (§15c is why the last item is on it):
+`grep -rn "SPEC EDIT OWED" internal/` → land what it finds → bump **all five** doc-set stamps →
+ADR §3 block → flip the code markers to `[SPEC EDIT LANDED — v<version>]` → **`cd docs && bun test`**,
+because `tutorial.ka.md` is generated and its stamp is a *copy* of the English one; the invariant
+checker catches the drift and refuses to assemble, but only if somebody runs it → `make ci`.
 
 **The `CLAUDE.md` owed since §2 now exists** (repo root, written session 6). It carries the
 `internal/` taxonomy, the doc-set map, the build split, the three enforced gates, and the standing
@@ -2713,14 +2811,19 @@ working rules. That item is discharged.
 
 ### Next work, in order
 
-0. **DECIDE WHAT CLOSES THE SLICE — the first real fork since the kernel table was written, because
-   the table is now empty.** Two candidates, and they are not obviously ordered:
-   (a) **land the eight `[SPEC EDIT OWED]` items as one release** (the v0.9.5 precedent — batch a
-   slice's edits into one coherent spec change at slice close, so external review reads deliberate
-   change rather than drift); or (b) **start the first bounded context**, which makes
-   `hexboundary`/`singlewriter`/`exhaustiveswitch` buildable for the first time (§1, §4 defer all
-   three on "a lint over an empty tree passes trivially"). (a) is the smaller, and it is the one the
-   slice's own convention says comes first. **Worth putting to the user**, since it is a scope call.
+0. ~~**DECIDE WHAT CLOSES THE SLICE**~~ — **DECIDED and DONE (session 13, §15): (a), the eight spec
+   edits, landed as `build-spec.md` v0.9.6.** The slice's own convention said the spec edits come
+   first, and they did. **The second slice is CLOSED.** Do not re-open it and do not re-apply any
+   of the eight.
+0b. **NEXT SLICE: the first bounded context** — formerly fork (b), now unblocked and unambiguous.
+   It is what makes `hexboundary`, `singlewriter` and `exhaustiveswitch` buildable for the first
+   time (§1, §4 defer all three on "a lint over an empty tree passes trivially" — a check over an
+   empty tree passes trivially, which is indistinguishable from a broken check). **Which context
+   first is a scope call worth putting to the user**; the shape of the argument is that §3.2 makes
+   `oms` the single-writer authority, so it is the one the other three gates are written about,
+   while `marketdata` is the one with no durable state and therefore the cheaper first proof of the
+   layering. **Also open for the user: §15b's four unmarked normative statements** — land them as a
+   v0.9.7 follow-up, or leave them as implementation detail.
 1. ~~**`platform/boot`**~~ — **DONE (session 12, §14).** §1's deferred kernel table is exhausted.
    **The parity dispatcher is what `events` was the last prerequisite for** — but it also needs a
    persisted `DispatchSeq` log, so it is not simply "next" (§9b).

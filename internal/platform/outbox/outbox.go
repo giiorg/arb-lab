@@ -32,16 +32,16 @@
 //
 // # Per-key FIFO, and why it is not global FIFO
 //
-// [SPEC EDIT OWED] §3.2 and D2 describe the outbox as an "at-least-once export
-// to idempotent consumers" and say nothing about ORDER. Order is nonetheless
-// load-bearing: D2 also calls audit "a projection of the OMS journal", and a
-// projection that applies a fill before the order that produced it does not
-// reproduce its source. So the spec states a delivery-count guarantee and
-// relies, unstated, on a delivery-order one. This package makes the order
-// guarantee explicit and scopes it — FIFO within a Key, nothing across two —
-// because "ordered" without a scope would be read as global FIFO, which is
-// strictly stronger, unnecessary, and would let one stuck record halt every
-// consumer.
+// [SPEC EDIT LANDED — v0.9.6] §3.2 and D2 described the outbox as an
+// "at-least-once export to idempotent consumers" and said nothing about ORDER.
+// Order was load-bearing anyway: D2 also calls audit "a projection of the OMS
+// journal", and a projection that applies a fill before the order that produced
+// it does not reproduce its source. So the spec stated a delivery-count
+// guarantee and relied, unstated, on a delivery-order one. This package made
+// the order guarantee explicit and scoped it — FIFO within a Key, nothing
+// across two — because "ordered" without a scope would be read as global FIFO,
+// which is strictly stronger, unnecessary, and would let one stuck record halt
+// every consumer. §3.2 now states it.
 //
 // Two events about the same trade must reach the audit projection in the order
 // they were journaled: a fill applied before the order that produced it is a

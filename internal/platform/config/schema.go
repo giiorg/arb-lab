@@ -14,16 +14,18 @@ import (
 // one is an error — see ErrTagUnknown for why silence would be worse here than
 // elsewhere.
 //
-// [SPEC EDIT OWED] §5.2 says configuration is "hot-reloadable where safe" and
-// stops there. "Where safe" has to be decided per field by somebody, and the two
-// ways to decide it are not equally wrong when forgotten: default-ALLOW means a
-// field added next year is silently hot until somebody notices, and the noticing
-// happens when a running process picks up a journal path or a fencing generation
-// mid-trade. Default-DENY means it is restart-required until somebody writes the
-// tag, and the noticing happens when a reload is refused with the field named.
-// This is the same argument §3.6 rule 4 already settled for float64 — deny until
-// a reason is written down — applied to a requirement the spec left open rather
-// than to one it decided differently. §5.2 should say so.
+// [SPEC EDIT LANDED — v0.9.6] §5.2 said configuration is "hot-reloadable where
+// safe" and stopped there. "Where safe" has to be decided per field by somebody,
+// and the two ways to decide it are not equally wrong when forgotten:
+// default-ALLOW means a field added next year is silently hot until somebody
+// notices, and the noticing happens when a running process picks up a journal
+// path or a fencing generation mid-trade. Default-DENY means it is
+// restart-required until somebody writes the tag, and the noticing happens when
+// a reload is refused with the field named. This is the same argument §3.6
+// rule 4 already settled for float64 — deny until a reason is written down —
+// applied to a requirement the spec had left open rather than to one it decided
+// differently. §5.2 now says so, including this file's one deliberate
+// asymmetry below.
 const (
 	tagKey = "config"
 	tagHot = "hot"

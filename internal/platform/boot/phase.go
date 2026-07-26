@@ -9,16 +9,17 @@ import (
 // PhaseKind is what a boot phase is FOR, and therefore where in the sequence it
 // is allowed to sit.
 //
-// [SPEC EDIT OWED] §3.2 states the roster — "signal, config, obs,
+// [SPEC EDIT LANDED — v0.9.6] §3.2 stated the roster — "signal, config, obs,
 // reconcile-only-boot, graceful shutdown" — as a LIST, in a table cell, and
-// never says that the positions are constraints or what breaks when they are
+// never said that the positions are constraints or what breaks when they are
 // violated. Two of them are load-bearing and both failures are silent: signal
 // installed late means an interrupt during a slow boot kills the process on the
 // default disposition with no flush, and observability started late means a
 // boot that dies in the journal join dies with an exit code as its only
 // diagnosis. The code turns the list into checked constraints with those
-// reasons attached; the spec should say so, rather than leaving a reader to
-// infer that a table cell's comma order was deliberate.
+// reasons attached; §3.2 now states them, including that the roster stays open,
+// rather than leaving a reader to infer that a table cell's comma order was
+// deliberate.
 //
 // This enum exists so those constraints can be checked rather than
 // reviewed. What it deliberately does NOT do is close the roster: KindService
@@ -154,9 +155,10 @@ type Sequence struct {
 	// may stop being audible before the watchdog escalates and the actuator
 	// takes over.
 	//
-	// [SPEC EDIT OWED] §7.4 gives the watchdog its trigger and §7.5 gives the
-	// process a graceful shutdown, and nothing in the spec joins them — but
-	// they are the same wall clock, and the join has a wrong side. A total stop
+	// [SPEC EDIT LANDED — v0.9.6] §7.4 gave the watchdog its trigger and §7.5
+	// gave the process a graceful shutdown, and nothing in the spec joined
+	// them — but they are the same wall clock, and the join has a wrong side.
+	// §7.4 now states the bound. A total stop
 	// budget at or above this threshold means an ORDINARY RESTART presents to
 	// the watchdog exactly as a dead host: it escalates, the actuator fences
 	// the bot's signer mid-flush and latches a takeover epoch, and the process

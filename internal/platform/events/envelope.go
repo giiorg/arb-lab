@@ -90,7 +90,7 @@ func (s StreamKind) Lane() Lane {
 // stream". It is NOT globally ordered `[→ Z1]`: VenueSeq is authoritative within
 // a SourceID and means nothing across two.
 //
-// [SPEC EDIT OWED] §3.5 declares this as four flat fields —
+// [SPEC EDIT LANDED — v0.9.6] §3.5 declared this as four flat fields —
 // SourceID{Venue, Product ProductCategory, Symbol string, Stream StreamKind} —
 // with the trailing comment "= a VenueInstrument stream". This composes the
 // instrument instead of restating its three fields. Two reasons, and the second
@@ -98,7 +98,7 @@ func (s StreamKind) Lane() Lane {
 // §5.1's VenueInstrument carries, so a source could not name an inverse contract
 // at all; and duplicating the fields duplicates their validation, which is how
 // two definitions of "a valid instrument" come to disagree. The spec's own
-// comment says this IS a VenueInstrument stream — this makes that structural.
+// comment said this IS a VenueInstrument stream; §3.5 now makes it structural.
 type SourceID struct {
 	Instrument ids.VenueInstrument
 	Stream     StreamKind

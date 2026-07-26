@@ -21,13 +21,14 @@
 //
 // # The ladder, and why capacity is a ceiling for every class
 //
-// [SPEC EDIT OWED] §7.6 says "back off at ~70% weight" without saying what backs
-// off. §7.1 says the margin top-up gets "a reserved rate-limit allocation so it
-// is not starved by trading traffic", and §6.7 says an ambiguous residual holds
-// new trading and reserves budget for recovery — both without saying how much,
-// or what happens when the reserve itself runs out. So the spec states a
-// threshold in one section and a reservation in two others, and relies, unstated,
-// on the priority ORDERING that makes them one mechanism.
+// [SPEC EDIT LANDED — v0.9.6] §7.6 said "back off at ~70% weight" without saying
+// what backs off. §7.1 says the margin top-up gets "a reserved rate-limit
+// allocation so it is not starved by trading traffic", and §6.7 says an
+// ambiguous residual holds new trading and reserves budget for recovery — both
+// without saying how much, or what happens when the reserve itself runs out. So
+// the spec stated a threshold in one section and a reservation in two others,
+// and relied, unstated, on the priority ORDERING that makes them one mechanism.
+// §7.6 now carries the ladder, and §7.1 and §6 point at it.
 //
 // The ordering is load-bearing rather than cosmetic, and it is not the obvious
 // one. Shedding market-data and account reads to protect trading traffic would
