@@ -1390,12 +1390,14 @@ and prints the diff it applied (session 5). It earned that on its first run this
 invocation double-wrapped the sed expression and the NO-OP guard reported twelve un-applied
 mutations instead of twelve phantom kills.
 
-**Both branches are PUSHED and in sync (re-verified end of session 6).**
-`feat/milestone-1-foundation` is at **`df7178b`**, tracking `origin/feat/milestone-1-foundation`,
-`0 0` on `git rev-list --left-right --count @{u}...HEAD`. Session 6's push was a clean
-fast-forward — divergence was checked before pushing rather than assumed, which is the same
-discipline session 5 applied to `main` (a strict ancestor, verified with
-`git merge-base --is-ancestor`). **No outward-facing action is owed.**
+**Both branches are PUSHED and in sync (re-verified at the end of session 6).**
+`feat/milestone-1-foundation` tracks `origin/feat/milestone-1-foundation`. **Check it rather than
+trust this paragraph** — `git rev-list --left-right --count @{u}...HEAD` should print `0 0`. The
+head commit is deliberately not named here: a paragraph that cites its own commit hash is stale the
+moment the commit containing it is written, and a hash that a reader then finds does not match is
+worse than no hash. Session 6's push was a clean fast-forward, with divergence checked before
+pushing rather than assumed — the same discipline session 5 applied to `main` (a strict ancestor,
+verified with `git merge-base --is-ancestor`). **No outward-facing action is owed.**
 
 **A PR has *not* been opened, and that is deliberate — the branch is pushed, not proposed.** Open
 one only if asked. Note that the branch now carries the whole of milestone 1 and will keep growing:
