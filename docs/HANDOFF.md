@@ -68,7 +68,7 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 ## NEXT REQUEST (2026-07-26): **milestone 1 — IN PROGRESS, `platform/fixedpoint` is DONE**
 
-**Branch `feat/milestone-1-foundation` at `ff80713`, 8 commits, tree clean, `make ci` green.** The money kernel is complete and load-bearing-tested: 1,482 production lines, 213 passing cases, an independently written `math/big` oracle, 19 negative controls and 4 positive controls. **Only the parser fuzz target is outstanding in that package.**
+**Branch `feat/milestone-1-foundation` at `efd56db`, 16 commits, tree clean, `make ci` green.** **Milestone 1's first slice (§1) is CODE-COMPLETE**: the scaffold, `platform/fixedpoint`, `platform/clock`, and both the `nofloat` and `notimenow` gates. What remains is documentation debt (ten `[SPEC EDIT OWED]` items), the timeboxed `gremlins` audit, and one open question for the user. Load-bearing-tested throughout: an independently written `math/big` oracle, a fuzz target with four total invariants, a two-implementation conformance suite, and **37 hand-applied mutations of which 37 are caught** (one survived, was diagnosed as a real test gap, and was closed).
 
 > **Read `docs/superpowers/specs/2026-07-26-milestone-1-foundation-decisions.md` first — its RESUME HERE block.**
 > That record holds every decision taken with its rationale *and rejected alternatives*, the verified
@@ -80,7 +80,7 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 1. **Scope.** First slice = scaffolding + `platform/fixedpoint` + `platform/clock` + the `nofloat` and no-`time.Now()` gates. The eleven kernel packages form a strict dependency spine and anything above the bottom would be rewritten when the bottom lands. `fixedpoint` first because **milestone 2 is a kill gate whose verdict is a money computation** — a wrong rounding direction moves the number across the threshold and kills or green-lights the project on a bug.
 2. **Layout.** `go.mod` at root, module `github.com/giiorg/arb-lab`, `go 1.26.0`. `main` fast-forwarded to v0.9.4 (**locally — not pushed**), code on `feat/milestone-1-foundation`. `tools/lint` is a **nested module** and there is deliberately **no `go.work`** (a workspace would let `x/tools` become importable from the engine). `migrations/` partitioned by dialect from the first file.
-3. **Gates = custom `go/analysis` analyzers**, each with `analysistest` fixtures that MUST produce diagnostics — because a `depguard` stanza cannot be unit-tested and `nofloat` cannot be config at all (it needs type info). **6 planned, 1 built.**
+3. **Gates = custom `go/analysis` analyzers**, each with `analysistest` fixtures that MUST produce diagnostics — because a `depguard` stanza cannot be unit-tested and `nofloat` cannot be config at all (it needs type info). **6 planned, 3 built** (`kernelpurity`, `nofloat`, `notimenow`); the other three are deferred because nothing exists to police yet.
 4. **`fixedpoint`** = `int64` mantissa @ `Scale = 9` + `math/bits` 128-bit intermediates; `(T, error)` + a sticky-error `Calc`; **zero value invalid**; `Price` carries `base`+`quote`.
 
 **Also decided, and not in the previous brief:**
@@ -90,9 +90,11 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 - **`kernelpurity` is a fifth structural rule** (built, green, bite-checked): `platform/` may import only stdlib + `platform/`, catching a domain leak and a spine inversion with one rule.
 - **Test-the-tests = negative controls in CI** (the NC1–NC5 discipline from `docs/formal/`), with `gremlins` as a timeboxed audit only — **still owed**, and to be reported honestly either way.
 
-**Six [SPEC EDIT OWED] items** are recorded and unapplied (four from session 1, two added in session 2 — `RoundingMode` deviating from rule 8's `type X string` shape, and the error-precedence contract): the `boundary/` flatten in §3.2/§11 (~30 occurrences — and **`boundary/lint` in §3.6 is not a path, do not rewrite it**), `kernelpurity` as a fifth rule, `exhaustiveswitch` as a sixth, and the Go-vs-Rust ADR §3 entry. These exist so R2d reads deliberate change rather than drift.
+**Ten [SPEC EDIT OWED] items** are recorded and unapplied — four from session 1, two from session 2, four from session 3. Session 1's: the `boundary/` flatten in §3.2/§11 (~30 occurrences — and **`boundary/lint` in §3.6 is not a path, do not rewrite it**), `kernelpurity` as a fifth rule, `exhaustiveswitch` as a sixth, the Go-vs-Rust ADR §3 entry. Session 2's: `RoundingMode` deviating from rule 8's `type X string` shape, and the error-precedence contract. Session 3's: `notimenow` bans the whole ambient-time family where rule 5's text names only `time.Now()`; `TimerSource` as an addition to §3.5; the timer priority direction (§3.5 states the tie-break order but not the direction); and the open question below. These exist so R2d reads deliberate change rather than drift.
 
-**No user decision is pending.** The `RoundingMode` set was confirmed **as proposed, unchanged** — eight modes, `RoundInvalid = 0`, `RoundExact` kept, `HalfDown` not added.
+**One user decision is now pending — a scope question, not a blocker.** Should §3.6 rule 5 (no ambient clock reads) reach `engine/` adapters as well as `domain/`/`application/`? A venue adapter stamping a received message with *this machine's* clock is arguably how a wrong timestamp enters the system in the first place. The gate currently implements the narrow scope the spec states, and a fixture pins that limit deliberately rather than exceeding it quietly. **Ask before widening.**
+
+The `RoundingMode` set was confirmed **as proposed, unchanged** — eight modes, `RoundInvalid = 0`, `RoundExact` kept, `HalfDown` not added.
 
 **One outward-facing action is owed:** neither `main` (57 commits ahead of `origin/main`) nor the feature branch has been pushed. Confirm before pushing.
 
@@ -109,12 +111,17 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 - **`-rapid.seed` semantics verified from module source** and found to be the *opposite* of a safe gate default: 0 means "choose a random one", so the properties are non-deterministic out of the box. `make test`/`make ci` now pin `RAPID_SEED`; `make test-properties` deliberately does not (the nightly explorer).
 - **21 mutations applied across the session, every construct bite-checked.** Two did not bite and both were diagnosed rather than papered over — one semantically equivalent (pinned by an internal test instead), one simply a bad mutation.
 
+**Also built and green (session 3):**
+
+- **`FuzzParseMantissa`** — the parser is the only untrusted-input boundary, so its fuzz body asserts four *total* invariants rather than checking for panics: `ErrSyntax` exactly when the input is outside an independently-stated grammar; every error matching exactly one sentinel class; the canonical round trip as a fixed point; and agreement with the `math/big` oracle where the oracle is defined. **The oracle gate was justified from `math/big` source** — `Rat.SetString` refuses `|exp| > 1e6` and reports it as a *parse failure*, which is not what this package means by a syntax error. Corpus reach was **measured, not assumed**: 162 of 348 generated entries reach the oracle cross-check.
+- **`nofloat`** — type-based and default-deny under `internal/`, because the rule is not "the token `float64` does not appear" but "no value here is a float". It catches `x := 1.5`, `a / b` with float operands, and `d.Seconds()` — the last being how it actually happens, with no float token at the call site. The `//nofloat:allow <reason>` escape is *enforced*: a bare directive exempts nothing, and an escape on a line with no float is reported as unused. It fired on real code immediately and both hits were resolved rather than suppressed.
+- **`notimenow`** — resolved through `go/types`, so `import wall "time"` and a dot-import are both caught, and it reports the *reference* so `var f = time.Now` counts. It bans the whole ambient-time family, because a gate stopping at `time.Now` is bypassed by `time.Since` — which is idiom, not evasion.
+- **`platform/clock`** — the four §3.5 methods, `Wall` + `TestClock`, and `ServerTime` with a **three-valued** `Passed()` so a funding boundary inside the uncertainty band cannot be silently resolved. An uncalibrated venue yields an *unset* `ServerTime`, because a zero offset with a zero band is the most confident answer the package can give and would be given on no data. Timer delivery is **pull-based** on a separate `TimerSource`: §3.5 gives the dispatcher the total order over events *and* timers, so a pushing Clock would split the arbitration that decides the replay key. The package therefore contains no goroutines at all.
+
 **Next items, in order** (detail in the decision record's RESUME HERE):
-1. **`FuzzParseMantissa`** — the only gap left in `fixedpoint`. Cross-check against the oracle **only where the oracle also accepts**: `big.Rat.SetString` rejects `"1."`/`".5"` and accepts `"1/2"`, a grammar difference rather than an arithmetic one.
-2. The `nofloat` + `notimenow` analyzers, `analysistest`-proven and bite-checked, registered in the multichecker.
-3. `platform/clock` + the two-implementation conformance suite — the test that makes §3.5's parity claim real rather than asserted. **Reuse the predicate/generator split** from the decision record §5c: predicates over a `Clock`, run against both implementations, each invariant with a negative control.
-4. The **[SPEC EDIT OWED]** items — now **six**, two added this session (`RoundingMode` as a documented exception to rule 8's `type X string` shape; the error-precedence contract).
-5. The timeboxed `gremlins` attempt, reported honestly either way — noting the 19 hand-written controls now cover much of what it would have found, so the remaining value is *unanticipated* survivors.
+1. The **[SPEC EDIT OWED]** items — now **ten**, four added this session. One of them is the open question above and needs the user, not a doc edit.
+2. The timeboxed `gremlins` attempt, reported honestly either way — noting the hand-written controls across `fixedpoint` and `clock` now cover much of what it would have found, so the remaining value is *unanticipated* survivors.
+3. **Milestone 1's second slice**, per §1's deferred table: `platform/apperror` and `platform/ids` (both import nothing), then `platform/events` — which needed `clock`, and now has it.
 
 **Do not over-build.** Milestone 1 exists to make **milestone 2 — the economic gate — measurable**, and §12.2 is an explicit kill gate the spec predicts BTC/VIP0 may fail (≈3.4% at 60% utilization vs the ~4.6% hurdle). Build the foundation the gate needs; the OMS is milestone 3.
 
