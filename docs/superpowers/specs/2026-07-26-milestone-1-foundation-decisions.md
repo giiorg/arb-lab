@@ -1,6 +1,8 @@
 # Milestone 1 — foundation decisions (2026-07-26)
 
-**Status:** in progress. First code in the repo. Branch `feat/milestone-1-foundation`, first commit `e92f9f0`.
+**Status:** in progress. Milestone 1's **first slice (§1) is code-complete** as of session 3 — scaffolding,
+`platform/fixedpoint`, `platform/clock`, and the `nofloat`/`notimenow` gates. Branch
+`feat/milestone-1-foundation`, first commit `e92f9f0`, head `f146855`, **unpushed**.
 **Doc set:** implements `build-spec.md` §12.1 (v0.9.4). Deviations from the spec are marked **[SPEC EDIT OWED]**.
 
 This record exists so a fresh session can resume without re-deriving anything. Every decision below was
@@ -690,6 +692,122 @@ stale and are ignored.
 
 ---
 
+## 5e. `platform/clock` as built (session 3) — the second kernel package
+
+Commits `e851f79` (ServerTime) and `f146855` (the port, both implementations, the
+conformance suite). The §5-family numbering is "packages built", so this sits here rather than
+under §3.
+
+### `ServerTime` is a type, and `Passed()` is why
+
+§3.5 declares `ServerNow(Venue) ServerTime` — a *type*, not `(time.Time, time.Duration)` — and that
+is the opportunity. A funding boundary decided against a band has **three** answers, so:
+
+```go
+func (s ServerTime) Passed(boundary time.Time) Certainty   // CertainlyPassed | CertainlyNotPassed | Uncertain
+```
+
+The rejected alternative is handing back the instant and the band and letting each call site
+compare them. Every call site would do that arithmetic slightly differently, and **the one that
+forgets the band answers "unknown" as either yes or no** — in the code path deciding whether to hold
+a position through a settlement.
+
+**The boundary IS the settlement instant**, so being exactly on it counts as passed. That
+inclusivity is load-bearing in two directions and both are pinned: `Earliest() == boundary` is
+`CertainlyPassed`, `Latest() == boundary` is only `Uncertain`.
+
+`Certainty` follows §3.6 rule 8's `type X string` + constants + `Validate()` shape, so **no new
+exception is owed** there (unlike `RoundingMode`).
+
+### An uncalibrated venue is unusable, and that is the sharpest decision here
+
+`ServerNow` on an unknown venue returns the **zero `ServerTime`**, which fails `Validate()` and
+answers `Uncertain` to everything. The alternative — a zero offset and a zero band — is *the most
+confident answer this package can give* ("that venue's clock is exactly ours"), and it would be
+given on the strength of no data at all. Every funding boundary would then read as decided.
+
+`ServerNow` has no error to return (§3.5 fixes the signature), so **`Validate()` is the loud path
+and `Uncertain` is the safe default**: a caller who skips the check stalls rather than acting on a
+clock it does not have.
+
+### Timer delivery is pull-based **[SPEC EDIT OWED — an addition, not a deviation]**
+
+The obvious design is a sink the Clock pushes into as timers come due. It is wrong here: §3.5 gives
+the **dispatcher** one total order over events *and* timers, so a Clock pushing on its own goroutine
+would force the dispatcher to re-queue everything it was handed, and **the arbitration that decides
+the replay key would live in two places**. So consumption is pull-based, on an interface separate
+from `Clock` because only the dispatcher pumps it while every domain component holds a `Clock`:
+
+```go
+type TimerSource interface { NextDue() (Fired, bool); Pending() int }
+```
+
+Side effect worth having: **this package contains no goroutines and no delivery-path concurrency at
+all.** `Fired.At` is the *scheduled* instant, not the delivery instant — the scheduled one is
+identical in a replay.
+
+**Deliberately absent: waking a live consumer.** That belongs to the dispatcher's select loop, which
+§1 defers (it needs `platform/events` and a persisted `DispatchSeq`). Building it now would be
+guessing at a shape with nothing to check it against.
+
+### The ordering rule, and the priority direction **[SPEC EDIT OWED — spec does not state it]**
+
+One `timerQueue`, shared by both implementations, so "earliest by `(At, Prio, ID)`" has one
+definition. Sharing is deliberate: a suite passing against two independent comparators would only
+prove they agree today.
+
+**Lower `Prio` is more urgent, so the zero value is the MOST urgent.** Chosen rather than inherited:
+under the opposite convention an unset priority sends a safety timer to the back of the queue, and
+noisy-but-early beats quiet-but-late. The id tie-break makes the order **total**, which is what lets
+a replay reproduce a drain sequence.
+
+A map and a linear scan, **not a heap**: cancel-and-replace by id is the operation §3.5 asks for
+most and it is exactly what costs a heap an index per entry, while the queue holds a handful of
+funding-boundary and order-timeout timers. Revisit if `Pending()` is ever seen in the thousands.
+
+### Clamping vs. erroring — the same question answered twice, differently
+
+| | Backwards time | Why |
+|---|---|---|
+| `Wall.Now` | **absorbed** (high-water clamp) | No error to return (§3.5). A stalled clock fires a timer late; a reversed one re-evaluates a settlement |
+| `TestClock.Advance` / `SetNow` | **rejected** | They *do* have an error to return, and in a replay backwards time means the dispatch log is out of order — a finding, not something to absorb |
+
+The clamp is not hypothetical. NTP steps the system clock, and Go's monotonic reading protects the
+*difference* between two `time.Time`s while `Now` hands out absolute instants compared against
+deadlines computed earlier.
+
+### `AdvanceToNextTimer` is the backtester's loop primitive
+
+Jumping straight to the next scheduled instant is what makes replaying a month of 8-hour funding
+cycles finish in seconds rather than iterating a nominal tick — a caller guessing a step size would
+either skip timers or waste most of its iterations. An already-due timer does not rewind the clock
+and still reports true, so an "advance then drain" loop makes progress instead of spinning.
+
+### Bite-checked: 18/18 mutations, 11 conformance negative controls — and 3 of 4 findings were in the TESTS
+
+This is the part worth carrying forward. The conformance suite is the easiest kind of test to write
+vacuously: nine invariants passing against both implementations look like nine guarantees and look
+identical to nine that could never fail.
+
+1. **The first controls run HUNG rather than failed.** The "a consumed timer stays due" defect made
+   `drain()` loop forever. **A predicate that can hang on a broken implementation is a bad
+   predicate** — a failing test names the defect, a hanging one reports nothing, blocks CI, and
+   reads as an infrastructure problem. `drain()` is now bounded with a legible overflow marker.
+2. **`checkNowMonotonic` has two clauses and one defect only reached one.** A `Now` that retreats
+   exactly as fast as time advances reads as *stalled*, not *reversed*, so the "went backwards"
+   clause had never fired. Split into `nowGoesBackwards` and `nowStandsStill` so both are live —
+   the vacuity problem found one level up, inside a control.
+3. **`Wall`'s monotonic clamp survived having its store removed.** `clampMonotonic` had its own
+   tests and the conformance suite passed, but the *wiring* was untested: without the store, the
+   high-water mark stays the zero time and the clamp silently never engages. Closed with an
+   unexported `systemNow` an internal test can replace — the public surface is unchanged — and the
+   mutation now bites. **A guarantee whose logic is tested and whose wiring is not is still an
+   untested guarantee.**
+4. The positive control does double duty: the same broken-clock wrapper with **no** defect selected
+   must pass every invariant, which shows the harness is not what causes the failures.
+
+---
+
 ## 6. Test strategy
 
 **Test-first per operation, red shown before green** (the `tdd` skill governs the loop). Rejected:
@@ -751,18 +869,21 @@ composition of four narrow interfaces, not a god-interface). **The risk to watch
 
 ---
 
-## RESUME HERE — updated during session 3
+## RESUME HERE — updated end of session 3
 
 **Environment, verified — do not re-derive.** Go 1.26.0. Remote `github.com/giiorg/arb-lab`. Branch
-`feat/milestone-1-foundation` at **`04bb5b9`**, tree clean, `make ci` green (fmt-check → vet both
+`feat/milestone-1-foundation` at **`f146855`**, tree clean, `make ci` green (fmt-check → vet both
 modules → custom gates → race tests both modules, `RAPID_SEED` pinned). Test-only dependency
 `pgregory.net/rapid v1.3.0` added; §11's "never a dependency" governs production code, untouched.
 `bitnet-backend-go` is **not on this machine** — a described style, not a readable source.
 
 **Two outward-facing actions are still owed and were deliberately not taken.** `main` was
 fast-forwarded locally to the v0.9.4 spec but **has never been pushed** (57 commits ahead of
-`origin/main`), and `feat/milestone-1-foundation` has never been pushed — it now carries 10
+`origin/main`), and `feat/milestone-1-foundation` has never been pushed — it now carries 15
 commits. Confirm with the user before pushing either.
+
+**Milestone 1's first slice (§1) is now CODE-COMPLETE.** Scaffolding, `platform/fixedpoint`,
+`platform/clock`, and both gates. What remains is documentation debt and two judgement calls, below.
 
 ### Done, so do not redo
 
@@ -778,15 +899,15 @@ commits. Confirm with the user before pushing either.
    bite-checked at 8/8 and 7/7 mutations. **The analyzer roster is 3 of 6 built**; the other three
    stay deferred for the reasons §4 gives (nothing to police yet). `nofloat` fired on real code and
    both hits were resolved, not suppressed.
+6. ✅ **`platform/clock`** (§5e) — the four spec'd methods, `Wall` + `TestClock`, `ServerTime` with a
+   three-valued `Passed()`, the shared `(At, Prio, ID)` queue, and a conformance suite run against
+   both implementations with **11 negative controls and a positive control**. 18/18 mutations caught.
+   **Do not reopen it.** Timer *delivery* is pull-based via a separate `TimerSource`; waking a live
+   consumer is deliberately left to the dispatcher.
 
 ### Next work, in order
 
-1. **`platform/clock`** + the two-implementation conformance suite (§3.5: `Now`, `ServerNow(Venue)`
-   with uncertainty band, `SetTimer(id, at, prio)` with cancel/replace by id and ties broken by prio
-   then id, `CancelTimer`). **Reuse the predicate/generator split from §5c** — write the conformance
-   suite as predicates over a `Clock`, run them against both implementations, and give each
-   invariant a negative control.
-2. **Land the [SPEC EDIT OWED] items — now eight:**
+1. **Land the [SPEC EDIT OWED] items — now ten:**
    - the `boundary/` flatten across `build-spec.md` §3.2/§11 (~30 occurrences, and **do not rewrite
      `boundary/lint` in §3.6** — it means "a boundary-or-lint test", not a path)
    - `kernelpurity` as a fifth structural rule
@@ -802,9 +923,20 @@ commits. Confirm with the user before pushing either.
      stamping a received message with this machine's clock is arguably how a wrong timestamp enters
      the system. The `engine/venue` fixture currently pins the narrow scope deliberately. **Ask
      before widening** (§4c)
-3. **Still owed:** the timeboxed `gremlins` attempt, reported honestly either way. Note the 19
-   hand-written negative controls now cover much of what mutation testing would have; the remaining
-   value is in finding *unanticipated* survivors.
+   - **`TimerSource` as an addition to §3.5** — timer consumption is pull-based on an interface
+     separate from `Clock`, and the spec's listing shows neither. Also record that waking a live
+     consumer is unbuilt and belongs to the dispatcher (§5e)
+   - **the timer priority direction** — lower `Prio` is more urgent, so the zero value is the most
+     urgent. §3.5 says "ties broken by prio then id" without stating the direction, and it is not
+     a detail: the opposite convention silently deprioritises an unset safety timer (§5e)
+2. **Still owed:** the timeboxed `gremlins` attempt, reported honestly either way. Note the negative
+   controls across `fixedpoint` and `clock` now cover much of what mutation testing would have (37
+   hand-applied mutations across the two, 37 caught after one gap was closed); the remaining value
+   is in finding *unanticipated* survivors.
+3. **Then milestone 1's second slice**, per §1's deferred table — the next packages up the spine are
+   `platform/apperror` and `platform/ids` (both import nothing), then `platform/events` (needs
+   `clock`, which now exists). `hexboundary` and `singlewriter` stay deferred until a bounded
+   context exists to police.
 
 ### Standing lessons — apply these, do not rediscover them
 
@@ -823,8 +955,22 @@ commits. Confirm with the user before pushing either.
   fuzzer's first "find" an artefact of the two tools' differing limits rather than a defect.
 - **A clean run and a vacuous run look identical, so coverage claims are measurements.** 30.4M fuzz
   executions with no find says nothing until you have counted how many corpus entries actually reach
-  the interesting branch (§5d: 162 of 348). This is the NC1–NC5 vacuity problem again, and it will
-  recur for `clock`'s conformance suite — a predicate that never reaches the timer path passes.
+  the interesting branch (§5d: 162 of 348). It recurred in `clock` exactly as predicted, one level
+  deeper than expected: a *negative control* turned out to reach only one of its predicate's two
+  clauses (§5e).
+- **A predicate that can HANG on a broken implementation is a bad predicate.** `clock`'s first
+  controls run hung instead of failing. A failing test names the defect; a hanging one reports
+  nothing, blocks CI, and reads as an infrastructure problem. Every drain/retry loop in a control
+  gets a bound and a legible overflow marker (§5e).
+- **Tested logic plus untested wiring is still an untested guarantee.** `Wall`'s monotonic clamp had
+  its own passing tests and survived having its store deleted, because nothing checked that the
+  clamp was connected. If a guarantee cannot be reached through the public API, indirect the one
+  dependency that blocks it and reach it from an internal test — do not settle for a doc comment
+  (§5e).
+- **The same question can deserve opposite answers in two implementations.** Backwards time is
+  absorbed by `Wall` (no error to return; a stalled clock beats a re-evaluated settlement) and
+  rejected by `TestClock` (it has an error, and in replay it means the dispatch log is out of
+  order). Look for the error channel before choosing (§5e).
 
 **Do not over-build.** Milestone 1 exists to make **milestone 2 — the economic gate — measurable**,
 and §12.2 is an explicit kill gate the spec predicts BTC/VIP0 may fail. The OMS is milestone 3.
