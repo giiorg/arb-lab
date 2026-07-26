@@ -105,11 +105,22 @@ These are not style preferences. Each one was paid for.
   review. `fixedpoint` has a `math/big` oracle; `ids` has one for its base32
   codec.
 - **Every claim gets bite-checked.** Before a test is trusted, mutate the code it
-  covers and confirm it fails. `tools/mutate.sh` does this — it scopes the
-  mutation to a line, prints the diff it applied, and reports `NO-OP!!` rather
-  than `caught` when the pattern did not match. Both of those guards exist
-  because their absence produced a false all-clear. A surviving mutant is either
-  a test gap or a wrong mutant, and telling which is the work.
+  covers and confirm it fails. `tools/mutate.sh` does this, and it reports five
+  verdicts rather than two — because four separate things have masqueraded as a
+  kill here, and each guard exists because its absence produced a false
+  all-clear:
+
+  | Verdict | Means |
+  |---|---|
+  | `caught` | the suite failed — the claim is checked |
+  | `SURVIVED` | the suite passed with broken code |
+  | `NO-OP!!` | the pattern did not match; the mutation never ran |
+  | `NOBUILD!!` | the mutant did not compile, so the tests never ran |
+  | `TIMEOUT!!` | the suite **hung**; a hanging test names no defect |
+
+  It scopes the mutation to a line and prints the diff, because a file moving is
+  not evidence about which function moved. A surviving mutant is either a test
+  gap or a wrong mutant, and **telling which is the work**.
 
   ```
   tools/mutate.sh <file> <line> <sed-command> <description> [test-target]
@@ -125,7 +136,16 @@ These are not style preferences. Each one was paid for.
   reads as a perfect score.
 - **A clean run and a vacuous run look identical.** Coverage claims are
   measurements. Counting executions says nothing until you have counted how many
-  reach the interesting branch.
+  reach the interesting branch — and this reaches past fuzz corpora to ordinary
+  fixtures. Every `events` coalescing test used a mailbox depth of 1, where
+  "merge against the newest" and "merge against the oldest" are the same slot, so
+  a real defect was unreachable while looking covered. Check whether a fixture
+  parameter is pinned to the value that collapses the distinction.
+- **A fix applied in one place gets applied to its mirror.** `Receive` was tested
+  across 200 trials because a Go `select` picks a ready case at random; `Send` —
+  same situation, same coin flip — was tested once, and a mutant survived on it.
+  When a test earns a repetition, a bound or an isolation trick, go and look for
+  the symmetric case immediately.
 - **Deviations from the spec are marked, not absorbed.** Take the deviation if it
   is right, mark it `[SPEC EDIT OWED]`, and land it in the spec before the slice
   closes. External review has to be able to tell deliberate change from drift.

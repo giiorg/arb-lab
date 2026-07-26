@@ -1373,7 +1373,197 @@ rejected.
 
 ---
 
-## RESUME HERE — updated end of session 6
+## 9. The second slice continued (session 7) — the instrument identity and `platform/events`
+
+Three decisions were put to the user before any code was written, because each one changes what gets
+built rather than how. All three were taken as recommended; the rejected alternatives are below.
+
+### 9a. Where the instrument value objects live — `platform/ids`
+
+§5.1 declares `VenueInstrument{Venue, ProductCategory, Symbol, ContractType}` as "the canonical
+identity for routing, market-data keys, orders, fills, reference calls, and recovery cursors". §3.5's
+`SourceID` needs it, and `kernelpurity` (rule 9) forbids `platform/` importing `engine/venue` — so it
+has to live somewhere in the kernel, and *which* somewhere is a real fork.
+
+**Decision: `platform/ids`.** It is an identity, the package's own doc comment already claims "the
+identities build-spec §5.1 assigns here", and `Venue` moved there last session for the same reason.
+
+| Rejected | Why not |
+|---|---|
+| `platform/events` — define it where §3.5 first names it | Then `oms.Order{Instrument …}`, `risk` and `engine/venue` all import the **event bus** to name an instrument. An order type depending on the transport is backwards. |
+| A new `platform/instrument` package | Cleanest naming, but it is in neither §11's tree nor §12.1's package list, so it would owe a spec edit to buy a name we already have a home for. |
+
+### 9b. Scope of the `events` slice — the envelope and the three lanes, not the dispatcher
+
+**Decision: `Envelope`/`SourceID`/`Prio`/`Lane`, the three lanes with their distinct overflow
+semantics, and the coalescing policy including the adverse-preserving rule.**
+
+**Deferred, with reasons rather than by omission:**
+
+- **The parity dispatcher.** §3.5 gives it three jobs — assigning `IngressSeq`, arbitrating between
+  sources that become ready at once, and waking a live consumer — and it needs a **persisted
+  `DispatchSeq` log**, which does not exist. The lanes are the primitives it composes; none of them
+  assigns a sequence number or decides an order *between* two sources.
+- **§3.4's command sequencer.** It orders Risk→OMS commands and there is neither a Risk context nor an
+  OMS to order anything between. Identical reasoning to the deferred `singlewriter` gate: a sequencer
+  with nothing to sequence passes its tests trivially, which is indistinguishable from a broken one.
+
+Also rejected: **envelope types only, lanes next session**. A type with no consumer is a guess about
+its own shape, and the lanes are what make the delivery contract falsifiable.
+
+### 9c. What a full control lane does — bounded, and it blocks
+
+§3.4 says two things that pull against each other: the control lane is **never dropped**, and
+market-data growth is **never unbounded**. The control lane's own overflow behaviour is not stated.
+
+**Decision: bounded queue, blocking send, with a context and a close escape.** Back-pressure reaching
+the socket reader is the *designed* behaviour — a stalled reader is visible in a latency graph, and a
+dropped execution event is visible nowhere while the net-delta invariant asserts against a number that
+is already wrong.
+
+| Rejected | Why not |
+|---|---|
+| **Unbounded queue + high-water alarm** | Never blocks, never drops, and its failure mode is an **OOM kill** — which arrives mid-journal-write, taking down the thing whose durability the lane exists to protect. |
+| **Fail fast on overflow** (`ClassInvariant` + `EffectNotApplied`) | Loud rather than silent, but it converts a transient consumer stall into a **trading halt**. A large, self-inflicted penalty for a condition that resolves itself in milliseconds. |
+
+The escape matters as much as the choice: without a context on `Send`, a wedged consumer wedges
+shutdown too — every producer parked in `Send`, and the process unkillable except by force, which
+loses the backlog the lane exists to preserve.
+
+### 9d. The three lanes are three answers to one question
+
+Worth stating because a reviewer skimming the signatures will see three near-identical queues. They
+differ only in what happens when the consumer falls behind, and that difference is the package:
+
+| Lane | Full consumer | Drops | Rationale |
+|---|---|---|---|
+| control | **blocks** | never | a lost execution event is lost execution truth |
+| market data | never blocks | **oldest**, counted | the newest update is closest to the truth |
+| observability | never blocks | **newest**, counted | independent spans; none supersedes another, and refusing the newcomer touches nothing already accepted |
+
+The two drop directions being opposite is deliberate and is pinned by a test in each file, because
+"drop" alone does not say which and a later change to either would be silent.
+
+`StreamKind.Lane()` makes routing a property of the **stream** rather than of the caller, and
+`MarketDataLane.Publish` **refuses** traffic that routes elsewhere. That guard is the one place the
+package can catch its own worst failure: a fill accepted onto the market-data lane is coalesced away,
+and a fill that never arrives is a position the ledger does not know about — no error, no log.
+
+### 9e. The adverse-preserving mark rule, and the fabrication it refuses `[→ R2c-1]`
+
+§3.4's exception to latest-wins: "the worst adverse mark since the OMS last consumed it is never
+dropped, so a brief adverse excursion that breaches a threshold cannot be hidden by a later recovery."
+
+The implementation question the spec does not answer: **when the worst payload and the newest metadata
+disagree, which envelope survives?**
+
+**Decision: the worst payload brings its OWN envelope — its sequence numbers, its `RecvTime`.** Both
+merge branches therefore yield a real observation.
+
+**Rejected: newest metadata + worst payload.** It reads better on a freshness metric and it is a
+fabrication — a price stamped at an instant it did not hold, flowing into threshold comparisons and
+into an audit trail. The cost of the chosen rule is **stated rather than hidden**: while an unconsumed
+excursion sits in a mailbox, the source reads marginally staler than it is. That direction is safe —
+it can only *trigger* a freshness check, never suppress one — and the window is bounded by the
+consumer's drain rate.
+
+Two supporting decisions:
+
+- **"Adverse" is the caller's to define.** It depends which way the position faces, and rule 9 forbids
+  the kernel knowing. `AdversePreserving[T]` takes the comparison; the cash-and-carry short (§2.2)
+  supplies "higher is worse".
+- **An uncomparable payload declines to merge.** Keeping both costs memory pressure and a visible
+  drop-oldest count; merging what the rule cannot compare would discard a mark silently.
+
+### 9f. What is deliberately NOT claimed
+
+- **Coalescing is not deterministic under concurrency, and the code says so.** §3.5 requires a
+  deterministic *rule* keyed on `(Source, field)`, "never a function of goroutine scheduling". The
+  `MergeFunc` signature enforces that half — it sees two envelopes and nothing else. Whether two
+  updates ever *meet* in a mailbox depends on whether the consumer drained between them, which **is**
+  scheduling; §3.5 resolves that with **persistence**, not purity, and replay re-applies the frozen
+  dispatch log. Claiming more would be claiming something false.
+- **Lanes do not validate envelopes.** `AcceptOrdinal` is stamped at ingestion and `IngressSeq` by the
+  dispatcher, so an envelope in flight *toward* the dispatcher legitimately fails `Envelope.Validate`.
+  A lane that validated on `Send` would reject exactly the traffic it exists to carry.
+- **`VenueInstrument.String` and `SourceID.String` are not injective.** A venue symbol containing the
+  separator would collide. Inventing a symbol charset to prevent that would over-fit to venues
+  `venue-profiles.md` has not verified; the identity is the **struct**, which is comparable and is used
+  directly as a mailbox key.
+- **Symbol case is neither folded nor checked.** Folding would be a claim about venues rather than
+  about this package — `BTC-PERPETUAL` and lowercase-symbol venues exist, and a fold that corrupts a
+  real symbol fails at order submission. Whitespace *is* rejected (not trimmed), because the
+  one-spelling rule forbids synonyms and " BTCUSDT" would be a second mailbox.
+
+### 9g. `ProductCategory` and `ContractType` encode linear-vs-inverse twice
+
+§5.1 gives `VenueInstrument` both fields, so `ProductLinearPerp` already implies `ContractLinear`. A
+redundant encoding is safe only while something forbids the copies from disagreeing — otherwise the
+struct can hold a state no instrument has, and two consumers reading different fields compute
+different notionals. `Validate` rejects the disagreement, which turns the redundancy into a checksum.
+
+`ProductInversePerp` is declared although no MVP adapter trades one. Without it `ContractType` has a
+single usable value, the agreement rule has nothing to be wrong about, and "this contract is linear"
+becomes an assumption rather than a checked claim.
+
+**Recorded, not taken:** dropping `ContractType` from the struct and deriving it from `Product` would
+remove the redundancy outright. That is a spec change rather than an implementation choice, and
+`ContractType` must exist regardless for `SymbolSpec`, which has no `Product` field.
+
+### 9h. One [SPEC EDIT OWED], following the v0.9.5 precedent
+
+**§3.5's `SourceID` is declared as four flat fields** — `{Venue, Product, Symbol, Stream}` — with the
+trailing comment "= a VenueInstrument stream". The code **composes** `ids.VenueInstrument` instead.
+
+Two reasons, and the second is the real one: the flat form has **no way to express the `ContractType`**
+§5.1 gives an instrument, so a source could not name an inverse contract at all; and duplicating three
+fields duplicates their validation, which is how two definitions of "a valid instrument" come to
+disagree. The spec's own comment says this *is* a `VenueInstrument` stream — this makes that
+structural.
+
+**Not landed in `build-spec.md` yet, deliberately, and this follows the precedent v0.9.5 set:** the
+first slice marked ten items `[SPEC EDIT OWED]` as they were taken and landed all ten together at
+slice close, as one coherent release. The second slice is **still open** (`config`, `outbox`,
+`observability`, `ratelimit`, `boot` remain), so this marker stays in the code — at
+`internal/platform/events/envelope.go`, on `SourceID` — and lands with whatever else accumulates.
+**The marker is the tracking mechanism; do not close the slice without grepping for it.**
+
+### 9i. Bite-checked: 43 mutations, 41 caught, 2 diagnosed — and the harness gained two verdicts
+
+Both survivors were **real gaps**, and both are the same lesson arriving twice: *a test that cannot
+distinguish two implementations is not covering the distinction.*
+
+1. **`Send`-after-`Close` was checked once, against a 50/50 select.** With room in the queue and the
+   lane closed, both select cases are ready and Go picks at random — so a `Send` that consulted the
+   closed signal only *inside* that select would accept post-close envelopes about half the time. The
+   `Receive` side already ran 200 trials for exactly this reason. **The lesson had been applied in one
+   place and not in its mirror**, which is how a fixed defect comes back through the other door.
+2. **Every coalescing test used depth 1**, where "merge against the newest" and "merge against the
+   oldest" are the same slot. The mutant was equivalent *under the fixtures* and a real defect outside
+   them — reachable exactly when a merge **declines**, which is the only way a coalescing mailbox grows
+   past one entry, and where the difference is an envelope vanishing without being queued or counted.
+   §5d's vacuous-run lesson, one level in: **the branch was unreachable while looking like coverage.**
+
+**The harness itself gained two verdicts this session, both found by real mutations, not by design:**
+
+3. **`NOBUILD!!` — `go test` exits non-zero for a BUILD failure exactly as it does for a failing
+   test.** A mutant that does not compile printed as `caught` and proved nothing. Go makes this easy to
+   hit: deleting a call site orphans an import, which is a compile *error*. The only visible trace was
+   a failing-test count of **0**, which is a contradiction — the harness was already printing the
+   evidence and not acting on it. Re-aim such a mutation to substitute a **wrong value** rather than
+   delete a call.
+4. **`TIMEOUT!!` — a mutation that made a non-blocking `Send` block HUNG the suite** instead of failing
+   it, wedging the run until the shell timed out. That is §5e's own lesson arriving through the
+   harness: a hanging test names no defect. `go test` now runs bounded (`MUTATE_TIMEOUT`, default 60s)
+   and a hang is reported as its own verdict — **not** a kill. The observability tests were fixed to
+   fail within a bound rather than park on a full lane.
+
+All four verdicts — `caught`, `SURVIVED`, `NO-OP!!`, `NOBUILD!!` — plus `TIMEOUT!!` were exercised as
+controls before any of the results above were believed.
+
+---
+
+## RESUME HERE — updated end of session 7
 
 **Environment, verified — do not re-derive.** **Go 1.26.5** (upgraded from 1.26.0 in session 5;
 both modules declare `go 1.26.0` as the minimum and `toolchain go1.26.5` as what to build with —
@@ -1383,12 +1573,14 @@ modules → custom gates → race tests both modules, `RAPID_SEED` pinned). Test
 `pgregory.net/rapid v1.3.0` added; §11's "never a dependency" governs production code, untouched.
 `bitnet-backend-go` is **not on this machine** — a described style, not a readable source.
 
-**The mutation harness is now IN THE REPO at `tools/mutate.sh`** (session 6), rather than being
-rewritten from the standing lessons every session. It carries both harness lessons as code: it
-`cmp`s and reports `NO-OP!!` when a pattern fails to match (session 4), and it takes a line number
-and prints the diff it applied (session 5). It earned that on its first run this session — the first
-invocation double-wrapped the sed expression and the NO-OP guard reported twelve un-applied
-mutations instead of twelve phantom kills.
+**The mutation harness is IN THE REPO at `tools/mutate.sh`** (session 6), rather than being rewritten
+from the standing lessons every session. It now carries **four** harness lessons as code, each paid
+for by a real mutation rather than designed in: it `cmp`s and reports `NO-OP!!` when a pattern fails
+to match (session 4); it takes a line number and prints the diff it applied (session 5); it reports
+`NOBUILD!!` when the mutant did not compile, because `go test` exits non-zero for a build failure
+exactly as it does for a failing test (session 7); and it runs **bounded** and reports `TIMEOUT!!`,
+because a mutation can make a test *hang* rather than fail, and a hanging test names no defect
+(session 7). **A `caught` with 0 failing tests is a contradiction — that is what exposed `NOBUILD`.**
 
 **Both branches are PUSHED and in sync (re-verified at the end of session 6).**
 `feat/milestone-1-foundation` tracks `origin/feat/milestone-1-foundation`. **Check it rather than
@@ -1404,11 +1596,18 @@ one only if asked. Note that the branch now carries the whole of milestone 1 and
 if a PR is ever wanted, it is worth asking whether it should be one per slice rather than one for
 the milestone.
 
-**Milestone 1's first slice (§1) is CODE-COMPLETE and closed out (session 5), and the SECOND SLICE'S
-FIRST TWO PACKAGES are now built too (session 6): `platform/apperror` and `platform/ids`, with the
-`Venue` move out of `platform/clock` that landing `ids` finally made possible.** The kernel is now
-four packages — `fixedpoint`, `clock`, `apperror`, `ids` — plus three gates. **There are no open
-spec-edit items and no open questions.** `platform/events` is the next package up the spine.
+**Milestone 1's first slice (§1) is CODE-COMPLETE and closed out (session 5). The SECOND SLICE is
+four packages in:** `platform/apperror` and `platform/ids` (session 6, with the `Venue` move out of
+`platform/clock`), then `ids`'s instrument identity and **`platform/events`** (session 7). The kernel
+is **five packages** — `fixedpoint`, `clock`, `apperror`, `ids`, `events` — plus three gates.
+**There are no open questions.** `platform/config` is the next package up the spine.
+
+**ONE SPEC EDIT IS OWED (§9h), and it is tracked by a marker in the code, not by this paragraph.**
+§3.5 declares `SourceID` as four flat fields; the code composes `ids.VenueInstrument` instead, because
+the flat form cannot express the `ContractType` §5.1 gives an instrument. It is deliberately not landed
+yet: the v0.9.5 precedent is to batch a slice's spec edits into one coherent release at slice close.
+**Before closing the second slice, `grep -rn "SPEC EDIT OWED" internal/ docs/`** and land what it
+finds.
 
 **The `CLAUDE.md` owed since §2 now exists** (repo root, written session 6). It carries the
 `internal/` taxonomy, the doc-set map, the build split, the three enforced gates, and the standing
@@ -1462,13 +1661,29 @@ working rules. That item is discharged.
     **Do not add an import of `platform/clock` to it** — `clock` imports `ids`, so that is a cycle;
     the time seam is the structural `TimeSource` interface and that is deliberate (§8c).
 12. ✅ **`CLAUDE.md` written** at the repo root — the §2 item, discharged.
+13. ✅ **`ids`'s instrument identity** (§9a, §9g) — `VenueInstrument`, `ProductCategory`,
+    `ContractType`. **Do not move them to `events`**: an `oms.Order` would then import the event bus to
+    name an instrument. **Do not "simplify away" the ContractType/Product redundancy** — §5.1 declares
+    both, `SymbolSpec` needs `ContractType` with no `Product` beside it, and `Validate` turning the
+    redundancy into a checksum is the point. 12 mutations caught, 1 intended survivor.
+14. ✅ **`platform/events`** (§9b–§9f) — `Envelope`/`SourceID`/`Prio`/`Lane`, the three lanes, and the
+    coalescing policy. 31 mutations, 29 caught, 2 real gaps found and closed.
+    **Do not make the lanes validate envelopes** — `IngressSeq` is stamped by the dispatcher, so a
+    lane that validated on `Send` would reject exactly the traffic it carries (§9f).
+    **Do not give `AdversePreserving` the newest envelope's metadata with the worst payload** — that
+    fabricates an observation, and §9e records why the honest version's staleness cost is the safe
+    direction. **Do not sort any lane by `Prio`** — §3.5's total order is the dispatch order, and
+    sorting inside a lane reorders within a `SourceID` where `VenueSeq` is authoritative.
+    **`events` does NOT import `clock`**, and that turned out to be right: enforcing a max-age needs a
+    Clock and a timer, both of which belong with the dispatcher; the lane only carries the `RecvTime`
+    an age is computed from, and `Envelope.Age` is pure.
 
 ### Next work, in order
 
-1. **`platform/events`** — the typed delivery lanes of §3.4. It needs `clock`, which exists, and it is
-   the last kernel package before the parity dispatcher becomes buildable. After it: `platform/config`
-   (needs `fixedpoint`), `platform/outbox`, `platform/observability`, `platform/ratelimit`
-   (which will consume `apperror`'s `ClassRateLimit` and `RetryAfter`), then `boot`.
+1. **`platform/config`** (needs `fixedpoint`), then `platform/outbox`, `platform/observability`,
+   `platform/ratelimit` (which will consume `apperror`'s `ClassRateLimit` and `RetryAfter`), then
+   `boot`. **The parity dispatcher is what `events` was the last prerequisite for** — but it also
+   needs a persisted `DispatchSeq` log, so it is not simply "next" (§9b).
 2. **`hexboundary`, `singlewriter`, `exhaustiveswitch` stay deferred** until a bounded context, an OMS
    write repository and a state machine exist to police. Unchanged reasoning (§1, §4).
 3. **Confirm the ClientOrderID venue budget before milestone 3** (§8g) — 36 characters and
@@ -1481,6 +1696,26 @@ working rules. That item is discharged.
 
 ### Standing lessons — apply these, do not rediscover them
 
+- **A fix applied in one place must be applied to its MIRROR.** `Receive`-prefers-queued was tested
+  across 200 trials precisely because a select picks at random; `Send`-after-`Close` — the same
+  situation with the same 50/50 — was tested once, and a mutant survived on the coin flip (§9i). When a
+  test earns a repetition, a bound or an isolation trick, go and look for the symmetric case
+  immediately, because the defect will come back through the other door.
+- **Check the FIXTURE dimension before believing the coverage.** Every coalescing test used a mailbox
+  depth of 1, where "merge against the newest" and "merge against the oldest" are the same slot — so
+  the branch was unreachable while looking covered (§9i). §5d's vacuous-run lesson generalises past
+  fuzz corpora: *any* fixture parameter pinned to its degenerate value can collapse a distinction the
+  code makes.
+- **`go test` exits non-zero for a BUILD failure exactly as it does for a failing test.** A mutant that
+  does not compile is not a killed mutant, and Go makes this easy to hit — deleting a call site orphans
+  an import, which is a compile error. `tools/mutate.sh` now reports `NOBUILD!!`; the tell that found
+  it was a `caught` with **0 failing tests**, which is a contradiction (§9i). Re-aim such a mutation to
+  substitute a **wrong value** rather than delete a call.
+- **A mutation can make a test HANG rather than fail, which wedges the whole run.** §5e's
+  no-hanging-predicate lesson, arriving through the harness: swapping a non-blocking send for a
+  blocking one parked the suite until the shell timed out. The harness now runs bounded and reports
+  `TIMEOUT!!` — **not** a kill (§9i). Any test that deliberately fills a queue past capacity needs its
+  own bound, or the mutation that breaks the queue reports nothing.
 - **When a mutant survives, ask what the code is FOR, not what it does.** Deleting the UUIDv7 counter
   reset kept ids unique and ordered, which was everything the tests checked; what it broke was the
   timestamp's meaning, four thousand mints later (§8f). The test that caught it states the purpose —
