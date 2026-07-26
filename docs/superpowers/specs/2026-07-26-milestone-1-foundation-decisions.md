@@ -1153,7 +1153,227 @@ composition of four narrow interfaces, not a god-interface). **The risk to watch
 
 ---
 
-## RESUME HERE — updated end of session 5
+## 8. The second slice (session 6) — `platform/apperror` and `platform/ids`
+
+Both packages sit at the bottom of §1's dependency spine. `apperror` genuinely imports nothing;
+`ids` imports nothing *from the module*, which is not the same claim and is discussed below.
+
+### 8a. `apperror` — two axes, because there are two questions
+
+The spec gives this package four words (§5.1: *"Error taxonomy (`errclass`)"*). Its requirements are
+not there — they are scattered across §5.3, §7.6 and §10, and they are load-bearing.
+
+**Decision: `Class` and `Effect` are separate enums.** `Class` answers *what went wrong* and drives
+backoff (§7.6), alerting and the error/rate-limit metric label (§10). `Effect` answers *did the side
+effect happen* and drives the order lifecycle (§5.3): `EffectUnknown` is what puts an order into
+`SubmissionUnknown` and sends recovery to `OrderByClientID` rather than to a resubmission.
+
+**The argument that settled it.** A 429 and a socket read timeout are both HTTP failures reaching a
+venue, and they differ absolutely on the safety axis. A connection refused and a read timeout share
+the cause axis *exactly* and still differ on the safety axis. So neither axis determines the other,
+and collapsing them makes the safety-critical fact something the OMS derives from the cause — which
+is exactly the inference §5.3 forbids when it says "not sent" is never inferred.
+
+**Rejected alternatives, both offered to the user:**
+
+- **One flat `Class` enum** with ambiguity encoded in the constant names (`ClassTransportUnknown`,
+  `ClassTransportNotSent`, …). Simplest, one metric label, one switch. Rejected because the safety
+  property ends up spread across constant names, so a class added later can silently omit it, and
+  the cross-product shows up as near-duplicate constants.
+- **`Class` + an `Ambiguous bool`.** Middle ground: explicit, cannot be forgotten by a new `Class`.
+  Rejected because it collapses "applied and still errored" into the same bucket as "proved not
+  applied", and because the zero value of a bool is the *unsafe* reading.
+
+**Shape decisions inside it, each with a reason:**
+
+- **`Class` takes §3.6 rule 8's `type X string` shape; `Effect` takes `RoundingMode`'s integer-enum
+  exception.** Rule 8's shape is for enums crossing a persistence or wire boundary, and `Class` does
+  — §10 makes it a metric label and the audit projection stores it. An `Effect` is an argument:
+  never persisted, never transmitted.
+- **`EffectUnspecified` is a sentinel that fails `Validate` and is SAFE to encounter.** This is the
+  difference between it and `RoundInvalid`. `mayHaveApplied` reads it as "yes, it may have", so a
+  spec built with the field forgotten degrades to the conservative reading. *Loud where it can be,
+  safe where it cannot* — the same division `ServerTime.Passed` takes for an uncalibrated venue.
+- **`mayHaveApplied` is written as a negation** — everything except `EffectNotApplied`, the one value
+  that is a claim about evidence. `Effect` is a defined `uint8`, so `Effect(9)` compiles; a negation
+  puts every undeclared value on the safe side rather than off the end of a list.
+- **`New(Spec)` never returns an error.** A constructor called on a failure path must not add a
+  failure path of its own — the caller is already holding something that went wrong. An invalid Spec
+  degrades to `ClassInternal`/`EffectUnknown` (safe), records what was wrong with it (loud), and
+  answers `Malformed()` so a test or boot check can assert a code path produces none.
+- **`Spec` is a struct, not a positional argument list.** The natural signature
+  `New(class, effect, op, detail string)` puts two same-typed strings side by side on a failure path.
+
+**The non-laundering rule — the sharpest thing in the package.** `EffectOf` reads the *outermost*
+classification in a chain, because that is the one nearest the caller's layer. On its own that rule
+has a hole: an application layer wrapping an ambiguous transport failure could restate it as certain,
+turning "the order might be live" into "there is no order" through nothing but an error message.
+`resolveEffect` closes it with one sentence — **agreement is preserved, disagreement collapses to
+`EffectUnknown`** — so certainty can never be manufactured by re-wrapping. A caller with genuinely
+new evidence (a resolving query that proved the order absent) constructs fresh rather than wrapping.
+
+**One real bug, found by building it rather than by review.** `New` first read the cause's effect
+with `EffectOf`, whose unclassified-input default is `EffectUnknown`. That made every wrap of a plain
+`errors.New` look like a disagreement, and `EffectNotApplied` became **unreachable in practice**. The
+taxonomy would still have been *safe* — it would have reported everything as ambiguous — which is
+precisely why it would have shipped. `recordedEffect` is the same chain walk with the opposite
+default, and the two are documented against each other so the next reader does not "simplify" them
+back together.
+
+**Bite-checked: 14 mutations, 14 caught.** One survived the first pass and the diagnosis is worth
+keeping: **renaming the `"not_found"` wire token survived**, because the `classes` slice names the
+*constants*, not the literals, so a rename moves the declaration and the lookup table together and
+the completeness test still saw them agree. It is a real defect — `Class` crosses a wire and
+persistence boundary, so a renamed token orphans every dashboard query and splits a stored series in
+two, with nothing failing. Fixed with a frozen-token test. **`Effect` deliberately gets no
+equivalent**, and the asymmetry is the point: it is never persisted, so its strings are debug output
+rather than a contract.
+
+### 8b. `ids` — the three decisions the user took
+
+**1. `ClientOrderID` is structured and REVERSIBLE, not hashed.**
+
+Format, fixed at 35 characters:
+
+```
+ab-<26 Crockford base32 of the TradeID>-<leg, 2 digits>-<attempt, 2 digits>
+ab-01FWHE4YDGFK1SHH6W1G60EECF-01-00
+```
+
+§5.3 makes the id a **recovery correlation handle, not a venue idempotency key** — after a crash the
+OMS re-derives it and asks the venue what happened, which is the only resolution §5.3 permits for an
+order at `DispatchAuthorized` or beyond. Carrying the TradeID rather than a digest means an operator
+reading a venue's order page recovers the trade **without database access**, and §11 says the journal
+is host-local and lost on host death: the incident where that matters is the one where the lookup
+table is gone. Uniqueness holds by construction rather than by a birthday-bound argument.
+
+*Rejected:* **hashed and opaque** (truncated SHA-256 → base32) — fits any future length budget and
+leaks no structure, but correlation needs the journal, uniqueness rests on a collision argument, and
+a truncated hash cannot be widened later without changing every derived id. **Counter-based**
+(`ab-<short trade>-<seq>`) — shortest and most readable, but the counter is state, so derivation
+stops being a pure function and crash re-derivation depends on the journal surviving.
+
+Sub-decisions: **Crockford base32 rather than base64** because these ids are read aloud and re-typed
+during incidents and Crockford excludes the confusable `I`/`L`/`O`; **most-significant-first**
+because that makes the text sort by trade age on a venue's order page with nothing parsing it;
+**strict decoding** (canonical uppercase only, no lowercase, no alias folding) because Crockford's own
+leniency would make two strings denote one id, and this id's whole job is exact correlation against
+what the venue echoes back; **two-digit fixed-width leg and attempt** because fixed length makes a
+truncation a length check rather than a parse that happens to succeed.
+
+**2. `Venue` moved from `platform/clock`, retiring the TODO at `clock.go:43`.** It is an identity, and
+`config`, `ratelimit`, `oms` and `engine/venue` will all need to name a venue without wanting a clock.
+Moved **as a type alias** (`type Venue = ids.Venue`), so every existing call site keeps compiling and
+the two names are one type rather than two that convert. `clock.ErrVenueUnset` was **removed** rather
+than kept beside `ids.ErrVenueUnset` — two errors for one condition is two mechanisms that can
+disagree. *Rejected:* leaving it in `clock`, which costs no churn now and makes every future package
+import a clock for a string type.
+
+**3. Who mints what is explicit in the types.** `TradeID` and `IntentID` are ours — minted as v7,
+wrapping an unexported UUID so the only ways to hold one are minting and parsing, with the Nil UUID
+as an unusable zero value. `ExecutionID` is the venue's: **received, never minted**, an opaque string
+with no structure we may assume. It carries §5.3's caveat that it is unique **only within an
+instrument**, which is why the type has **no `Equal` method** — any such helper would compare the bare
+value, and the bare value is not an identity. Comparison happens in the repository against the full
+five-column key.
+
+### 8c. `ids` cannot import nothing — and does anyway
+
+The session-5 resume block predicted `apperror` and `ids` would "both import nothing". For `ids` that
+is wrong as stated: a UUIDv7 embeds a 48-bit millisecond timestamp and 74 random bits, and **§3.5's
+parity requires both to be injected** or a replay mints different ids from the same input and stops
+being a replay.
+
+It nonetheless imports nothing from the module, because the time seam is a **one-method interface
+declared here** (`TimeSource`) rather than `clock.Clock`. Go's interfaces are structural, so
+`clock.Wall` and `clock.TestClock` satisfy it with no import edge. That is not tidiness — **`clock`
+imports `ids` for `Venue`, so an import in the other direction would be a cycle.**
+
+Worth recording explicitly: **§3.6 rule 5 does not reach `platform/`.** No gate would have caught an
+ambient `time.Now()` here. The injection is a design decision, not compliance.
+
+### 8d. The generator's state machine
+
+`rand_a`'s 12 bits hold a **monotonic counter**, not random bits. RFC 9562 method 1 permits it, and
+determinism requires it — a random seed would be entropy the backtester has to reproduce for no
+benefit, since unguessability is `rand_b`'s 62 bits' job. Three branches, each a decision:
+
+- **New millisecond → counter resets to 0.** Per-millisecond state, not global.
+- **Counter exhausted (4096 in one millisecond) → borrow the next millisecond.** Wrapping would
+  reissue an id already minted; stalling would block a caller on a clock it does not control.
+  Borrowing runs ids marginally ahead of the clock, bounded and self-correcting.
+- **Backwards clock → clamp, do not error.** The same choice `clock.Wall` makes and for the same
+  reason. Note the asymmetry against §5e: `Wall` clamps because it has *no error channel*, while this
+  one *has* one and still does not use it — a mint that failed because the host stepped its clock
+  would abort a trade for a reason with nothing to do with trading.
+
+**Failure ordering is load-bearing.** Everything that can fail — reading the clock, validating its
+range, drawing entropy — happens *before* any state is mutated, so a failed mint leaves the generator
+exactly as it was. The test asserts the strong form: after a failed mint the next id is the one that
+would have been minted had the failure never happened.
+
+**Determinism is claimed precisely, and its limit is stated rather than prevented.** Identical clock
+and entropy give an identical sequence *for a single-goroutine caller*, which is what §3.4's
+dispatcher provides. Concurrent use is safe (the mutex guarantees uniqueness) but not deterministic,
+because the entropy reader is drawn outside the lock. Stated in the doc comment because the constraint
+belongs to the caller's architecture and this package cannot check it.
+
+### 8e. Written fresh, and the tests are what pays for it
+
+§11 forbids `github.com/google/uuid` (`platform/` is "reimplemented fresh; never a dependency"). That
+is a genuine cost — a bit layout is what a library gets right once. It is paid back by testing against
+inputs whose right answers were known **before this code existed**:
+
+- The parser is checked against **RFC 9562 Appendix A.6's worked example**, including the decimal
+  instant the RFC prints beside it. A round-trip test would prove only that the encoder and decoder
+  agree with each other, which they would if both were wrong in the same direction.
+- The base32 codec is checked against an **independently written `math/big` oracle** — repeated
+  divmod by 32, sharing no code path with the implementation's bit-position loop — over generated
+  input, plus boundary values and an order-preservation property.
+
+**The oracle earned its place immediately.** The golden `ClientOrderID` in the test was first written
+as a hand-encoding, and it was **wrong**. Had the fix been "copy whatever the implementation prints",
+the golden test would have become an assertion that the code equals itself.
+
+### 8f. Bite-checked: 25 mutations, 24 caught, 1 semantically equivalent
+
+Two survived the first pass. Both were real test gaps and both diagnoses generalise:
+
+1. **Deleting the counter reset survived.** Ids stayed unique and stayed ordered — which is everything
+   the other tests checked. What breaks is quieter: after 4095 mints the generator has no counter room
+   in any millisecond, so every id borrows and the timestamp **drifts permanently ahead of the clock**,
+   and the 48 bits that make a v7 sortable-by-time stop meaning a time. Now pinned by the property
+   that actually fails: *the first id of a millisecond must equal what a generator with no history
+   would produce there.* **Lesson: when a mutant survives, ask what the code is FOR, not what it
+   does — uniqueness and ordering were never the reset's job.**
+2. **Deleting the prefix check survived.** The venue-system-id fixtures (`autoclose-` etc.) were
+   zero-padded, so with no prefix check they still failed — on the *separator* check, returning the
+   *same sentinel*. The test proved the ids were rejected and proved nothing about which check did it.
+   Now isolated by a **structurally perfect id with only the prefix changed**. **Lesson: a rejection
+   test with one sentinel cannot tell you which check fired; to isolate a check, build the input that
+   passes every other one.**
+
+The one survivor left is **semantically equivalent, not a gap**: `NewClientOrderID` ends with a
+runtime assertion that the derived id is exactly 35 characters, which the range checks above it
+already guarantee. Kept — it costs one branch and would catch a future edit to the format string
+before an id reaches a venue — and the claim it stands for is pinned by an internal constants test
+instead.
+
+### 8g. One unverified venue assumption, stated rather than buried
+
+The **36-character and `[A-Za-z0-9_-]` budget** the ClientOrderID format fits inside is **not recorded
+in `docs/venue-profiles.md`** and has not been browser-confirmed to the §4 standard. It is the widely
+documented limit for both venues and the format is designed conservatively inside it.
+
+**Confirm before milestone 3 places a real order.** It is named as a constant (`clientOrderIDBudget`),
+asserted by a test, and documented on the type. If a venue allows less, the 26-character TradeID field
+is the only part with any give — and shortening it means hashing, which is the alternative this design
+rejected.
+
+
+---
+
+## RESUME HERE — updated end of session 6
 
 **Environment, verified — do not re-derive.** **Go 1.26.5** (upgraded from 1.26.0 in session 5;
 both modules declare `go 1.26.0` as the minimum and `toolchain go1.26.5` as what to build with —
@@ -1169,12 +1389,15 @@ fast-forward — `origin/main` was a strict ancestor, 58 behind and 0 diverged, 
 is pushed and tracking `origin/feat/milestone-1-foundation`. **No outward-facing action is owed.**
 A PR has *not* been opened — the branch is pushed, not proposed; open one only if asked.
 
-**Milestone 1's first slice (§1) is CODE-COMPLETE, its documentation debt is DISCHARGED, and as of
-session 5 its LAST OUTSTANDING TASK — the `gremlins` audit — is done too.** Scaffolding,
-`platform/fixedpoint`, `platform/clock`, three gates, all ten [SPEC EDIT OWED] items landed as
-**build-spec v0.9.5** plus an ADR §3 implementation-decision block, and the mutation audit run with
-its four findings fixed (§6b). **There are no open spec-edit items, no open questions, and nothing
-owed from the first slice.** The next thing to do is start the second slice.
+**Milestone 1's first slice (§1) is CODE-COMPLETE and closed out (session 5), and the SECOND SLICE'S
+FIRST TWO PACKAGES are now built too (session 6): `platform/apperror` and `platform/ids`, with the
+`Venue` move out of `platform/clock` that landing `ids` finally made possible.** The kernel is now
+four packages — `fixedpoint`, `clock`, `apperror`, `ids` — plus three gates. **There are no open
+spec-edit items and no open questions.** `platform/events` is the next package up the spine.
+
+**The `CLAUDE.md` owed since §2 now exists** (repo root, written session 6). It carries the
+`internal/` taxonomy, the doc-set map, the build split, the three enforced gates, and the standing
+working rules. That item is discharged.
 
 ### Done, so do not redo
 
@@ -1212,17 +1435,51 @@ owed from the first slice.** The next thing to do is start the second slice.
    on a mutant the suite kills 20/20 by hand. **Every `LIVED` it reports must be reproduced manually
    before it is believed.** If you want it again after new code lands, §6b has the exact invocation.
 
+10. ✅ **`platform/apperror`** (§8a) — the two-axis taxonomy, `Class` + `Effect`, with the
+    non-laundering wrap rule, the safe-by-default chain walkers and the malformed-spec degradation.
+    14/14 mutations caught. **Do not collapse the two axes back into one**; §8a records why, and the
+    two rejected shapes were both put to the user. **Do not "simplify" `recordedEffect` into
+    `EffectOf`** — they are the same walk with deliberately opposite defaults, and merging them makes
+    `EffectNotApplied` unreachable in practice while everything still passes.
+11. ✅ **`platform/ids`** (§8b–§8g) — `Venue` (moved), Crockford base32 with a `math/big` oracle,
+    RFC 9562 UUIDv7 checked against the RFC's own worked example, `TradeID`/`IntentID`/`ExecutionID`,
+    and the reversible `ClientOrderID`. 25 mutations, 24 caught, 1 semantically equivalent.
+    **Do not add an import of `platform/clock` to it** — `clock` imports `ids`, so that is a cycle;
+    the time seam is the structural `TimeSource` interface and that is deliberate (§8c).
+12. ✅ **`CLAUDE.md` written** at the repo root — the §2 item, discharged.
+
 ### Next work, in order
 
-1. **Milestone 1's second slice**, per §1's deferred table — the next packages up the spine are
-   `platform/apperror` and `platform/ids` (both import nothing), then `platform/events` (needs
-   `clock`, which now exists). `hexboundary` and `singlewriter` stay deferred until a bounded
-   context exists to police.
-2. **A `CLAUDE.md` line is owed for the flattened layout** (§2): `ls internal/` now shows contexts and
-   machinery groups as peers, so the taxonomy needs one sentence — first-class business capabilities
-   are top-level, supporting machinery is grouped under `platform/`, `engine/`, `app/`.
+1. **`platform/events`** — the typed delivery lanes of §3.4. It needs `clock`, which exists, and it is
+   the last kernel package before the parity dispatcher becomes buildable. After it: `platform/config`
+   (needs `fixedpoint`), `platform/outbox`, `platform/observability`, `platform/ratelimit`
+   (which will consume `apperror`'s `ClassRateLimit` and `RetryAfter`), then `boot`.
+2. **`hexboundary`, `singlewriter`, `exhaustiveswitch` stay deferred** until a bounded context, an OMS
+   write repository and a state machine exist to police. Unchanged reasoning (§1, §4).
+3. **Confirm the ClientOrderID venue budget before milestone 3** (§8g) — 36 characters and
+   `[A-Za-z0-9_-]` on Binance `newClientOrderId` and Bybit `orderLinkId`, browser-confirmed to the §4
+   standard and recorded in `docs/venue-profiles.md`. Not needed to keep building; needed before a
+   real order is placed.
+4. **`apperror` has no venue-code → `Class` table, on purpose** (§8a). That mapping is venue-specific
+   knowledge and belongs in `engine/venue` beside the client that produces the codes, where
+   `venue-profiles.md` can be cited next to it. Build it there, not here.
 
 ### Standing lessons — apply these, do not rediscover them
+
+- **When a mutant survives, ask what the code is FOR, not what it does.** Deleting the UUIDv7 counter
+  reset kept ids unique and ordered, which was everything the tests checked; what it broke was the
+  timestamp's meaning, four thousand mints later (§8f). The test that caught it states the purpose —
+  the counter is per-millisecond state — rather than a consequence.
+- **A rejection test with one sentinel cannot tell you which check fired.** Deleting the
+  ClientOrderID prefix check survived because the fixtures failed the *separator* check instead, with
+  the same sentinel (§8f). To isolate a check, build the input that passes every other one.
+- **Safe-direction bugs are the ones that ship.** `New` reading the cause's effect with `EffectOf`
+  made every wrapped plain error ambiguous, so `EffectNotApplied` became unreachable — and nothing
+  failed, because reporting everything as ambiguous is *conservative* (§8a). A default that is safe
+  in one direction is still wrong; test that the other branch is reachable.
+- **A test's expected value must come from somewhere other than the implementation.** The golden
+  ClientOrderID was a hand-encoding and it was wrong; the `math/big` oracle found it (§8e). "Copy
+  whatever the code prints" turns a golden test into an assertion that the code equals itself.
 
 - **Every claim gets bite-checked before it is written down.** 21 mutations were applied across the
   session and **two did not bite** — both worth the diagnosis rather than the paper-over. One was a

@@ -68,9 +68,22 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## NEXT REQUEST (2026-07-26): **milestone 1 — FIRST SLICE COMPLETE, second slice is next**
+## NEXT REQUEST (2026-07-26): **milestone 1 — second slice under way; `platform/events` is next**
 
-**Branch `feat/milestone-1-foundation`, tree clean, `make ci` green.** **Milestone 1's first slice (§1) is COMPLETE — code, documentation debt, and the `gremlins` audit all closed out.** The scaffold, `platform/fixedpoint`, `platform/clock`, and the `kernelpurity` / `nofloat` / `notimenow` gates; the ten `[SPEC EDIT OWED]` items landed as build-spec v0.9.5; the milestone's one user question asked and answered. Load-bearing-tested throughout: an independently written `math/big` oracle, a fuzz target with four total invariants, a two-implementation conformance suite, and **46 hand-applied mutations of which 46 are caught**. **Nothing is owed from the first slice — the next thing to do is start the second.**
+**Branch `feat/milestone-1-foundation`, `make ci` green on Go 1.26.5.** **Milestone 1's first slice (§1) is COMPLETE** — the scaffold, `platform/fixedpoint`, `platform/clock`, the `kernelpurity` / `nofloat` / `notimenow` gates, the ten `[SPEC EDIT OWED]` items landed as build-spec v0.9.5, and the `gremlins` audit run and closed out.
+
+**The second slice is now two packages in (session 6): `platform/apperror` and `platform/ids`.** The shared kernel is four packages deep.
+
+- **`platform/apperror`** — the error taxonomy §5.1 calls `errclass`, built on **two orthogonal axes**. `Class` routes (backoff §7.6, alerting, the §10 metric label); `Effect` answers *did the side effect happen*, which is what drives an order into `SubmissionUnknown`. Neither determines the other — a 429 and a read timeout are both HTTP failures at a venue and differ absolutely on the safety axis — and collapsing them would make the safety fact something callers **derive from the cause**, which is the inference §5.3 forbids. Every default is chosen so that forgetting it fails safe: an unclassified error reads `ClassInternal`/`EffectUnknown`, and **wrapping can never manufacture certainty** (agreement is preserved; disagreement collapses to `EffectUnknown`), so an outer layer cannot launder "the order might be live" into "there is no order".
+- **`platform/ids`** — UUIDv7 (written fresh per §11 and checked against **RFC 9562's own worked example**), `TradeID`/`IntentID`/`ExecutionID`, `Venue` **moved here from `platform/clock`**, and the **deterministic, reversible `ClientOrderID`**: `ab-<26 Crockford base32 of the TradeID>-<leg>-<attempt>`, fixed at 35 characters. Reversible rather than hashed because §5.3 makes it a *recovery correlation handle* — an operator reading a venue's order page must recover the trade **without database access**, and §11 says the journal is host-local and lost on host death, so the incident where that matters is the one where the lookup table is gone.
+
+Load-bearing-tested as before: an independent `math/big` oracle for the base32 codec (which caught a wrong hand-encoded golden value on its first run), RFC 9562's vector for the layout, and **39 hand-applied mutations across the two packages — 38 caught, 1 diagnosed as semantically equivalent**. Three survived a first pass and every one was a real gap; the diagnoses are recorded as standing lessons.
+
+**Also discharged: the `CLAUDE.md` owed since the layout flatten.** It now exists at the repo root with the `internal/` taxonomy, the doc-set map, the two-module build split, the three enforced gates and the standing working rules.
+
+**One item carried forward, not blocking:** the ClientOrderID's 36-character venue budget is an **unverified assumption** — not in `venue-profiles.md`, not browser-confirmed. Named as a constant, asserted by a test, and to be confirmed before milestone 3 places a real order.
+
+**Next: `platform/events`** (typed delivery lanes, §3.4) — the last kernel package before the parity dispatcher becomes buildable.
 
 > **Read `docs/superpowers/specs/2026-07-26-milestone-1-foundation-decisions.md` first — its RESUME HERE block.**
 > That record holds every decision taken with its rationale *and rejected alternatives*, the verified
