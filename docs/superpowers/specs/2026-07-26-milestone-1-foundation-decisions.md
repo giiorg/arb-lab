@@ -920,8 +920,183 @@ helpers with the `math/bits` path. A paraphrase of the fast path would be a taut
 gets a paired known-wrong implementation that MUST fail it. This is the discipline `docs/formal/`
 already paid for — NC1–NC5 exist because *"a passing liveness property and a vacuous one look
 identical"*. `gremlins`/`go-mutesting` are not maintained well enough to sit behind a CI gate; the
-timeboxed attempt is **still owed** and its result must be reported honestly either way. (Note §0: this
-is a place where Rust's `cargo-mutants` would have won outright.)
+timeboxed attempt is **RUN as of session 5 — see §6b**, and the decision to keep it out of CI is now
+supported by measurement rather than by reputation. (Note §0: this is a place where Rust's
+`cargo-mutants` would have won outright.)
+
+---
+
+## 6b. The `gremlins` audit (session 5) — RUN, and it earned its keep
+
+The debt §6 carried since session 1. Reported honestly either way, as promised — and the honest report
+is *better* than the prediction in one direction and *worse* in another.
+
+### It runs on Go 1.26. The §0 premise needs one word changed
+
+`go install github.com/go-gremlins/gremlins/cmd/gremlins@latest` builds clean on **Go 1.26.0
+darwin/arm64** and the binary self-reports `version dev`. §0's claim was that `gremlins` is *not
+maintained*, which is true of the project; the inference nearby — that an unmaintained Go tool would
+not survive the version gap — did **not** hold. Worth separating, because "it doesn't run" is a reason
+to stop and "it runs but misreports" is a reason to be careful, and only the second one is true.
+
+**It is still not in CI, and now for measured reasons rather than reputational ones** — see the misreport
+modes below, particularly the last. It touched neither `go.mod`: installed to a scratch `GOBIN`, run
+against a *copy* of the tree, because `gremlins` mutates source files in place and reverts them, and a
+tool that edits your working tree gets a throwaway working tree.
+
+### Four ways it misreports, and one of them is silent and total
+
+1. **The per-mutant timeout is derived from a warm-cache baseline.** The first run reported
+   `Killed: 0, Lived: 0, Timed out: 274` and **`Test efficacy: 0.00%`**. Nothing was wrong with the
+   suite. Go's test cache made `gremlins`' own baseline measurement `100.87ms`, every real test run
+   overran the budget derived from it, and *every mutant* came back a timeout. **`go clean -testcache`
+   moved the baseline to `2.86s` and the identical tree scored 92.51%.** This is the failure mode the
+   record keeps meeting: a broken harness and a catastrophic result print the same number. Standing
+   fix: clean the test cache first, and pass `--timeout-coefficient 12`, which took the remaining
+   7 timeouts to 0 — two of which turned out to be real survivors, including the important one below.
+2. **`./...` silently finds nothing.** `gremlins unleash ./... ` prints *"No results to report"* and
+   exits 0 — indistinguishable from a clean tree. `.` and a concrete package path both work. A path
+   form that reads as "everything" and means "nothing" is worth writing down once.
+3. **A non-viable mutant is scored as a kill.** `ARITHMETIC_BASE` is applied to string `+`
+   concatenation — `"Certainty(" + string(c) + ")"` gets mutated to `-`, which cannot compile. The
+   build fails, `go test` exits non-zero, and `gremlins` records **KILLED**. The `Not viable` counter
+   read 0 in every run this session. **So every efficacy number here is an upper bound**, inflated by
+   an unknown count of mutants no test could have caught because no compiler would accept them.
+4. **Verdicts are not reproducible.** Four runs over one unchanged tree: three agreed exactly
+   (`Killed: 256, Lived: 24`) and the fourth reported one extra survivor,
+   `CONDITIONALS_NEGATION at clock/timers.go:116:12`. Applying that same mutation by hand and running
+   the clock suite twenty times: **caught 20/20**. So `gremlins` produced a **false LIVED**, roughly
+   once in four runs, on a mutant the tests kill deterministically. `--workers 1` did not change it,
+   so it is not simple worker contention. **A false LIVED is the expensive direction of wrong** — it
+   sends you hunting a gap that does not exist, and it means no `LIVED` from this tool can be believed
+   until it is reproduced by hand. Every finding below was.
+
+### The structural blind spot: bare-`switch` case expressions
+
+20 mutants in the engine sit in `NOT COVERED` permanently, and 18 of them are on `case` expressions of
+bare switches — `signMantissa`, `cmpMantissa`, `roundingIncrement`, and `parseMantissa`'s shift
+classifier. Those functions are 100% / 95.7% / 98.6% statement-covered. Go's cover tool counts case
+*bodies*, so a mutant on a case *expression* maps to no coverage block and `gremlins` refuses to run
+it. (The other 2 are on `const minInt64 = -1 << 63`, which is not executable at all.)
+
+**This is exactly the money kernel's three-way comparison logic** — the code whose whole job is that
+`Cmp` and `Sign` agree by construction. **The mutation audit does not reach it, so the hand-written
+tables and negative controls remain the only thing testing it.** Do not read a good efficacy number as
+covering that ground.
+
+Related, and cheaper: `gremlins` walks the filesystem, not the module graph, so `tools/lint`'s 36
+mutants show as `NOT COVERED` from the root module. The nested module needs its **own run** from
+`tools/lint/`.
+
+### What it found — four items, none of which the 46 hand-applied mutations had reached
+
+The prediction in §6 was that the hand-written controls already covered most of this and the residual
+value was in *unanticipated* survivors. That was right, and the residual value was real.
+
+**1. The `bits.Div64` panic guard was untested at its boundary — the significant one.**
+`mulDivMantissa` guards `hi >= uden` before `bits.Div64`, because `Div64` *panics* when the quotient
+will not fit in 64 bits. Loosening it to `hi > uden` survived the entire suite: every existing test
+clears that guard by a wide margin, so nothing exercised the equality. Constructing the separating
+input — `a = 2^32`, `b = scaleFactor·2^32`, making the 128-bit product exactly `scaleFactor·2^64`, so
+`hi == uden` and `lo == 0` — the mutant panics with `runtime error: integer overflow` inside
+`math/bits.Div64`.
+
+That is precisely the outcome this package may not have. Its own comment says so: a panic here lands on
+the **`DispatchAuthorized` crash boundary (§5.3)** the formal model is built around, which is why every
+arithmetic failure in the kernel is converted to an error. **A guard that converts a panic into an error
+is worth nothing until something proves it is still standing at the value where it starts to matter.**
+Bite-checked in both directions: mutant applied + new test → fails; mutant applied + new test removed →
+`ok`. The test also asserts the product really lands on the equality, so a change to `Scale` breaks it
+loudly instead of quietly sliding off the boundary.
+
+**2. `Quantity.Mul` had 0.0% coverage** — an exported money-kernel method with no test at all,
+confirmed against `go tool cover -func`, not inferred from the mutation output. The way it was missed
+is the lesson: `quantity_test.go` enumerates operations in two tables, *binary* (taking a `Quantity`)
+and *unary* (taking nothing). `Mul` is the only `Quantity` method with a third shape,
+`(Rate, RoundingMode)`, so it fell between two tables that each looked exhaustive from the inside.
+**A table driven by signature shape is a coverage claim about the shapes it names, not about the method
+set.** Now 100%, 17 cases, and 4/4 mutations caught — after the first bite-check attempt itself
+misfired, see below.
+
+**3. `Certainty.String` had 0.0% coverage** (`clock/servertime.go`), and the missing branch is the one
+that matters: an invalid `Certainty` reaching a log line prints as `Certainty(maybe)` rather than as a
+bare `maybe` that would read as a decision someone made. Both branches asserted together, because a
+`String` that wrapped *everything* would pass a test that only checked the invalid side.
+
+**4. Analyzer diagnostic ordering was unasserted, in both gates.** `sortedLines`/`sortedEscapes` exist
+so that two runs over an unchanged tree emit byte-identical output. Reversing either comparator left the
+whole analyzer suite green — because `analysistest` matches diagnostics against `// want` comments
+attached to source lines and is **order-insensitive by construction**. This is §5e's lesson with the
+blind spot moved: not untested wiring, but a property the harness structurally cannot see. Direct unit
+tests on the comparators now, in both analyzers; the duplication is deliberate and matches the standing
+decision to extract these two analyzers' common parts at the **third** gate, not the second.
+
+### The survivors are the other half of the result — 24 in the engine, 7 in the gates
+
+Every one was triaged, and the great majority are **provably equivalent mutants**, which is a good sign
+rather than a gap. The two overflow guards account for 10 of them:
+
+```go
+if (a > 0 && b > 0 && s < 0) || (a < 0 && b < 0 && s >= 0)   // addMantissa
+```
+
+Loosening *any* of those five comparisons cannot change the verdict — admitting `a == 0` makes `s == b`,
+which fails `s < 0`; `s == 0` is unreachable because `2·(2^63−1) < 2^64`. That is the argument the
+function's own doc comment makes, now confirmed mechanically. `subMantissa` is the same shape.
+Likewise `magnitude`'s `v < 0` (at zero, `uint64(-(0+1))+1 == 0`, so both branches agree), the `Abs`
+zero-checks on all three categories (`negMantissa(0) == 0`), and `parse.go`'s exponent classifier at
+`v == maxExponent`, where the shortcut and the full path return the same error class either way.
+
+**One accepted survivor is worth naming because it is not equivalent, just unobservable.** Mutating
+`len(digits)+shift > maxMantissaDigits` to `-` — the guard that checks width before materializing zeros
+— survives. Measured rather than argued: across 14 exponent-heavy inputs the values and errors are
+**identical**, and the only difference is bytes allocated on a path that errors either way (a flat 3080
+bytes clean; 5912 at `e1000` mutated). The reason is that `maxExponent = 1000` already caps the
+allocation at about a kilobyte, so the guard's stated motivation — "a gigabyte" — is not reachable
+today. **The comment now says that**, and the guard stays, because it is what keeps the claim true if
+`maxExponent` is ever raised. Pinning it would need a byte-level memory assertion, which is fragile
+under `-race` and not worth it.
+
+In the gates, the 4 reversed-comparator mutants are now killed; the surviving `<` → `<=` ones are
+equivalent while positions are distinct, and a `token.Pos` identifies one place in one file. The
+remaining `notimenow:271` negation is the same-line dedup tie-break, which needs two findings on one
+source line *and* the ability to observe which column got reported — `analysistest` matches by line, not
+column, so it cannot be reached from the current harness. Accepted and named, not overlooked.
+
+### Scores, before and after
+
+| | Killed | Lived | Not covered | Efficacy |
+|---|---|---|---|---|
+| root module, before | 249 | 25 | 62 | 90.88% |
+| root module, after | **256** | **24** | **56** | **91.43%** |
+| `tools/lint`, before | 23 | 11 | 2 | 67.65% |
+| `tools/lint`, after | **27** | **7** | 2 | **79.41%** |
+
+Read those percentages with misreport mode 3 in mind: they are upper bounds. The `Lived` column moving
+25 → 24 understates the change, because the six newly-covered mutants moved *into* the runnable pool at
+the same time; the mutant that matters, `mantissa.go:132:8`, went from LIVED to KILLED.
+
+**Reproducing it:** install to a scratch `GOBIN`, copy the tree, then per module —
+`go clean -testcache && gremlins unleash -E 'testdata' --timeout-coefficient 12 .` — once from the root
+and once from `tools/lint/`. Never `./...`.
+
+### Two lessons, both about harnesses rather than about code
+
+**A mutation harness must prove the *intended* change, not *a* change.** §4d's script already `cmp`s
+before and after and prints `NO-OP!!` when nothing moved. That is not enough. The first bite-check of
+`Quantity.Mul` reported `drop the asset tag: SURVIVED` — alarming, and false: the pattern
+`return Quantity{q: v, asset: q.asset}, nil` occurs **three times** in `quantity.go`, and the
+substitution had landed on line 113 (`Neg`) instead of line 163 (`Mul`). The file changed, `cmp` was
+satisfied, and the wrong function was mutated. Line-scoping it, the test caught it immediately.
+**`cmp` proves the file moved; only the diff proves what moved.**
+
+**A fixture can quietly agree with the thing it claims to rule out.** The first version of the analyzer
+sort test asserted, in a comment, that a comparator reaching for the wrong field could not pass it —
+and then a mutant sorting by `keys[i].num` **survived**, because the fixture's line numbers happened to
+run in the same order as its positions. The comment stated the property; the data did not. Rebuilt with
+line number running exactly *backwards* against position and file name scrambled against both: 8 of 10
+mutants caught, and the 2 survivors were predicted as equivalent *before* the run rather than explained
+after it. **A claim written in a test comment is not tested by the test unless the data can falsify it.**
 
 ---
 
@@ -957,10 +1132,10 @@ composition of four narrow interfaces, not a god-interface). **The risk to watch
 
 ---
 
-## RESUME HERE — updated end of session 4
+## RESUME HERE — updated end of session 5
 
 **Environment, verified — do not re-derive.** Go 1.26.0. Remote `github.com/giiorg/arb-lab`. Branch
-`feat/milestone-1-foundation` at **`86b71c6`**, tree clean, `make ci` green (fmt-check → vet both
+`feat/milestone-1-foundation`, tree clean, `make ci` green (fmt-check → vet both
 modules → custom gates → race tests both modules, `RAPID_SEED` pinned). Test-only dependency
 `pgregory.net/rapid v1.3.0` added; §11's "never a dependency" governs production code, untouched.
 `bitnet-backend-go` is **not on this machine** — a described style, not a readable source.
@@ -971,10 +1146,12 @@ fast-forward — `origin/main` was a strict ancestor, 58 behind and 0 diverged, 
 is pushed and tracking `origin/feat/milestone-1-foundation`. **No outward-facing action is owed.**
 A PR has *not* been opened — the branch is pushed, not proposed; open one only if asked.
 
-**Milestone 1's first slice (§1) is CODE-COMPLETE and its documentation debt is now DISCHARGED.**
-Scaffolding, `platform/fixedpoint`, `platform/clock`, three gates, and — as of session 4 — all ten
-[SPEC EDIT OWED] items landed as **build-spec v0.9.5** plus an ADR §3 implementation-decision block.
-**There are no open spec-edit items and no open questions.**
+**Milestone 1's first slice (§1) is CODE-COMPLETE, its documentation debt is DISCHARGED, and as of
+session 5 its LAST OUTSTANDING TASK — the `gremlins` audit — is done too.** Scaffolding,
+`platform/fixedpoint`, `platform/clock`, three gates, all ten [SPEC EDIT OWED] items landed as
+**build-spec v0.9.5** plus an ADR §3 implementation-decision block, and the mutation audit run with
+its four findings fixed (§6b). **There are no open spec-edit items, no open questions, and nothing
+owed from the first slice.** The next thing to do is start the second slice.
 
 ### Done, so do not redo
 
@@ -1004,20 +1181,21 @@ Scaffolding, `platform/fixedpoint`, `platform/clock`, three gates, and — as of
    occurrences and left `boundary/lint` in §3.6 alone, as instructed. **Do not re-apply any of them.**
 8. ✅ **Rule 5's `engine/` scope — the milestone's one user question, asked and answered YES**
    (§4d). Built, bite-checked 9/9, committed. **Do not re-ask.**
+9. ✅ **The `gremlins` audit — RUN and closed out (session 5, §6b). Do not re-run it as if it were
+   still owed.** It *does* build on Go 1.26 (§0's "unmaintained" is about the project, not the
+   build), it found **four real gaps, all four now fixed**, and it stays out of CI for reasons that
+   are now measured: a warm test cache makes it report 0.00% efficacy, `./...` silently finds
+   nothing, non-viable mutants are scored as kills, and **one run in four produced a false LIVED**
+   on a mutant the suite kills 20/20 by hand. **Every `LIVED` it reports must be reproduced manually
+   before it is believed.** If you want it again after new code lands, §6b has the exact invocation.
 
 ### Next work, in order
 
-1. **The timeboxed `gremlins` attempt**, reported honestly either way. Note the negative controls
-   across `fixedpoint` and `clock` plus the analyzer mutation passes now cover much of what mutation
-   testing would have (**46 hand-applied mutations, 46 caught** after one gap was closed and one
-   no-op was reported rather than counted); the remaining value is in finding *unanticipated*
-   survivors. If `gremlins` is unmaintained to the point of not running on Go 1.26, **say so and stop**
-   — that is a real finding, and §0 already records Go's weak mutation tooling as a known cost.
-2. **Milestone 1's second slice**, per §1's deferred table — the next packages up the spine are
+1. **Milestone 1's second slice**, per §1's deferred table — the next packages up the spine are
    `platform/apperror` and `platform/ids` (both import nothing), then `platform/events` (needs
    `clock`, which now exists). `hexboundary` and `singlewriter` stay deferred until a bounded
    context exists to police.
-3. **A `CLAUDE.md` line is owed for the flattened layout** (§2): `ls internal/` now shows contexts and
+2. **A `CLAUDE.md` line is owed for the flattened layout** (§2): `ls internal/` now shows contexts and
    machinery groups as peers, so the taxonomy needs one sentence — first-class business capabilities
    are top-level, supporting machinery is grouped under `platform/`, `engine/`, `app/`.
 
@@ -1032,11 +1210,22 @@ Scaffolding, `platform/fixedpoint`, `platform/clock`, three gates, and — as of
   the real thing passes, or a universally-objecting predicate reads as a perfect result. Corollary
   found the hard way in §4d: when a fixture changes role — `engine/venue` went from clean control to
   offending — **check whether it was the only positive control**, and replace it before moving on.
-- **A mutation harness must prove the mutation applied.** A pattern that fails to match produces
-  *exactly* the output of a caught mutation: the suite is green before, red never happens, and the
-  script reports success. The mutation script therefore `cmp`s the file before and after and prints
-  `NO-OP!!` rather than `caught` when nothing changed. It fired on its first run (§4d). This is the
-  vacuous-coverage lesson again, one level up: **the harness itself needs a control.**
+- **A mutation harness must prove the mutation applied — and that it applied *where you meant*.** A
+  pattern that fails to match produces *exactly* the output of a caught mutation, so the script
+  `cmp`s before and after and prints `NO-OP!!` rather than `caught` when nothing changed; it fired on
+  its first run (§4d). Session 5 found the next layer: `cmp` proves *a* change, not *the* change. A
+  `Quantity.Mul` mutation reported SURVIVED because the pattern occurred three times in the file and
+  the substitution landed on `Neg` instead (§6b). **Scope the mutation to a line and print the diff**
+  — the file moving is not evidence about which function moved.
+- **A fixture can quietly agree with the thing its comment claims it rules out.** The analyzer sort
+  test asserted in prose that a comparator reaching for the wrong field could not pass it, and then a
+  mutant sorting by line number survived, because the fixture's line numbers happened to ascend
+  alongside its positions (§6b). **A claim in a test comment is not tested unless the data can
+  falsify it** — build the fixture so the decoy orderings actively disagree.
+- **A tool that runs is not a tool that reports.** `gremlins` scored an untouched, healthy suite at
+  **0.00% efficacy** because a warm Go test cache shrank the baseline it derives its timeout from
+  (§6b). Same tree, cache cleaned: 92.51%. And it emits a **false LIVED about once in four runs**.
+  Before believing any number from a new tool, find the input whose right answer you already know.
 - **Write the oracle before trusting the implementation.** The one real defect this session was
   found by the two disagreeing, not by review.
 - **Verify tooling semantics from source.** Twice now. `-rapid.seed`'s default turned out to be the
