@@ -12,8 +12,6 @@ import (
 // to distinguish "this venue quotes finer than we store" (a finding worth
 // alerting on) from "this is not a number" (a protocol bug).
 func TestParseMoney_rejects(t *testing.T) {
-	const usdt = fixedpoint.Asset("USDT")
-
 	cases := []struct {
 		in   string
 		want error
@@ -72,8 +70,6 @@ func TestParseMoney_rejects(t *testing.T) {
 // A zero exponent applied to zero digits is still zero, however it is spelled —
 // this guards the early-return path that skips exponent range checking.
 func TestParseMoney_zeroIsZeroWhateverTheExponent(t *testing.T) {
-	const usdt = fixedpoint.Asset("USDT")
-
 	for _, in := range []string{"0", "-0", "0.0", "0e100", "0e-100", "-0.000e5"} {
 		m, err := fixedpoint.ParseMoney(usdt, in)
 		if err != nil {

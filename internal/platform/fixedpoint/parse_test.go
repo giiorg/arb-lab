@@ -13,8 +13,6 @@ import (
 // Every `want` below is a hand-written known-good literal, not a value
 // recomputed the way the implementation computes it.
 func TestParseMoney_roundTrip(t *testing.T) {
-	const usdt = fixedpoint.Asset("USDT")
-
 	cases := []struct {
 		in   string
 		want string // canonical Decimal() output

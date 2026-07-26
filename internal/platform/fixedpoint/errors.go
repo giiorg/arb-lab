@@ -22,4 +22,20 @@ var (
 	// ErrOverflow reports a magnitude outside the representable range. It is
 	// returned instead of wrapping, always.
 	ErrOverflow = errors.New("fixedpoint: value out of range")
+
+	// ErrAssetMismatch reports an operation between two values whose asset tags
+	// disagree — adding EUR to USDT, or pricing a BTC quantity with an ETH
+	// price. This is the finding the runtime tag exists to produce.
+	ErrAssetMismatch = errors.New("fixedpoint: asset mismatch")
+
+	// ErrRoundingMode reports a rounding mode outside the declared set, in
+	// practice the zero value: an operation reached with nobody having said how
+	// it should round.
+	ErrRoundingMode = errors.New("fixedpoint: invalid rounding mode")
+
+	// ErrDivideByZero reports a division whose divisor is zero. It is an error
+	// rather than a panic for the reason §5.3 gives: a panic mid-execution
+	// lands on the DispatchAuthorized crash boundary the formal model was built
+	// around, so this package never panics on data.
+	ErrDivideByZero = errors.New("fixedpoint: divide by zero")
 )
