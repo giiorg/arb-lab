@@ -1,0 +1,25 @@
+# Build output
+/bin/
+
+# Go test/coverage artifacts
+*.test
+*.out
+coverage.*
+
+# NOTE: testdata/fuzz/ is deliberately NOT ignored. Go keeps its generated
+# corpus in $GOCACHE/fuzz; it writes into testdata/fuzz/ only when it finds a
+# FAILING input, and those are regression cases we want committed.
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Editor-only workspace file. Deliberately NOT committed: a go.work would let
+# the root module resolve golang.org/x/tools through tools/lint, silently
+# defeating the reason tools/lint is a separate module.
+go.work
+go.work.sum
+
+# Stray tooling artifact
+logger.log

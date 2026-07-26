@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# A superseded push has nothing to tell us; cancel it rather than pay for it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # Read the version from go.mod so the toolchain is stated in exactly
+          # one place.
+          go-version-file: go.mod
+          # Two modules, two sums — tools/lint is separate on purpose so that
+          # golang.org/x/tools never enters the engine's dependency graph.
+          cache-dependency-path: |
+            go.sum
+            tools/lint/go.sum
+
+      # fmt-check, vet (both modules), the custom structural gates, and
+      # race-enabled tests (both modules).
+      - run: make ci
