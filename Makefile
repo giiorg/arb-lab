@@ -54,6 +54,18 @@ test-properties-deep: ## deep property run on the pinned seed (reproducible)
 	RAPID_CHECKS=$(RAPID_NIGHTLY_CHECKS) RAPID_SEED=$(RAPID_SEED) \
 		$(GO) test -count=1 -run 'TestProperty' ./...
 
+# -fuzz takes exactly one package, so this target names it rather than using
+# ./... . `-run '^$$'` suppresses the ordinary tests so the time budget goes to
+# fuzzing; the seed corpus still runs as a table under plain `make test`, which
+# is what makes this an explorer rather than a gate — the same division as
+# test / test-properties above. A find lands in testdata/fuzz/ and is committed.
+FUZZTIME ?= 60s
+
+.PHONY: fuzz
+fuzz: ## bounded fuzz run of the decimal parser (FUZZTIME=60s)
+	$(GO) test -run '^$$' -fuzz FuzzParseMantissa -fuzztime $(FUZZTIME) \
+		./internal/platform/fixedpoint
+
 .PHONY: vet
 vet: ## go vet, both modules
 	$(GO) vet ./...
