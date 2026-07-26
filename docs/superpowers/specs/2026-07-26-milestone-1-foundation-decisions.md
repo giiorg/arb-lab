@@ -496,6 +496,80 @@ quietly turns a category into an alias.
 
 ---
 
+## 5d. The parser fuzz target (session 3) — `fixedpoint` is now complete
+
+`parseMantissa` is the package's **only untrusted-input boundary**: every other entry point takes
+an `int64` or another category, already constrained by the type system, while this one takes bytes
+off a venue wire. Committed in `04bb5b9`.
+
+### The body asserts four total invariants, not the absence of panics
+
+A fuzz target that only checks for crashes is testing the wrong failure mode — this parser's
+likely defect is *returning a plausible number* or the wrong error class. So the body is four
+invariants that hold for every input, well-formed or not:
+
+| | Invariant | The defect only it catches |
+|---|---|---|
+| **I1** | `ErrSyntax` **exactly when** the input is outside the grammar | prefix-consumption, i.e. a missing `i != len(s)`; and precision loss misfiled as bad syntax |
+| **I2** | every error matches **exactly one** sentinel class, and a rejected input returns no value | classification collapsed into one opaque error; a truncated value handed back alongside `ErrPrecisionLoss` |
+| **I3** | an accepted value survives the canonical round trip, and the canonical text is a **fixed point** of it | the scale applied once too few times |
+| **I4** | agreement with the `math/big` oracle where the oracle is defined | **the exponent ignored** — self-consistent, correctly classified, right grammar; nothing else finds it |
+
+**A regexp is the right second implementation of the grammar** (`decimalGrammar`), and for a
+specific reason: the defects a hand-written index-advancing walker has — consuming a prefix and
+not noticing the tail, accepting an empty exponent, letting a second point through — are *not
+defects a regexp can have*. I1 is a **biconditional**, and the reverse direction is the
+load-bearing one: well-formed text misreported as `ErrSyntax` sends a caller hunting a protocol
+bug that does not exist.
+
+### I4's gate — three documented divergences, not a suppression
+
+The oracle is a second implementation of the **arithmetic**, not of the grammar and not of the
+limits, and the fuzzer finds every place those diverge within seconds. So the cross-check runs
+only inside *this package's* grammar with the exponent capped at four digits:
+
+- **Grammar.** `big.Rat` rejects `"1."` and `".5"` (accepted here) and accepts `"1/2"`, hex
+  floats and digit separators (rejected here). A disagreement about which characters spell a
+  number is not a disagreement about what the number is.
+- **Limits — verified from source.** `Rat.SetString` refuses `|exp| > 1e6` outright
+  (`ratconv.go:181`, *"avoid excessively large exponents"*) and reports it as a **parse failure**.
+  That is not what this package means by `ErrSyntax`: `"1e2000000"` is well-formed text naming an
+  out-of-range value. Had this not been read from source first, the fuzzer's first "find" would
+  have been an artefact of the two tools' differing cutoffs.
+- **Cost.** `Rat` materialises `5^exp` to do this. The four-digit cap keeps it cheap **while
+  still exercising `"1e9999"` and `"1e-7000"`** — i.e. straddling this package's own
+  `maxExponent = 1000` cutoff, where an off-by-direction in the `expNeg` branch would live. Had
+  the gate been set at `maxExponent` instead, that agreement would never have been checked.
+
+### The reach was measured, not assumed
+
+30.4M executions over 90s produced no find — which on its own is equally consistent with "nothing
+was checked". So the generated corpus was counted: **162 of 348 entries open the I4 gate, and the
+oracle has an opinion on all 162.** 178 are in-grammar; 31 parse successfully. The cross-check is
+reached, not bypassed.
+
+This is the same discipline as §5c's positive controls, applied to a fuzzer: a clean run and a
+vacuous run are indistinguishable from the outside, so the coverage claim has to be a measurement.
+
+### Six negative controls, each aimed at one invariant
+
+Written as a predicate over a `parseFunc` — §5c's split, reused exactly as §5c predicted it would
+be. `go test -fuzz` **cannot** demonstrate that its own assertions bite; a target whose
+invariants are all vacuously true reports the same clean run as one that works. Each control is
+caught by the invariant it targets, so a control that stops being caught names which invariant
+went vacuous.
+
+### Harness
+
+`make fuzz` (bounded, `FUZZTIME ?= 60s`, one package because `-fuzz` takes one) is the
+**explorer**; the seed corpus runs as an ordinary table under `make test`, so it is also a
+committed regression suite the CI gate executes. Same division as `test` / `test-properties`.
+`testdata/fuzz/` stays un-gitignored: Go writes there only on a **failing** input, so anything
+appearing there is a regression case to commit — the opposite of rapid's fail files, which go
+stale and are ignored.
+
+---
+
 ## 6. Test strategy
 
 **Test-first per operation, red shown before green** (the `tdd` skill governs the loop). Rejected:
@@ -557,18 +631,18 @@ composition of four narrow interfaces, not a god-interface). **The risk to watch
 
 ---
 
-## RESUME HERE — updated end of session 2
+## RESUME HERE — updated during session 3
 
 **Environment, verified — do not re-derive.** Go 1.26.0. Remote `github.com/giiorg/arb-lab`. Branch
-`feat/milestone-1-foundation` at **`ff80713`**, tree clean, `make ci` green (fmt-check → vet both
+`feat/milestone-1-foundation` at **`04bb5b9`**, tree clean, `make ci` green (fmt-check → vet both
 modules → custom gates → race tests both modules, `RAPID_SEED` pinned). Test-only dependency
 `pgregory.net/rapid v1.3.0` added; §11's "never a dependency" governs production code, untouched.
 `bitnet-backend-go` is **not on this machine** — a described style, not a readable source.
 
 **Two outward-facing actions are still owed and were deliberately not taken.** `main` was
 fast-forwarded locally to the v0.9.4 spec but **has never been pushed** (57 commits ahead of
-`origin/main`), and `feat/milestone-1-foundation` has never been pushed — it now carries 8 commits.
-Confirm with the user before pushing either.
+`origin/main`), and `feat/milestone-1-foundation` has never been pushed — it now carries 10
+commits. Confirm with the user before pushing either.
 
 ### Done, so do not redo
 
@@ -576,26 +650,22 @@ Confirm with the user before pushing either.
 2. ✅ **All `fixedpoint` arithmetic** — four categories, the 128-bit kernel, `Calc` (§5b).
 3. ✅ **The oracle suite** — `math/big` oracle, 4 rapid properties, 19 negative + 4 positive
    controls, and the seed policy verified against module source and wired into the Makefile (§5c).
-4. 🟡 **SQL codec ✅ and zero-alloc assertions ✅. The parser FUZZ TARGET IS NOT BUILT** — the one
-   piece of item 4 outstanding.
+4. ✅ **SQL codec, zero-alloc assertions, and the parser fuzz target** — `FuzzParseMantissa` with
+   four total invariants, six negative controls, a gate on the oracle cross-check justified from
+   `math/big` source, and its corpus reach measured rather than assumed (§5d). **`platform/fixedpoint`
+   is COMPLETE.** Do not reopen it; `make fuzz` is available if a longer explorer run is wanted.
 
 ### Next work, in order
 
-1. **`FuzzParseMantissa`** — the only gap left in `fixedpoint`. Seed corpus via `f.Add` in source
-   (`testdata/fuzz/` is for *failing* finds, and is deliberately not gitignored — see `.gitignore`).
-   Body: parse; on success assert `parseMantissa(formatMantissa(m)) == m`; cross-check against
-   `oracleParse` **only when the oracle also accepts**, because `big.Rat.SetString` rejects `"1."`
-   and `".5"` (which this parser takes) and accepts `"1/2"` and hex floats (which it does not) — a
-   grammar difference, not an arithmetic one. Add a `make fuzz` target with a bounded `-fuzztime`.
-2. **`nofloat` + `notimenow` analyzers**, each `analysistest`-proven and bite-checked; register both
+1. **`nofloat` + `notimenow` analyzers**, each `analysistest`-proven and bite-checked; register both
    in `tools/lint/cmd/arblab-lint` alongside `kernelpurity`. `nofloat` is default-deny under
    `internal/` with a `//nofloat:allow <reason>` escape (§3).
-3. **`platform/clock`** + the two-implementation conformance suite (§3.5: `Now`, `ServerNow(Venue)`
+2. **`platform/clock`** + the two-implementation conformance suite (§3.5: `Now`, `ServerNow(Venue)`
    with uncertainty band, `SetTimer(id, at, prio)` with cancel/replace by id and ties broken by prio
    then id, `CancelTimer`). **Reuse the predicate/generator split from §5c** — write the conformance
    suite as predicates over a `Clock`, run them against both implementations, and give each
    invariant a negative control.
-4. **Land the [SPEC EDIT OWED] items — now six:**
+3. **Land the [SPEC EDIT OWED] items — now six:**
    - the `boundary/` flatten across `build-spec.md` §3.2/§11 (~30 occurrences, and **do not rewrite
      `boundary/lint` in §3.6** — it means "a boundary-or-lint test", not a path)
    - `kernelpurity` as a fifth structural rule
@@ -604,11 +674,11 @@ Confirm with the user before pushing either.
    - **`RoundingMode` as a documented exception to rule 8's `type X string` shape** (§5)
    - **the error-precedence contract**: invalid mode → divide-by-zero → overflow → precision loss
      (§5b)
-5. **Still owed:** the timeboxed `gremlins` attempt, reported honestly either way. Note the 19
+4. **Still owed:** the timeboxed `gremlins` attempt, reported honestly either way. Note the 19
    hand-written negative controls now cover much of what mutation testing would have; the remaining
    value is in finding *unanticipated* survivors.
 
-### Standing lessons from session 2 — apply these, do not rediscover them
+### Standing lessons — apply these, do not rediscover them
 
 - **Every claim gets bite-checked before it is written down.** 21 mutations were applied across the
   session and **two did not bite** — both worth the diagnosis rather than the paper-over. One was a
@@ -619,9 +689,14 @@ Confirm with the user before pushing either.
   the real thing passes, or a universally-objecting predicate reads as a perfect result.
 - **Write the oracle before trusting the implementation.** The one real defect this session was
   found by the two disagreeing, not by review.
-- **Verify tooling semantics from source.** `-rapid.seed`'s default turned out to be the opposite of
-  a safe gate default, and the design that assumed otherwise would have shipped a non-reproducible
-  CI.
+- **Verify tooling semantics from source.** Twice now. `-rapid.seed`'s default turned out to be the
+  opposite of a safe gate default (session 2), and `big.Rat.SetString`'s `|exp| > 1e6` cutoff
+  reports a *parse failure* for well-formed text (session 3) — which, unread, would have made the
+  fuzzer's first "find" an artefact of the two tools' differing limits rather than a defect.
+- **A clean run and a vacuous run look identical, so coverage claims are measurements.** 30.4M fuzz
+  executions with no find says nothing until you have counted how many corpus entries actually reach
+  the interesting branch (§5d: 162 of 348). This is the NC1–NC5 vacuity problem again, and it will
+  recur for `clock`'s conformance suite — a predicate that never reaches the timer path passes.
 
 **Do not over-build.** Milestone 1 exists to make **milestone 2 — the economic gate — measurable**,
 and §12.2 is an explicit kill gate the spec predicts BTC/VIP0 may fail. The OMS is milestone 3.
