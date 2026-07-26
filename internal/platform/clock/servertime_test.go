@@ -171,3 +171,38 @@ func TestCertainty_Validate(t *testing.T) {
 		}
 	}
 }
+
+// String was at 0.0% coverage until the mutation audit reported it, and the
+// branch that was missing is the one that matters. A Certainty reaches a log
+// line or an error message through String, so an invalid one that printed as
+// the bare "" or "maybe" would read as a value someone chose. Wrapping it in
+// Certainty(...) makes an unassigned decision visible in the place it is most
+// likely to be read — after the fact, in a settlement post-mortem.
+//
+// Both branches are asserted together because the wrapper is only informative
+// if the valid values do NOT carry it: a String that wrapped everything would
+// pass a test that only checked the invalid side.
+func TestCertainty_String(t *testing.T) {
+	valid := map[clock.Certainty]string{
+		clock.CertainlyPassed:    "certainly_passed",
+		clock.CertainlyNotPassed: "certainly_not_passed",
+		clock.Uncertain:          "uncertain",
+	}
+	for c, want := range valid {
+		if got := c.String(); got != want {
+			t.Errorf("%q.String() = %q; want %q", string(c), got, want)
+		}
+	}
+
+	invalid := map[clock.Certainty]string{
+		"":        `Certainty()`,
+		"maybe":   `Certainty(maybe)`,
+		"PASSED":  `Certainty(PASSED)`,
+		"passed ": `Certainty(passed )`,
+	}
+	for c, want := range invalid {
+		if got := c.String(); got != want {
+			t.Errorf("%q.String() = %q; want %q", string(c), got, want)
+		}
+	}
+}

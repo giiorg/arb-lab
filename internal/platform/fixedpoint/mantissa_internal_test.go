@@ -2,6 +2,7 @@ package fixedpoint
 
 import (
 	"errors"
+	"math/bits"
 	"testing"
 )
 
@@ -281,6 +282,44 @@ func TestMulDivMantissa_DivideByZero(t *testing.T) {
 	for _, mode := range declaredModes {
 		if _, err := mulDivMantissa(1, 1, 0, mode); !errors.Is(err, ErrDivideByZero) {
 			t.Errorf("mulDivMantissa(1, 1, 0, %v) = %v; want ErrDivideByZero", mode, err)
+		}
+	}
+}
+
+// TestMulDivMantissa_Div64Boundary pins the guard in front of bits.Div64 at the
+// one input where `hi >= uden` and `hi > uden` disagree — the exact equality.
+// Every other test in this file clears the guard by a wide margin, so a mutation
+// loosening it to `>` survived the whole suite: the mutation audit found this,
+// and reproducing it panics with "integer overflow" inside math/bits.Div64.
+//
+// A panic is specifically what this package may not do. §5.3 puts a crash inside
+// the money kernel on the DispatchAuthorized boundary the formal model is built
+// around, which is why mulDivMantissa converts every arithmetic failure into an
+// error. A guard that turns a panic into an error is worth nothing until some
+// test proves it is still standing at the value where it starts to matter.
+//
+// The construction: bits.Div64 panics when the quotient will not fit in 64 bits,
+// i.e. when hi >= uden. Taking a = 2^32 and b = scaleFactor*2^32 makes the
+// 128-bit product exactly scaleFactor * 2^64, so hi == scaleFactor == uden and
+// lo == 0. Both operands stay well inside int64.
+func TestMulDivMantissa_Div64Boundary(t *testing.T) {
+	const a = int64(1) << 32
+	const b = int64(scaleFactor) << 32
+
+	// The construction is only meaningful if it really lands on the equality,
+	// so assert the arithmetic rather than trusting the comment: a change to
+	// Scale must break this loudly instead of quietly sliding off the boundary.
+	hi, lo := bits.Mul64(magnitude(a), magnitude(b))
+	if hi != scaleFactor || lo != 0 {
+		t.Fatalf("product of %d and %d is (hi=%d, lo=%d); want (hi=%d, lo=0) — the boundary moved",
+			a, b, hi, lo, uint64(scaleFactor))
+	}
+
+	for _, mode := range declaredModes {
+		got, err := mulDivMantissa(a, b, scaleFactor, mode)
+		if !errors.Is(err, ErrOverflow) {
+			t.Errorf("mulDivMantissa(%d, %d, scaleFactor, %v) = %d, %v; want ErrOverflow",
+				a, b, mode, got, err)
 		}
 	}
 }

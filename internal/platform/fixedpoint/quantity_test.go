@@ -137,3 +137,101 @@ func TestQuantity_AssetDiscipline(t *testing.T) {
 		}
 	}
 }
+
+// Quantity.Mul had no test at all until the mutation audit reported it at 0.0%
+// coverage, and the way it was missed is worth keeping in view: the two tables
+// above enumerate operations by SIGNATURE SHAPE — binary ones taking a Quantity,
+// unary ones taking nothing. Mul is the package's only Quantity method with a
+// third shape, (Rate, RoundingMode), so it fell between two tables that each
+// looked exhaustive from the inside. A table driven by shape is a coverage claim
+// about the shapes it names, not about the method set.
+//
+// Scaling a size by a dimensionless ratio is how a fraction of a position is
+// taken and how a contract multiplier is applied, so every guard the other
+// operations get is checked here too — including the one the other tables cannot
+// have, an unset Rate.
+func TestQuantity_Mul(t *testing.T) {
+	cases := []struct {
+		q, r string
+		mode fixedpoint.RoundingMode
+		want string // "" means the operation must fail with err
+		err  error
+	}{
+		// The ordinary path: taking half a position, and applying a multiplier
+		// bigger than one.
+		{q: "2", r: "0.5", mode: fixedpoint.RoundExact, want: "1"},
+		{q: "1.5", r: "0.25", mode: fixedpoint.RoundExact, want: "0.375"},
+		{q: "3", r: "1.5", mode: fixedpoint.RoundExact, want: "4.5"},
+		{q: "-2", r: "0.5", mode: fixedpoint.RoundExact, want: "-1"},
+		{q: "2", r: "0", mode: fixedpoint.RoundExact, want: "0"},
+
+		// A third of a position is not representable, so the mode decides — and
+		// RoundExact refuses to decide. RoundTowardZero is the sizing default
+		// for the reason the doc comment gives: never size beyond what is
+		// backed, on either side of zero.
+		{q: "1", r: "0.333333333", mode: fixedpoint.RoundExact, want: "0.333333333"},
+		{q: ulp, r: ulp, mode: fixedpoint.RoundExact, err: fixedpoint.ErrPrecisionLoss},
+		{q: ulp, r: ulp, mode: fixedpoint.RoundTowardZero, want: "0"},
+		{q: ulp, r: ulp, mode: fixedpoint.RoundAwayFromZero, want: ulp},
+		{q: negUlp, r: ulp, mode: fixedpoint.RoundTowardZero, want: "0"},
+		{q: negUlp, r: ulp, mode: fixedpoint.RoundAwayFromZero, want: negUlp},
+		{q: negUlp, r: ulp, mode: fixedpoint.RoundFloor, want: negUlp},
+		{q: negUlp, r: ulp, mode: fixedpoint.RoundCeil, want: "0"},
+
+		// An unset mode fails even when the arithmetic is exact, so that a
+		// suite written with round numbers cannot pass one through.
+		{q: "2", r: "0.5", mode: fixedpoint.RoundInvalid, err: fixedpoint.ErrRoundingMode},
+
+		{q: maxDecimal, r: "2", mode: fixedpoint.RoundExact, err: fixedpoint.ErrOverflow},
+	}
+
+	for _, tc := range cases {
+		name := tc.q + " * " + tc.r + " " + tc.mode.String()
+		t.Run(name, func(t *testing.T) {
+			got, err := mustQuantity(t, btc, tc.q).Mul(mustRate(t, tc.r), tc.mode)
+			if tc.want == "" {
+				if err == nil {
+					t.Fatalf("Mul = %s, nil; want %v", got.Decimal(), tc.err)
+				}
+				if !errors.Is(err, tc.err) {
+					t.Fatalf("Mul error = %v; want it to wrap %v", err, tc.err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Mul failed: %v", err)
+			}
+			if got.Decimal() != tc.want {
+				t.Errorf("Mul = %s; want %s", got.Decimal(), tc.want)
+			}
+			// The asset rides through unchanged: a Rate is dimensionless, so
+			// scaling a BTC size by one yields a BTC size and never an untagged
+			// number that the next operation would have to guess about.
+			if got.Asset() != btc {
+				t.Errorf("Mul dropped the asset: got %q; want %q", got.Asset(), btc)
+			}
+		})
+	}
+}
+
+// The unset guards, separated out because each has a different sentinel and the
+// Rate side has no asset tag to be missing — it carries a construction flag, and
+// this is the only Quantity operation that can report on it.
+func TestQuantity_MulUnsetOperands(t *testing.T) {
+	var unsetQ fixedpoint.Quantity
+	var unsetR fixedpoint.Rate
+	validQ := mustQuantity(t, btc, "1")
+	validR := mustRate(t, "0.5")
+
+	if _, err := unsetQ.Mul(validR, fixedpoint.RoundExact); !errors.Is(err, fixedpoint.ErrAssetUnset) {
+		t.Errorf("Mul on the zero Quantity = %v; want ErrAssetUnset", err)
+	}
+	if _, err := validQ.Mul(unsetR, fixedpoint.RoundExact); !errors.Is(err, fixedpoint.ErrRateUnset) {
+		t.Errorf("Mul by the zero Rate = %v; want ErrRateUnset", err)
+	}
+	// Both unset: the receiver is checked first, and which sentinel comes back
+	// is part of the contract rather than an accident of statement order.
+	if _, err := unsetQ.Mul(unsetR, fixedpoint.RoundExact); !errors.Is(err, fixedpoint.ErrAssetUnset) {
+		t.Errorf("Mul with both operands unset = %v; want ErrAssetUnset", err)
+	}
+}

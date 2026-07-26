@@ -116,8 +116,19 @@ func parseMantissa(s string) (int64, error) {
 		}
 		digits = digits[:len(digits)-drop]
 	case shift > 0:
-		// Check the width BEFORE materializing the zeros, so a hostile
-		// exponent cannot make us allocate a gigabyte to then reject it.
+		// Check the width BEFORE materializing the zeros, so a hostile exponent
+		// cannot make us allocate to then reject.
+		//
+		// How much this is worth today, stated honestly because the mutation
+		// audit measured it: maxExponent already caps shift at Scale+1000, so
+		// the allocation this skips is about a kilobyte, not the gigabyte an
+		// unbounded exponent would buy. Mutating the `+` to `-` is therefore
+		// observably equivalent — identical values and identical errors across
+		// every exponent-heavy input, differing only in bytes allocated on a
+		// path that errors either way — which is why no test pins it and why it
+		// survives the audit as a known, accepted survivor rather than a gap.
+		// It stays because it is the check that keeps that claim true if
+		// maxExponent is ever raised, and raising it is a one-line change.
 		if len(digits)+shift > maxMantissaDigits {
 			return 0, fmt.Errorf("parse %q: %w", s, ErrOverflow)
 		}
