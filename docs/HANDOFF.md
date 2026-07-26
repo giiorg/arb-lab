@@ -66,13 +66,14 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## NEXT REQUEST (2026-07-26): **milestone 1 — IN PROGRESS, resume mid-`fixedpoint`**
+## NEXT REQUEST (2026-07-26): **milestone 1 — IN PROGRESS, `platform/fixedpoint` is DONE**
 
-**The first code in the repo exists.** Branch `feat/milestone-1-foundation` at `e92f9f0`, tree clean, `make ci` green.
+**Branch `feat/milestone-1-foundation` at `ff80713`, 8 commits, tree clean, `make ci` green.** The money kernel is complete and load-bearing-tested: 1,482 production lines, 213 passing cases, an independently written `math/big` oracle, 19 negative controls and 4 positive controls. **Only the parser fuzz target is outstanding in that package.**
 
 > **Read `docs/superpowers/specs/2026-07-26-milestone-1-foundation-decisions.md` first — its RESUME HERE block.**
-> That record holds all 17 decisions taken with their rationale *and rejected alternatives*, the verified
-> environment, the deferred scope each with a reason, and the exact next eight work items in order.
+> That record holds every decision taken with its rationale *and rejected alternatives*, the verified
+> environment, the deferred scope each with a reason, **§5b/§5c on `fixedpoint` as actually built and
+> the test strategy as actually executed**, and the exact next work items in order.
 > Everything below is a summary of it; the record is authoritative.
 
 **All four forks the previous brief named are settled**, plus thirteen more. The one-line versions:
@@ -89,9 +90,9 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 - **`kernelpurity` is a fifth structural rule** (built, green, bite-checked): `platform/` may import only stdlib + `platform/`, catching a domain leak and a spine inversion with one rule.
 - **Test-the-tests = negative controls in CI** (the NC1–NC5 discipline from `docs/formal/`), with `gremlins` as a timeboxed audit only — **still owed**, and to be reported honestly either way.
 
-**Four [SPEC EDIT OWED] items** are recorded and unapplied: the `boundary/` flatten in §3.2/§11 (~30 occurrences — and **`boundary/lint` in §3.6 is not a path, do not rewrite it**), `kernelpurity` as a fifth rule, `exhaustiveswitch` as a sixth, and the Go-vs-Rust ADR §3 entry. These exist so R2d reads deliberate change rather than drift.
+**Six [SPEC EDIT OWED] items** are recorded and unapplied (four from session 1, two added in session 2 — `RoundingMode` deviating from rule 8's `type X string` shape, and the error-precedence contract): the `boundary/` flatten in §3.2/§11 (~30 occurrences — and **`boundary/lint` in §3.6 is not a path, do not rewrite it**), `kernelpurity` as a fifth rule, `exhaustiveswitch` as a sixth, and the Go-vs-Rust ADR §3 entry. These exist so R2d reads deliberate change rather than drift.
 
-**One user decision is pending:** the `RoundingMode` set (proposed with `RoundInvalid = 0` so a forgotten argument errors, and `RoundExact` so invariant tests can assert exactness). It blocks the arithmetic.
+**No user decision is pending.** The `RoundingMode` set was confirmed **as proposed, unchanged** — eight modes, `RoundInvalid = 0`, `RoundExact` kept, `HalfDown` not added.
 
 **One outward-facing action is owed:** neither `main` (57 commits ahead of `origin/main`) nor the feature branch has been pushed. Confirm before pushing.
 
@@ -99,17 +100,21 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Verified environment, do not re-derive:** **Go 1.26.0**. Remote `github.com/giiorg/arb-lab`. Branch `feat/milestone-1-foundation` at `e92f9f0`, tree clean, `make ci` green (fmt-check → vet both modules → custom gates → race tests both modules). Two Go modules: root (the engine) and `tools/lint` (nested, so `golang.org/x/tools` stays out of the engine's dependency graph). `bitnet-backend-go` is **not on this machine** — a described style, not a readable source. The `gopls` "not in your workspace" warnings are **expected and correct** — see the `go.work` decision.
 
-**Built and green:** the scaffold (`go.mod`, `Makefile`, GitHub Actions, `.gitignore`, `migrations/README.md`), the `kernelpurity` analyzer + its multichecker binary, and `platform/fixedpoint`'s scale/parse/format seam — `Scale = 9`, `Asset`, `Money` + `Validate`/`ParseMoney`/`ZeroMoney`/`Decimal`, exact `parseMantissa`/`formatMantissa` with **no `float64` on any path**, four sentinels, 25 round-trip + 27 rejection cases, all bite-checked with deliberate mutations.
+**Built and green:** the scaffold (`go.mod`, `Makefile`, GitHub Actions, `.gitignore`, `migrations/README.md`), the `kernelpurity` analyzer + its multichecker binary, and **the whole of `platform/fixedpoint`**:
 
-**Next eight items, in order** (detail in the decision record's RESUME HERE):
-1. Confirm the pending `RoundingMode` set, then build it.
-2. `fixedpoint` arithmetic test-first per operation: `Add`/`Sub` → `Quantity` → `Price{base,quote}` + `Notional` → `Rate` + `Mul(Rate)` → the `Calc` chain. Overflow **errors, never wraps**.
-3. The `rapid` + independently-written `math/big` oracle suite, one negative control per property. **Verify `rapid`'s `-rapid.seed` semantics from the module source before wiring a Makefile target — the seed policy is designed but the flag behaviour is unverified.**
-4. SQL codec, parser fuzz target with committed seed corpus, zero-alloc assertions.
-5. The `nofloat` + `notimenow` analyzers, `analysistest`-proven and bite-checked, registered in the multichecker.
-6. `platform/clock` + the two-implementation conformance suite — the test that makes §3.5's parity claim real rather than asserted.
-7. The four **[SPEC EDIT OWED]** items.
-8. The timeboxed `gremlins` attempt, reported honestly either way.
+- **Four categories** — `Money`, `Quantity`, `Price{base,quote}`, `Rate` — every zero value invalid, cross-category arithmetic a *compile* error, cross-asset arithmetic a runtime error. `Rate` carries an explicit `set bool` because it is dimensionless and an unpopulated **fee** rate would otherwise read as zero fees, which clears any hurdle.
+- **`mulDivMantissa`** — one 128-bit `math/bits` rounding kernel every operation routes through, so rounding policy exists in exactly one place. `Notional`/`AveragePrice` as inverses, `Money.Mul(Rate)`, `Money.Div(Money) → Rate`, the `Calc` chain, and the persistence codec (`int64` mantissa = SQLite `INTEGER` = Postgres `BIGINT`, which is D2's cheap migration path made concrete).
+- **An error-precedence contract**: invalid mode → divide-by-zero → **overflow** → precision loss. This was *found by the oracle*, not by review: the kernel had been classifying the same condition two ways depending on which side of an internal 64-bit boundary it fell.
+- **`rapid` (test-only, v1.3.0) against a `math/big` oracle written as a different algorithm** — it rounds by comparing distances to the two integer neighbours, where the fast path derives an increment from a remainder. 19 negative controls, each rejected with its counterexample logged; 4 positive controls, because a predicate that always objects looks identical to a perfect result. The `float64` control is caught at `123456789.123456789` returning `...784` — rule 4 demonstrated, not asserted.
+- **`-rapid.seed` semantics verified from module source** and found to be the *opposite* of a safe gate default: 0 means "choose a random one", so the properties are non-deterministic out of the box. `make test`/`make ci` now pin `RAPID_SEED`; `make test-properties` deliberately does not (the nightly explorer).
+- **21 mutations applied across the session, every construct bite-checked.** Two did not bite and both were diagnosed rather than papered over — one semantically equivalent (pinned by an internal test instead), one simply a bad mutation.
+
+**Next items, in order** (detail in the decision record's RESUME HERE):
+1. **`FuzzParseMantissa`** — the only gap left in `fixedpoint`. Cross-check against the oracle **only where the oracle also accepts**: `big.Rat.SetString` rejects `"1."`/`".5"` and accepts `"1/2"`, a grammar difference rather than an arithmetic one.
+2. The `nofloat` + `notimenow` analyzers, `analysistest`-proven and bite-checked, registered in the multichecker.
+3. `platform/clock` + the two-implementation conformance suite — the test that makes §3.5's parity claim real rather than asserted. **Reuse the predicate/generator split** from the decision record §5c: predicates over a `Clock`, run against both implementations, each invariant with a negative control.
+4. The **[SPEC EDIT OWED]** items — now **six**, two added this session (`RoundingMode` as a documented exception to rule 8's `type X string` shape; the error-precedence contract).
+5. The timeboxed `gremlins` attempt, reported honestly either way — noting the 19 hand-written controls now cover much of what it would have found, so the remaining value is *unanticipated* survivors.
 
 **Do not over-build.** Milestone 1 exists to make **milestone 2 — the economic gate — measurable**, and §12.2 is an explicit kill gate the spec predicts BTC/VIP0 may fail (≈3.4% at 60% utilization vs the ~4.6% hurdle). Build the foundation the gate needs; the OMS is milestone 3.
 
