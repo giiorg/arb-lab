@@ -2,7 +2,7 @@
 
 **Status:** in progress. Milestone 1's **first slice (§1) is code-complete** as of session 3 — scaffolding,
 `platform/fixedpoint`, `platform/clock`, and the `nofloat`/`notimenow` gates. Branch
-`feat/milestone-1-foundation`, first commit `e92f9f0`, head `f146855`, **unpushed**.
+`feat/milestone-1-foundation`, first commit `e92f9f0`, head `5893ac0`, **pushed and tracking**.
 **Doc set:** implements `build-spec.md` §12.1 (v0.9.4). Deviations from the spec are marked **[SPEC EDIT LANDED — v0.9.5]**.
 
 This record exists so a fresh session can resume without re-deriving anything. Every decision below was
@@ -965,10 +965,11 @@ modules → custom gates → race tests both modules, `RAPID_SEED` pinned). Test
 `pgregory.net/rapid v1.3.0` added; §11's "never a dependency" governs production code, untouched.
 `bitnet-backend-go` is **not on this machine** — a described style, not a readable source.
 
-**Two outward-facing actions are still owed and were deliberately not taken.** `main` was
-fast-forwarded locally to the v0.9.4 spec but **has never been pushed** (58 commits ahead of
-`origin/main`), and `feat/milestone-1-foundation` has never been pushed — it now carries 20
-commits. Confirm with the user before pushing either.
+**Both branches are now PUSHED (2026-07-26, on the user's instruction).** `main` went up as a
+fast-forward — `origin/main` was a strict ancestor, 58 behind and 0 diverged, verified with
+`git merge-base --is-ancestor` before pushing rather than assumed. `feat/milestone-1-foundation`
+is pushed and tracking `origin/feat/milestone-1-foundation`. **No outward-facing action is owed.**
+A PR has *not* been opened — the branch is pushed, not proposed; open one only if asked.
 
 **Milestone 1's first slice (§1) is CODE-COMPLETE and its documentation debt is now DISCHARGED.**
 Scaffolding, `platform/fixedpoint`, `platform/clock`, three gates, and — as of session 4 — all ten

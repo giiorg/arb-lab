@@ -81,7 +81,7 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 **All four forks the previous brief named are settled**, plus thirteen more. The one-line versions:
 
 1. **Scope.** First slice = scaffolding + `platform/fixedpoint` + `platform/clock` + the `nofloat` and no-`time.Now()` gates. The eleven kernel packages form a strict dependency spine and anything above the bottom would be rewritten when the bottom lands. `fixedpoint` first because **milestone 2 is a kill gate whose verdict is a money computation** — a wrong rounding direction moves the number across the threshold and kills or green-lights the project on a bug.
-2. **Layout.** `go.mod` at root, module `github.com/giiorg/arb-lab`, `go 1.26.0`. `main` fast-forwarded to v0.9.4 (**locally — not pushed**; the spec is now v0.9.5 on the feature branch), code on `feat/milestone-1-foundation`. `tools/lint` is a **nested module** and there is deliberately **no `go.work`** (a workspace would let `x/tools` become importable from the engine). `migrations/` partitioned by dialect from the first file.
+2. **Layout.** `go.mod` at root, module `github.com/giiorg/arb-lab`, `go 1.26.0`. `main` fast-forwarded to v0.9.4 and **pushed**; the spec is now v0.9.5 on the feature branch, also pushed, code on `feat/milestone-1-foundation`. `tools/lint` is a **nested module** and there is deliberately **no `go.work`** (a workspace would let `x/tools` become importable from the engine). `migrations/` partitioned by dialect from the first file.
 3. **Gates = custom `go/analysis` analyzers**, each with `analysistest` fixtures that MUST produce diagnostics — because a `depguard` stanza cannot be unit-tested and `nofloat` cannot be config at all (it needs type info). **6 planned, 3 built** (`kernelpurity`, `nofloat`, `notimenow`); the other three are deferred because nothing exists to police yet.
 4. **`fixedpoint`** = `int64` mantissa @ `Scale = 9` + `math/bits` 128-bit intermediates; `(T, error)` + a sticky-error `Calc`; **zero value invalid**; `Price` carries `base`+`quote`.
 
@@ -98,7 +98,7 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 The `RoundingMode` set was confirmed **as proposed, unchanged** — eight modes, `RoundInvalid = 0`, `RoundExact` kept, `HalfDown` not added.
 
-**One outward-facing action is owed:** neither `main` (58 commits ahead of `origin/main`) nor the feature branch (20 commits) has been pushed. Confirm before pushing.
+**Nothing outward-facing is owed.** Both branches were pushed 2026-07-26 on the user's instruction: `main` as a verified fast-forward (`origin/main` was a strict ancestor, 58 behind / 0 diverged), and `feat/milestone-1-foundation` now tracks its remote. **No PR has been opened** — pushed is not proposed; open one only if asked.
 
 **Read first, in this order:** the decision record above (its RESUME HERE block) → `build-spec.md` **§3.2** (the package map), **§3.5** (backtest-live parity — the `Clock`/`Envelope` contract the conformance suite tests), **§3.6** (ten structural rules as of v0.9.5, plus the gate-status paragraph), **§4** (`VenueInstrument`), **§12.1**. Then this file's *Locked decisions*.
 
