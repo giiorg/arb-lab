@@ -1742,7 +1742,171 @@ depend on the author remembering the rule.
 
 ---
 
-## RESUME HERE — updated end of session 8
+## 11. The second slice continued (session 9) — `platform/outbox`
+
+### 11a. Scope — ports and the relay, no store `[user decision]`
+
+Three shapes were put to the user, and the first was taken.
+
+**Taken: `Message`/`Record`, the `Store` and `Publisher` ports, and the `Relay`. No `Append`, no SQL,
+no schema, no driver.** Everything whose behaviour is decidable against a fake store, and nothing
+whose behaviour is a property of a database that does not exist.
+
+**Rejected: ports plus a `database/sql` store now.** `database/sql` is stdlib, so `kernelpurity`
+would have permitted it, and the third-party SQLite driver registers itself at the composition root
+— the gate does not decide this one. It was rejected on the argument the gate-deferral section
+already settled for `hexboundary`: the outbox's defining guarantee is that the event append commits
+**in the same transaction as the OMS journal write** (core §5.3, §6 step 6), and the journal is
+milestone 3. Writing the SQL now means guessing the transaction shape of an undesigned thing and then
+testing the guess against itself. A check over an empty tree passes trivially, which is
+indistinguishable from a broken check.
+
+**Rejected: skip the outbox and build `observability` first.** Defensible — `observability` and
+`ratelimit` are both fully self-contained today. Rejected because the split above recovers most of
+the value: the relay's ordering, retry and never-drop behaviour is exactly the part that is subtle,
+and it is all checkable now. Reordering would have deferred the subtle half to sit beside a database.
+
+**`Append` is absent as a positive decision, not an omission**, and `ports.go` says so at the
+declaration. An `Append(ctx, Message)` on the `Store` interface would be strictly WORSE than nothing:
+it would compile, it would read as the outbox contract, and it would silently be a *second*
+transaction. A lost race between those two commits is the split-brain the pattern exists to prevent.
+So the value crossing the boundary is defined (it is knowable now) and the verb is not (its shape is
+not).
+
+### 11b. Per-key FIFO, scoped `[SPEC EDIT OWED]`
+
+§3.2 and D2 describe the outbox as an "at-least-once export to idempotent consumers" and say nothing
+about **order**. Order is nonetheless load-bearing, because D2 also calls audit "a projection of the
+OMS journal", and a projection that applies a fill before the order that produced it does not
+reproduce its source. The spec states a delivery-**count** guarantee and relies, unstated, on a
+delivery-**order** one.
+
+**Taken: FIFO within a `Key`, nothing across two.** Same structural rule §3.5 states for dispatch —
+"an unready `SourceID` never stalls dispatch of ready inputs from other `SourceID`s" — and the
+agreement between the two is deliberate.
+
+**Rejected: global FIFO.** Strictly stronger, and it converts one poison record into a total halt of
+every consumer. **Rejected: no ordering guarantee at all** — that is the status quo reading of the
+spec, and it makes the audit projection's agreement with its source a coincidence.
+
+The cost is stated in the package doc rather than hidden: a record that fails forever blocks **its own
+key** forever. That is the safe direction, and the reasoning is §10b's question asked again. Skipping
+past a stuck record publishes K7 while K5 is unsent, which silently reorders a hash-chained
+projection; blocking is loud, because the key's backlog and attempt count climb where a metric sees
+them.
+
+### 11c. Two value-shape decisions, each because its absence is quiet
+
+**`Payload` is `[]byte`, not `any`** — deliberately unlike `events.Envelope.Payload`, and the
+difference is the durability boundary. An `Envelope` is dispatched in-process and never persisted as
+a value, so it can carry a typed Go object. A `Record` already crossed a transaction: these are the
+exact bytes that committed beside the journal write, and §7.5/Z4 hash-chain the projection they feed.
+Holding a Go object and re-marshalling it at delivery time lets the exported bytes differ from the
+committed ones — a map iteration order or a struct-tag change is enough — which breaks a hash chain
+in a way that reads as **tampering** rather than as a bug.
+
+**`Seq` is named as the dedup key in the contract.** At-least-once without a stated dedup key invites
+the obvious wrong answer: content-hash dedup, which silently drops the second of two legitimately
+identical events (the same funding accrual on two intervals).
+
+**`Topic` and `Key` are open string types, not closed enums.** §3.6 rule 8's shape does not apply,
+taking the same exception `clock.TimerID` already took: the set of names is open. A closed
+`TopicAudit | TopicObs | TopicTax` would repeat §10a's rejected shape in a new place — adding a
+consumer would become a kernel edit. What is enforced instead is a **format**, via an allow-list
+rather than a deny-list of whitespace, because a topic is written to an indexed column, printed in
+logs, and used as a §10 metric label, and a deny-list admits every character nobody thought to name.
+
+**An empty `Key` is rejected rather than read as "unordered".** §10b's question again: a producer that
+simply forgot a key would get its events interleaved, silently, visible only in the projection.
+
+### 11d. The relay owns no goroutine
+
+`RunOnce` performs one claim → publish → settle pass and returns a `Result`. **Rejected: an internal
+ticker draining continuously** — that makes the instant of every publish a function of wall-clock
+scheduling, which is not reproducible. `platform/clock` made the identical call for the identical
+reason (§5e: pull-based timer delivery, no goroutines in the package at all). Whoever owns the total
+order owns the cadence.
+
+The relay is stateless between passes **by construction**: attempt counts and retry instants live on
+the record in the store, so a process that crashes mid-backoff does not resume at attempt zero and
+start hammering a consumer that has been rejecting it for an hour.
+
+`Claim` takes `now` as an argument rather than letting the store read a clock. This is §3.6 rule 5's
+argument reaching a port signature: retry eligibility is a comparison against `RetryAt`, and a store
+reading its own clock puts two clocks either side of it, so a replay claims a different set than the
+live run did.
+
+### 11e. The backoff guard is on the right-hand side, and that is the whole trick
+
+`Delay` computes `Base << attempts` capped at `Max`. The obvious form — shift, then compare — is
+wrong in the damaging direction. `time.Duration` is an `int64` of nanoseconds, so with a `Base` of one
+second the shift overflows at 34 attempts, and an overflowed shift does not produce a very long wait:
+it produces a **negative** one. A negative delay schedules `RetryAt` in the past, so the record is
+reclaimed on the very next pass — the backoff becomes a hot loop against a consumer that is already
+failing, which is the exact opposite of its purpose.
+
+Asking `Base > Max>>attempts` instead never performs the overflowing shift. Go defines a right shift
+wider than the type as zero for a positive operand, so a huge attempt count answers `Base > 0` — true
+for any valid schedule. The function is **total over every `uint32` with no special-case branch**,
+which matters because a special case is a branch that has to be remembered and tested.
+
+**No jitter, and that is a decision.** Jitter de-synchronises a herd; a single in-process pump over a
+local store has no herd, and randomness would make the retry instant unreproducible, breaking the
+replay determinism §3.5 rests on. If a multi-process deployment ever creates a herd, the jitter
+belongs there with a seeded source.
+
+**`RetryAfter` and the computed backoff resolve to the longer of the two, in both directions**, and
+each direction is load-bearing. A longer `RetryAfter` must win, because retrying inside a venue's
+stated window is guaranteed to fail and spends rate-limit budget §5.3 reserves for recovery. A
+*shorter* one must lose, or a consumer advertising one second resets an hour of accumulated
+escalation on every attempt — the backoff would stop escalating precisely against the consumer that
+keeps failing. Both directions carry their own test; both mutants are caught by exactly one test each.
+
+**`apperror`'s `Effect` axis is deliberately not consulted.** Under at-least-once, `EffectApplied` and
+`EffectNotApplied` lead to the same action — redeliver — so branching on it would be a distinction the
+retry logic cannot act on. It still matters to the operator, where it is the difference between a
+duplicate that is certain and one that is merely possible; `ports.go` says so, because a reader who
+knows §8a will expect the axis to be used and should find out why it is not.
+
+### 11f. Bite-check — 38 runs, 30 claims, all caught
+
+Four survived. **Three were real gaps**, all closed:
+
+- **The relay sorted the store's slice in place.** `ordered := slices.Clone(claimed)` → `ordered :=
+  claimed` survived because the fake returned its own slice and nothing looked at it afterwards. The
+  concern is real rather than theoretical: a store implementation written later against this
+  interface — reasonably returning a cached or reused slice — would have it destroyed by a package
+  it only knows through the port, and the symptom is a silently reordered projection. §10b's question
+  again, and the answer is the same: the consumer must not mutate.
+- **Every malformed-identifier fixture put its bad character mid-string.** `i >= 0` → `i > 0`
+  survived on **both** `Topic.Validate` and `Key.Validate`, because at index 0 the two predicates
+  differ and no fixture reached index 0. `" audit"` validated. This is §9i's fixture-dimension lesson
+  landing in a third place — after `events`'s mailbox depth of 1 and §5d's fuzz-corpus reach — and it
+  is now clear that the lesson generalises to *any* fixture parameter pinned to the value that
+  collapses a distinction the code makes.
+- **The mirror was fixed in the same pass.** `Key` runs the same scan through the same helper, so it
+  has the same blind spot; §9i's other lesson says go and look immediately rather than let the defect
+  return through the other door.
+
+**The fourth is semantically equivalent and is now flagged in the code as an expected survivor.**
+Removing the empty-claim fast path changes nothing observable: the code below produces
+`Result{Claimed: 0}` — which is `Result{}` — clones nil, iterates nothing, settles nothing and joins
+no errors. It is kept because an idle outbox is the steady state of a continuously pumped relay, so it
+saves an allocation on the hot-by-frequency path. **Naming an expected survivor in the code is new
+here and worth keeping**: a mutation harness cannot tell a fast path from a defect, so the code has to.
+
+Both harness guards fired and both were right. One **`NOBUILD!!`** — adding a `%s` verb without an
+argument, caught by `go vet`'s printf check inside the mutant, re-aimed to substitute a wrong value
+per §9i's own advice. Three **`NO-OP!!`** — stale line numbers after edits, which is exactly the
+failure the line-scoped design exists to report rather than print as `caught`.
+
+One claim had **no test at all until the bite-check demanded one**: `Record.String` omits the payload,
+which the relay's error path depends on since it formats records with `%s`. The doc comment asserted
+it; nothing checked it. §10f's ruling applied without the test being written first.
+
+---
+
+## RESUME HERE — updated end of session 9
 
 **Environment, verified — do not re-derive.** **Go 1.26.5** (upgraded from 1.26.0 in session 5;
 both modules declare `go 1.26.0` as the minimum and `toolchain go1.26.5` as what to build with —
@@ -1761,7 +1925,7 @@ exactly as it does for a failing test (session 7); and it runs **bounded** and r
 because a mutation can make a test *hang* rather than fail, and a hanging test names no defect
 (session 7). **A `caught` with 0 failing tests is a contradiction — that is what exposed `NOBUILD`.**
 
-**Both branches were PUSHED and in sync at the end of session 7; session 8 committed on top.**
+**Both branches were PUSHED and in sync at the end of session 9.**
 `feat/milestone-1-foundation` tracks `origin/feat/milestone-1-foundation`. **Check it rather than
 trust this paragraph** — `git rev-list --left-right --count @{u}...HEAD` should print `0 0`. The
 head commit is deliberately not named here: a paragraph that cites its own commit hash is stale the
@@ -1776,20 +1940,24 @@ if a PR is ever wanted, it is worth asking whether it should be one per slice ra
 the milestone.
 
 **Milestone 1's first slice (§1) is CODE-COMPLETE and closed out (session 5). The SECOND SLICE is
-five packages in:** `platform/apperror` and `platform/ids` (session 6, with the `Venue` move out of
+six packages in:** `platform/apperror` and `platform/ids` (session 6, with the `Venue` move out of
 `platform/clock`), then `ids`'s instrument identity and **`platform/events`** (session 7), then
-**`platform/config`** (session 8). The kernel is **six packages** — `fixedpoint`, `clock`,
-`apperror`, `ids`, `events`, `config` — plus three gates. **There are no open questions.**
-`platform/outbox` is the next package up the spine.
+**`platform/config`** (session 8), then **`platform/outbox`** (session 9). The kernel is **seven
+packages** — `fixedpoint`, `clock`, `apperror`, `ids`, `events`, `config`, `outbox` — plus three
+gates. **There are no open questions.** `platform/observability` is the next package up the spine.
 
-**TWO SPEC EDITS ARE OWED, and they are tracked by markers in the code, not by this paragraph.**
+**THREE SPEC EDITS ARE OWED, and they are tracked by markers in the code, not by this paragraph.**
 §9h: §3.5 declares `SourceID` as four flat fields; the code composes `ids.VenueInstrument` instead,
 because the flat form cannot express the `ContractType` §5.1 gives an instrument. §10b: §5.2 says
 configuration is "hot-reloadable where safe" and stops; the code makes "where safe" a per-field
-**default-deny** `config:"hot"` tag, on rule 4's own argument. Both are deliberately not landed yet:
+**default-deny** `config:"hot"` tag, on rule 4's own argument. §11b: §3.2 and D2 describe the outbox as
+an at-least-once export and say nothing about ORDER, while relying on it — audit is called "a
+projection of the OMS journal", and a projection that applies a fill before its order does not
+reproduce its source; the code makes the guarantee explicit and scopes it to the Key. All three are
+deliberately not landed yet:
 the v0.9.5 precedent is to batch a slice's spec edits into one coherent release at slice close.
 **Before closing the second slice, `grep -rn "SPEC EDIT OWED" internal/`** (code only — the doc set is full of PROSE about past markers, so a repo-wide grep is mostly false positives) and land what it
-finds. It should report exactly two.
+finds. It should report exactly three.
 
 **The `CLAUDE.md` owed since §2 now exists** (repo root, written session 6). It carries the
 `internal/` taxonomy, the doc-set map, the build split, the three enforced gates, and the standing
@@ -1860,6 +2028,19 @@ working rules. That item is discharged.
     Clock and a timer, both of which belong with the dispatcher; the lane only carries the `RecvTime`
     an age is computed from, and `Envelope.Age` is pure.
 
+16. ✅ **`platform/outbox`** (§11a–§11f) — `Message`/`Record`, the `Store` and `Publisher` ports, the
+    `Relay`, per-key FIFO and the backoff. 38 mutation runs, 30 claims, all caught.
+    **Do not add an `Append` to `Store`** — §11a records why, and it is the one addition here that
+    would be worse than nothing: it compiles, it reads as the outbox contract, and it is silently a
+    second transaction. It lands with the journal, in milestone 3.
+    **Do not make FIFO global** — §11b; one poison record would halt every consumer.
+    **Do not "fix" the backoff by shifting first and comparing after** — §11e; `1s << 34` overflows
+    `int64` into a NEGATIVE duration, which schedules the retry in the past.
+    **Do not give the relay a goroutine or a ticker** — §11d, `clock`'s call for `clock`'s reason.
+    **Do not delete the empty-claim fast path when a mutant survives on it** — it is flagged in the
+    code as semantically equivalent and deliberately kept (§11f).
+    **Do not make `Payload` an `any`** — §11c; the committed bytes are what the hash chain covers.
+
 15. ✅ **`platform/config`** (§10a–§10i) — `Decode`/`Store`/`Revision`, the default-deny document
     checks, the `config:"hot"` reload policy, `SecretRef` and `Duration`. 43 mutation runs, 37 claims,
     all caught. **Do not move §5.2's schema into it** — §10a records why, and both shapes were put to
@@ -1874,10 +2055,15 @@ working rules. That item is discharged.
 
 ### Next work, in order
 
-1. **`platform/outbox`**, then `platform/observability`, `platform/ratelimit` (which will consume
-   `apperror`'s `ClassRateLimit` and `RetryAfter`), then `boot`. **The parity dispatcher is what
-   `events` was the last prerequisite for** — but it also needs a persisted `DispatchSeq` log, so it
-   is not simply "next" (§9b).
+1. **`platform/observability`**, then `platform/ratelimit` (which will consume `apperror`'s
+   `ClassRateLimit` and `RetryAfter` — note `outbox.Relay` already honours the latter, §11e), then
+   `boot`. **The parity dispatcher is what `events` was the last prerequisite for** — but it also
+   needs a persisted `DispatchSeq` log, so it is not simply "next" (§9b).
+1b. **`platform/outbox`'s store half is OWED, and it lands with the OMS journal in milestone 3** —
+   the `Append` verb, the SQL, the migration and the driver. It is deferred on §11a's argument, not
+   forgotten. When it lands, the thing to check first is that the append and the journal write are
+   genuinely one transaction, because everything in `platform/outbox` assumes it and nothing there
+   can test it.
 2. **`hexboundary`, `singlewriter`, `exhaustiveswitch` stay deferred** until a bounded context, an OMS
    write repository and a state machine exist to police. Unchanged reasoning (§1, §4).
 3. **Confirm the ClientOrderID venue budget before milestone 3** (§8g) — 36 characters and
@@ -1922,6 +2108,13 @@ working rules. That item is discharged.
   situation with the same 50/50 — was tested once, and a mutant survived on the coin flip (§9i). When a
   test earns a repetition, a bound or an isolation trick, go and look for the symmetric case
   immediately, because the defect will come back through the other door.
+- **The fixture-dimension lesson has now fired THREE times, so treat it as a checklist item rather
+  than a war story.** §5d: 162 of 348 fuzz corpus entries reached the oracle. §9i: every coalescing
+  test used a mailbox depth of 1, where "merge against the newest" and "merge against the oldest" are
+  the same slot. §11f: every malformed-identifier fixture put its bad character mid-string, where
+  `i >= 0` and `i > 0` are the same predicate — so `" audit"` validated while the check looked
+  covered. **Before believing a validation suite, ask which fixture parameter is pinned to the value
+  that collapses the distinction the code makes**, and vary it.
 - **Check the FIXTURE dimension before believing the coverage.** Every coalescing test used a mailbox
   depth of 1, where "merge against the newest" and "merge against the oldest" are the same slot — so
   the branch was unreachable while looking covered (§9i). §5d's vacuous-run lesson generalises past

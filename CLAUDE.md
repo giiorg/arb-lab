@@ -148,8 +148,12 @@ These are not style preferences. Each one was paid for.
   reach the interesting branch — and this reaches past fuzz corpora to ordinary
   fixtures. Every `events` coalescing test used a mailbox depth of 1, where
   "merge against the newest" and "merge against the oldest" are the same slot, so
-  a real defect was unreachable while looking covered. Check whether a fixture
-  parameter is pinned to the value that collapses the distinction.
+  a real defect was unreachable while looking covered. Every `outbox` malformed-
+  identifier fixture then put its bad character mid-string, where `i >= 0` and
+  `i > 0` are the same predicate — so `" audit"` validated. **Three times now**,
+  which makes it a checklist item and not a war story: before believing a suite,
+  find the fixture parameter pinned to the value that collapses the distinction
+  the code makes, and vary it.
 - **A fix applied in one place gets applied to its mirror.** `Receive` was tested
   across 200 trials because a Go `select` picks a ready case at random; `Send` —
   same situation, same coin flip — was tested once, and a mutant survived on it.
