@@ -41,3 +41,21 @@ func (o Order) Await() {
 // calls deadline() later reads this machine's clock, and a check shaped around
 // call expressions would see nothing here at all.
 var deadline = time.Now // want `time\.Now reads the wall clock`
+
+// Two ambient reads on one line produce ONE diagnostic, not two. The reduction
+// is not cosmetic: the escape hatch works per line, so diagnosing per reference
+// while suppressing per line would let a single annotation silently answer
+// several findings. The rule reports the earliest read on the line and stops.
+func (o Order) Span(from time.Time) time.Duration {
+	return time.Since(o.Placed) - time.Since(from) // want `time\.Since reads the wall clock`
+}
+
+// The escape hatch is engine-only, and this is the control that pins it. Rule 5
+// admits an annotated exception for live-only transport; it admits none here,
+// where a wall-clock read is a design error and injecting the Clock is always
+// the fix. So the annotation suppresses nothing AND is called out — a directive
+// that silently did nothing would read as a working suppression to whoever
+// wrote it.
+func (o Order) Escaped() bool {
+	return time.Now().After(o.Placed) /*notimenow:allow domain code cannot escape this rule*/ // want `time\.Now reads the wall clock` `notimenow:allow is not available in domain code`
+}

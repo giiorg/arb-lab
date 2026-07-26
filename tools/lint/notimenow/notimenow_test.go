@@ -29,8 +29,14 @@ func TestNoTimeNow(t *testing.T) {
 		// Clean, and the fixture that matters most: the adapter whose job is to
 		// read the clock. A rule that policed this one could not be satisfied.
 		"github.com/giiorg/arb-lab/internal/platform/clock",
-		// Clean: engine/ infrastructure is outside the scope build-spec states.
-		// Pinned so that the limit is visible rather than implicit.
+		// Offending, and the escape hatch in all four of its states: a stamped
+		// timestamp caught, a transport deadline escaped, an escape without a
+		// reason refused, an escape with nothing to suppress reported, and a
+		// misspelled directive left inert.
 		"github.com/giiorg/arb-lab/internal/engine/venue",
+		// Clean, and the positive control for the widened scope: engine code
+		// that takes the Clock. Without it the suite would only show engine
+		// code being rejected, which a universally-objecting gate also does.
+		"github.com/giiorg/arb-lab/internal/engine/state",
 	)
 }
