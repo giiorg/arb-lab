@@ -1383,11 +1383,24 @@ modules → custom gates → race tests both modules, `RAPID_SEED` pinned). Test
 `pgregory.net/rapid v1.3.0` added; §11's "never a dependency" governs production code, untouched.
 `bitnet-backend-go` is **not on this machine** — a described style, not a readable source.
 
-**Both branches are now PUSHED (2026-07-26, on the user's instruction).** `main` went up as a
-fast-forward — `origin/main` was a strict ancestor, 58 behind and 0 diverged, verified with
-`git merge-base --is-ancestor` before pushing rather than assumed. `feat/milestone-1-foundation`
-is pushed and tracking `origin/feat/milestone-1-foundation`. **No outward-facing action is owed.**
-A PR has *not* been opened — the branch is pushed, not proposed; open one only if asked.
+**The mutation harness is now IN THE REPO at `tools/mutate.sh`** (session 6), rather than being
+rewritten from the standing lessons every session. It carries both harness lessons as code: it
+`cmp`s and reports `NO-OP!!` when a pattern fails to match (session 4), and it takes a line number
+and prints the diff it applied (session 5). It earned that on its first run this session — the first
+invocation double-wrapped the sed expression and the NO-OP guard reported twelve un-applied
+mutations instead of twelve phantom kills.
+
+**Both branches are PUSHED and in sync (re-verified end of session 6).**
+`feat/milestone-1-foundation` is at **`df7178b`**, tracking `origin/feat/milestone-1-foundation`,
+`0 0` on `git rev-list --left-right --count @{u}...HEAD`. Session 6's push was a clean
+fast-forward — divergence was checked before pushing rather than assumed, which is the same
+discipline session 5 applied to `main` (a strict ancestor, verified with
+`git merge-base --is-ancestor`). **No outward-facing action is owed.**
+
+**A PR has *not* been opened, and that is deliberate — the branch is pushed, not proposed.** Open
+one only if asked. Note that the branch now carries the whole of milestone 1 and will keep growing:
+if a PR is ever wanted, it is worth asking whether it should be one per slice rather than one for
+the milestone.
 
 **Milestone 1's first slice (§1) is CODE-COMPLETE and closed out (session 5), and the SECOND SLICE'S
 FIRST TWO PACKAGES are now built too (session 6): `platform/apperror` and `platform/ids`, with the

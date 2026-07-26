@@ -105,9 +105,21 @@ These are not style preferences. Each one was paid for.
   review. `fixedpoint` has a `math/big` oracle; `ids` has one for its base32
   codec.
 - **Every claim gets bite-checked.** Before a test is trusted, mutate the code it
-  covers and confirm it fails. Scope the mutation to a line and print the diff —
-  a file changing is not evidence about *which* function changed. A surviving
-  mutant is either a test gap or a wrong mutant, and telling which is the work.
+  covers and confirm it fails. `tools/mutate.sh` does this — it scopes the
+  mutation to a line, prints the diff it applied, and reports `NO-OP!!` rather
+  than `caught` when the pattern did not match. Both of those guards exist
+  because their absence produced a false all-clear. A surviving mutant is either
+  a test gap or a wrong mutant, and telling which is the work.
+
+  ```
+  tools/mutate.sh <file> <line> <sed-command> <description> [test-target]
+  ```
+
+  `gremlins` is the automated complement, audited in the decision record §6b: it
+  works and it found four real gaps, but it stays out of CI on measured grounds
+  — a warm test cache makes it report 0.00% efficacy, and roughly one run in four
+  emits a false `LIVED`. Run `go clean -testcache` first, and reproduce every
+  `LIVED` by hand before believing it.
 - **Positive controls, always.** Any harness reporting "the broken thing failed"
   must also show the real thing passes, or a universally-objecting predicate
   reads as a perfect score.
