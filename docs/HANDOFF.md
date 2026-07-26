@@ -66,27 +66,56 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## NEXT REQUEST (2026-07-26, not started): **milestone 1 — the Go foundation skeleton**
+## NEXT REQUEST (2026-07-26): **milestone 1 — IN PROGRESS, resume mid-`fixedpoint`**
 
-**This is the first code in the repo.** Orientation is done: the five-doc spec set is at v0.9.4, the interactive guide is published and bilingual, `tutorial.ka.md` is done. Asked for in a **fresh conversation**. Start with `superpowers:brainstorming` — the forks below are real, and item 1 is the one that decides whether the session succeeds.
+**The first code in the repo exists.** Branch `feat/milestone-1-foundation` at `e92f9f0`, tree clean, `make ci` green.
 
-**Read first:** `build-spec.md` **§12 item 1** (the scope sentence), **§3.2** (bounded contexts / engine / kernel table — the package map), **§3.5** (backtest-live parity), **§3.6** (the eight structural rules, four of which are CI gates), **§4** (the venue contract and `VenueInstrument`). Then this file's *Locked decisions*.
+> **Read `docs/superpowers/specs/2026-07-26-milestone-1-foundation-decisions.md` first — its RESUME HERE block.**
+> That record holds all 17 decisions taken with their rationale *and rejected alternatives*, the verified
+> environment, the deferred scope each with a reason, and the exact next eight work items in order.
+> Everything below is a summary of it; the record is authoritative.
 
-**Verified environment, do not re-derive:** the repo is **greenfield — no `go.mod`, no `.go` files**, only `README.md` (one line) and `docs/`. **Go 1.26.0** is installed. The DDD/hexagonal reference repo `bitnet-backend-go` cited in the locked decisions is **not on this machine** — treat it as a described style, not a readable source. Branch `docs/funding-arb-spec` is **pushed and clean** as of 6f2f0d8.
+**All four forks the previous brief named are settled**, plus thirteen more. The one-line versions:
 
-**Scope per §12.1:** `platform/{fixedpoint(dimensional),clock,events(lanes),outbox,ids,config,apperror,boot}` + `engine/venue` + `engine/state` + `platform/observability`, the **parity dispatcher**, and **all §3.6 CI gates (boundary, single-writer, `nofloat`, no-`time.Now()`) from day one** — "from day one" is normative, not aspirational.
+1. **Scope.** First slice = scaffolding + `platform/fixedpoint` + `platform/clock` + the `nofloat` and no-`time.Now()` gates. The eleven kernel packages form a strict dependency spine and anything above the bottom would be rewritten when the bottom lands. `fixedpoint` first because **milestone 2 is a kill gate whose verdict is a money computation** — a wrong rounding direction moves the number across the threshold and kills or green-lights the project on a bug.
+2. **Layout.** `go.mod` at root, module `github.com/giiorg/arb-lab`, `go 1.26.0`. `main` fast-forwarded to v0.9.4 (**locally — not pushed**), code on `feat/milestone-1-foundation`. `tools/lint` is a **nested module** and there is deliberately **no `go.work`** (a workspace would let `x/tools` become importable from the engine). `migrations/` partitioned by dialect from the first file.
+3. **Gates = custom `go/analysis` analyzers**, each with `analysistest` fixtures that MUST produce diagnostics — because a `depguard` stanza cannot be unit-tested and `nofloat` cannot be config at all (it needs type info). **6 planned, 1 built.**
+4. **`fixedpoint`** = `int64` mantissa @ `Scale = 9` + `math/bits` 128-bit intermediates; `(T, error)` + a sticky-error `Calc`; **zero value invalid**; `Price` carries `base`+`quote`.
 
-**The forks to settle:**
-1. **How much of §12.1 is actually one session — this is the sharp one.** The scope sentence lists eleven kernel packages, two engine subsystems, the dispatcher and four custom lints. That is several sessions, not one. Decide the **first vertical slice** and say what is deferred. The strongest candidate is `platform/fixedpoint` + `platform/clock` + the `nofloat` and no-`time.Now()` gates, because those four are what every later package is *built out of* — but that is a recommendation to argue with, not a decision already taken.
-2. **Repo layout and module path.** Does `go.mod` sit at the repo root alongside `docs/`, and is the module path `github.com/giiorg/arb-lab` (the push remote)? And code belongs on its **own branch** — `docs/funding-arb-spec` is a docs branch and 34 commits of spec history.
-3. **How the four §3.6 gates get built.** They are custom static analysis, not config: a `nofloat` AST lint over the money path, an import-boundary rule (`domain/`+`application/` must not import `infrastructure/`/`engine/`), a single-writer rule (only `oms` imports the OMS write repositories), and a no-`time.Now()` rule. Custom `golang.org/x/tools/go/analysis` analyzers, or `golangci-lint` with `depguard`/`forbidigo`? The gates need their own tests either way — a lint that never fails is not a gate.
-4. **The dimensional `fixedpoint` design is arguably its own session.** §3.6 rule 4 is subtle and deliberately asymmetric: `Money`/`Quantity`/`Price`/`Rate` are **distinct compile-time types** (cross-category ops must not compile), while the **asset/currency tag is runtime-checked** via `Validate()` — because dynamic venue assets cannot be phantom-typed. Plus 128-bit/`big.Int` intermediates, canonical scale, an explicit rounding mode **per operation**, and a SQL codec rather than raw floats.
+**Also decided, and not in the previous brief:**
+
+- **The language question was asked and properly assessed: Go is confirmed over Rust.** Recorded with measured switching costs and Rust's genuine wins stated honestly (compile-time `enum` exhaustiveness across the seven safety machines; native `i128` + `Result`/`?`, which would have removed the `Calc` type entirely; `cargo-mutants`). The decisive counter is structural: **this design is ports-and-adapters maximalist (~20 I/O ports needing dynamic dispatch, which is §3.5's entire parity mechanism) and `dyn`-compatible async traits are Rust's worst-supported combination.** The compensating measure is a sixth gate, `exhaustiveswitch`. *"No GC pauses"* is explicitly debunked for a strategy on 8-hour settlement cycles. **The correctness ceiling is set by neither language — it is TLC trace-checking against the TLA+ model, which the spec already plans.**
+- **`boundary/` is dropped — contexts sit at `internal/<ctx>/`.** `contexts/` was rejected by the user (collides with `context.Context`); no third word survives. Settled by the observation that **none of §3.6's gates depend on the prefix** — they key on the inner layer names — so it carried zero enforcement value.
+- **`kernelpurity` is a fifth structural rule** (built, green, bite-checked): `platform/` may import only stdlib + `platform/`, catching a domain leak and a spine inversion with one rule.
+- **Test-the-tests = negative controls in CI** (the NC1–NC5 discipline from `docs/formal/`), with `gremlins` as a timeboxed audit only — **still owed**, and to be reported honestly either way.
+
+**Four [SPEC EDIT OWED] items** are recorded and unapplied: the `boundary/` flatten in §3.2/§11 (~30 occurrences — and **`boundary/lint` in §3.6 is not a path, do not rewrite it**), `kernelpurity` as a fifth rule, `exhaustiveswitch` as a sixth, and the Go-vs-Rust ADR §3 entry. These exist so R2d reads deliberate change rather than drift.
+
+**One user decision is pending:** the `RoundingMode` set (proposed with `RoundInvalid = 0` so a forgotten argument errors, and `RoundExact` so invariant tests can assert exactness). It blocks the arithmetic.
+
+**One outward-facing action is owed:** neither `main` (57 commits ahead of `origin/main`) nor the feature branch has been pushed. Confirm before pushing.
+
+**Read first, in this order:** the decision record above (its RESUME HERE block) → `build-spec.md` **§3.2** (the package map), **§3.5** (backtest-live parity — the `Clock`/`Envelope` contract the conformance suite tests), **§3.6** (the eight structural rules; note the roster is now ten with `kernelpurity` and `exhaustiveswitch`), **§4** (`VenueInstrument`), **§12.1**. Then this file's *Locked decisions*.
+
+**Verified environment, do not re-derive:** **Go 1.26.0**. Remote `github.com/giiorg/arb-lab`. Branch `feat/milestone-1-foundation` at `e92f9f0`, tree clean, `make ci` green (fmt-check → vet both modules → custom gates → race tests both modules). Two Go modules: root (the engine) and `tools/lint` (nested, so `golang.org/x/tools` stays out of the engine's dependency graph). `bitnet-backend-go` is **not on this machine** — a described style, not a readable source. The `gopls` "not in your workspace" warnings are **expected and correct** — see the `go.work` decision.
+
+**Built and green:** the scaffold (`go.mod`, `Makefile`, GitHub Actions, `.gitignore`, `migrations/README.md`), the `kernelpurity` analyzer + its multichecker binary, and `platform/fixedpoint`'s scale/parse/format seam — `Scale = 9`, `Asset`, `Money` + `Validate`/`ParseMoney`/`ZeroMoney`/`Decimal`, exact `parseMantissa`/`formatMantissa` with **no `float64` on any path**, four sentinels, 25 round-trip + 27 rejection cases, all bite-checked with deliberate mutations.
+
+**Next eight items, in order** (detail in the decision record's RESUME HERE):
+1. Confirm the pending `RoundingMode` set, then build it.
+2. `fixedpoint` arithmetic test-first per operation: `Add`/`Sub` → `Quantity` → `Price{base,quote}` + `Notional` → `Rate` + `Mul(Rate)` → the `Calc` chain. Overflow **errors, never wraps**.
+3. The `rapid` + independently-written `math/big` oracle suite, one negative control per property. **Verify `rapid`'s `-rapid.seed` semantics from the module source before wiring a Makefile target — the seed policy is designed but the flag behaviour is unverified.**
+4. SQL codec, parser fuzz target with committed seed corpus, zero-alloc assertions.
+5. The `nofloat` + `notimenow` analyzers, `analysistest`-proven and bite-checked, registered in the multichecker.
+6. `platform/clock` + the two-implementation conformance suite — the test that makes §3.5's parity claim real rather than asserted.
+7. The four **[SPEC EDIT OWED]** items.
+8. The timeboxed `gremlins` attempt, reported honestly either way.
 
 **Do not over-build.** Milestone 1 exists to make **milestone 2 — the economic gate — measurable**, and §12.2 is an explicit kill gate the spec predicts BTC/VIP0 may fail (≈3.4% at 60% utilization vs the ~4.6% hurdle). Build the foundation the gate needs; the OMS is milestone 3.
 
-**Nothing blocks this.** It does not wait on the guide's voice gate, on R2d, or on the Binance ⚠ items (those gate milestone 3). If R2d later changes the spec, §3.2/§3.5/§3.6 are the parts that have been stable across four review rounds.
+**Nothing blocks this.** It does not wait on the guide's voice gate, on R2d, or on the Binance ⚠ items (those gate milestone 3). If R2d later changes the spec, §3.2/§3.5/§3.6 are the parts stable across four review rounds — **but note this session has now deliberately edited §3.2/§3.6's surface** (the flatten + two added rules), all four edits recorded as owed and traceable.
 
-**Build it test-first** — the user's stack note is Go + DDD/hexagonal, NautilusTrader-style, and "don't assume, clarify". Per the user's standing rule, **no AI attribution** in commits or any authored content.
+**Build it test-first** — the user's stack note is Go + DDD/hexagonal, NautilusTrader-style, and "don't assume, clarify"; the `tdd` skill governs the loop, red shown before green. Per the user's standing rule, **no AI attribution** in commits or any authored content.
 
 ### Open finding, still untriaged (needs a tag + ADR §3 entry)
 
@@ -107,7 +136,7 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 10. **`docs/legacy/`** — frozen research record. **Do not edit.**
 
 ## Locked decisions (do NOT re-litigate)
-- **Stack:** from-scratch **Go** backend; **React/Next on Bun** operator dashboard. OSS = reference only.
+- **Stack:** from-scratch **Go** backend; **React/Next on Bun** operator dashboard. OSS = reference only. **Reaffirmed 2026-07-26 after an explicit Rust-vs-Go assessment** at the moment the switching cost was smallest (~700 lines of code; the real cost was 1–2 sessions of spec revision plus a review round). Rust's genuine wins are recorded, not strawmanned — compile-time `enum` exhaustiveness over the seven safety machines, native `i128`, `Result`/`?` (which would remove the `Calc` type entirely), and `cargo-mutants`. The decisive counter is structural: **this design is ports-and-adapters maximalist — ~20 I/O-performing ports needing dynamic dispatch, which *is* §3.5's parity mechanism — and `dyn`-compatible async traits are Rust's worst-supported combination.** Compensating measure: the `exhaustiveswitch` gate. Full assessment: `docs/superpowers/specs/2026-07-26-milestone-1-foundation-decisions.md` §0. **Do not reopen without new information.**
 - **Strategy-pluggable foundation**; **MVP proves cash-and-carry FIRST**; cross-exchange spread is strategy #2 (alts/dislocation only).
 - **Venues:** Binance + Bybit, N-venue-ready behind one adapter seam.
 - **Architecture D1–D4** (single-process engine; journal+outbox→embedded store **SQLite WAL + `synchronous=FULL`**; `platform/fixedpoint`; parity `Clock` + total-order dispatcher). DDD/hexagonal à la `bitnet-backend-go`.
