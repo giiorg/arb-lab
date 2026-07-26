@@ -96,6 +96,15 @@ These are not style preferences. Each one was paid for.
 - **Time is injected.** Never `time.Now()`. `platform/clock` is the seam, and
   live-vs-backtest interchangeability *is* the parity mechanism, not a testing
   convenience.
+- **When a default has two directions, pick the one that is right when somebody
+  forgets it.** `nofloat` denies `float64` until a reason is written down.
+  `platform/config` denies hot-reload of a field until a `config:"hot"` tag says
+  otherwise, so a field added next year is restart-required rather than silently
+  live. The failure you get from forgetting should be a refusal that names the
+  field, not a running process that picked up a new journal path mid-trade.
+  There is one deliberate exception, and it is instructive: an *unrecognised*
+  `config` tag value is an error rather than a silent deny, because there the
+  safe direction is also the silent one.
 - **The zero value is unusable.** Every constructed type in `platform/` fails
   `Validate()` when nobody populated it, because an unpopulated cost reads as
   free and an unpopulated rate reads as zero fee — both compute the economic

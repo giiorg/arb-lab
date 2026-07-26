@@ -1563,7 +1563,186 @@ controls before any of the results above were believed.
 
 ---
 
-## RESUME HERE — updated end of session 7
+## 10. The second slice continued (session 8) — `platform/config`
+
+### 10a. What the package owns — the machinery, not §5.2's schema `[user decision]`
+
+Two shapes were put to the user, and the first was taken.
+
+**Taken: `platform/config` is generic machinery.** `Decode[T]`, `Store[T]`, `Revision`, the reload
+policy, and two shared value types. §5.2's risk caps, per-venue block, per-strategy params and
+emergency policy are defined by the contexts that own their meaning — `risk`, `engine/venue`,
+`strategy` — and `app/` composes them.
+
+**Rejected: the whole §5.2 schema in the kernel.** §5.2 does say "Config is a typed struct with
+`Validate()`", and the struct is expressible entirely from `platform` types (`fixedpoint.Money`,
+`ids.Venue`), so `kernelpurity` would have passed. It was rejected on two grounds. The §3.2 table's
+entry for this package is a list of **verbs** — "typed load + `Validate()` + safe hot-reload;
+revisions recorded for replay" — not a list of fields. And the practical test decides it: adding a
+risk cap should touch `risk`. If the cap lived in the kernel, every context's parameters would be a
+kernel edit, and `risk` would import the definition of its own caps from a package that cannot
+import `risk` back.
+
+**Nothing here is a spec deviation.** §5.2 enumerates the schema's *content* and never says where it
+lives. This is an interpretation of an open question, recorded so it is not silently reopened.
+
+### 10b. "Hot-reloadable where safe" is default-deny `[user decision]` `[SPEC EDIT OWED]`
+
+§5.2 says configuration is "hot-reloadable where safe" and stops there. Somebody has to decide *where*
+per field, and three mechanisms were put to the user.
+
+**Taken: a struct tag, `config:"hot"`, checked by a reflective diff, default-deny.** A field may
+differ across a `Reload` only if it — or an ancestor — carries the tag; the first field that moves
+without permission returns `ErrNotReloadable` naming its path, and **nothing is swapped**.
+
+The argument is entirely about which way it fails when somebody forgets. Default-**allow** means a
+field added to a schema next year is silently hot, and the noticing happens when a running process
+picks up a journal path or a fencing generation mid-trade. Default-**deny** means it is
+restart-required until somebody writes the tag, and the noticing happens when a reload is refused
+with the field named. This is §3.6 rule 4's argument for `float64` — deny until a reason is written
+down — applied to a requirement the spec left open rather than to one it decided differently.
+
+An **unrecognised** tag value is an error rather than a silent deny, which is the one place the safe
+direction is not the right one: denying is safe, so a typo'd `config:"hto"` would fail safe *and
+silently*, leaving an operator believing a field reloads when it does not.
+
+**Rejected: splitting the schema into `Static` and `Hot` types.** The compiler would enforce it, with
+no reflection and no tag to forget — genuinely stronger. It was rejected because the safety boundary
+would then dictate the schema's shape, and §5.2's shape cuts across it: a per-venue block holds a
+static endpoint *and* a hot rate-limit budget, so it would have to be split in two and the config
+file's grouping would stop matching the Go types one-to-one.
+
+**Rejected: a schema-owned `ValidateTransition(prev T) error`.** The most expressive — it could say
+"leverage may drop but never rise while a position is open" — but it carries the unsafe default: a
+schema that never implements it gets everything hot-reloadable, and nothing fails. That is the exact
+shape of the `apperror` `EffectOf` defect (§8a), which this project has already paid for once.
+
+The tag is marked `[SPEC EDIT OWED]` in `internal/platform/config/schema.go`, following the v0.9.5
+precedent of batching a slice's spec edits into one release at slice close. It joins §9h's `SourceID`
+item; **both are found by `grep -rn "SPEC EDIT OWED" internal/`**.
+
+### 10c. Composites recurse; adding an entry and editing one are different acts
+
+The reload diff walks *into* maps, slices and pointers rather than comparing them wholesale, and that
+is not a refinement — it is what makes §5.2's actual shape work. A per-venue map carries no tag, so a
+wholesale `DeepEqual` would refuse **any** difference under it, and the per-venue rate-limit budget
+§5.2 puts exactly there could never be tuned without a restart.
+
+So entries present on both sides are compared element-wise, while **adding or removing** an entry is
+a structural change to the map and needs the *map* to be hot. The asymmetry is deliberate: editing a
+venue's budget is something a running process absorbs, and introducing a venue means wiring a client
+it does not have.
+
+### 10d. Four things a config file does silently
+
+Configuration is read once, at boot, by nobody, and a mistake in it does not crash — it computes a
+different number. Each of these is now default-deny, and the middle two are checks the standard
+library does not make:
+
+| | what Go does | what this does |
+|---|---|---|
+| unknown key | ignores it | rejected — a typo'd `per_trade_notionl` otherwise leaves the real cap at its zero value with nothing reported |
+| **duplicate key** | **takes the LAST, silently** | rejected by a token-level scan. `DisallowUnknownFields` cannot see it: both occurrences are *known* fields |
+| **trailing data** | **reads one value, ignores the rest** | rejected — a file holding two objects otherwise loads the first and never mentions the second |
+| untagged field | matches the Go identifier, case-insensitively | rejected at load — the wire name must be a decision, not a consequence of an identifier a refactor can rename |
+
+The two middle rows carry **measurement** tests rather than assertions
+(`TestDecode…WouldOtherwiseBeSilent`): they run the same bytes through `encoding/json` directly and
+assert that it accepts them and which value it takes. A guard is only worth its complexity while the
+thing it guards against is real, and these say so rather than sitting there unjustified.
+
+### 10e. Two shared value types, each because its absence is quiet
+
+**`SecretRef` cannot hold a secret.** That is the design, not a usage convention. It holds a scheme
+and a name — `env:BINANCE_API_KEY`, `file:/run/secrets/bybit.key` — with no field for a value and no
+method producing one. So §5.2's "key refs (never inline secrets)" is enforced rather than requested:
+a pasted credential **has no scheme**, so it fails to parse and the process does not boot. And
+printing one is safe *by construction* — there is nothing else in there — rather than by remembering
+to redact. Resolution is deliberately elsewhere: a kernel type that could resolve is a kernel type
+that could log a resolved value. The scheme set is closed, and a `file:` reference must be
+**absolute**, because a relative secret path resolves against a working directory a systemd unit or a
+container entrypoint does not choose.
+
+**`Duration` crosses the boundary as a string.** A JSON number decoded into a `time.Duration` is
+**nanoseconds**. §5.2's `T_blind` of `300` — five minutes to whoever typed it — becomes 300ns: a
+stale-mark blind budget that has expired before the first check, firing the §7.1 de-risk on the first
+tick with nothing wrong. Nothing errors and nothing logs. So a bare number is **refused** rather than
+interpreted, and `"5m"` is a string on whose meaning Go and the operator cannot disagree. Zero is
+deliberately **valid** — "no dwell" and "check immediately" are real settings, unlike a zero cost —
+and a schema for which zero is wrong says so in its own `Validate`, where it can name the field.
+
+### 10f. The scoped no-values-in-messages invariant
+
+`ErrNotReloadable`, `ErrDuplicateKey`, `ErrTrailingData` and every audit record name a **path** —
+`risk.max_total_open`, `venues["binance"].endpoint` — and never the value at it. An error travels to
+logs and alerting, and a config struct is exactly where a credential ends up when somebody declined
+to use `SecretRef`. `ParseSecretRef` holds the same line for a sharper reason: the value it refuses
+is, by construction, the one input that is definitely a credential.
+
+**The claim is scoped, and the exclusions are stated rather than overlooked** — an unscoped version
+would have been an overclaim. A `Duration` that fails to parse echoes the text that failed, because
+that text is the operator's own typo and never became configuration; a decoder syntax error can name
+the character it stopped on; and a schema's own `Validate` is outside this package entirely.
+
+### 10g. What is deliberately NOT here
+
+The **file watcher** — deciding when to re-read bytes is a composition-root concern with its own
+failure semantics (a truncated write, an editor's atomic-rename dance, a debounce window) and it
+needs a `Clock`. The **revision log** — this package *mints* the identity §3.5 replays against and
+persists nothing; persistence is the journal's job. The **approval kernel** — §5.2 routes
+emergency-policy edits through `platform/foureyes`, and this package would happily reload a policy
+struct that had never been approved; wiring the two is `app/operator`'s job.
+
+And there is **no clock**. `Decode`/`New`/`Reload` take the instant as an argument. `notimenow` does
+not police `platform/`, so this is discipline rather than enforcement — but `Revision.LoadedAt` is a
+replayed field, and a timestamp a backtest cannot control is a timestamp that makes a replay differ
+from the run it replays.
+
+### 10h. Bite-checked: 43 runs, 37 claims, all caught — and six survivors worth the diagnosis
+
+31 of the first 37 were caught outright. **Every one of the six survivors was worth diagnosing, and
+five of them were real test gaps of a single shape** — §8f's lesson arriving in bulk:
+
+**Four fixtures were failing the NEXT check.** Every schema-audit refusal returns `ErrSchemaField`,
+so a deleted check whose fixture happened to trip a later one produced an identical error and an
+identical pass. An unexported field with no json tag failed the *no-json-tag* check; an embedded
+*unexported* type failed the *exported-field* check; a field with no tag failed the *empty-name*
+check; a zero `SecretRef` failed the *reparse*. Fixed by asserting the **message**, not only the
+sentinel — the message is the diagnosis a programmer acts on, and "this field has no json tag" and
+"this field's json name is empty" are different instructions.
+
+One of those fixes ran into a wall worth recording: the obvious repair — give the unexported field a
+json tag so only one check can reject it — **does not build under `make ci`**, because `go vet`'s
+`structtag` analyzer refuses a json tag on an unexported field. The isolation had to come from the
+message assertion instead.
+
+**The fifth was a real gap, and the code was right.** Removing a map entry is caught by the per-key
+presence walk; **adding** one is invisible to it, because every live key is still present. Only the
+size comparison sees it. The removal case was tested and the addition case was not, so a mutant
+deleting the size check survived while silently admitting a whole new venue.
+
+**The sixth was redundant code, now deleted.** A `bytes.TrimSpace(data)) == 0` pre-check never fired
+in a way that mattered: `json.Decode` returns `io.EOF` for an empty *or* all-whitespace document and
+the branch below already maps that to `ErrEmptyDocument`. It was worse than redundant — a document of
+one non-breaking space is not empty, and `TrimSpace` trims Unicode whitespace that JSON does not, so
+the pre-check reported "empty document" where the decoder would have named the invalid character.
+Deleted, and the **surviving path was then bite-checked in its place** rather than assumed.
+
+The harness fired its `NO-OP!!` guard once, correctly: adding the `[SPEC EDIT OWED]` block to
+`schema.go` moved a target line, and a re-run at the stale number reported no-op rather than a
+phantom kill.
+
+### 10i. `nofloat` fired on this session's own code
+
+`config.Duration.Duration().Seconds()` in a freshly written test — `time.Duration.Seconds()` returns
+`float64`. The gate caught it in `make ci` before it was ever committed, on a line written without
+thinking about it at all. Worth noting because it is the second time (§5) a §3.6 gate has bitten real
+code rather than a fixture: the value of a default-deny type-based rule is precisely that it does not
+depend on the author remembering the rule.
+
+---
+
+## RESUME HERE — updated end of session 8
 
 **Environment, verified — do not re-derive.** **Go 1.26.5** (upgraded from 1.26.0 in session 5;
 both modules declare `go 1.26.0` as the minimum and `toolchain go1.26.5` as what to build with —
@@ -1582,7 +1761,7 @@ exactly as it does for a failing test (session 7); and it runs **bounded** and r
 because a mutation can make a test *hang* rather than fail, and a hanging test names no defect
 (session 7). **A `caught` with 0 failing tests is a contradiction — that is what exposed `NOBUILD`.**
 
-**Both branches are PUSHED and in sync (re-verified at the end of session 7).**
+**Both branches were PUSHED and in sync at the end of session 7; session 8 committed on top.**
 `feat/milestone-1-foundation` tracks `origin/feat/milestone-1-foundation`. **Check it rather than
 trust this paragraph** — `git rev-list --left-right --count @{u}...HEAD` should print `0 0`. The
 head commit is deliberately not named here: a paragraph that cites its own commit hash is stale the
@@ -1597,17 +1776,20 @@ if a PR is ever wanted, it is worth asking whether it should be one per slice ra
 the milestone.
 
 **Milestone 1's first slice (§1) is CODE-COMPLETE and closed out (session 5). The SECOND SLICE is
-four packages in:** `platform/apperror` and `platform/ids` (session 6, with the `Venue` move out of
-`platform/clock`), then `ids`'s instrument identity and **`platform/events`** (session 7). The kernel
-is **five packages** — `fixedpoint`, `clock`, `apperror`, `ids`, `events` — plus three gates.
-**There are no open questions.** `platform/config` is the next package up the spine.
+five packages in:** `platform/apperror` and `platform/ids` (session 6, with the `Venue` move out of
+`platform/clock`), then `ids`'s instrument identity and **`platform/events`** (session 7), then
+**`platform/config`** (session 8). The kernel is **six packages** — `fixedpoint`, `clock`,
+`apperror`, `ids`, `events`, `config` — plus three gates. **There are no open questions.**
+`platform/outbox` is the next package up the spine.
 
-**ONE SPEC EDIT IS OWED (§9h), and it is tracked by a marker in the code, not by this paragraph.**
-§3.5 declares `SourceID` as four flat fields; the code composes `ids.VenueInstrument` instead, because
-the flat form cannot express the `ContractType` §5.1 gives an instrument. It is deliberately not landed
-yet: the v0.9.5 precedent is to batch a slice's spec edits into one coherent release at slice close.
+**TWO SPEC EDITS ARE OWED, and they are tracked by markers in the code, not by this paragraph.**
+§9h: §3.5 declares `SourceID` as four flat fields; the code composes `ids.VenueInstrument` instead,
+because the flat form cannot express the `ContractType` §5.1 gives an instrument. §10b: §5.2 says
+configuration is "hot-reloadable where safe" and stops; the code makes "where safe" a per-field
+**default-deny** `config:"hot"` tag, on rule 4's own argument. Both are deliberately not landed yet:
+the v0.9.5 precedent is to batch a slice's spec edits into one coherent release at slice close.
 **Before closing the second slice, `grep -rn "SPEC EDIT OWED" internal/`** (code only — the doc set is full of PROSE about past markers, so a repo-wide grep is mostly false positives) and land what it
-finds.
+finds. It should report exactly two.
 
 **The `CLAUDE.md` owed since §2 now exists** (repo root, written session 6). It carries the
 `internal/` taxonomy, the doc-set map, the build split, the three enforced gates, and the standing
@@ -1678,12 +1860,24 @@ working rules. That item is discharged.
     Clock and a timer, both of which belong with the dispatcher; the lane only carries the `RecvTime`
     an age is computed from, and `Envelope.Age` is pure.
 
+15. ✅ **`platform/config`** (§10a–§10i) — `Decode`/`Store`/`Revision`, the default-deny document
+    checks, the `config:"hot"` reload policy, `SecretRef` and `Duration`. 43 mutation runs, 37 claims,
+    all caught. **Do not move §5.2's schema into it** — §10a records why, and both shapes were put to
+    the user. **Do not make the reload policy default-allow, and do not replace the tag with a
+    schema-owned `ValidateTransition`** — §10b records both rejected alternatives and the
+    `apperror`-shaped defect the second one reintroduces. **Do not "simplify" the composite walk into
+    a wholesale `DeepEqual`** — a hot rate-limit budget inside a non-hot venue map would stop being
+    tunable (§10c). **Do not add a `Resolve` method to `SecretRef`** — a kernel type that can produce
+    a secret is one that can log one (§10e). **Do not delete the duplicate-key or trailing-data scans
+    without reading their measurement tests first** — they assert what `encoding/json` does instead,
+    and will say so if it ever changes.
+
 ### Next work, in order
 
-1. **`platform/config`** (needs `fixedpoint`), then `platform/outbox`, `platform/observability`,
-   `platform/ratelimit` (which will consume `apperror`'s `ClassRateLimit` and `RetryAfter`), then
-   `boot`. **The parity dispatcher is what `events` was the last prerequisite for** — but it also
-   needs a persisted `DispatchSeq` log, so it is not simply "next" (§9b).
+1. **`platform/outbox`**, then `platform/observability`, `platform/ratelimit` (which will consume
+   `apperror`'s `ClassRateLimit` and `RetryAfter`), then `boot`. **The parity dispatcher is what
+   `events` was the last prerequisite for** — but it also needs a persisted `DispatchSeq` log, so it
+   is not simply "next" (§9b).
 2. **`hexboundary`, `singlewriter`, `exhaustiveswitch` stay deferred** until a bounded context, an OMS
    write repository and a state machine exist to police. Unchanged reasoning (§1, §4).
 3. **Confirm the ClientOrderID venue budget before milestone 3** (§8g) — 36 characters and
@@ -1695,6 +1889,33 @@ working rules. That item is discharged.
    `venue-profiles.md` can be cited next to it. Build it there, not here.
 
 ### Standing lessons — apply these, do not rediscover them
+
+- **One sentinel cannot say WHICH check fired, and this scales.** §8f found it once; session 8 found
+  it four times in one table (§10h). Every schema-audit refusal returns `ErrSchemaField`, so four
+  fixtures were each failing the check AFTER the one under test, and four mutants survived on it. The
+  fix is to assert the **message**, because the message is the diagnosis somebody acts on. Note the
+  wall: the obvious repair — build a fixture that passes every other check — is not always available.
+  Giving an unexported field a json tag to isolate the exported-field check **does not build under
+  `make ci`**, because `go vet`'s `structtag` analyzer refuses exactly that.
+- **A guard is worth keeping only while what it guards against is real, so MEASURE it.** The
+  duplicate-key and trailing-data scans carry tests that run the same bytes through `encoding/json`
+  directly and assert it accepts them silently (§10d). If the standard library ever changes, the test
+  says the guard is no longer load-bearing rather than leaving a check nobody can justify.
+- **When a mutant survives on a check that has a twin, ask what the twin cannot see.** Removing a map
+  entry is caught by a per-key presence walk; **adding** one is invisible to it, because every live
+  key is still there (§10h). Two checks that look like one thing were guarding two different failures,
+  and only one of them was tested.
+- **A surviving mutant is sometimes telling you the code is redundant.** A whitespace pre-check in
+  `decode.go` never fired in a way that mattered — the `io.EOF` branch below already covered it — and
+  it was strictly worse, reporting "empty document" for a document with an invalid character in it.
+  Deleted. Then the SURVIVING path was bite-checked in its place, because removing the redundant one
+  is only safe if the remaining one is known to bite (§10h).
+- **Ask which way a default fails when somebody FORGETS it.** That single question decided the reload
+  policy (§10b) the same way it decided rule 4. Default-allow is noticed when a running process picks
+  up a journal path mid-trade; default-deny is noticed when a reload is refused with the field named.
+  The corollary is not universal, though: an unrecognised tag *value* is an error rather than a silent
+  deny, because there denying is safe **and silent**, which leaves an operator believing a field
+  reloads when it does not.
 
 - **A fix applied in one place must be applied to its MIRROR.** `Receive`-prefers-queued was tested
   across 200 trials precisely because a select picks at random; `Send`-after-`Close` — the same
