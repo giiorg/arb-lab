@@ -121,6 +121,22 @@ green-lit on a bug.
 - **`go.mod` at repo root**, module `github.com/giiorg/arb-lab` (matches the push remote), `go 1.26.0`.
   `go mod init` wrote `1.25.0` despite a 1.26.0 toolchain; pinned up so the declared language semantics
   match what is actually tested.
+- **`go` and `toolchain` are separate directives, and separating them is the decision (session 5).**
+  On the 1.26.0 → **1.26.5** upgrade the obvious move — bump `go` to `1.26.5` — is the wrong one twice
+  over. A patch release changes no language semantics, so as a *minimum* it buys nothing and only
+  narrows who can build the module. But leaving it alone is also wrong here, because
+  `.github/workflows/ci.yml` installs with **`go-version-file: go.mod`** deliberately, "so the
+  toolchain is stated in exactly one place" — which quietly makes the `go` line double as the CI pin,
+  and would have left CI on 1.26.0 while local work moved to 1.26.5. **`toolchain go1.26.5` resolves
+  both**: `go` stays the permissive minimum, `toolchain` states what we build with, `setup-go`
+  documents that it prefers `toolchain` when present, and the version still lives in one file.
+  **Both modules carry it** — there is no `go.work`, so each resolves its own toolchain, and leaving
+  the nested one unstated would let the two halves of `make ci` build on different releases.
+- **`tools/lint` had been declaring `go 1.25.0` since the scaffold commit — fixed in session 5.** The
+  same `go mod init` default that was caught and pinned up in the root module was missed in the nested
+  one, in the same commit, so the gates had been built and tested on 1.26 while claiming 1.25 for
+  months. Nothing broke, which is the point: **an untested compatibility claim fails silently until
+  someone acts on it.** Now `1.26.0`, matching the root.
 - **`main` was fast-forwarded to the v0.9.4 spec** (it was a strict ancestor, 0 ahead / 57 behind — no
   merge commit, no conflict), then `feat/milestone-1-foundation` cut from it. Rejected: branching code
   off the docs branch (leaves `main` stale), and branching off stale `main` (the branch's own `docs/`
@@ -933,11 +949,16 @@ is *better* than the prediction in one direction and *worse* in another.
 
 ### It runs on Go 1.26. The §0 premise needs one word changed
 
-`go install github.com/go-gremlins/gremlins/cmd/gremlins@latest` builds clean on **Go 1.26.0
+`go install github.com/go-gremlins/gremlins/cmd/gremlins@latest` builds clean on **Go 1.26
 darwin/arm64** and the binary self-reports `version dev`. §0's claim was that `gremlins` is *not
 maintained*, which is true of the project; the inference nearby — that an unmaintained Go tool would
 not survive the version gap — did **not** hold. Worth separating, because "it doesn't run" is a reason
 to stop and "it runs but misreports" is a reason to be careful, and only the second one is true.
+
+**Re-verified across the toolchain bump.** The audit was first run on **1.26.0** and re-run in full on
+**1.26.5** after the upgrade later in the session: `gremlins` rebuilt from source without complaint,
+and both modules produced **identical counts and a byte-identical survivor set** (root 256/24,
+`tools/lint` 27/7). So none of what follows is an artefact of one patch release.
 
 **It is still not in CI, and now for measured reasons rather than reputational ones** — see the misreport
 modes below, particularly the last. It touched neither `go.mod`: installed to a scratch `GOBIN`, run
@@ -1134,7 +1155,9 @@ composition of four narrow interfaces, not a god-interface). **The risk to watch
 
 ## RESUME HERE — updated end of session 5
 
-**Environment, verified — do not re-derive.** Go 1.26.0. Remote `github.com/giiorg/arb-lab`. Branch
+**Environment, verified — do not re-derive.** **Go 1.26.5** (upgraded from 1.26.0 in session 5;
+both modules declare `go 1.26.0` as the minimum and `toolchain go1.26.5` as what to build with —
+see §2, and do not "simplify" that into one directive). Remote `github.com/giiorg/arb-lab`. Branch
 `feat/milestone-1-foundation`, tree clean, `make ci` green (fmt-check → vet both
 modules → custom gates → race tests both modules, `RAPID_SEED` pinned). Test-only dependency
 `pgregory.net/rapid v1.3.0` added; §11's "never a dependency" governs production code, untouched.
