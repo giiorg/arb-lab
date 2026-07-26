@@ -57,6 +57,9 @@
 #   NOBUILD!! the mutant did not compile; the tests never ran, so nothing was
 #             proved. Re-aim the mutation so the code still builds — usually by
 #             substituting a WRONG value rather than deleting a call.
+#   TIMEOUT!! the suite HUNG on the mutant. Not a kill: a hanging test names no
+#             defect, blocks CI and reads as an infrastructure problem (the §5e
+#             lesson). Fix the TEST to fail within a bound, then re-run.
 #
 # A SURVIVED is either a test gap or a wrong mutant, and TELLING WHICH IS THE
 # ACTUAL WORK. Do not paper over it, and do not assume it is a gap: some
@@ -121,7 +124,12 @@ fi
 # Print the exact change, so "which line moved" is evidence rather than belief.
 applied=$(diff "$backup" "$file" | grep -E '^[<>]' | sed 's/^/           /')
 
-if out=$(go test "$target" 2>&1); then
+# A bounded run, because a mutation can make a test BLOCK rather than fail —
+# swapping a lane's non-blocking send for a blocking one is exactly that. Go's
+# own default is 10 minutes, which in a loop of twenty mutations is an afternoon,
+# and the result is not a kill anyway: §5e's lesson is that a hanging test names
+# no defect. Bounded here so the hang is reported instead of waited on.
+if out=$(go test -timeout "${MUTATE_TIMEOUT:-60s}" "$target" 2>&1); then
     printf '  SURVIVED %-58s  <-- TEST GAP or an equivalent mutant; diagnose which\n' "$desc"
     printf '%s\n' "$applied"
     exit 1
@@ -133,6 +141,14 @@ fi
 # are checked because either alone has a hole — a package can fail to build with
 # no banner on the tested package itself, and a `--- FAIL` can appear in output
 # that ALSO contains a build failure from a sibling package.
+# A hang is checked BEFORE the build check, because a timeout also produces no
+# `--- FAIL` line and would otherwise be misreported as a compile failure.
+if printf '%s' "$out" | grep -qE 'test timed out|^panic: test timed out'; then
+    printf '  TIMEOUT!! %-57s  (the suite HUNG — a hanging test names no defect; bound it)\n' "$desc"
+    printf '%s\n' "$out" | grep -E 'test timed out|^\s*[A-Za-z0-9_]+\.func|^Test' | sed 's/^/           /' | head -4
+    exit 4
+fi
+
 failing=$(printf '%s' "$out" | grep -cE '^\s*--- FAIL')
 if [ "$failing" -eq 0 ] || printf '%s' "$out" | grep -qE '\[build failed\]|^# '; then
     printf '  NOBUILD!! %-57s  (the mutant did not compile — the tests never ran)\n' "$desc"
