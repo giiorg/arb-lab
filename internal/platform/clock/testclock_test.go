@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/giiorg/arb-lab/internal/platform/clock"
+	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
 
 // The conformance suite covers what both implementations must agree on. This file
@@ -183,7 +184,11 @@ func TestConstructors_rejectBadCalibrations(t *testing.T) {
 			// can reach it.
 			name: "venue unset",
 			cals: []clock.Calibration{{Offset: time.Second, Uncertainty: time.Second}},
-			want: clock.ErrVenueUnset,
+			// The sentinel now belongs to platform/ids, where Venue lives.
+			// clock.Venue is an alias for it, so the error a calibration
+			// rejects with is ids' one — there is deliberately not a second
+			// error for the same condition.
+			want: ids.ErrVenueUnset,
 		},
 		{
 			// A negative band would put Earliest() after Latest() and invert

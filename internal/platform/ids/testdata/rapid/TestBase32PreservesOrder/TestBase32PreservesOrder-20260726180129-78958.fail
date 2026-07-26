@@ -1,0 +1,131 @@
+# 2026/07/26 18:01:29.892897 [TestBase32PreservesOrder] [rapid] draw a: 0
+# 2026/07/26 18:01:29.892900 [TestBase32PreservesOrder] [rapid] draw b: 0
+# 2026/07/26 18:01:29.892901 [TestBase32PreservesOrder] [rapid] draw a: 0
+# 2026/07/26 18:01:29.892902 [TestBase32PreservesOrder] [rapid] draw b: 0
+# 2026/07/26 18:01:29.892902 [TestBase32PreservesOrder] [rapid] draw a: 0
+# 2026/07/26 18:01:29.892903 [TestBase32PreservesOrder] [rapid] draw b: 0
+# 2026/07/26 18:01:29.892903 [TestBase32PreservesOrder] [rapid] draw a: 0
+# 2026/07/26 18:01:29.892903 [TestBase32PreservesOrder] [rapid] draw b: 0
+# 2026/07/26 18:01:29.892904 [TestBase32PreservesOrder] [rapid] draw a: 0
+# 2026/07/26 18:01:29.892905 [TestBase32PreservesOrder] [rapid] draw b: 0
+# 2026/07/26 18:01:29.892905 [TestBase32PreservesOrder] [rapid] draw a: 0
+# 2026/07/26 18:01:29.892905 [TestBase32PreservesOrder] [rapid] draw b: 0
+# 2026/07/26 18:01:29.892905 [TestBase32PreservesOrder] [rapid] draw a: 0
+# 2026/07/26 18:01:29.892906 [TestBase32PreservesOrder] [rapid] draw b: 0
+# 2026/07/26 18:01:29.892906 [TestBase32PreservesOrder] [rapid] draw a: 0
+# 2026/07/26 18:01:29.892906 [TestBase32PreservesOrder] [rapid] draw b: 0
+# 2026/07/26 18:01:29.892906 [TestBase32PreservesOrder] [rapid] draw a: 0
+# 2026/07/26 18:01:29.892907 [TestBase32PreservesOrder] [rapid] draw b: 0
+# 2026/07/26 18:01:29.892907 [TestBase32PreservesOrder] [rapid] draw a: 0
+# 2026/07/26 18:01:29.892908 [TestBase32PreservesOrder] [rapid] draw b: 0
+# 2026/07/26 18:01:29.892908 [TestBase32PreservesOrder] [rapid] draw a: 0
+# 2026/07/26 18:01:29.892908 [TestBase32PreservesOrder] [rapid] draw b: 0
+# 2026/07/26 18:01:29.892908 [TestBase32PreservesOrder] [rapid] draw a: 0
+# 2026/07/26 18:01:29.892909 [TestBase32PreservesOrder] [rapid] draw b: 0
+# 2026/07/26 18:01:29.892909 [TestBase32PreservesOrder] [rapid] draw a: 0
+# 2026/07/26 18:01:29.892909 [TestBase32PreservesOrder] [rapid] draw b: 0
+# 2026/07/26 18:01:29.892910 [TestBase32PreservesOrder] [rapid] draw a: 0
+# 2026/07/26 18:01:29.892910 [TestBase32PreservesOrder] [rapid] draw b: 0
+# 2026/07/26 18:01:29.892910 [TestBase32PreservesOrder] [rapid] draw a: 0
+# 2026/07/26 18:01:29.892910 [TestBase32PreservesOrder] [rapid] draw b: 1
+# 2026/07/26 18:01:29.892911 [TestBase32PreservesOrder] [rapid] draw a: 1
+# 2026/07/26 18:01:29.892911 [TestBase32PreservesOrder] [rapid] draw b: 0
+# 2026/07/26 18:01:29.892912 [TestBase32PreservesOrder] 00000000000000000000000000000001 < 00000000000000000000000000000100 numerically but "10000000000000000000000000" does not sort before "08000000000000000000000000"
+# 
+v0.4.8#20260726
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1
+0x0
+0x0
+0x1
+0x0
+0x0
+0x0

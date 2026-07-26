@@ -36,13 +36,25 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
 
-// Venue identifies an exchange. It lives here rather than in engine/venue
-// because the shared kernel may not import a bounded context (kernelpurity), and
-// §3.5 puts it in this signature. It is a candidate to move to platform/ids when
-// that package lands.
-type Venue string
+// Venue is re-exported from platform/ids, where it now lives.
+//
+// It sat here while this was the only package that existed and needed it — §3.5
+// puts a venue in ServerNow's signature, and the shared kernel may not import a
+// bounded context (§3.6 rule 9), so engine/venue was never an option. It moved
+// when platform/ids landed, because config, ratelimit and oms all need to name a
+// venue without wanting a clock.
+//
+// The alias rather than a bare rename: every existing call site keeps compiling,
+// and the two names are the same type rather than two types that convert.
+//
+// Note the direction of the dependency. clock imports ids, never the reverse —
+// ids declares its own one-method TimeSource interface instead of importing this
+// package, which is what keeps the two out of a cycle.
+type Venue = ids.Venue
 
 // TimerID names a timer for cancel-and-replace. It is a key rather than an
 // enum-like, so §3.6 rule 8's Validate shape does not apply: the set of timer
@@ -59,9 +71,6 @@ var (
 	// backwards breaks the monotonicity every timer comparison assumes, and in
 	// a backtest it would silently replay a window twice.
 	ErrTimeReversed = errors.New("clock: time would move backwards")
-
-	// ErrVenueUnset reports an empty Venue reaching a calibration lookup.
-	ErrVenueUnset = errors.New("clock: venue unset")
 
 	// ErrVenueDuplicate reports the same venue calibrated twice at
 	// construction, which is a wiring mistake with a silent winner otherwise.
@@ -144,8 +153,8 @@ type Calibration struct {
 }
 
 func (c Calibration) validate() error {
-	if c.Venue == "" {
-		return ErrVenueUnset
+	if err := c.Venue.Validate(); err != nil {
+		return err
 	}
 	if c.Uncertainty < 0 {
 		return fmt.Errorf("venue %q uncertainty %v: %w", c.Venue, c.Uncertainty, ErrUncertaintyNegative)
