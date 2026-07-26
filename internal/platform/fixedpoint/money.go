@@ -150,6 +150,45 @@ func (m Money) Cmp(o Money) (int, error) {
 	return cmpMantissa(m.m, o.m), nil
 }
 
+// Mul scales an amount by a dimensionless ratio, keeping the asset. Every fee
+// and every funding payment is this operation.
+//
+// The mode is the caller's policy: RoundAwayFromZero for a cost, so it is never
+// understated, and RoundHalfEven for a valuation, so the bias does not
+// accumulate across thousands of settlements.
+func (m Money) Mul(r Rate, mode RoundingMode) (Money, error) {
+	if err := m.requireAsset("mul"); err != nil {
+		return Money{}, err
+	}
+	if err := r.requireSet("mul"); err != nil {
+		return Money{}, err
+	}
+	v, err := mulDivMantissa(m.m, r.r, scaleFactor, mode)
+	if err != nil {
+		return Money{}, fmt.Errorf("money mul %s * %s: %w", m, r, err)
+	}
+	return Money{m: v, asset: m.asset}, nil
+}
+
+// Div returns m / o as a dimensionless Rate: dividing two amounts of the same
+// asset cancels the unit. Expressing a carry against the capital that earned it
+// is milestone 2's headline number, and it is this operation.
+func (m Money) Div(o Money, mode RoundingMode) (Rate, error) {
+	if _, err := binaryAsset("div", m, o); err != nil {
+		return Rate{}, err
+	}
+	if o.m == 0 {
+		return Rate{}, fmt.Errorf("money div %s by zero: %w", m, ErrDivideByZero)
+	}
+	// Scale the numerator up before dividing so the quotient lands on the
+	// canonical scale rather than being truncated to whole units.
+	v, err := mulDivMantissa(m.m, scaleFactor, o.m, mode)
+	if err != nil {
+		return Rate{}, fmt.Errorf("money div %s / %s: %w", m, o, err)
+	}
+	return Rate{r: v, set: true}, nil
+}
+
 // Sign reports -1, 0 or 1.
 //
 // It is fallible for the same reason the zero value is invalid: 0 is a
