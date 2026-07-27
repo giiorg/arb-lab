@@ -278,6 +278,13 @@ func (s Sequence) validateOrder(firstAt map[PhaseKind]int, counts map[PhaseKind]
 				return fmt.Errorf("%w: %s %q at position %d precedes %s, so its failure is unreported",
 					ErrPhaseOrder, p.Kind, p.Name, i, KindObservability)
 			}
+		case KindUnspecified, KindSignal, KindConfig, KindObservability:
+			// The phases that may precede observability, named rather than
+			// left to fall out of the switch (§3.6 rule 10). Signal and config
+			// MUST come first, and observability cannot precede itself; the
+			// zero value is refused by Validate before this loop runs. A phase
+			// kind added to §3.2's open roster has to choose a side here, which
+			// is the one decision this loop exists to make.
 		}
 	}
 

@@ -162,6 +162,11 @@ func (a Act) String() string {
 // would make inserting a posture silently re-map every act.
 func minPostureFor(a Act) Posture {
 	switch a {
+	case ActUnspecified:
+		// The zero Act, named rather than defaulted (§3.6 rule 10). A caller
+		// that has not said what it wants to do is refused, and PostureHalted
+		// is what nothing is above.
+		return PostureHalted
 	case ActReconcile:
 		return PostureReconcileOnly
 	case ActReduce:

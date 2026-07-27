@@ -75,14 +75,22 @@ func Float(s Sample) (float64, bool) { //nofloat:allow the metric wire seam — 
 	switch s.unit {
 	case UnitCount, UnitBytes:
 		return f, exact //nofloat:allow returning the converted value
+	case UnitUnspecified, UnitSeconds, UnitRatio, UnitMoney:
+		// The scaled units, named rather than swept into the default (§3.6
+		// rule 10). A default is where a unit added next year lands silently,
+		// and it would land on the scaling branch — which is the right answer
+		// for a scaled unit and the wrong one for a second counting unit.
 	default:
-		// Scaled units divide by the canonical scale factor. The division is by
-		// a power of two times a power of five; 10^9 is not a power of two, so
-		// this step is itself inexact for most inputs — which is precisely why
-		// the caller is told, rather than the package pretending a decimal
-		// value survived a binary float.
-		return f / scaleFactorFloat, exact //nofloat:allow the scaled result
+		// An unrecognised unit scales too. Reaching it means Validate was
+		// bypassed, and scaling is the conservative reading: it cannot make a
+		// count look larger than it is.
 	}
+	// Scaled units divide by the canonical scale factor. The division is by a
+	// power of two times a power of five; 10^9 is not a power of two, so this
+	// step is itself inexact for most inputs — which is precisely why the caller
+	// is told, rather than the package pretending a decimal value survived a
+	// binary float.
+	return f / scaleFactorFloat, exact //nofloat:allow the scaled result
 }
 
 // scaleFactorFloat is 10^fixedpoint.Scale as a double. Exact: 10^9 is well

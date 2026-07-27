@@ -24,6 +24,10 @@ func TestKernelPurity(t *testing.T) {
 		// Offending: the shared kernel reaching into a bounded context, and
 		// the shared kernel inverting the dependency spine via engine/.
 		"github.com/giiorg/arb-lab/internal/platform/leaky",
+		// Offending, at the kernel ROOT rather than beneath it — the fixture
+		// for within()'s equality arm, which every subpackage above leaves
+		// untested. See that package's comment.
+		"github.com/giiorg/arb-lab/internal/platform",
 		// Not subject to the rule: a context may import whatever it likes.
 		"github.com/giiorg/arb-lab/internal/oms/domain",
 	)

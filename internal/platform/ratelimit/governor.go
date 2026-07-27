@@ -247,6 +247,11 @@ func (g *Governor) Penalize(p Penalty) error {
 		g.bans++
 	case PenaltyThrottle:
 		g.throttles++
+	case PenaltyUnspecified:
+		// Counted as neither, and named rather than left to fall out (§3.6
+		// rule 10). Unreachable: p.Validate above refuses the zero kind. A
+		// penalty kind added later must decide which counter it moves, because
+		// these two feed the operator's view of why a venue is paused.
 	}
 
 	hold := g.profile.ThrottlePause

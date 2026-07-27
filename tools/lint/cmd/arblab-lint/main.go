@@ -11,6 +11,7 @@ package main
 import (
 	"golang.org/x/tools/go/analysis/multichecker"
 
+	"github.com/giiorg/arb-lab/tools/lint/exhaustiveswitch"
 	"github.com/giiorg/arb-lab/tools/lint/hexboundary"
 	"github.com/giiorg/arb-lab/tools/lint/kernelpurity"
 	"github.com/giiorg/arb-lab/tools/lint/nofloat"
@@ -19,6 +20,7 @@ import (
 
 func main() {
 	multichecker.Main(
+		exhaustiveswitch.Analyzer,
 		hexboundary.Analyzer,
 		kernelpurity.Analyzer,
 		nofloat.Analyzer,

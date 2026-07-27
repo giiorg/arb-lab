@@ -174,6 +174,11 @@ func roundingIncrement(mode RoundingMode, neg bool, quo, rem, den uint64) (uint6
 		return 0, nil
 	}
 	switch mode {
+	case RoundInvalid:
+		// Named rather than left to the trailing return (§3.6 rule 10). It is
+		// the zero value, so it is what a caller who populated nothing passes,
+		// and it must reach the error below rather than any rounding at all.
+		return 0, fmt.Errorf("fixedpoint: rounding mode %d: %w", uint8(mode), ErrRoundingMode)
 	case RoundExact:
 		return 0, ErrPrecisionLoss
 	case RoundTowardZero:

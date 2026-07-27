@@ -5,11 +5,13 @@
 package sub
 
 import (
+	"github.com/giiorg/arb-lab/internal/engine"                           // want `domain must not import engine`
 	"github.com/giiorg/arb-lab/internal/engine/state"                     // want `domain must not import engine`
 	"github.com/giiorg/arb-lab/internal/marketdata/infrastructure/driven" // want `domain must not import infrastructure`
 )
 
 type View struct {
-	MV   state.MarketView
-	Feed driven.Client
+	Spine engine.Spine // the parity seam's own package, matched by within()'s equality arm
+	MV    state.MarketView
+	Feed  driven.Client
 }

@@ -133,6 +133,11 @@ func (d Decision) detail() string {
 		}
 		return fmt.Sprintf("venue %s limit %q is at its ceiling until %s",
 			d.Venue, d.Limit, d.NotBefore.UTC().Format(time.RFC3339Nano))
+	case ReasonUnspecified, ReasonAdmitted:
+		// Neither is a refusal, so neither has a refusal detail to render.
+		// Named rather than left to the generic line below (§3.6 rule 10):
+		// that line describes a refusal, and reaching it with ReasonAdmitted
+		// would print "refused the request (admitted)".
 	}
 	return fmt.Sprintf("venue %s refused the request (%s)", d.Venue, d.Reason)
 }

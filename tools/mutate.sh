@@ -57,6 +57,10 @@
 #   NOBUILD!! the mutant did not compile; the tests never ran, so nothing was
 #             proved. Re-aim the mutation so the code still builds — usually by
 #             substituting a WRONG value rather than deleting a call.
+#   PANIC!!   the mutant compiled, ran, and CRASHED. A kill, but a weaker one:
+#             the suite observed a crash rather than a wrong answer, so the
+#             claim you aimed at may still be unchecked. Usual cause is
+#             mutating a nil guard.
 #   TIMEOUT!! the suite HUNG on the mutant. Not a kill: a hanging test names no
 #             defect, blocks CI and reads as an infrastructure problem (the §5e
 #             lesson). Fix the TEST to fail within a bound, then re-run.
@@ -161,6 +165,24 @@ if printf '%s' "$out" | grep -qE 'test timed out|^panic: test timed out'; then
 fi
 
 failing=$(printf '%s' "$out" | grep -cE '^\s*--- FAIL')
+
+# A PANICKING mutant compiled and ran, but a panic prints no `--- FAIL` line, so
+# the build check below would call it NOBUILD!! — "the tests never ran" — about a
+# mutant that built cleanly and crashed. Two different diagnoses under one
+# verdict, which is the same defect NOBUILD and TIMEOUT were each added to fix.
+#
+# It IS a kill: the suite went red on broken code. It is reported separately
+# because what it proves is weaker. The test did not observe a wrong ANSWER, it
+# observed a crash, so the claim you were aiming at may still be unchecked —
+# nil-guard mutations are the usual source. Found in session 15 on
+# exhaustiveswitch, where dropping a nil check made the analyzer segfault
+# instead of report.
+if [ "$failing" -eq 0 ] && printf '%s' "$out" | grep -qE '^panic:|^\[signal SIG'; then
+    printf '  PANIC!!  %-58s  (a kill, but by CRASH — the claim itself may be unchecked)\n' "$desc"
+    printf '%s\n' "$out" | grep -E '^panic:|^\[signal SIG' | sed 's/^/           /' | head -2
+    exit 5
+fi
+
 if [ "$failing" -eq 0 ] || printf '%s' "$out" | grep -qE '\[build failed\]|^# '; then
     printf '  NOBUILD!! %-57s  (the mutant did not compile — the tests never ran)\n' "$desc"
     printf '%s\n' "$out" | grep -E '^[^[:space:]].*\.go:[0-9]+:|\[build failed\]' | sed 's/^/           /' | head -5

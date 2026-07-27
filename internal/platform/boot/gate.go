@@ -207,10 +207,15 @@ func (o Outcome) posture() Posture {
 		return PostureStopOpening
 	case OutcomePassed:
 		return PostureTrading
+	case OutcomeFailed:
+		return PostureHalted
 	}
-	// OutcomeFailed, and anything unrecognised. An unrecognised outcome halting
-	// is deliberate: Validate rejects it at the door, and a value that reached
-	// here anyway is a corrupted enum rather than a new case to guess at.
+	// Anything unrecognised. An unrecognised outcome halting is deliberate:
+	// Validate rejects it at the door, and a value that reached here anyway is
+	// a corrupted enum rather than a new case to guess at. OutcomeFailed used
+	// to share this line and is now named above (§3.6 rule 10) — a declared
+	// member and a corrupted one are different facts, and only one of them
+	// should change when a member is added.
 	return PostureHalted
 }
 

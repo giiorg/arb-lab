@@ -131,6 +131,12 @@ func (l Limit) validateCeilings() error {
 // in the package — the exact inversion ErrPriorityInvalid exists to prevent.
 func (l Limit) Ceiling(p Priority) uint64 {
 	switch p {
+	case PriorityUnspecified:
+		// Named rather than left to the trailing return (§3.6 rule 10). This is
+		// the whole point of the doc comment above: the zero Priority admits
+		// nothing, and the direction is chosen so that an unpopulated field is
+		// the LEAST privileged value rather than the most.
+		return 0
 	case PriorityOpening:
 		return l.OpeningCeiling
 	case PriorityRoutine:
@@ -214,6 +220,11 @@ func (c Cost) Validate() error {
 // validated profile. It is not a silent default standing in for a check.
 func (c Cost) units(d Dimension) uint64 {
 	switch d {
+	case DimensionUnspecified:
+		// Named rather than left to the trailing return (§3.6 rule 10). Charging
+		// zero is safe only because Limit.Validate refused this dimension
+		// upstream, which the doc comment above says and the code now shows.
+		return 0
 	case DimensionWeight:
 		return c.Weight
 	case DimensionOrders:

@@ -109,6 +109,14 @@ func oracleMulDiv(a, b, den int64, mode RoundingMode) (int64, error) {
 			// the parity of the integer for negatives as well.
 			chosen = pick(lo.Bit(0) == 0, lo, hi)
 		}
+	case RoundInvalid, RoundExact:
+		// Named rather than swept into the default (§3.6 rule 10), and this
+		// switch is policed precisely BECAUSE it is the oracle: a mode added
+		// without a branch here is a mode whose independent implementation
+		// silently stops existing while the cross-check goes on passing.
+		// RoundExact is answered by the early return above; RoundInvalid never
+		// reaches a rounding decision.
+		panic("oracle: rounding mode " + mode.String() + " does not round")
 	default:
 		panic("oracle: unhandled rounding mode " + mode.String())
 	}

@@ -82,7 +82,13 @@ func (s StreamKind) Lane() Lane {
 	switch s {
 	case StreamBook, StreamMark, StreamFunding:
 		return LaneMarketData
+	case StreamExecutions, StreamAccount, StreamControl:
+		return LaneControl
 	}
+	// Unrecognised only. The private streams above used to share this line;
+	// naming them (§3.6 rule 10) separates "classified as control" from
+	// "unclassified, therefore delivered intact", which the doc comment already
+	// treated as two different facts while the code had one branch for both.
 	return LaneControl
 }
 

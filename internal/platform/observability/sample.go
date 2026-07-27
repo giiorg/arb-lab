@@ -86,6 +86,12 @@ func (u Unit) suffix() string {
 		return "_bytes"
 	case UnitRatio:
 		return "_ratio"
+	case UnitUnspecified, UnitCount, UnitMoney:
+		// The units that contribute no suffix, named rather than left to the
+		// trailing return (§3.6 rule 10). Money's suffix depends on its asset
+		// and is Spec's to supply; a count carries none by convention; the zero
+		// value names no unit at all.
+		return ""
 	}
 	return ""
 }

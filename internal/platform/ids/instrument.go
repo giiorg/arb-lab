@@ -250,6 +250,13 @@ func (vi VenueInstrument) validateContract() error {
 // one call site.
 func (p ProductCategory) contractType() ContractType {
 	switch p {
+	case ProductSpot:
+		// "The question does not apply", named rather than left to the trailing
+		// return (§3.6 rule 10). Spot has no settlement, which is a different
+		// fact from the unset product the trailing return still answers for —
+		// this enum is string-backed, so its zero value is "" and is not a
+		// declared member.
+		return ""
 	case ProductLinearPerp:
 		return ContractLinear
 	case ProductInversePerp:
