@@ -9,17 +9,18 @@ import (
 
 // MaxFundingIntervalHours bounds FundingIntervalFromHours.
 //
-// # [SPEC EDIT OWED] §4 states a units discipline for money and none for time
+// # [SPEC EDIT LANDED — v0.9.9] §4 stated a units discipline for money and
+// # none for time
 //
-// §4 requires that "all numeric fields cross the boundary as dimensional
+// §4 required that "all numeric fields cross the boundary as dimensional
 // fixedpoint (parsed from venue decimal strings), never float64" — a rule about
-// money, and a good one. Nothing says anything about the venue fields that are
+// money, and a good one. Nothing said anything about the venue fields that are
 // DURATIONS, and one of them is load-bearing: Bybit's fundingIntervalHour is a
 // whole number of hours, and §2.4's settlement enumeration divides by whatever
 // it becomes.
 //
-// A conforming reimplementation can multiply it by time.Minute and satisfy this
-// spec completely. §2.4 then enumerates a hold's settlements against a
+// A conforming reimplementation could multiply it by time.Minute and satisfy
+// that spec completely. §2.4 then enumerates a hold's settlements against a
 // 480-minute interval, gets a plausible count, and the kill-gate carry figure
 // is wrong by a factor of sixty with nothing failing. This is §10's own
 // argument — landed in v0.9.7 for the OBSERVABILITY seam, where "a duration
@@ -27,11 +28,12 @@ import (
 // fails nothing" — and the venue seam is where the duration is *created*, one
 // layer earlier and with the same consequence.
 //
-// The edit owed is the rule, not the constant: a venue field whose unit is
-// implicit in its NAME crosses this seam through a conversion that states the
-// unit, and a value outside the range that unit can plausibly hold is REFUSED
-// rather than converted. §4 already has the shape of this sentence for money;
-// it needs the other half.
+// The edit was the rule, not the constant: §4 now requires that a venue field
+// whose unit is implicit in its NAME crosses this seam through a conversion
+// that states the unit, that a value outside the range that unit can plausibly
+// hold is REFUSED rather than converted, and that a zero or absent duration is
+// refused rather than defaulted to the venue's documented value. §4 already had
+// the shape of that sentence for money; it now has the other half.
 //
 // # It is a UNIT check, not a venue-policy one. Every perpetual either MVP venue
 // runs settles at 1h, 2h, 4h or 8h (Profiles §1), so 24 admits every real value

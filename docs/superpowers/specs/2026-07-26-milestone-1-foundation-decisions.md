@@ -1,9 +1,13 @@
 # Milestone 1 — foundation decisions (2026-07-26)
 
-**Status:** in progress. Milestone 1's **first slice (§1) is code-complete** as of session 3 — scaffolding,
-`platform/fixedpoint`, `platform/clock`, and the `nofloat`/`notimenow` gates. Branch
-`feat/milestone-1-foundation`, first commit `e92f9f0`, head `5893ac0`, **pushed and tracking**.
-**Doc set:** implements `build-spec.md` §12.1 (v0.9.4). Deviations from the spec are marked **[SPEC EDIT LANDED — v0.9.5]**.
+**Status:** in progress — and **this line is not where to read it**. It described session 3 for sixteen
+sessions after session 3 ended, naming a head commit that no longer exists, which is why the live
+statement lives at **`## RESUME HERE`** at the bottom of this file (newest first) and the plan lives in
+`docs/HANDOFF.md`. As of session 19: milestone 1's first **four** slices are closed, the doc set is at
+**v0.9.9**, and nothing is owed. Branch `feat/milestone-1-foundation`, pushed — verify with
+`git rev-list --left-right --count @{u}...HEAD` rather than believing a sentence about it.
+**Doc set:** implements `build-spec.md` §12.1. Deviations from the spec are marked `[SPEC EDIT OWED]`
+while open and `[SPEC EDIT LANDED — vX.Y.Z]` once the spec has caught up.
 
 This record exists so a fresh session can resume without re-deriving anything. Every decision below was
 taken explicitly by the user during the session, with the rejected alternatives recorded — the same
@@ -3069,6 +3073,39 @@ Everything else caught, including the two that matter most: `StreamFunding` → 
 1. **The reading pass is DONE and produced marker #3** — it is in the count above, not additional to it. The other two were taken while building.
 2. **The spec edits**, as `build-spec.md` **v0.9.9**: §3.5 (the `DataSource` resolution + the `SourceID` product rule) and §4 (the time-units discipline). Then the release checklist: five doc stamps, ADR §3's fifth milestone-1 block, marker flip to `[SPEC EDIT LANDED — v0.9.9]`, Georgian header re-sync + `tutorial.ka.md` re-assemble, `cd docs && bun test`, `make ci`.
 3. **Not owed and worth saying so:** no formal-model change. Nothing here touches the fence/takeover/plan composition; `docs/formal/` stays at the Cx8 verdict.
+
+## §21 — session 19: the slice CLOSED — `build-spec.md` v0.9.9
+
+§20h's list, done in its stated order. **This is milestone 1's first close with no code change in it**, and that is worth stating rather than passing over: §19's close *opened* with a code fix because its lead finding was a violation, and this one has nothing to fix because all three markers were silences. A doc-only close is what "the code already agreed with the spec, the spec had just never said it" looks like from the outside.
+
+### §21a — two edits the release checklist did not have on its list, both found by doing it
+
+The three ADR rows are the record of what was owed. Two more went in that no marker demanded:
+
+- **Four stale `DataSource` references outside §3.5's declaration.** §3.2's backtest row, §3.5's own live-vs-backtest wiring sentence, §8's parity bullet and §11's repo tree all named the retired type. The marker was written against the **declaration**, because that is where the contradiction was visible; the rename's actual surface was **five sites**. Renaming the declaration and leaving the references is how a resolution becomes a *second* ambiguity — a reader greps `DataSource`, finds four hits and no definition, and cannot tell whether the type was renamed, deleted, or is simply missing. **The general form: a marker names where a defect was seen, never where its fix reaches, so the close has to re-derive the surface rather than trust the marker's location.**
+- **The `C8` traceability row gained `core §4`.** The refuse-rather-than-default rule resolves part of a finding the ADR already tracks (Bybit dynamic settlement), and a resolution absent from the traceability table is invisible to exactly the review that table exists to serve.
+
+### §21b — the evidence that settled the rename, and why it beat the argument that preceded it
+
+`engine/venue/doc.go` argued §4's shape wins on three grounds — the mailbox key a merged channel forces the subscriber to re-derive, the per-stream product constraints `Subscribe(VenueInstrument)` cannot express, and §7.6's budget spent on a book feed a funding-only consumer never wanted. All three hold, and all three are in the spec now.
+
+But the cheapest evidence turned up during the close and is worth more than the argument: **`venue-profiles.md` §3 was already writing `MarketDataSource.StreamMark`.** The rest of the doc set had adopted §4's name already; §3.5's `DataSource` was not a competing convention but a single line nobody had updated. An argument tells a reader which shape *should* win. A citation tells them which one the set was already using — and only the second is checkable by someone who disagrees with the argument. Look for it before writing the third paragraph of reasoning.
+
+### §21c — a contradiction and a silence are not the same finding, and only one is findable alone
+
+All three markers are silences in the core (the v0.9.6 shape). **Two of them are the sharper kind: the core does not omit the rule, it states it twice, incompatibly.** The market-data seam is declared in §3.5 *and* §4 with shapes no single type satisfies; the per-stream product constraint is stated in §4 and dropped where §3.5 defines the identity that carries both of its fields.
+
+A gap is visible to a reader of one section. **A contradiction is visible only to a reader holding two sections at once** — and neither is visible to a grep. So §19e and this slice name the same limit of the slice-close gate from opposite sides: session 17 found a rule the *code* silently broke, session 18 found rules the *spec* silently disagreed with itself about. Both were found by the reading pass, which now has two independent cases behind it rather than one.
+
+### §21d — what is owed: nothing
+
+`grep -rn "SPEC EDIT OWED" internal/ tools/` returns **zero**, and the three markers read `[SPEC EDIT LANDED — v0.9.9]`. Doc set at v0.9.9 across all five stamps plus the Georgian header; `tutorial.ka.md` re-assembled from fragments (never hand-edited — a test asserts the file equals a fresh assemble); `docs` **102 pass**; `make ci` green. **No formal-model change** — nothing in this slice touches the fence/takeover/plan composition, so `docs/formal/` stays at the Cx8 verdict.
+
+**Next is a new slice, and the choice is the user's.** `marketdata`'s book path (reconstruction, gap detection, resnapshot — the §3.4 machinery the funding path never needed) or `oms`, which **expires `singlewriter`'s deferral** and would complete the six-gate roster.
+
+## RESUME HERE — updated end of session 19
+
+**SESSION 19 UPDATE — READ THIS FIRST.** The `engine/venue` slice is **CLOSED**. `build-spec.md` is at **v0.9.9** with §3.5 ×2 and §4 ×1; all five doc stamps and the Georgian header are re-synced, `tutorial.ka.md` re-assembled, ADR §3 carries the **fifth** milestone-1 block (tagless total **thirty-three**), and the three code markers read `[SPEC EDIT LANDED — v0.9.9]`. **`grep -rn "SPEC EDIT OWED" internal/ tools/` is CLEAN.** `docs` 102 pass, `make ci` green. **Nothing is owed.** The reasoning is §21; §20 is now history. What follows was written at the end of session 18 and earlier.
 
 ## RESUME HERE — updated end of session 18
 

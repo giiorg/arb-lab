@@ -1,6 +1,8 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-07-27): **v0.9.8** — milestone 1's first THREE slices are CLOSED, including the first bounded context. **Nothing is owed.** **Start at `## START HERE` below, not at this line.**
+## Status (2026-07-27): **v0.9.9** — milestone 1's first FOUR slices are CLOSED, including the first bounded context and the venue seam. **Nothing is owed.** **Start at `## START HERE` below, not at this line.**
+
+**v0.9.9 (2026-07-27) — the fourth-slice release, and the one that CLOSES `engine/venue`.** The slice built the normalized funding DTO that retired `marketdata`'s `driving.FundingUpdate` placeholder, and produced **three** spec edits — **all silences in the core rather than disagreements with it**, the v0.9.6 shape rather than v0.9.8's. **This is milestone 1's first close containing no code change**, which is what "the code already agreed with the spec, the spec had just never said it" looks like from outside. **Two of the three are a sharper kind of silence and the distinction is the finding worth carrying: the core does not omit them, it states them twice, incompatibly.** §3.5: the **market-data seam was declared twice** — a flat `DataSource{ Subscribe(VenueInstrument) <-chan Envelope }` here and three per-stream methods in §4, for the same pipeline position, with no type satisfying both. **§4's per-stream shape wins and the seam is `MarketDataSource` throughout**, on three grounds — one channel per instrument merges three `SourceID`s and forces the subscriber to re-derive a key the seam could have kept; the per-stream product constraints are **inexpressible** in `Subscribe(VenueInstrument)`; and §7.6's capacity ladder gets spent on a book feed a funding-only consumer never wanted. The tell that §4 was current is structural rather than a preference: **every other line of §3.5's seam block is written as a reference to §4**, while `DataSource` was the one written as an independent definition — and `venue-profiles.md` §3 was **already** writing `MarketDataSource.StreamMark`, which is cheaper evidence than any of the three arguments. §3.5 also: **a `SourceID` MUST refuse an `(instrument, stream)` pair no venue can produce** — §4 marks funding and mark perp-only per stream and §3.5 never carried it across, so a spot funding source validated cleanly, and §3.4 makes `SourceID` the mailbox key, so an impossible source is **a mailbox that exists, can be subscribed to, and never delivers**, indistinguishable downstream from a venue gone quiet. The rule states the **full table including the negative rows** (the private streams and control are *not* product-constrained), because the constraint reads like a market-data property and is not one — §4.2 makes spot a full API family with its own user-data stream, so inferring it would silently unsubscribe half a cash-and-carry trade. §4: **the units discipline that covered money now covers time.** `fixedpoint` puts a money field's dimension in its type; a duration has none, and a venue duration field's unit lives only in its **name** (Bybit's `fundingIntervalHour`) — so an adapter can multiply by `time.Minute`, satisfy the never-`float64` rule completely, and hand §2.4 a 480-minute interval that enumerates a plausible settlement count while **§12's kill-gate carry figure is wrong by a factor of sixty with nothing failing**. That is §10's own v0.9.7 argument applied one layer earlier, where the duration is *created*. A zero is **refused, never defaulted**: it arrives from three situations a fallback answers identically, two are a wiring failure wearing a correct BTC reading's clothes, and the third **absorbs §2.4's C8 flip**. Three code markers now read `[SPEC EDIT LANDED — v0.9.9]`, `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **zero**, ADR §3 gains the **milestone-1 fourth-slice block** (tagless total now **thirty-three**) and the `C8` traceability row gains core §4, `docs` 102 pass, `make ci` green. **No formal-model change; `docs/formal/` is untouched and still at the Cx8 verdict.** Full reasoning with rejected alternatives: decision record **§20** (the slice) and **§21** (the close).
 
 **v0.9.8 (2026-07-27) — the third-slice release, and the one that CLOSES `marketdata`.** The slice built the first bounded context on the funding path — `domain/` + `application/` + `infrastructure/{driven,driving}` + `module.go` — and produced **eight** spec edits. **The lead one is a different kind from every milestone-1 edit before it: a violation of the core, not a silence in it.** §3.5 already required a dispatched envelope to carry the `AcceptOrdinal` of the input that triggered it; `driven.LanePublisher` published zero, so a published funding snapshot could not be traced back to its cause — and its doc comment confidently argued the rule did not apply. **The `[SPEC EDIT OWED]` grep could not have found it**, because a violation is by definition unmarked; the reading pass beside the grep is what caught it, which is why that pass is not replaceable by the grep. The mechanism generalizes: **a true rule stated without its scope becomes a false rule** — "this layer must not invent a sequence" is true of `IngressSeq` (the replay key, assigned in consumption order) and false of `AcceptOrdinal` (stamped upstream, merely *inherited*), and one sentence covering both is what cost the trace. §3.5 takes four edits: the causal-traceability rule is **scoped, not extended** (it binds every producer, not only book reconstruction — the reconstructed snapshot was an *example* being read as the extent); the envelope derived from the **absence** of an input — §3.4's silence timer — carries **no ordinal**, and reusing the last one is **forbidden** (it makes the capture log claim one raw input produced two dispatched envelopes, so a replay reports a phantom duplicate and concludes the feed is healthy); **`Envelope.Validate()` is the dispatcher's post-stamp check**, so a §3.4 mailbox holds pre-dispatch envelopes and each field now says *when* it is required rather than only who stamps it; and **`Prio` is a per-`SourceID` constant that may not depend on content** (fixing only the direction leaves the `FreshnessBlind` escalation available, which reorders one source inside its own mailbox so **a degrading feed appears to recover**). §3.4: **one budget per (data class, venue), measured against two clocks** — transport age from `RecvTime` against `Clock.Now()` and data age from `SourceTime` against `Clock.ServerNow(venue)`, reported separately and reduced by minimum, because a venue-side stall keeps updates arriving on schedule with a frozen `SourceTime` and the transport verdict reads perfectly fresh for the whole outage. §4: the **`Envelope` is authoritative for provenance** and a normalized payload carries none. §3.2: `marketdata` stops claiming to publish `MarketView`, resolving its contradiction with §3.3 in §3.3's favour. §3.6: rules **1 (`hexboundary`) and 10 (`exhaustiveswitch`) move to enforced**, leaving `singlewriter` the only deferral — and the paragraph keeps two findings worth more than the status change: rule 10's deferral **named the wrong trigger** (it waited on a state machine while the kernel's eleven enum-likes were what made it buildable; it found **13 silent fallthroughs** on its first real run), and **rule 1's obvious positive control is an import cycle**, so the type-checker refuses before the analyzer runs and a clean gate run proves nothing. Six code markers now read `[SPEC EDIT LANDED — v0.9.8]`, `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **zero**, ADR §3 gains the **milestone-1 third-slice block** (tagless total now **thirty**), 7/7 mutations caught, `docs` 102 pass, `make ci` green. **No formal-model change; `docs/formal/` is untouched and still at the Cx8 verdict.** Full reasoning with rejected alternatives: decision record **§18** (the finding) and **§19** (the close).
 
@@ -75,7 +77,68 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 18, 2026-07-27)
+## START HERE (updated end of session 19, 2026-07-27)
+
+**Branch `feat/milestone-1-foundation`, tree clean, `make ci` green on Go 1.26.5.** Verify rather
+than trust this sentence: `git rev-list --left-right --count @{u}...HEAD` should print `0 0`. No PR —
+deliberate. The head commit is not named here on purpose: a paragraph citing its own hash is stale
+the moment the commit containing it is written.
+
+### Where the work is
+
+**Milestone 1's fourth slice — `engine/venue` — is CLOSED, and NOTHING IS OWED.** The doc set is at
+**v0.9.9** across all five stamps plus the Georgian header; `tutorial.ka.md` is re-assembled from its
+fragments; ADR §3 carries the **fifth** milestone-1 block; and
+`grep -rn "SPEC EDIT OWED" internal/ tools/` — **both paths** — returns **zero**. `docs` 102 pass.
+The reasoning is decision record **§21**; **§20** is the slice it closes and is now history.
+
+**The next work is a new slice, and the choice is yours.** Two candidates, and they are not
+equivalent in what they unlock:
+
+| Candidate | What it buys | What it costs |
+|---|---|---|
+| **`marketdata`'s book path** | The §3.4 machinery the funding path never needed — reconstruction, gap detection on `VenueSeq`, resnapshot, and the coalescing rule that is *deterministic and keyed on `(Source, field)`*. It is the first code that exercises `StreamBook`, so it is the first that could disagree with the seam §3.5 just resolved | Stays inside a context that is already built; adds no new gate |
+| **`oms`** | **Expires `singlewriter`'s deferral** — the last unbuilt gate, roster 6 of 6 — because the deferral was explicitly scoped to "until `oms`'s write repository exists", and this repo's rule is that a deferral expires when its subject appears, not after the code it polices | A bigger slice: §5.3's identity, states and commands, plus the crash-boundary journal discipline |
+
+### Three things from this close that will bite if you do not know them
+
+1. **A marker names where a defect was SEEN, never where its fix reaches.** The `DataSource`
+   resolution was marked against the *declaration* in §3.5, because that is where the contradiction
+   was visible — but the rename's real surface was **five sites**: §3.2's backtest row, §3.5's
+   live-vs-backtest wiring sentence, §8's parity bullet and §11's repo tree all named the retired
+   type. Renaming the declaration alone turns a resolution into a *second* ambiguity, since a reader
+   greps the old name, finds four hits and no definition, and cannot tell rename from deletion. **Any
+   future close: re-derive the surface, do not trust the marker's location.**
+2. **Look for the citation before writing the third paragraph of argument.** `engine/venue/doc.go`
+   argued §4's shape wins on three grounds and all three hold — but the thing that actually settled
+   it was found during the close: **`venue-profiles.md` §3 was already writing
+   `MarketDataSource.StreamMark`.** The doc set had adopted §4's name already. An argument says which
+   shape *should* win; a citation says which one the set was *using*, and only the second is
+   checkable by someone who disagrees with you.
+3. **A contradiction and a silence are not the same finding, and only one is findable alone.** A gap
+   is visible to a reader of one section; **a contradiction is visible only to a reader holding two
+   sections at once**, and neither is visible to a grep. Session 17 found a rule the *code* silently
+   broke; session 18 found rules the *spec* silently disagreed with itself about. Both came from the
+   reading pass, which now has two independent cases behind it — so the pass is not a formality that
+   sits beside the gate, it is the only thing covering two whole classes of defect.
+
+### Still true, still deferred, still deliberate
+
+- **`observability`'s Prometheus adapter and tracing** — the adapter lands with `app/` where the
+  per-binary `/metrics` decision lives (§11 gives `arblab-actuator` no HTTP surface at all); tracing
+  lands once §3.5's `DispatchSeq` exists to hang a span on. Both on argument (§12a, §12f).
+- **No raw Binance/Bybit clients and none of §4's nine capability interfaces in `engine/venue`** —
+  §20a. The dispatcher is not built, so a WS client would invent its own arbitration, which is the
+  second-authority defect §3.5 forbids; and eight of the nine interfaces are consumed by contexts
+  that do not exist. **The `MarketDataSource` resolution does not change this** — declaring the
+  interface now is still the empty-tree case.
+- **No `DefaultFundingInterval` constant, and its absence is now normative** — §4 states the
+  refuse-rather-than-default rule as of v0.9.9, so the 8h default belongs to the Binance adapter,
+  applied from an overlay that was fetched and came back empty.
+
+---
+
+## START HERE (updated end of session 18, 2026-07-27, HISTORICAL)
 
 **Branch `feat/milestone-1-foundation`, tree clean, `make ci` green on Go 1.26.5.** Verify rather
 than trust this sentence: `git rev-list --left-right --count @{u}...HEAD` should print `0 0`. No PR —

@@ -94,14 +94,16 @@ func (s StreamKind) Lane() Lane {
 
 // RequiresPerp reports whether this stream exists only for perpetuals.
 //
-// # [SPEC EDIT OWED] §3.5's SourceID can name a source no venue can produce
+// # [SPEC EDIT LANDED — v0.9.9] §3.5's SourceID could name a source no venue
+// # can produce
 //
 // §4 states the rule per stream — StreamFunding is "perp only", StreamMark is
 // "perp only: mark/index — spot has none; price the spot leg from its book",
 // StreamBook is "spot & perp both" — and §3.5, which defines SourceID and gives
-// it a Validate, never carries the constraint across. So a SourceID pairing a
-// spot instrument with the funding stream validates cleanly today, and the
-// envelope built from it validates too.
+// it a Validate, never carried the constraint across. So a SourceID pairing a
+// spot instrument with the funding stream validated cleanly, and the envelope
+// built from it validated too. §3.5 now states the full per-stream table and
+// requires the refusal here, at the identity.
 //
 // The rule belongs here for the same structural reason ids.VenueInstrument
 // checks its product against its contract type: this is the type that holds

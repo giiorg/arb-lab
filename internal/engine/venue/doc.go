@@ -30,14 +30,14 @@
 // interfaces here would be a third statement of a contract that already has
 // two ends.
 //
-// # [SPEC EDIT OWED] §3.5 and §4 declare the market-data seam twice, with
-// # different shapes, and neither says which one wins
+// # [SPEC EDIT LANDED — v0.9.9] §3.5 and §4 declared the market-data seam
+// # twice, with different shapes, and neither said which one won
 //
-// §3.5's seam block gives:
+// §3.5's seam block gave:
 //
 //	type DataSource interface { Subscribe(VenueInstrument) <-chan Envelope }
 //
-// while §4 gives StreamBook / StreamFunding / StreamMark, each taking a
+// while §4 gave StreamBook / StreamFunding / StreamMark, each taking a
 // VenueInstrument and returning its own channel. These are the same position in
 // the pipeline — both are what the dispatcher reads and what §8's backtest
 // substitutes a replay adapter for — and a type satisfying one does not satisfy
@@ -45,9 +45,10 @@
 //
 // §3.5's block is a REFERENCE to §4 everywhere else in it: ExecutionVenue is
 // written as a composition of §4's four interfaces and says "see §4" inline.
-// DataSource is the one line written as a definition instead, and its signature
-// is the one that has not kept up. Three things say §4's per-stream shape is
-// the authoritative one:
+// DataSource was the one line written as a definition instead, and its
+// signature is the one that had not kept up. Three things say §4's per-stream
+// shape is the authoritative one, and v0.9.9 resolves §3.5 in its favour —
+// the seam is MarketDataSource, one channel per (instrument, stream):
 //
 //   - §3.4 gives every SourceID its own mailbox, and a SourceID is
 //     (instrument, stream). One channel per instrument merges three of them, so
@@ -62,12 +63,16 @@
 //     an interface shape that forces an unused high-rate feed spends that budget
 //     on nothing.
 //
-// The edit owed is small and it is a resolution, not a new rule: DataSource is
-// MarketDataSource under §3.5's parity-seam name, and the per-stream shape is
-// authoritative. It is recorded here rather than resolved by declaring the
-// interface, because declaring it is the empty-tree case above — it gets built
-// with the first client that implements it and the first dispatcher that calls
-// it, in one slice, where a wrong shape would actually fail something.
+// The edit was small and it was a resolution, not a new rule: DataSource is
+// gone and the seam is MarketDataSource, with §4's per-stream shape
+// authoritative. Profiles §3 was already writing that name, which is the
+// cheapest evidence available that §4's spelling was the live one rather than
+// the preferred one.
+//
+// It is still not resolved HERE by declaring the interface, and that is
+// unchanged by the edit: declaring it is the empty-tree case above. It gets
+// built with the first client that implements it and the first dispatcher that
+// calls it, in one slice, where a wrong shape would actually fail something.
 //
 // # Why the normalized DTO and marketdata's domain type are two types
 //
