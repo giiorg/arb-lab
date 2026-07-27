@@ -167,10 +167,14 @@ func (r *BookReconstruct) OnSnapshot(snap domain.BookSnapshot, trigger AcceptOrd
 			// looks like it did the right thing.
 			return BookView{}, r.desync(st, inst, held[i:], nil, ErrSequenceGap)
 		case domain.SeqRelationUnknown:
-			// Unreachable: synced was just set and a validated snapshot carries
-			// a non-zero VenueSeq. Named rather than defaulted, which is rule
-			// 10 doing its job — a relation added later lands here as a build
-			// failure instead of falling into the apply path.
+			// Unreachable: synced was just set, and snap.Validate above refuses a
+			// zero VenueSeq (domain.ErrBookSeqUnset). That refusal was ADDED for
+			// this line — the claim was written here first and the domain did not
+			// yet make it, so a book snapshot with no sequence was marked synced
+			// at position zero and every later delta landed exactly here, forever.
+			// Named rather than defaulted, which is rule 10 doing its job: a
+			// relation added later lands here as a build failure instead of
+			// falling into the apply path.
 			return BookView{}, fmt.Errorf(
 				"instrument %s: held delta %d..%d against seq %d: %w",
 				inst, d.FirstSeq, d.LastSeq, st.book.Watermark.VenueSeq, ErrAwaitingSnapshot)
@@ -397,16 +401,19 @@ func (r *BookReconstruct) hold(
 // path a recorded gap rather than a reorder: a reconstructor that quietly shed
 // held deltas presents a resync loop as a slow venue.
 //
-// # [SPEC EDIT OWED] the core defines no overflow policy for THIS buffer
+// # [SPEC EDIT LANDED — v0.9.10] the core defined no overflow policy for THIS
+// # buffer
 //
-// §3.4 defines one for the post-reconstruction snapshot lane — "bounded depth +
+// §3.4 defined one for the post-reconstruction snapshot lane — "bounded depth +
 // defined overflow (drop-oldest + freshness gap counter)" — and §3.5 permits
-// reconstruction to hold a delta behind a gap, but neither says what a FULL hold
+// reconstruction to hold a delta behind a gap, but neither said what a FULL hold
 // buffer does. The two are different buffers with opposite policies, which is
-// why the silence is easy to read past: drop-oldest is right for a
-// latest-value snapshot lane and is the wrong half to keep here. This policy —
-// bounded, keep-newest, counted — is chosen above on its merits and owes §3.4 a
-// sentence before the slice closes.
+// why the silence was easy to read past: drop-oldest is right for a latest-value
+// snapshot lane and is the wrong half to keep here. §3.4 now states this policy
+// — bounded, keep-newest, counted — and states WHY the direction differs from
+// the lane's: these deltas exist to bridge to a snapshot that has not arrived
+// and will be newer than the buffer's head, so a retained prefix was destined to
+// be stale on the drain.
 func (st *bookState) retain(ds []domain.BookDelta, depth int) bool {
 	if len(st.held)+len(ds) <= depth {
 		st.held = append(st.held, ds...)

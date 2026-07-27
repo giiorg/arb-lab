@@ -32,6 +32,42 @@ var (
 	// every settlement fall in year one — so a hold captures nothing and the
 	// carry reads zero, which is indistinguishable from a flat regime.
 	ErrNextSettleUnset = errors.New("venue: funding next-settlement instant unset")
+
+	// ErrSideUnset and ErrSideUnknown report a book side that is empty or
+	// outside the declared pair.
+	//
+	// Two sentinels rather than one, because they come from different mistakes
+	// and only one of them is about the venue. An empty side is a decode that
+	// never populated the field — a struct built from JSON that used a different
+	// key — while an unknown one is a venue vocabulary this seam has not been
+	// taught ("buy"/"sell", "b"/"a"). The first sends a reader to the decoder,
+	// the second to the Profiles entry that should have recorded the spelling.
+	ErrSideUnset   = errors.New("venue: book side unset")
+	ErrSideUnknown = errors.New("venue: book side is not bid or ask")
+
+	// ErrLevelQuantityNotPositive reports a snapshot level resting zero or
+	// negative size.
+	//
+	// A snapshot states what IS on the book, so zero is not a small order — it
+	// is the venue's removal encoding leaking into a payload that has no way to
+	// express one. Admitted, it publishes a resting order of size zero, which
+	// prices as available liquidity that no fill will ever come back from.
+	ErrLevelQuantityNotPositive = errors.New("venue: book level quantity is not positive")
+
+	// ErrChangeQuantityNegative reports a depth instruction with negative size.
+	// Zero is legal here and means remove; negative means this seam is reading a
+	// size-delta protocol as a size-set one, and the two diverge silently — the
+	// book stays plausible and drifts.
+	ErrChangeQuantityNegative = errors.New("venue: level change quantity is negative")
+
+	// ErrDeltaFirstSeqUnset reports a depth message with no first sequence.
+	//
+	// It is the one half of the span this payload holds — BookDelta records why
+	// the other half stays on the envelope — so a zero here is a dropped field,
+	// not a venue starting from zero. Left through, it makes every delta claim a
+	// span beginning at 1, which reads as an enormous overlap against any live
+	// book and applies deltas the reconstruction has already applied.
+	ErrDeltaFirstSeqUnset = errors.New("venue: book delta first sequence unset")
 )
 
 // There is deliberately no sentinel here for "funding asked of a spot

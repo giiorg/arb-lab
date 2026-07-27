@@ -15,27 +15,21 @@
 // So the split is: app/ decides what the store and the lane ARE, this decides
 // what they are plugged into.
 //
-// # Scope: the funding path is WIRED; the book path is built but not yet wired
+// # Scope: the funding and book paths are WIRED; mark is not
 //
-// §3.2 gives this context book reconstruction and mark normalization as well.
-// application.BookReconstruct now exists and is tested — the domain
-// reconstruction, gap detection on VenueSeq, the hold buffer and automatic
-// resnapshot are all built — but Module still has one field, and the reason is
-// specific rather than a leftover deferral.
+// §3.2 gives this context three jobs and two of them are assembled here. The
+// book path landed exactly as this comment previously committed to: engine/venue
+// gained the normalized DTOs (venue.BookSnapshot, venue.BookDelta), so
+// BookDispatch type-asserts a venue type instead of inventing one in the context
+// that consumes it — the dependency direction driving/'s doc exists to protect.
+// Module has a second field and Deps has the predicted Resnapshotter entry.
 //
-// A driving adapter turns an events.Envelope into a use-case call, which means
-// type-asserting a NORMALIZED VENUE DTO out of the payload — venue.Funding is
-// what FundingDispatch asserts. There is no venue.Book yet, so a book dispatch
-// would have to invent one here, in the context that consumes it, which is the
-// dependency direction driving/'s doc comment exists to forbid. The book DTO
-// belongs to engine/venue (§4), and that is the next slice.
-//
-// The deferral stays visible in the TYPE rather than in prose elsewhere: Module
-// has one field, so a caller cannot reach a book path that is not assembled and
-// there is no nil to check. When it lands it is a second field and a second
-// Deps entry — the Resnapshotter, which is a port rather than a concrete kernel
-// type because its adapter is a venue REST client living outside this context
-// entirely (§20a defers those clients, and this is where that deferral surfaces).
+// Mark normalization remains unwired, and the reason is the same shape as the
+// book path's was: §3.4's mark stream has its own freshness class and §5.2's
+// mark_blind_action keys on it, but there is no venue.Mark and no use case, so
+// there is nothing here to compose. The deferral stays visible in the TYPE
+// rather than in prose elsewhere — a caller cannot reach a mark path that is not
+// assembled, and there is no nil to check.
 package marketdata
 
 import (
@@ -51,15 +45,22 @@ import (
 
 // Deps is what a composition root supplies.
 //
-// # These are the outside world, and none of them is a port
+// # Three kernel types, and ONE port — the exception is the interesting field
 //
-// A caller passes a clock, a configuration store and an events lane — three
-// concrete kernel types — and gets back a context whose inside is ports all the
-// way down. That asymmetry is the point: substitution happens at the seams
-// application/ declares, and a root that wanted to substitute Budgets itself
-// would be reaching past the composition this file exists to perform.
+// A caller passes a clock, a configuration store and an events lane — concrete
+// kernel types — and gets back a context whose inside is ports all the way down.
+// That asymmetry is the point: substitution happens at the seams application/
+// declares, and a root that wanted to substitute Budgets itself would be
+// reaching past the composition this file exists to perform.
 //
-// The one substitution a root DOES make is Clock, and it is an interface for
+// Resnapshotter breaks that pattern, and it is worth saying why rather than
+// letting it read as an inconsistency. Every other driven port has exactly one
+// adapter and that adapter lives in this context's infrastructure/, so this file
+// can construct it. A resnapshot is a REST call to a venue, and the venue
+// clients live outside this context entirely — §20a defers them — so there is
+// nothing here to construct. A root supplies it or the context does not build.
+//
+// The one substitution a root ALSO makes is Clock, and it is an interface for
 // §3.5's reason rather than for testing: cmd/arblab-backtest wires a TestClock
 // and runs the same code, and that interchangeability IS the parity mechanism.
 type Deps struct {
@@ -78,6 +79,38 @@ type Deps struct {
 	// source on the lane — the perp mark coalesces adverse-preservingly and a
 	// book snapshot does not — and one context cannot answer for the others.
 	Lane *events.MarketDataLane
+
+	// Resnapshotter is how the book path asks a venue for a fresh full book.
+	//
+	// A port, and supplied from outside for the reason stated above: its adapter
+	// is a venue REST client, and §20a defers those. What a root wires here must
+	// be IDEMPOTENT under repeat calls — application.BookReconstruct requests on
+	// every held delta rather than once, deliberately, because a single dropped
+	// request leaves the book held forever with nothing retrying. Only the
+	// adapter knows the venue's rate limit (§7.6), so the coalescing belongs
+	// there.
+	Resnapshotter application.Resnapshotter
+
+	// BookHoldDepth bounds the per-instrument buffer of deltas awaiting a
+	// resnapshot.
+	//
+	// # A Deps field rather than a §5.2 config entry, which is a claim about
+	// # WHEN it may change
+	//
+	// The freshness budgets beside it are hot — an operator widens one
+	// mid-incident and it takes effect without a restart. This must not be, and
+	// platform/config's default direction is the argument: a field is
+	// restart-required until somebody writes down why it is safe to change under
+	// load, and nobody can write that here. Shrinking the depth mid-resync
+	// discards held deltas that the in-flight snapshot was going to chain to,
+	// which converts a recovering book into the non-terminating resync loop the
+	// buffer exists to prevent — at precisely the moment an operator is reaching
+	// for a knob.
+	//
+	// Zero is refused rather than defaulted: application.ErrHoldDepthInvalid
+	// records that a depth of zero holds nothing, so the REST book always lands
+	// behind the live stream and the very next delta gaps, forever.
+	BookHoldDepth int
 }
 
 // Module is the context's driving surface.
@@ -89,6 +122,19 @@ type Deps struct {
 type Module struct {
 	// Funding is the funding-rate path: envelopes in, silence timers in.
 	Funding *driving.FundingDispatch
+
+	// Book is the order-book path: snapshot and delta envelopes in on one
+	// surface, silence timers in.
+	//
+	// Two fields rather than one dispatcher with a stream switch, and the two
+	// Timer methods are why. Each path arms its OWN timer-ID namespace
+	// (application.bookSilenceTimerID records that a shared name would make each
+	// class's arm cancel the other's), so the routing a caller does here is real
+	// routing and not a formality. A merged surface would have to re-derive which
+	// use case owns a fired ID from the ID's spelling — a copy of a naming rule
+	// that lives in application/, which is the same copy FundingDispatch.Timer
+	// declines to make one layer down.
+	Book *driving.BookDispatch
 }
 
 // New assembles the context, refusing an incomplete one.
@@ -123,5 +169,29 @@ func New(deps Deps) (*Module, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marketdata: funding dispatch: %w", err)
 	}
-	return &Module{Funding: dispatch}, nil
+
+	// The book path gets its OWN publisher over the SAME lane. Sharing the
+	// pointer is correct — one market-data lane, per-SourceID mailboxes inside it
+	// — and the two publishers exist because the two ports both declare Publish;
+	// driven.BookLanePublisher's doc records that Go forces the split.
+	bookPublisher, err := driven.NewBookLanePublisher(deps.Lane)
+	if err != nil {
+		return nil, fmt.Errorf("marketdata: book publisher: %w", err)
+	}
+	// budgets is reused rather than reconstructed: one ConfigBudgets satisfies
+	// both narrow ports, which is where the sharing belongs (application declares
+	// FundingBudgets and BookBudgets separately so neither use case depends on
+	// the other's method). A second adapter over the same store would be a second
+	// read path to keep in step for nothing.
+	reconstruct, err := application.NewBookReconstruct(
+		deps.Clock, bookPublisher, budgets, deps.Resnapshotter, deps.BookHoldDepth)
+	if err != nil {
+		return nil, fmt.Errorf("marketdata: book reconstruction: %w", err)
+	}
+	bookDispatch, err := driving.NewBookDispatch(reconstruct)
+	if err != nil {
+		return nil, fmt.Errorf("marketdata: book dispatch: %w", err)
+	}
+
+	return &Module{Funding: dispatch, Book: bookDispatch}, nil
 }
