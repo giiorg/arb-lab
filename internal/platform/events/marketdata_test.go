@@ -412,7 +412,7 @@ func TestMarketDataRejectsControlTraffic(t *testing.T) {
 	l := markLane(t, 1)
 
 	for _, stream := range []events.StreamKind{
-		events.StreamExecutions, events.StreamAccount, events.StreamControl,
+		events.StreamOrders, events.StreamExecutions, events.StreamAccount, events.StreamControl,
 	} {
 		src := aSource()
 		src.Stream = stream

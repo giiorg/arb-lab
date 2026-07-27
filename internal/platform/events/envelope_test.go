@@ -186,9 +186,9 @@ func TestSourceIDRejects(t *testing.T) {
 func TestStreamKindDeclaredSet(t *testing.T) {
 	declared := []events.StreamKind{
 		events.StreamBook, events.StreamMark, events.StreamFunding,
-		events.StreamExecutions, events.StreamAccount, events.StreamControl,
+		events.StreamOrders, events.StreamExecutions, events.StreamAccount, events.StreamControl,
 	}
-	want := []string{"book", "mark", "funding", "executions", "account", "control"}
+	want := []string{"book", "mark", "funding", "orders", "executions", "account", "control"}
 
 	for i, s := range declared {
 		if err := s.Validate(); err != nil {
@@ -226,6 +226,12 @@ func TestStreamLane(t *testing.T) {
 		{events.StreamBook, events.LaneMarketData},
 		{events.StreamMark, events.LaneMarketData},
 		{events.StreamFunding, events.LaneMarketData},
+		// Orders and executions are SEPARATE kinds, and both are control lane.
+		// §4's OrderGateway declares two channels because a venue sequences them
+		// independently; one kind for both would put an accept, a reject and a
+		// fill in one per-instrument mailbox, where the exactly-once fill rule
+		// would have to deduplicate against a queue it shares.
+		{events.StreamOrders, events.LaneControl},
 		{events.StreamExecutions, events.LaneControl},
 		{events.StreamAccount, events.LaneControl},
 		{events.StreamControl, events.LaneControl},
@@ -264,6 +270,7 @@ func TestStreamRequiresPerp(t *testing.T) {
 		// rather than an oversight: spot fills and spot balances are real, and
 		// §4.2 makes the spot leg a full API family with its own user-data
 		// stream. Constraining them would silently unsubscribe half the trade.
+		{events.StreamOrders, false},
 		{events.StreamExecutions, false},
 		{events.StreamAccount, false},
 		{events.StreamControl, false},

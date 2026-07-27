@@ -154,6 +154,14 @@ func (b BookSnapshot) Validate() error {
 	if err := b.Watermark.Validate(); err != nil {
 		return fmt.Errorf("book watermark: %w", err)
 	}
+	// Checked HERE rather than in Watermark.Validate, which deliberately admits
+	// a zero because a REST-polled funding read has no sequence. A book is the
+	// case that exemption does not reach: the sequence is the position deltas are
+	// placed against, so a zero one is not a stream without gap detection, it is
+	// a book that can never advance. See ErrBookSeqUnset.
+	if b.Watermark.VenueSeq == 0 {
+		return fmt.Errorf("book %s: %w", b.Instrument, ErrBookSeqUnset)
+	}
 	if err := b.validateLevels(); err != nil {
 		return err
 	}

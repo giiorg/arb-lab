@@ -141,6 +141,25 @@ func TestBookSnapshotValidate(t *testing.T) {
 			domain.ErrWatermarkUnset,
 		},
 		{
+			// The MIRROR of BookDelta's ErrDeltaSeqUnset, and it was missing
+			// until the driving adapter was wired.
+			//
+			// Watermark.Validate deliberately admits a zero VenueSeq — a
+			// REST-polled funding read has none — so the case above passes
+			// through this one untouched: a book can have a complete watermark
+			// and no position. The consequence is not a wrong book. It is a book
+			// marked SYNCED at position zero, against which Follows returns
+			// SeqRelationUnknown for every later delta, forever, while the feed
+			// reports connected. See ErrBookSeqUnset.
+			//
+			// Note that this case must keep both timestamps populated. Zeroing
+			// the whole watermark — which is what the case above does — fires
+			// ErrWatermarkUnset first and would make this assertion vacuous.
+			"watermark carries no venue sequence",
+			func(_ *testing.T, b *domain.BookSnapshot) { b.Watermark.VenueSeq = 0 },
+			domain.ErrBookSeqUnset,
+		},
+		{
 			// The violation is at index 2, NOT index 1. At index 1 a check
 			// comparing against levels[i-1] and one comparing against levels[0]
 			// give the same answer, so the fixture would not distinguish them.

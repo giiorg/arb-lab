@@ -36,7 +36,45 @@ const (
 	// than a book does.
 	StreamFunding StreamKind = "funding"
 
-	// StreamExecutions carries private fills. Control lane: a lost fill is a
+	// StreamOrders carries private ORDER-LIFECYCLE events: accept, partial,
+	// cancel, reject. Control lane.
+	//
+	// # This constant was MISSING, and no spec edit was owed for it
+	//
+	// §4's OrderGateway declares StreamOrders() and StreamExecutions() as two
+	// separate channels, and §3.5's product-constraint table names StreamOrders
+	// among the private streams explicitly. This package declared six kinds and
+	// not this one — so the spec was already right and the CODE was wrong, which
+	// is the second time that has happened here (v0.9.8's AcceptOrdinal was the
+	// first). The slice-close marker grep cannot find this class of defect by
+	// construction: it locates claims the code MARKED, and a rule the code
+	// silently omits is marked nowhere. (Naming that grep's pattern literally in
+	// a comment would also break it, which is its own small lesson about a gate
+	// whose pattern is a string.) A reading pass over what the slice
+	// asserts normatively is what found it, which is why that pass sits beside
+	// the grep rather than inside it.
+	//
+	// # It is DISTINCT from StreamExecutions, and folding them was the tempting
+	// # reading
+	//
+	// §4 notes that fills arrive on both — "same ExecutionID, applied exactly
+	// once" — which makes StreamOrders look like a superset worth collapsing. It
+	// is not, and §3.4's mailbox is why: SourceID is the mailbox key, so one kind
+	// for both puts an accept, a reject and a fill in ONE per-instrument queue.
+	// The exactly-once rule then has to deduplicate a fill against a stream it
+	// shares a queue with, rather than across two independently sequenced ones,
+	// and a reject overtaking the fill of a prior order becomes expressible.
+	// Separate kinds keep each venue channel's own sequence authoritative within
+	// its own SourceID, which is what §3.5 says VenueSeq means.
+	//
+	// Nothing produces or consumes this yet — oms is the slice that will. It is
+	// declared now because the alternative is a missing enum member, and a
+	// missing member is exactly what §3.6 rule 10 exists to make impossible: the
+	// three switches below would each have silently classified it, and two of
+	// them default in the direction that is wrong for a private stream.
+	StreamOrders StreamKind = "orders"
+
+	// StreamExecutions carries private FILLS. Control lane: a lost fill is a
 	// position the ledger does not know about.
 	StreamExecutions StreamKind = "executions"
 
@@ -55,7 +93,7 @@ const (
 func (s StreamKind) Validate() error {
 	switch s {
 	case StreamBook, StreamMark, StreamFunding,
-		StreamExecutions, StreamAccount, StreamControl:
+		StreamOrders, StreamExecutions, StreamAccount, StreamControl:
 		return nil
 	case "":
 		return ErrStreamUnset
@@ -82,7 +120,7 @@ func (s StreamKind) Lane() Lane {
 	switch s {
 	case StreamBook, StreamMark, StreamFunding:
 		return LaneMarketData
-	case StreamExecutions, StreamAccount, StreamControl:
+	case StreamOrders, StreamExecutions, StreamAccount, StreamControl:
 		return LaneControl
 	}
 	// Unrecognised only. The private streams above used to share this line;
@@ -128,11 +166,11 @@ func (s StreamKind) RequiresPerp() bool {
 	switch s {
 	case StreamFunding, StreamMark:
 		return true
-	case StreamBook, StreamExecutions, StreamAccount, StreamControl:
+	case StreamBook, StreamOrders, StreamExecutions, StreamAccount, StreamControl:
 		// Named rather than left to the trailing return (§3.6 rule 10). Book
-		// exists on both families; the three private streams are not
-		// product-constrained — spot fills and spot balances are real. That is a
-		// different fact from the unclassified case below.
+		// exists on both families; the four private streams are not
+		// product-constrained — spot orders, spot fills and spot balances are all
+		// real. That is a different fact from the unclassified case below.
 		return false
 	}
 	return true

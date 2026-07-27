@@ -125,6 +125,28 @@ var (
 	// produces a wrong answer rather than an obvious one.
 	ErrBookInstrumentMismatch = errors.New("marketdata: delta names a different instrument than the book")
 
+	// ErrBookSeqUnset reports a reconstructed book carrying no venue sequence.
+	//
+	// # It is the MIRROR of ErrDeltaSeqUnset, and its absence was a live defect
+	//
+	// Watermark.VenueSeq is deliberately unchecked by Watermark.Validate, because
+	// a REST-polled funding read legitimately supplies none. A BOOK is the case
+	// that rule does not cover: §3.4 requires "lossless application with
+	// sequence-gap detection", and the sequence is what a delta's relation is
+	// computed against. A delta already cannot carry a zero — ErrDeltaSeqUnset
+	// and the LastSeq agreement check see to that — so the snapshot was the one
+	// end of the same claim left unstated.
+	//
+	// Left through, it does not produce a wrong book. It produces a book that is
+	// marked SYNCED at position zero, against which BookDelta.Follows returns
+	// SeqRelationUnknown for every subsequent delta forever: each one is refused
+	// as ErrAwaitingSnapshot, each refusal requests a snapshot, and each snapshot
+	// re-establishes position zero. A permanent resync loop reporting a connected
+	// feed, a valid book and a healthy transport — which is why this is a domain
+	// refusal naming the instrument rather than a comment asserting the state is
+	// unreachable.
+	ErrBookSeqUnset = errors.New("marketdata: reconstructed book carries no venue sequence")
+
 	// ErrDeltaSeqUnset reports a delta carrying no venue sequence.
 	//
 	// Watermark documents a zero VenueSeq as the ordinary case for a polled
