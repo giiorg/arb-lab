@@ -62,6 +62,11 @@
 //
 // # At-least-once means the consumer needs a dedup key, and Seq is it
 //
+// [SPEC EDIT LANDED — v0.9.7] D2 called the export at-least-once "to idempotent
+// consumers" and never said idempotent ON WHAT, which leaves content-hash dedup
+// as a reading that satisfies the spec and loses data. Named in §3.2 now, along
+// with Payload being the committed bytes (Message.Payload).
+//
 // The relay publishes, then acks. A crash in that window redelivers. This is not
 // a weakness to engineer away — closing it needs a distributed transaction with
 // each consumer, which is exactly the exactly-once mechanism D2 assigns to the

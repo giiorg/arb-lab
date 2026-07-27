@@ -4,6 +4,11 @@ import "fmt"
 
 // Posture is what the process is currently permitted to do at a venue.
 //
+// [SPEC EDIT LANDED — v0.9.7] §7.5 named reconcile-only as a PHASE OF BOOT, while
+// every §7.4 escalation puts an already-running process into it. It is a posture
+// occupiable at any time, and §7.5 now states the four rungs, the restrictive
+// zero value, and Weakest's halted identity.
+//
 // Integer enum with a zero sentinel — §3.6 rule 8's documented exception, same
 // as ratelimit.Priority and observability.Kind. It never crosses a wire; what
 // crosses is the refusal it produced.

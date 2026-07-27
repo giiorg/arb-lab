@@ -2523,7 +2523,15 @@ paid for repeatedly. The two honest options were *no tags* or *retro-tag all eig
 a larger change than the release needed, so the first was taken and the reason recorded here. ADR §3
 now carries both blocks, each row naming its section — traceability for all eighteen in one place.
 
-### 15b. Four unmarked candidates deliberately NOT landed — a scope call for the user
+### 15b. Four unmarked candidates deliberately NOT landed in v0.9.6 — **ALL FOUR LANDED as v0.9.7 (session 14, §16)**
+
+> **RESOLVED.** The scope call below was put to the user at the start of session 14 and answered:
+> **land them, as a doc-only v0.9.7, before the next slice starts.** All four are now in the core
+> (§3.2 + D2, §7.5, §7.6, §10), all five doc-set stamps are at v0.9.7, ADR §3 carries a third
+> milestone-1 block, and each of the four code sites now carries a `[SPEC EDIT LANDED — v0.9.7]`
+> marker. **Do not re-apply them.** The reasoning below is kept because *why each was originally
+> left unmarked* is the part worth not losing — see §16 for what changed the verdict.
+
 
 The release was held to **exactly the eight markers**, because the marker count is what makes the
 gate mechanical: `grep -rn "SPEC EDIT OWED" internal/` returned eight before and returns **zero**
@@ -2564,7 +2572,75 @@ English line verbatim, re-assembled, `102 pass / 0 fail`), and the release check
 it, because "the doc set is stamped" and "the generated doc set is stamped" were two different
 claims and only one of them was being checked.
 
-## RESUME HERE — updated end of session 13
+## 16. Session 14 — §15b's four landed as v0.9.7, and what reversed the verdict
+
+The user was asked the two open scope calls at the start of the session and answered both:
+**land §15b's four first**, then **build `marketdata`** as the first bounded context. This section
+records the first; the context is §17.
+
+### 16a. The test that reversed the judgement
+
+Each of the four was judged, when written, to be *an implementation of* an existing requirement
+rather than a deviation from it — which is why none carried a marker. Re-testing that judgement
+needed a sharper question than "is this in the spec?", because the honest answer for all four was
+"sort of, by implication", which is what produced the original verdict. The question used instead:
+
+> **Could a reimplementation get this wrong in the *unsafe* direction while still satisfying the
+> core as written?**
+
+All four fail it, and the failures are not close:
+
+| Statement | The satisfying-and-wrong reading | What it costs |
+|---|---|---|
+| outbox dedup key | D2 says *idempotent consumers* and never says idempotent **on what** — content-hash dedup is a natural reading | two identical funding accruals on successive intervals are distinct facts; the second is dropped, surfacing as a **missing funding receipt in the §10 tax records** that nothing reports |
+| boot posture | §7.5 calls reconcile-only a **phase of boot**, so a stage enum satisfies it | every §7.4 escalation puts a *running* process into it; and the natural way to write the combining minimum seeds the fold at the maximum, making **"nothing was checked" and "everything passed" the same answer** |
+| header ratchet | §7.6 says **header-aware** and stops — *adopt the venue's reading* is the obvious implementation | a reading below the local count is what **staleness looks like**; adopting it discards every request sent since, and the downside is a ban escalating toward three days against a throughput loss that lasts until the window rolls |
+| integer sample seam | §3.6 rule 4 bans `float64` under `internal/`, so a `//nofloat:allow` at the metric port satisfies it | that escape then propagates to **every instrumented call site**, each written by somebody thinking about a dashboard rather than rounding — and §12's kill-gate verdict is read off those panels |
+
+**The distinction from the previous eighteen is worth keeping and is recorded in ADR §3.** v0.9.5's
+ten and v0.9.6's eight were found by *writing* code that would otherwise have relied on an unstated
+requirement. These four were found by *re-reading* code and asking what backs a claim it already
+makes. That is a weaker signal, which is exactly why they were originally left unmarked — and the
+weaker signal still produced four real gaps.
+
+**Built with no new venue facts.** §7.6's edit leans on the rate-limit header names and Binance's
+429→418 ban escalating 2 min → 3 days; both are already verified in `venue-profiles.md` §2, so they
+are **cited, not introduced**, and that doc stays alignment-only. This was checked rather than
+assumed, on the standing rule that nothing enters the profiles unverified.
+
+### 16b. A process finding — the marker gate is necessary and not sufficient
+
+v0.9.6's release gate was `grep -rn "SPEC EDIT OWED" internal/` returning zero, and that gate was
+sound *for what it measures*: it proves nothing **flagged** is outstanding. It cannot see an
+unmarked normative claim, because an unmarked claim is exactly the thing it does not match — and
+the four above sat in the kernel through the whole of v0.9.6 with the gate reading green.
+
+**This is the vacuous-coverage lesson applied to the release process itself,** and it is the third
+place it has now appeared: a fixture pinned to a value that collapses a distinction (seven times, in
+the code), a check that is never executed (§15c, the Georgian tutorial), and now a check whose
+predicate cannot express the failure it is trusted to exclude. Zero markers means *nobody flagged
+anything*; it does not mean *code and spec agree*. **The standing addition is a slice-close reading
+pass over what the slice's code asserts normatively** — the question in §16a is the one to ask —
+kept separate from the marker grep rather than folded into it, because the two answer different
+questions and collapsing them would recreate exactly the gap being closed.
+
+**§15c's checklist item worked this time.** `cd docs && bun test` was run as part of the release
+rather than after it, the `ka` header fragment was re-synced to the new English status line before
+assembly, and the suite reports **102 pass / 0 fail**. That item is now load-bearing rather than
+aspirational.
+
+### 16c. What landed
+
+`build-spec.md` **v0.9.7**, all five doc-set stamps bumped, ADR §3 gains a **third** milestone-1
+block (bringing the tagless total to **twenty-two**, which the "not tagged" paragraph now states),
+and four `[SPEC EDIT LANDED — v0.9.7]` markers in `outbox/outbox.go`, `boot/posture.go`,
+`ratelimit/ratelimit.go` and `observability/sample.go`. **No formal-model change** — `docs/formal/`
+is untouched and still at the Cx8 verdict. **`state-machines.md` deliberately does not change**
+despite §7.5's posture edit being its near neighbour: the rungs are what a *process* refuses to do,
+while that doc's machines are what an *incident* does — the same reasoning v0.9.6 used for §7.5's
+latching rule. `make ci` green.
+
+## RESUME HERE — updated end of session 14
 
 **Environment, verified — do not re-derive.** **Go 1.26.5** (upgraded from 1.26.0 in session 5;
 both modules declare `go 1.26.0` as the minimum and `toolchain go1.26.5` as what to build with —
@@ -2610,8 +2686,11 @@ EIGHT packages in:** `platform/apperror` and `platform/ids` (session 6, with the
 
 **§1's deferred kernel table is EXHAUSTED (`boot` was the last one) and the SECOND SLICE IS CLOSED
 (session 13):** the eight spec edits landed as `build-spec.md` **v0.9.6**, the doc set is stamped,
-and nothing is owed. The next work is not another kernel package — it is **the first bounded
-context**. See "Next work" below.
+and nothing is owed. **Session 14 then landed §15b's four as a doc-only `build-spec.md` v0.9.7**
+(§16) — the user's call, taken before the next slice rather than folded into it, so that
+`grep OWED` returning zero once again means *code and spec agree* rather than *nobody flagged
+anything*. The next work is not another kernel package — it is **the first bounded context, and the
+user has chosen `marketdata`**. See "Next work" below.
 
 **The engine module still has ZERO production dependencies** (only test-only `pgregory.net/rapid`).
 That is now a decision with a record rather than an accident: §12a put taking
@@ -2624,7 +2703,8 @@ where the per-binary `/metrics` decision lives (§11 gives `arblab-actuator` no 
 and tracing lands once §3.5's `DispatchSeq` exists to hang a span on. Both deferred on argument
 (§12a, §12f), not forgotten.
 
-**NOTHING IS OWED — the eight spec edits LANDED as `build-spec.md` v0.9.6 (session 13, §15).**
+**NOTHING IS OWED. The doc set is at v0.9.7** (session 14, §16 — §15b's four, landed doc-only);
+the eight before them landed as **v0.9.6** (session 13, §15).
 `grep -rn "SPEC EDIT OWED" internal/` returns **zero**; the eight markers now read
 `[SPEC EDIT LANDED — v0.9.6]`, ADR §3 carries the milestone-1 second-slice block, and all five
 doc-set stamps are at v0.9.6. **Do not re-apply any of them.** What follows is the historical
@@ -2667,13 +2747,20 @@ edits into one coherent release at slice close, so external review reads deliber
 than drift. The gate was `grep -rn "SPEC EDIT OWED" internal/` (**code only** — the doc set is full
 of PROSE about past markers, so a repo-wide grep is mostly false positives): it returned exactly
 **eight** before, and returns **zero** now. The release was held to exactly those eight; four
-unmarked candidates are recorded in §15b as a scope call for the user, deliberately not smuggled in.
+unmarked candidates were recorded in §15b as a scope call for the user, deliberately not smuggled
+in — and **session 14 landed all four as v0.9.7** (§16), which is where the limit of that gate is
+written down: zero markers proves nothing was *flagged*, not that code and spec *agree*.
 
 **Release checklist, for the next slice that closes** (§15c is why the last item is on it):
-`grep -rn "SPEC EDIT OWED" internal/` → land what it finds → bump **all five** doc-set stamps →
-ADR §3 block → flip the code markers to `[SPEC EDIT LANDED — v<version>]` → **`cd docs && bun test`**,
-because `tutorial.ka.md` is generated and its stamp is a *copy* of the English one; the invariant
-checker catches the drift and refuses to assemble, but only if somebody runs it → `make ci`.
+`grep -rn "SPEC EDIT OWED" internal/` → land what it finds → **then a reading pass over what the
+slice's code asserts *normatively* and the spec does not** (§16b: the grep cannot see an *unmarked*
+claim, which is how four of them sat through a whole release with the gate green; the question to
+ask each one is "could a reimplementation get this wrong in the **unsafe** direction while still
+satisfying the core as written?") → bump **all five** doc-set stamps → ADR §3 block → flip the code
+markers to `[SPEC EDIT LANDED — v<version>]` → **re-sync `i18n/ka/tutorial/header.md`'s status line
+to the new English one and `node i18n/tools/assemble.mjs`** → **`cd docs && bun test`**, because
+`tutorial.ka.md` is generated and its stamp is a *copy* of the English one; the invariant checker
+catches the drift and refuses to assemble, but only if somebody runs it → `make ci`.
 
 **The `CLAUDE.md` owed since §2 now exists** (repo root, written session 6). It carries the
 `internal/` taxonomy, the doc-set map, the build split, the three enforced gates, and the standing
@@ -2815,15 +2902,23 @@ working rules. That item is discharged.
    edits, landed as `build-spec.md` v0.9.6.** The slice's own convention said the spec edits come
    first, and they did. **The second slice is CLOSED.** Do not re-open it and do not re-apply any
    of the eight.
-0b. **NEXT SLICE: the first bounded context** — formerly fork (b), now unblocked and unambiguous.
-   It is what makes `hexboundary`, `singlewriter` and `exhaustiveswitch` buildable for the first
-   time (§1, §4 defer all three on "a lint over an empty tree passes trivially" — a check over an
-   empty tree passes trivially, which is indistinguishable from a broken check). **Which context
-   first is a scope call worth putting to the user**; the shape of the argument is that §3.2 makes
-   `oms` the single-writer authority, so it is the one the other three gates are written about,
-   while `marketdata` is the one with no durable state and therefore the cheaper first proof of the
-   layering. **Also open for the user: §15b's four unmarked normative statements** — land them as a
-   v0.9.7 follow-up, or leave them as implementation detail.
+0b. ~~**§15b's four**~~ — **DECIDED and DONE (session 14, §16): landed as `build-spec.md` v0.9.7,
+   doc-only, before the next slice started.** Do not re-apply them.
+0c. **NEXT SLICE: `marketdata`, the first bounded context** — **DECIDED by the user (session 14).**
+   It is what makes `hexboundary` and `exhaustiveswitch` buildable for the first time (§1, §4 defer
+   them on "a lint over an empty tree passes trivially" — indistinguishable from a broken check).
+   **`singlewriter` stays deferred**, because it is the one gate that genuinely needs `oms`'s write
+   repository; two of the three wake here, not three. **The alternatives and why they lost, so this
+   is not silently reopened:** `oms` is the context §3.2 makes the single-writer authority and the
+   one all three gates are written about, but it needs the journal — and `platform/outbox`'s store
+   half is deferred to milestone 3 (item 1b below), so `oms` first means either pulling milestone-3
+   work forward or building against a **stubbed write repository**, which is precisely the hazard
+   §14h rejected for the `Reconciler` port: *a nil-returning implementation reports every gate
+   passed with nothing joined, and the boot is green*. `strategy` is closest to the milestone-2
+   verdict but consumes `marketdata`'s output, so it would be built against invented inputs. The
+   decisive argument is the kill gate: **milestone 2's verdict is measured net carry, and you
+   cannot measure carry without funding-rate data while you can measure it without ever placing an
+   order** — `marketdata` is on that critical path and `oms` is not.
 1. ~~**`platform/boot`**~~ — **DONE (session 12, §14).** §1's deferred kernel table is exhausted.
    **The parity dispatcher is what `events` was the last prerequisite for** — but it also needs a
    persisted `DispatchSeq` log, so it is not simply "next" (§9b).
@@ -2832,8 +2927,13 @@ working rules. That item is discharged.
    forgotten. When it lands, the thing to check first is that the append and the journal write are
    genuinely one transaction, because everything in `platform/outbox` assumes it and nothing there
    can test it.
-2. **`hexboundary`, `singlewriter`, `exhaustiveswitch` stay deferred** until a bounded context, an OMS
-   write repository and a state machine exist to police. Unchanged reasoning (§1, §4).
+2. **The three sleeping gates split at item 0c, and the split is the point.** `hexboundary` and
+   `exhaustiveswitch` become buildable **with `marketdata`** — a context with `domain/` /
+   `application/` / `infrastructure/` layering is all either needs to police, and building them
+   against the first context is what proves the layering rather than asserting it. **`singlewriter`
+   stays deferred** until `oms`'s write repository exists; it is the one gate whose subject is
+   genuinely absent, and a lint over an empty tree passes trivially (§1, §4 — unchanged reasoning,
+   now scoped to one gate instead of three).
 3. **Confirm the ClientOrderID venue budget before milestone 3** (§8g) — 36 characters and
    `[A-Za-z0-9_-]` on Binance `newClientOrderId` and Bybit `orderLinkId`, browser-confirmed to the §4
    standard and recorded in `docs/venue-profiles.md`. Not needed to keep building; needed before a

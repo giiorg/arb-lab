@@ -115,6 +115,11 @@ func (u Unit) suffix() string {
 //
 // The zero value is unusable. Construct with Count, Seconds, Bytes, Ratio or
 // MoneyOf.
+//
+// [SPEC EDIT LANDED — v0.9.7] §3.6 rule 4 bans float64 and §10 lists metrics, but
+// neither said how a number ENTERS this layer — which is the one boundary where a
+// float64 seam gets reintroduced for the whole codebase on the argument that it
+// is only a metric. §10 now states the integer seam and the unit/asset tags.
 type Sample struct {
 	mantissa int64
 	unit     Unit

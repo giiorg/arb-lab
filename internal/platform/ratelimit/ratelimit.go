@@ -62,6 +62,10 @@
 //
 // # Header-aware means the venue's count wins, in one direction
 //
+// [SPEC EDIT LANDED — v0.9.7] §7.6 said "header-aware governors" and stopped, so
+// "adopt the venue's reading" was a satisfying and dangerous implementation. The
+// upward-only fold and Penalize's retry-hint-as-floor are both in §7.6 now.
+//
 // A governor that only counted its own sends would be a guess. The venues report
 // consumption back (`X-MBX-USED-WEIGHT-*`, `X-Bapi-Limit-*`), so Observe folds
 // that reading in. It folds in only UPWARD, and the asymmetry is the point.
