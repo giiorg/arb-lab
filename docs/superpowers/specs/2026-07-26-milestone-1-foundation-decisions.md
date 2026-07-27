@@ -3163,6 +3163,67 @@ The pair is the reason `SURVIVED` is a question rather than a verdict.
 
 **Next is `oms`**, which expires `singlewriter`'s deferral and completes the six-gate roster. `StreamOrders` now exists for it.
 
+## §23 — session 21: `oms/domain`, the sixth slice OPENED — the order lifecycle and the fill ledger
+
+### §23a — what was built, and what this slice is NOT
+
+`internal/oms/domain/`: `OrderState` (§5.3's fixed twelve-state set) with `Validate`, `IsTerminal` and `ContributesPossibleDelta`; `CanTransition` over SM §1's edge set; `Fill`, `FillKey` and `Ledger`. Five files, two test files, 22 mutations.
+
+**The slice is OPEN, not closed.** There is no `oms/application/`, no `ports`, no `infrastructure/`, no `module.go`, and no `Trade` or `Order` aggregate — this is §5.3's *mechanism* layer only. `singlewriter`'s deferral has therefore **NOT expired**: it is scoped to "until `oms`'s write repository exists", and a repository is a port with an adapter, which is the next slice's subject rather than this one's. Recorded explicitly because the roster paragraph in §3.6 invites the opposite reading, and this repo's rule is that a deferral expires when its subject appears — the subject is the repository, not the package.
+
+### §23b — the two silences in SM §1, both found by reading the table against the prose
+
+Both are silences rather than disagreements (the v0.9.9 shape), and both fail the same way: **a stall, with every light green.**
+
+**`DispatchAuthorized` has no way out.** SM §1's table gives it two rows — `send returns → Submitted`, and `no-return / crash → DispatchAuthorized (stays)`. The second names the resolution *in its action column* ("resolved by query only") and leaves the target column pointing back at itself, so the resolution's **outcome edges are unstated**. The requirement is stated three times elsewhere and reached the table none of them: core §5.3's rules paragraph ("an order at `DispatchAuthorized` or beyond is resolved **only** by `OrderByClientID`/`Fills`"), SM §1's own invariant ("crash recovery is defined for every pre-ack state"), and FLAG-2's ruling ("applies equally to `DispatchAuthorized`-recovery resolution"). Implemented as the table reads, a crash-recovered order is stuck in a state that contributes a possible-delta interval, so §6.7 classifies its hedge group **Ambiguous permanently**: the exposure stays open, new trading is held, an operator is alerted about an order the venue may have filled hours earlier, and nothing reports an error. **Owed: the five query-resolution edges, same set as `SubmissionUnknown`'s.**
+
+**Venue-initiated termination is absent entirely.** Every path into `Canceled` leaves `CancelPending` or `CancelUnknown` — states entered by requesting a cancel *ourselves*. But §6 step 6 makes the execution pattern "parallel marketable-IOC limit orders", i.e. IOC is the **only** order type this system sends, and SM §2's finality contract states the consequence in its own step 1: **"an IOC is immediately terminal at the venue"**. A partially-filled IOC has its remainder canceled *by* the venue with no request from us; one that crosses nothing is canceled outright. Neither passes through `CancelPending`. So without these edges **the only order type this system sends can never terminate on its ordinary outcome** — it sits `Acknowledged` or `PartiallyFilled`, both delta-contributing, and the one-leg-failure handler waits for fills on an order the venue closed milliseconds after we sent it while a naked leg stays naked. **Owed: a venue-initiated termination row covering `Acknowledged`/`PartiallyFilled` → `Canceled` (IOC expiry, GTD expiry, venue cancel-all, self-trade prevention), distinct from the FLAG-1 rows, which are about a cancel WE requested.**
+
+**Rejected framing for both: "the table is a summary, the prose governs."** It does not survive contact with §3.6 rule 10's own argument — the states are an enum-like precisely so a decision site cannot silently omit a member, and a transition *table* that omits an edge is the same defect one level up. SM is normative by reference; a mechanism document that cannot be implemented literally is one nobody can check an implementation against.
+
+### §23c — `ContributesPossibleDelta` is not `!IsTerminal`, and Planned is the whole finding
+
+§6.7's ambiguous-state list has **seven** members. There are **eight** non-terminal states. The difference is `Planned`, and §5.3 says why in a sentence written for another purpose: "a `Planned`-only order was never dispatched (no venue order can exist)". An order that cannot have reached the venue cannot move the venue's delta, so it contributes a **point — zero** — not an interval.
+
+The negation is the plausible simplification, it reads as the conservative choice, and it **deadlocks the system**: §6.7 requires an ambiguous residual to be quiesced to finality *before* any compensating trade, and the finality contract resolves an order by querying the venue for it. There is nothing at the venue to query for a `Planned` order, so the contract runs to its deadline, the group enters `DeadlineExceededAmbiguous`, new trading is held and an operator is alerted — over an order the OMS has merely not sent yet and will happily leave unsent, **because §6.7 just told it to stop opening.**
+
+### §23d — the mutation that found the mirror the reading pass missed
+
+One `SURVIVED`, and it was a real gap of a **recorded** kind. `IsTerminal` and `ContributesPossibleDelta` both ended in `return false, s.Validate()`, which *looks* like the fix for the trailing-return-hides-its-own-group trap and is not: **`Validate` answers nil for every declared state**, so a member dropped from a *false-group* case falls through to `(false, nil)` — the identical answer, and the group stays untestable. Dropping `StatePlanned` from the no-delta case survived every test in the file, including the one written specifically for it.
+
+What makes this worth recording rather than just fixing: the identical shape had been diagnosed and fixed **one function away**, in `successors`, thirty minutes earlier — where the terminal group would have been hidden the same way. This is the "a fix applied in one place gets applied to its mirror" rule, and the mirror was in the same file. The fix is validate-first, then switch, then an **unconditional** `ErrOrderStateUnhandled` reachable only from a *declared* state with no case.
+
+### §23e — the third-copy check that was NOT written
+
+`errors.go` was drafted with an `ErrFillAssetMismatch`. It was deleted before the ledger was written, because `fixedpoint.Quantity.Add` already refuses a disagreeing asset tag — so a check here would be §22g's surviving-mutant shape (a helper validating what its caller already validated, with no test able to tell which fired). The fold's own refusal stands, wrapped with the order and the execution. The deletion is recorded *in `errors.go`* as a parenthetical, so the next contributor does not add it back as an obvious omission.
+
+### §23f — FillKey looks like a dedupe hole and is not, conditionally
+
+§5.3's key is `UNIQUE(account, venue, product_category, symbol, execution_id)`. `FillKey` holds an `ids.VenueInstrument`, which carries a **`ContractType` the key does not name** — and a wider key is a *weaker* uniqueness constraint. It is safe because `VenueInstrument.Validate` refuses a Contract disagreeing with its Product, so the fourth field is functionally determined (ids' own doc calls it "a checksum").
+
+**The conditional is the whole point.** An *unvalidated* `{linear_perp, inverse}` is a distinct map key from the `{linear_perp, linear}` naming the same real instrument, so the same execution applies twice. Hence `Key` validates rather than being an infallible constructor, and hence a test asserts the contradiction is refused at both `Register` and `Key`.
+
+### §23g — the fixture-collapse checklist, run before the mutations; it changed four fixtures
+
+- **One fill collapses sum, first and last.** Three fills at **1, 2, 4** make the total distinct from every individual fill *and every pair*, so no wrong fold reaches 7.
+- **`Remaining` with ordered = 14 would equal cumulative.** Ordered **10** against 7 filled gives 3 — equal to neither operand, nor zero, nor any single fill.
+- **The instrument-mismatch fixture was built from two symbols**, where "compares the whole instrument" and "compares the symbol" give the same answer. Rebuilt as **spot vs perp of the SAME symbol** — which is also the pair that actually occurs, since a cash-and-carry trade holds an order on each at the same instant. The mutation `f.Instrument != order.instrument` → symbol-only comparison is `caught` **only** because of this change.
+- **The dedupe fixture varied the execution ID**, which passes against a key made of the execution ID alone. Rebuilt to hold the execution ID **fixed** while varying product and account — the §9 chaos case "identical spot/perp execution IDs".
+
+### §23h — mutations: 22 run, 22 caught (after the §23d survivor was fixed)
+
+Nine on the state machine, thirteen on the ledger. One `NOBUILD!!` and two `NO-OP!!` along the way, each the harness's own guard working rather than a result. The `successors` design was chosen *for* mutation observability: `(nil, nil)` for the three real terminals and an unconditional error at the bottom, so "Filled dropped from the terminal case" is `caught` by a test rather than only by `exhaustiveswitch`.
+
+### §23i — what is owed: THREE markers, and the slice cannot close on them alone
+
+`grep -rn "SPEC EDIT OWED" internal/ tools/` returns **three**: two in `transition.go` (§23b) and one in `fill.go` — §5.1's `Fill` field list carries **`Fee Money` AND `FeeAsset`**, a list that predates the money kernel, so the asset is stated twice and fee attribution and the tax export can reconcile to two different numbers. All three are silences or stale field lists; **none is a disagreement with the core.**
+
+**No formal-model change** — nothing here touches the fence/takeover/plan composition, so `docs/formal/` stays at the Cx8 verdict.
+
+## RESUME HERE — updated end of session 21
+
+**SESSION 21 UPDATE — READ THIS FIRST.** Milestone 1's **sixth slice (`oms`) is OPEN**, not closed. `internal/oms/domain/` holds §5.3's order lifecycle and fill ledger; **nothing above `domain/` exists yet**, so `singlewriter`'s deferral has **not** expired — its subject is the write *repository*, which is a port plus an adapter and belongs to the next slice. `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **THREE** (2 × `transition.go`, 1 × `fill.go`) — that is correct mid-slice; markers land at slice close. `make ci` green, 22 mutations / 22 caught, one diagnosed survivor fixed (§23d). Doc set is **still v0.9.10** and correctly so: no spec edit has landed yet. The reasoning is **§23**; §22 is now history. What follows was written at the end of session 20 and earlier.
+
 ## RESUME HERE — updated end of session 20
 
 **SESSION 20 UPDATE — READ THIS FIRST.** `marketdata`'s **book path is COMPLETE and the slice is CLOSED**. `build-spec.md` is at **v0.9.10** with §3.4 ×2 and §4 ×1; `platform/events` gained **`StreamOrders`**, which was a code omission against an already-correct spec and therefore owed no edit. **`grep -rn "SPEC EDIT OWED" internal/ tools/` is CLEAN.** `make ci` green, 17 mutations / 15 caught / 2 diagnosed survivals (opposite diagnoses — §22g). The reasoning is §22; §21 is now history. **Next is `oms`.** What follows was written at the end of session 19 and earlier.

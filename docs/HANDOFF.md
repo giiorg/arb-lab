@@ -1,6 +1,6 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-07-27): **v0.9.10** — milestone 1's first FIVE slices are CLOSED, including `marketdata` complete on the funding AND book paths. **Nothing is owed to the core; ONE verification is owed to Profiles — see START HERE.** **Start at `## START HERE` below, not at this line.**
+## Status (2026-07-27): **v0.9.10** — milestone 1's first FIVE slices are CLOSED; the **sixth (`oms`) is OPEN**, with `oms/domain` built and **three spec edits owed**. **Start at `## START HERE` below, not at this line.**
 
 **v0.9.9 (2026-07-27) — the fourth-slice release, and the one that CLOSES `engine/venue`.** The slice built the normalized funding DTO that retired `marketdata`'s `driving.FundingUpdate` placeholder, and produced **three** spec edits — **all silences in the core rather than disagreements with it**, the v0.9.6 shape rather than v0.9.8's. **This is milestone 1's first close containing no code change**, which is what "the code already agreed with the spec, the spec had just never said it" looks like from outside. **Two of the three are a sharper kind of silence and the distinction is the finding worth carrying: the core does not omit them, it states them twice, incompatibly.** §3.5: the **market-data seam was declared twice** — a flat `DataSource{ Subscribe(VenueInstrument) <-chan Envelope }` here and three per-stream methods in §4, for the same pipeline position, with no type satisfying both. **§4's per-stream shape wins and the seam is `MarketDataSource` throughout**, on three grounds — one channel per instrument merges three `SourceID`s and forces the subscriber to re-derive a key the seam could have kept; the per-stream product constraints are **inexpressible** in `Subscribe(VenueInstrument)`; and §7.6's capacity ladder gets spent on a book feed a funding-only consumer never wanted. The tell that §4 was current is structural rather than a preference: **every other line of §3.5's seam block is written as a reference to §4**, while `DataSource` was the one written as an independent definition — and `venue-profiles.md` §3 was **already** writing `MarketDataSource.StreamMark`, which is cheaper evidence than any of the three arguments. §3.5 also: **a `SourceID` MUST refuse an `(instrument, stream)` pair no venue can produce** — §4 marks funding and mark perp-only per stream and §3.5 never carried it across, so a spot funding source validated cleanly, and §3.4 makes `SourceID` the mailbox key, so an impossible source is **a mailbox that exists, can be subscribed to, and never delivers**, indistinguishable downstream from a venue gone quiet. The rule states the **full table including the negative rows** (the private streams and control are *not* product-constrained), because the constraint reads like a market-data property and is not one — §4.2 makes spot a full API family with its own user-data stream, so inferring it would silently unsubscribe half a cash-and-carry trade. §4: **the units discipline that covered money now covers time.** `fixedpoint` puts a money field's dimension in its type; a duration has none, and a venue duration field's unit lives only in its **name** (Bybit's `fundingIntervalHour`) — so an adapter can multiply by `time.Minute`, satisfy the never-`float64` rule completely, and hand §2.4 a 480-minute interval that enumerates a plausible settlement count while **§12's kill-gate carry figure is wrong by a factor of sixty with nothing failing**. That is §10's own v0.9.7 argument applied one layer earlier, where the duration is *created*. A zero is **refused, never defaulted**: it arrives from three situations a fallback answers identically, two are a wiring failure wearing a correct BTC reading's clothes, and the third **absorbs §2.4's C8 flip**. Three code markers now read `[SPEC EDIT LANDED — v0.9.9]`, `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **zero**, ADR §3 gains the **milestone-1 fourth-slice block** (tagless total now **thirty-three**) and the `C8` traceability row gains core §4, `docs` 102 pass, `make ci` green. **No formal-model change; `docs/formal/` is untouched and still at the Cx8 verdict.** Full reasoning with rejected alternatives: decision record **§20** (the slice) and **§21** (the close).
 
@@ -77,7 +77,76 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 20, 2026-07-27)
+## START HERE (updated end of session 21, 2026-07-27)
+
+**Branch `feat/milestone-1-foundation`, tree clean, `make ci` green.** Verify rather than trust
+this sentence: `git status --short` and `git rev-list --left-right --count @{u}...HEAD`. The head
+commit is not named here on purpose — a paragraph citing its own hash is stale the moment the
+commit containing it is written.
+
+### Where the work is
+
+**Milestone 1's sixth slice — `oms` — is OPEN, and this is the first session on it.** What exists
+is `internal/oms/domain/` and nothing else: §5.3's twelve-state order lifecycle (`OrderState`,
+`CanTransition` over SM §1's edge set) and the cumulative-execution fill ledger (`Fill`, `FillKey`,
+`Ledger`). Two commits. **22 mutations, 22 caught** after one diagnosed survivor was fixed.
+
+Reasoning with the rejected alternatives: decision record **§23**. §22 is now history.
+
+### Three things to know before you touch anything
+
+1. **`singlewriter`'s deferral has NOT expired, and do not land the gate yet.** The deferral is
+   scoped to *"until `oms`'s **write repository** exists"*, and a repository is a port with an
+   adapter — `oms/application/ports/` and `oms/infrastructure/driven/`, neither of which exists.
+   A `domain/` package is not its subject. Landing the analyzer now means a lint over a tree with
+   nothing to police, which is the exact thing the deferral was written to prevent, and a clean run
+   would be indistinguishable from a broken one. It expires **the session the repository appears**,
+   which on current shape is the next one.
+
+2. **THREE markers are owed, and that is correct mid-slice** — they land at slice close, not when
+   taken. `grep -rn "SPEC EDIT OWED" internal/ tools/` returns 2 × `transition.go` + 1 × `fill.go`.
+   The doc set is **still v0.9.10** and correctly so: nothing has been landed into the spec yet.
+
+3. **Do not "simplify" `ContributesPossibleDelta` to `!IsTerminal()`.** It is the one predicate in
+   the package whose correctness is invisible to type-checking, its doc comment argues the case at
+   length, and a test asserts the two predicates disagree on **exactly one** state. See §23c.
+
+### The three owed edits, stated so the next session can land them without re-deriving
+
+All three are **silences or stale field lists — none is a disagreement with the core.**
+
+- **SM §1 transitions table, `DispatchAuthorized` row.** Add the five query-resolution edges
+  (`Acknowledged` / `PartiallyFilled` / `Filled` / `Rejected` / `AbsentAfterFinality`), the same set
+  `SubmissionUnknown` has. Core §5.3's rules paragraph, SM §1's own crash-recovery invariant and
+  FLAG-2's ruling **all three** already require it; the table has the resolution in its *action*
+  column and its target column pointing back at itself, so read literally a crash-recovered order
+  can never leave the state. Cost of the silence: the hedge group is permanently `Ambiguous`,
+  exposure open, new trading held, nothing erroring.
+- **SM §1 transitions table, a NEW venue-initiated termination row.** `Acknowledged` /
+  `PartiallyFilled` → `Canceled` on IOC expiry, GTD expiry, venue cancel-all or self-trade
+  prevention — **distinct from the FLAG-1 rows**, which are about a cancel *we* requested. §6 step 6
+  makes marketable-IOC the only order type sent, and SM §2 step 1 already says "an IOC is
+  immediately terminal at the venue". Without it the only order type this system sends can never
+  terminate on its ordinary outcome.
+- **Core §5.1, the `Fill` field list.** Drop `FeeAsset`; `Fee Money` carries the asset tag already.
+  The list predates the money kernel.
+
+### What comes next, in the order that keeps the gate honest
+
+`oms/application/` — the ports and the use case that drives the lifecycle — then
+`infrastructure/driven` with the write repository, **and `singlewriter` lands in that same session**
+rather than after the code it polices. Then `module.go`, then the slice closes: the three markers
+above land in the spec, all five stamps and the Georgian header re-sync, `tutorial.ka.md`
+re-assembles, ADR §3 gains the seventh milestone-1 block.
+
+**Still owed from session 20 and untouched here:** the `venue-profiles.md` verification of the two
+venues' **depth update-ID shapes**, which `venue.BookDelta`'s span design cites. Not a correctness
+risk — see the session-20 section below for why, and why it decides whether `SeqRelationOverlap` is
+reachable in production at all.
+
+---
+
+## START HERE (updated end of session 20, 2026-07-27, HISTORICAL)
 
 **Branch `feat/milestone-1-foundation`, tree clean, `make ci` green on Go 1.26.5.** Verify rather
 than trust this sentence: `git rev-list --left-right --count @{u}...HEAD`. The head commit is not
