@@ -75,7 +75,78 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 17, 2026-07-27)
+## START HERE (updated end of session 18, 2026-07-27)
+
+**Branch `feat/milestone-1-foundation`, tree clean, `make ci` green on Go 1.26.5.** Verify rather
+than trust this sentence: `git rev-list --left-right --count @{u}...HEAD` should print `0 0`. No PR —
+deliberate. The head commit is not named here on purpose: a paragraph citing its own hash is stale
+the moment the commit containing it is written.
+
+### Where the work is
+
+**Milestone 1's fourth slice — `engine/venue` — is BUILT and NOT CLOSED.** The user chose it from
+session 17's three candidates on the decay argument: `driving.FundingUpdate` was explicitly the
+contract *until* `engine/venue` landed, and exactly one consumer held that placeholder. It is now
+`venue.Funding`, and `driving.FundingUpdate` no longer exists. `domain/` and `application/` were
+untouched by the move — §3.6 rule 1's promised property, now checked rather than predicted.
+
+| Piece | State |
+|---|---|
+| `internal/engine/venue/{doc,funding,source,errors}.go` | **Done** — normalized funding DTO + the mailbox-key constructor |
+| `marketdata` migrated onto it (`driving/`, `driven/`) | **Done** |
+| §4's perp-only rule, pushed down to `platform/events` | **Done** — `StreamKind.RequiresPerp` + `SourceID.Validate` |
+| **The slice CLOSE** | **OWED — this is the next work.** Full list: decision record **§20h** |
+
+`grep -rn "SPEC EDIT OWED" internal/ tools/` returns **three**, and all three are *silences in the
+core rather than disagreements with it* — the v0.9.6 shape:
+
+1. **`engine/venue/doc.go`** — §3.5 and §4 declare the market-data seam **twice, with incompatible
+   shapes**. §3.5: `DataSource interface { Subscribe(VenueInstrument) <-chan Envelope }`. §4:
+   `StreamBook`/`StreamFunding`/`StreamMark`. Same position in the pipeline; a type satisfying one
+   does not satisfy the other. §4 wins. **It is deliberately not resolved by declaring the
+   interface** — that is the empty-tree case.
+2. **`platform/events/envelope.go`** — §3.5's `SourceID` can name a source **no venue can produce**.
+   §4 marks funding and mark perp-only; §3.5 never carries it across, so a spot funding source
+   validated cleanly and was covered only by accident, three layers downstream, by `marketdata`'s
+   own domain.
+3. **`engine/venue/funding.go`** — §4 states a units discipline **for money and none for time**.
+   Bybit's `fundingIntervalHour` multiplied by `time.Minute` satisfies the spec completely and hands
+   §2.4 a settlement count wrong by 60×. This is §10's v0.9.7 argument, one layer earlier.
+
+### Three things from this slice that will bite if you do not know them
+
+1. **`venue.Funding` and `domain.FundingObservation` overlap ON PURPOSE, and neither is deletable.**
+   §3.6 rule 1 forbids `domain/` from importing `engine/`, so the domain *cannot* be expressed in
+   terms of the venue type. The consequence: the venue-side `Validate` is a strict subset of the
+   domain's over the shared fields, so **no input exists that one refuses and the other accepts** —
+   the only observable difference is which boundary the error names. That is what
+   `TestDeliverJudgesTheVenueReadingBeforeTranslatingIt` pins, and without it the venue check is
+   silently deletable.
+2. **A trailing `return X` in a switch makes the `X` group's membership invisible to tests.** Any
+   member dropped from it falls through to the same answer; only `exhaustiveswitch` catches it
+   (verified by hand — `make lint` exits 3). Probed against **committed code from an earlier slice**
+   to confirm it generalizes: dropping `StreamControl` from `Lane`'s control case **survives**,
+   dropping `StreamFunding` from its market-data case is **caught**. The two gates are not redundant.
+   Do not "fix" this by flipping a default — that trades a checkable claim for a dangerous one.
+3. **There is no `DefaultFundingInterval` constant, and its absence is load-bearing.** Profiles §1
+   gives Binance's "absent ⇒ 8h default", but a zero-value fallback answers three different
+   situations identically and two are a wiring failure wearing a correct BTC reading's clothes. Zero
+   is refused; the default belongs to the Binance adapter, applied from an overlay that was fetched
+   and came back empty.
+
+### The finding this slice contributes to method
+
+**§19e's lesson recurred inside a single session, and the mutation harness is what caught it.** A
+comment at `LanePublisher`'s new `venue.FundingSource` call claimed the constructor produced the
+outer, better-named diagnosis for a spot instrument. Replacing the call with the literal it replaced
+**survived** — because the rule lives on `events.SourceID.Validate`, both paths produce the identical
+wrapped error. The comment was arguing for a property the code did not have. That is the good
+outcome (the rule is enforced by *construction*, not by remembering the constructor) reported by a
+false claim, and the fix was to say what the call actually buys.
+
+---
+
+## START HERE (updated end of session 17, 2026-07-27, HISTORICAL)
 
 **Branch `feat/milestone-1-foundation`, tree clean, `make ci` green on Go 1.26.5, pushed and in
 sync.** Verify rather than trust this sentence: `git rev-list --left-right --count @{u}...HEAD`
