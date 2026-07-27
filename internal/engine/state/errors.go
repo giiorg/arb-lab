@@ -29,10 +29,18 @@ var (
 	// ErrRegression reports a write whose observation predates the one already
 	// held. See Cache.PutFunding.
 	ErrRegression = errors.New("state: observation predates the cached one")
-
-	// ErrInstrumentMismatch reports a write whose payload names a different
-	// instrument than the key it would be stored under. It cannot happen through
-	// the exported API, which derives the key from the payload; it is the
-	// assertion that keeps that true.
-	ErrInstrumentMismatch = errors.New("state: observation instrument does not match its key")
 )
+
+// There is deliberately no ErrInstrumentMismatch here, and its absence was a
+// decision rather than an omission. One was declared in this slice's first draft
+// — "it cannot happen through the exported API, which derives the key from the
+// payload; it is the assertion that keeps that true" — and no such assertion
+// existed, nor could one: both write paths derive the key from the payload one
+// line before storing it, and domain.Watermark carries no instrument of its own
+// to disagree with. So the sentinel was returned by nothing and reachable by
+// nothing, while `errors.Is(err, ErrInstrumentMismatch)` compiled, always
+// answered false, and READ as a handled case. Its two siblings are the contrast
+// that makes the point: oms.ErrFillInstrumentMismatch and
+// marketdata.ErrBookInstrumentMismatch are each returned by real code and pinned
+// by a test, because there the two identities genuinely arrive from different
+// places.

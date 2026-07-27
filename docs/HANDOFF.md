@@ -1,6 +1,6 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-07-27): **v0.9.11 — the sixth-slice release, and the one that CLOSES `oms`.** Milestone 1's first SIX slices are now CLOSED. The slice produced **seven normative edits** — three in SM §1's transitions table, two in core §5.1, two in core §3.6 — plus a code fix carrying no spec edit: **§3.6 rule 2's drift in the already-closed `marketdata` slice, fixed rather than carried a fourth session**. `grep -rn "SPEC EDIT OWED" internal/ tools/` returned **ZERO** at that close; it returns **two** now, from the open seventh slice. **Start at `## START HERE` below, not at this line.**
+## Status (2026-07-27): **v0.9.12 — the seventh-slice release, the one that CLOSES `engine/state`, and the one that EMPTIES §12 milestone 1's build roster.** All SEVEN slices are closed. The slice produced **four normative edits** — three in core §3.4 (with one also touching §3.5) and one in core §5.2 — plus a code fix carrying no spec edit: **a sentinel `errors.Is` could name that nothing could ever return**, documented as "the assertion that keeps that true" while no assertion existed or could be written. **Two of the four edits were found by the closing reading pass rather than by the marker grep**, which is now the third consecutive release where the pass out-produced the gate. `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **ZERO**; two code markers read `[SPEC EDIT LANDED — v0.9.12]`. `make ci` green, all six gates clean, `docs` 102 pass, `docs/formal/` untouched at Cx8. **Milestone 2's kill gate is next, and it is the project's stop/go decision.** **Start at `## START HERE` below, not at this line.**
 
 **v0.9.9 (2026-07-27) — the fourth-slice release, and the one that CLOSES `engine/venue`.** The slice built the normalized funding DTO that retired `marketdata`'s `driving.FundingUpdate` placeholder, and produced **three** spec edits — **all silences in the core rather than disagreements with it**, the v0.9.6 shape rather than v0.9.8's. **This is milestone 1's first close containing no code change**, which is what "the code already agreed with the spec, the spec had just never said it" looks like from outside. **Two of the three are a sharper kind of silence and the distinction is the finding worth carrying: the core does not omit them, it states them twice, incompatibly.** §3.5: the **market-data seam was declared twice** — a flat `DataSource{ Subscribe(VenueInstrument) <-chan Envelope }` here and three per-stream methods in §4, for the same pipeline position, with no type satisfying both. **§4's per-stream shape wins and the seam is `MarketDataSource` throughout**, on three grounds — one channel per instrument merges three `SourceID`s and forces the subscriber to re-derive a key the seam could have kept; the per-stream product constraints are **inexpressible** in `Subscribe(VenueInstrument)`; and §7.6's capacity ladder gets spent on a book feed a funding-only consumer never wanted. The tell that §4 was current is structural rather than a preference: **every other line of §3.5's seam block is written as a reference to §4**, while `DataSource` was the one written as an independent definition — and `venue-profiles.md` §3 was **already** writing `MarketDataSource.StreamMark`, which is cheaper evidence than any of the three arguments. §3.5 also: **a `SourceID` MUST refuse an `(instrument, stream)` pair no venue can produce** — §4 marks funding and mark perp-only per stream and §3.5 never carried it across, so a spot funding source validated cleanly, and §3.4 makes `SourceID` the mailbox key, so an impossible source is **a mailbox that exists, can be subscribed to, and never delivers**, indistinguishable downstream from a venue gone quiet. The rule states the **full table including the negative rows** (the private streams and control are *not* product-constrained), because the constraint reads like a market-data property and is not one — §4.2 makes spot a full API family with its own user-data stream, so inferring it would silently unsubscribe half a cash-and-carry trade. §4: **the units discipline that covered money now covers time.** `fixedpoint` puts a money field's dimension in its type; a duration has none, and a venue duration field's unit lives only in its **name** (Bybit's `fundingIntervalHour`) — so an adapter can multiply by `time.Minute`, satisfy the never-`float64` rule completely, and hand §2.4 a 480-minute interval that enumerates a plausible settlement count while **§12's kill-gate carry figure is wrong by a factor of sixty with nothing failing**. That is §10's own v0.9.7 argument applied one layer earlier, where the duration is *created*. A zero is **refused, never defaulted**: it arrives from three situations a fallback answers identically, two are a wiring failure wearing a correct BTC reading's clothes, and the third **absorbs §2.4's C8 flip**. Three code markers now read `[SPEC EDIT LANDED — v0.9.9]`, `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **zero**, ADR §3 gains the **milestone-1 fourth-slice block** (tagless total now **thirty-three**) and the `C8` traceability row gains core §4, `docs` 102 pass, `make ci` green. **No formal-model change; `docs/formal/` is untouched and still at the Cx8 verdict.** Full reasoning with rejected alternatives: decision record **§20** (the slice) and **§21** (the close).
 
@@ -77,7 +77,67 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 26, 2026-07-27 — `engine/state` BUILT, not closed)
+## START HERE (updated end of session 27, 2026-07-27 — the CLOSE, v0.9.12, and milestone 1's roster is empty)
+
+**Branch `feat/milestone-1-foundation`, tree clean, `make ci` green, all six gates clean, `docs` 102 pass.**
+Verify rather than trust: `git status --short`, `git rev-list --left-right --count @{u}...HEAD`, and
+`grep -rn "SPEC EDIT OWED" internal/ tools/` (expect **zero**).
+
+### Where the work is
+
+**Milestone 1 has NO unbuilt and NO open slice.** Seven slices, all closed. The doc set is at
+**v0.9.12** across all six headers.
+
+| Path | Holds |
+|---|---|
+| `internal/platform/` | the ten-package shared kernel |
+| `internal/engine/venue/` | the normalized venue-seam DTOs |
+| `internal/engine/state/` | §3.2's latest-value cache + §3.4's cross-leg skew — **CLOSED this session** |
+| `internal/marketdata/` | funding + book paths, `application/ports/`, `module.go` |
+| `internal/oms/` | §5.3's lifecycle + ledger, ports, dispatch, the write repository, `module.go` |
+| `tools/lint/` | all six §3.6 gates, enforced |
+
+### The next work: §12 MILESTONE 2, which is a KILL GATE
+
+This is the decision the project exists to reach: **if measured net carry does not clear the cost
+hurdle, the project stops.** Read §12's milestone-2 roster before designing anything — the shape of
+the work is a measurement, not a feature, and the deliverable is a number with a verdict attached.
+
+**The one thing the close leaves pointed at it:** §5.2 now carries §3.4's freshness budget family
+and the cross-leg skew limit as *configuration*, and milestone 2's verdict is the output of a money
+computation. Both halves of the CLAUDE.md warning apply at once — an unpopulated cost reads as free,
+and a wrong rounding direction moves the number across the threshold without anything failing.
+
+### Three things worth carrying, all from the close
+
+1. **The reading pass out-produced the marker grep, three releases running.** Two of this slice's
+   four edits carried markers; the other two — the latest-value write rule and §5.2's config family
+   — existed as claims nobody had marked, because at writing time each read as *implementing* an
+   existing requirement rather than departing from one. The grep's three named limits are in ADR §3
+   and decision record §28d; this adds no fourth limit, it just makes the pattern a majority.
+
+2. **The fixture-collapse tell moved out of the tests and into the error taxonomy** (§30c).
+   `ErrInstrumentMismatch` was declared, documented as an assertion, returned by nothing, and
+   unreachable by construction — so `errors.Is` against it compiled, always answered false, and
+   **read as a handled case**. No coverage tool objects: an unused package-level `var` is legal Go.
+   No mutation harness objects either: killing it changes no test. **The check that finds this class
+   is "does anything `return` this sentinel", and it is now worth running at every close.**
+
+3. **A silence can be a question the core RAISES and declines** (§30b). Earlier blocks record
+   omissions (v0.9.6) and statements made twice incompatibly (v0.9.9). The skew-timestamp edit is
+   neither: §3.5 names `SourceTime` *and* `RecvTime` for cross-leg skew, so the reader is told the
+   question exists and left to answer it — and the answer a reader reaches for first is the one that
+   silently measures the venues' clock offset instead of the market.
+
+### The one standing debt, unchanged and invisible to the close gate by construction
+
+**The `venue-profiles.md` verification of the two venues' depth update-ID shapes**, which
+`venue.BookDelta`'s span design cites. Owed since session 20. A **Profiles verification** rather than
+a core edit, so the marker grep has never answered for it and never will.
+
+---
+
+## START HERE (updated end of session 26, 2026-07-27, HISTORICAL — `engine/state` BUILT, not closed)
 
 **Branch `feat/milestone-1-foundation`, tree clean, `make ci` green, all six gates clean.** Verify
 rather than trust: `git status --short` and `git rev-list --left-right --count @{u}...HEAD`.

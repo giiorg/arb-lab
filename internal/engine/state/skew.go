@@ -10,8 +10,8 @@ import (
 // Skew is §3.4's max cross-leg skew: the widest gap between the instants this
 // process took delivery of the observations a decision spans.
 //
-// # [SPEC EDIT OWED] It is measured over RecvTime, and the spec names both
-// # timestamps without choosing
+// # [SPEC EDIT LANDED — v0.9.12] It is measured over RecvTime, and the spec
+// # named both timestamps without choosing
 //
 // §3.5 carries SourceTime and RecvTime "for freshness, cross-leg-skew metrics,
 // and offline analysis only" — both of them, for that list of three. §3.4

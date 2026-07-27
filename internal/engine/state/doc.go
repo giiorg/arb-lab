@@ -52,7 +52,7 @@
 //
 // # The published freshness verdict does NOT survive this cache
 //
-// [SPEC EDIT OWED] §3.4 requires a silence timer because "a feed that simply
+// [SPEC EDIT LANDED — v0.9.12] §3.4 requires a silence timer because "a feed that simply
 // stops emits no event, so staleness MUST be detected by a timer, not only by
 // the next update". A latest-value cache is the same defect wearing different
 // clothes, and the spec does not name it: ports.FundingSnapshot arrives carrying
