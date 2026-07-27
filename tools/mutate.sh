@@ -129,7 +129,18 @@ applied=$(diff "$backup" "$file" | grep -E '^[<>]' | sed 's/^/           /')
 # own default is 10 minutes, which in a loop of twenty mutations is an afternoon,
 # and the result is not a kill anyway: §5e's lesson is that a hanging test names
 # no defect. Bounded here so the hang is reported instead of waited on.
-if out=$(go test -timeout "${MUTATE_TIMEOUT:-60s}" "$target" 2>&1); then
+# MUTATE_MODULE names the module the target lives in, because this repo has two
+# and only one of them is reachable from the root. `go test ./tools/lint/...`
+# from here does not fail usefully — it reports "main module does not contain
+# package", which go test exits non-zero for, so an unmutated analyzer would
+# have printed `caught` and every gate's bite-check would have been a phantom.
+# The mutation is still applied to the file at its repo-relative path; only the
+# test run relocates.
+#
+#   MUTATE_MODULE=tools/lint tools/mutate.sh tools/lint/hexboundary/hexboundary.go \
+#       213 's/inward()/outward()/' "polices the wrong layers" ./hexboundary
+#
+if out=$(go test -C "${MUTATE_MODULE:-.}" -timeout "${MUTATE_TIMEOUT:-60s}" "$target" 2>&1); then
     printf '  SURVIVED %-58s  <-- TEST GAP or an equivalent mutant; diagnose which\n' "$desc"
     printf '%s\n' "$applied"
     exit 1
