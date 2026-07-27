@@ -24,7 +24,19 @@ func TestSingleWriter(t *testing.T) {
 		//     subpackage fixture leaves untested);
 		//   - a use case importing its own ports, because rule 6 forbids
 		//     bypassing the write path rather than using it;
-		//   - the adapter importing the port it satisfies.
+		//   - the adapter importing the port it satisfies;
+		//   - the root's EXTERNAL TEST package, which is a different shape from
+		//     all of the above and is the one this gate got wrong. Go suffixes
+		//     the last SEGMENT, so oms's own test suite loads as
+		//     internal/oms_test and matches neither of within()'s arms. The
+		//     other two external test packages in the real tree
+		//     (oms/application_test, oms/infrastructure/driven_test) sit BELOW
+		//     the exempt path and are covered by the prefix arm, which is why
+		//     nothing here had this shape until oms/module_test.go was written
+		//     and the gate reported it. Loaded from oms_x_test.go under the
+		//     package below — analysistest loads with tests enabled, and the
+		//     mutation harness confirms this fixture is analysed rather than
+		//     merely present.
 		"github.com/giiorg/arb-lab/internal/oms",
 		"github.com/giiorg/arb-lab/internal/oms/application",
 		"github.com/giiorg/arb-lab/internal/oms/infrastructure/driven",

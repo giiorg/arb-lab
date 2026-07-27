@@ -55,6 +55,36 @@
 //     authority specifically. "No context may import another context's
 //     internals" is a wider rule that might well be right, and it is not this
 //     one; widening it is a spec edit rather than an implementation of it.
+//   - oms's own EXTERNAL TEST package. See isOwner, and the marker below.
+//
+// # [SPEC EDIT OWED] §3.6 is silent about external test packages, and two
+// # gates have now answered it independently
+//
+// Rule 6 says the lint forbids "every package outside internal/oms/", and rules
+// identified BY POSITION rest on that phrase. An external test package is the
+// one Go construct where a package's import path and its directory disagree:
+// oms's own test suite compiles as internal/oms_test — outside internal/oms/ by
+// path, inside it by directory — so "outside" does not decide the case, and
+// nothing else in §3.6 does either.
+//
+// Two gates have now had to answer it with no rule to consult, and they reached
+// OPPOSITE conclusions, correctly. hexboundary normalises the suffix so an
+// external test package is classified as the layer it tests, which makes
+// marketdata/domain_test POLICED. This one normalises it so internal/oms_test
+// is read as internal/oms, which makes the owner's test suite EXEMPT. Both
+// follow from one unstated principle — an external test package IS the package
+// it tests, and the rule applies to it exactly as it applies to that package —
+// and neither states it, so the third gate to meet the case re-derives it or
+// gets it wrong.
+//
+// The cost of the silence is measured rather than hypothetical: this analyzer
+// shipped without the normalisation and reported oms's own module_test.go as a
+// second writer to order state, because a test double for ports.OrderPlacer has
+// to name ports.Ack in its method signature.
+//
+// Owed to core §3.6: state that a positional rule reads an external test
+// package as the package it tests, so that "policed" and "exempt" are
+// consequences of one sentence rather than two independent judgement calls.
 //
 // # The composition root is policed too, and that is the deliberate reading
 //
@@ -162,7 +192,7 @@ func run(pass *analysis.Pass) (any, error) {
 			if !ok {
 				continue
 			}
-			if within(self, root+"/"+owner) {
+			if isOwner(self, root+"/"+owner) {
 				// oms importing its own write path is the pattern working.
 				continue
 			}
@@ -190,6 +220,95 @@ func run(pass *analysis.Pass) (any, error) {
 func moduleRoot(pkgPath string) (string, bool) {
 	root, _, ok := strings.Cut(pkgPath, internalSegment)
 	return root, ok
+}
+
+// isOwner reports whether the analyzed package is the one context permitted to
+// import the write path: oms, anything beneath it, or oms's own external test
+// package.
+//
+// # The third case is a defect this gate shipped with, and the fix already
+// # existed one directory over
+//
+// within() alone answers NO for internal/oms_test, because Go suffixes the LAST
+// SEGMENT of the path rather than adding a directory: the equality arm matches
+// internal/oms and the prefix arm matches internal/oms/. So oms's own
+// module_test.go could not name ports.Ack to declare a double for
+// ports.OrderPlacer, and the gate reported the context's own test suite as a
+// second writer to order state.
+//
+// hexboundary had already diagnosed this exact asymmetry and normalises it away
+// with the same helper, which makes this a mirror that was not carried across
+// rather than a new problem: singlewriter was written from the same template
+// and copied within() without the normalisation beside it.
+//
+// Every OTHER external test package in this repo hid it by accident.
+// internal/oms/application_test and internal/oms/infrastructure/driven_test sit
+// BELOW the exempt path, so within()'s prefix arm already covers them; only the
+// OWNER package's external test suffixes the exempt path itself, and no fixture
+// here had that shape. This repo's standing tell — the fixture does not contain
+// the thing under test — arriving in the one form the testdata tree lacked.
+// There is one now.
+//
+// # Same normalisation as hexboundary's, opposite consequence, and that is
+// # correct rather than an inconsistency
+//
+// There, stripping the suffix makes an external test package classify as the
+// layer it tests, so it becomes POLICED — the default-deny direction, because
+// the analyzed path is being matched against the set of things the rule covers.
+// Here the analyzed path is being matched against the single EXEMPTION, so the
+// same strip makes oms's test package exempt. In both gates the normalisation
+// says one thing: an external test package is the package it tests, and the
+// rule then applies to it exactly as it applies to that package.
+//
+// The limit is hexboundary's too, and it is why this is not a blanket
+// TrimSuffix over the whole path: a real directory named internal/oms_test
+// would inherit the exemption. That needs a sibling context literally named
+// "oms_test" — conspicuous in review in a way an accidental import is not —
+// while stripping mid-path would exempt internal/oms_test/anything and is the
+// silent failure within()'s full-segment comparison exists to prevent.
+//
+// Rule 6's own wording settles that this is a CODE fix rather than a spec
+// question: it forbids "every package outside internal/oms/", and an external
+// test package's files are inside that directory. The gate was reporting a
+// package the rule does not reach.
+func isOwner(self, ownerPath string) bool {
+	return within(withoutTestSuffix(self), ownerPath)
+}
+
+// externalTestSuffix is what Go appends to a directory's import path to name the
+// external test package compiled from its _test.go files.
+const externalTestSuffix = "_test"
+
+// withoutTestSuffix strips that suffix from the final segment, so an external
+// test package is read as the package it tests.
+//
+// Copied deliberately rather than shared: tools/lint keeps each analyzer
+// self-contained so a fixture failure names one gate, and hexboundary carries
+// the same function for the same reason.
+//
+// # A trailing suffix is a final-segment suffix, and saying so is the whole
+// # implementation
+//
+// The final-segment restriction matters — a directory named application_test
+// mid-path must NOT be read as application/ — and TrimSuffix already provides
+// it, because a string-final _test is necessarily inside the final segment.
+// There is nothing left for a split to decide.
+//
+// This function used to perform that split explicitly, and the mutation harness
+// is what settled it: replacing LastIndex with Index SURVIVED. Diagnosed with a
+// TrimSuffix oracle over 21 paths, including a_test/b, a/b_test/c and
+// internal/oms_test/sub — zero disagreements, so the split was not a guard that
+// happened to be untested but one that could not fail. §26h's shape, in the
+// opposite direction: there two guards on one fact could not be killed
+// individually, here one guard was doing nothing at all. Both read as safety in
+// review and neither was.
+//
+// The comment it replaced credited the split with the mid-path protection,
+// which is the sharper cost: a true rule attributed to the wrong mechanism
+// makes the mechanism look load-bearing, and the next person to simplify it has
+// to re-derive that it never was.
+func withoutTestSuffix(pkgPath string) string {
+	return strings.TrimSuffix(pkgPath, externalTestSuffix)
 }
 
 // within reports whether pkgPath is dir itself or nested under it.

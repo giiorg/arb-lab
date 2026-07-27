@@ -266,17 +266,28 @@ const externalTestSuffix = "_test"
 // withoutTestSuffix strips that suffix from the final segment, so an external
 // test package classifies as the layer it tests.
 //
-// It is applied only to the final segment, and only there because that is the
-// only place Go puts it. Stripping it anywhere in the path would be a wider
-// claim than the one being made, and a real directory named application_test
-// somewhere mid-path would silently start being read as application/.
+// # The final-segment restriction is real; the code that appeared to enforce it
+// # was not
+//
+// The restriction matters: a real directory named application_test somewhere
+// mid-path must NOT start being read as application/. TrimSuffix gives it for
+// free, because a string-final _test is necessarily inside the final segment,
+// so there is nothing left for an explicit split to decide.
+//
+// This used to split on the last separator and cut the suffix from the tail.
+// singlewriter's mutation run is what settled that the split was inert —
+// replacing LastIndex with Index there SURVIVED, and a TrimSuffix oracle over
+// 21 paths (a_test/b, a/b_test/c, internal/oms_test/sub among them) found zero
+// disagreements. The mutant was equivalent because the code could not fail, and
+// the comment above it credited the split with a protection TrimSuffix was
+// already providing.
+//
+// Carried here the session singlewriter found it, under this repo's rule that a
+// fix applied in one place is applied to its mirror immediately. The mirror is
+// exact: singlewriter was written from this analyzer's template and inherited
+// both the function and the comment.
 func withoutTestSuffix(pkgPath string) string {
-	i := strings.LastIndex(pkgPath, "/")
-	last, ok := strings.CutSuffix(pkgPath[i+1:], externalTestSuffix)
-	if !ok {
-		return pkgPath
-	}
-	return pkgPath[:i+1] + last
+	return strings.TrimSuffix(pkgPath, externalTestSuffix)
 }
 
 // moduleRoot returns everything before the /internal/ segment of an import
