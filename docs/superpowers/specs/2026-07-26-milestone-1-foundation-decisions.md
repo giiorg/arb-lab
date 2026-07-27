@@ -3350,6 +3350,80 @@ Ten on `order.go`, one on the new transition edge. The fixture-collapse checklis
 
 **No formal-model change** — nothing here touches the fence/takeover/plan composition, so `docs/formal/` stays at the Cx8 verdict.
 
+## §25 — session 23: the dispatch use case built, and the seam that made half a switch observable
+
+### §25a — what was built
+
+`internal/oms/application/dispatch.go`: `Dispatcher`, `NewDispatcher`, `Outcome`, `Dispatch`, `admit`, `classifyPlace`, `classifyEffect`. Implemented from §24e rather than re-derived, and §24e held up — the signature, the seven steps, `admit`'s three checks, the `Effect` × `Class` table and the double-dispatch guard all landed as specified. Two tests: `dispatch_test.go` (behaviour through the public entry point) and `dispatch_internal_test.go` (the classifier's members, its fallthrough, and the SM §1 assertion).
+
+**One structural deviation from §24e, and it is §25b.** Everything else is the design as written.
+
+### §25b — `classifyPlace` split into `classifyEffect(Effect, Class)`, because §24e's own stated purpose for `ErrEffectUnhandled` was unreachable without it
+
+§24e specified `classifyPlace(err error) (domain.OrderState, error)` — one function, tagged switch on `apperror.EffectOf(err)`. Implementing it exposed something the design could not have seen from the outside: **two of `Effect`'s four members cannot reach that switch through `apperror`'s public API.**
+
+- `apperror.New` validates its `Spec` and degrades anything invalid to `ClassInternal`/`EffectUnknown`, so **no constructed `*apperror.Error` can carry `EffectUnspecified` or an undeclared cast.** Every exported constructor routes through `New`.
+- `EffectOf` answers `EffectUnspecified` **only for a nil error**, which `classifyPlace` handles before the switch.
+
+So through the exported surface alone, `EffectUnspecified` is in the switch's case group but no input can land on it — and **deleting it from that group would change nothing any test could observe.** That is exactly the trailing-return-hides-its-own-group trap this repo diagnosed in `domain.IsTerminal`, reappearing not in the switch but **in the argument type**. §24e added `ErrEffectUnhandled` specifically "so the group is observable by a test", and with an `error` argument that purpose is unachievable.
+
+Taking the two axes as **values** moves the seam to where every case is reachable. `classifyPlace` keeps the part that is genuinely about errors — nil, and §5.3's rule that the effect is read rather than the cause. **The contract is unchanged, so this is not a spec deviation and carries no marker.**
+
+**The mutation is the evidence, not the argument.** `case apperror.EffectUnknown, apperror.EffectUnspecified:` → `case apperror.EffectUnknown:` is **caught** (2 failing tests). Under §24e's signature nothing could have failed.
+
+**Rejected: an injectable classifier field on `Dispatcher`.** It would close §25c below as well, and it was refused: a function field on the type that decides whether an order is live creates a construction path where the classification can be wrong, to buy observability of a branch a **gate** already prevents. A seam that exists only for tests is not worth a new way to build a broken dispatcher.
+
+### §25c — the one surviving mutant, diagnosed: `Outcome.Cause`'s `ErrEffectUnhandled` arm is unobservable BY CONSTRUCTION
+
+`Cause: errors.Join(placeErr, unhandled)` → drop `unhandled`. **SURVIVED.**
+
+Telling test gap from equivalent mutant is the work, and here it is neither cleanly. Producing a non-nil `unhandled` needs `classifyPlace` to hit its fallthrough, which needs an undeclared `apperror.Effect`, which §25b just established **no `ports.OrderPlacer` error can carry**. So the mutant is **equivalent today** — and stops being equivalent the moment somebody adds an `Effect` member and forgets a case here, which is the entire scenario `ErrEffectUnhandled` exists for.
+
+**What covers it is a gate, not a test, and the gate was verified rather than assumed.** Dropping `EffectUnspecified` from the case group and running `make lint`:
+
+```
+internal/oms/application/dispatch.go:268:2: switch over Effect does not name
+EffectUnspecified: every declared member must be named … (§3.6 rule 10)
+```
+
+`exhaustiveswitch` refuses to build a `classifyEffect` that has stopped naming a member — the only way the dropped arm could come to matter. So the coverage exists; it is structural rather than behavioural.
+
+**Recorded in the `Outcome.Cause` doc comment as well as here**, because the next person to run mutations on this file will find this survivor and needs the diagnosis at the survivor, not only in a decision record. **A surviving mutant left undocumented is indistinguishable from one nobody has looked at.**
+
+### §25d — the fixture-collapse checklist, run before the mutations as §24e instructed; it shaped all five fakes
+
+All five of §24e's items were real, and two changed the design of the fakes rather than a fixture value:
+
+- **The journal fake fails a NAMED append** (`failOn map[OrderState]error`), not every call. Without it, "refuses to place when authorization is not durable" (a safety claim, step 2) and "reports any journal error" (an alerting claim, step 6) are the same test — and they are the two claims this file exists to keep apart.
+- **The placer counts calls AND records the journal's depth at entry** (`appendsBefore`). The count is §5.3's single-`Place` rule, which is a count and which every other assertion tolerates being 2. The depth is the journal-before-network ordering asserted as **interleaving** rather than inferred from end-state totals — a dispatcher that placed first and journaled both records afterwards satisfies every count.
+- **`EffectNotApplied` is exercised across four different classes** through four different constructors (`VenueRejected`, `Transport`, `Precondition`, `RateLimited`), plus the whole-class sweep in `TestClassifyEffectReadsTheClassOnlyForNotApplied`. With one class, "checks the class" and "ignores the class" agree.
+- **Type and TIF vary independently**, and the TIF is wrong in two distinct ways (`GTC`, `FOK`) so the check cannot be a GTC test.
+- **The guard is refused on a VALID order whose first dispatch SUCCEEDED**, or "refuses a repeat" collapses into "refuses an invalid order".
+
+**A sixth the checklist did not name, found by writing it:** the id fixtures. `mintedID` builds through `ids.NewClientOrderID` rather than as a literal, because a hand-written id that stops parsing after a format change turns **every** admit test silently into a test of `ErrOrderNotOMSMinted`. The domain suite's own literal `"ab-0123456789ABCDEFGHJKMNPQRS-00-00"` is in fact **not** OMS-minted — its UUID is a v5 — which makes it a free fixture for the foreign-id case and would have made it a poisonous one for the others.
+
+### §25e — the mirror this file adds to `TestClassifyEffectReadsTheClassOnlyForNotApplied`
+
+The checklist asks for both class arms under `EffectNotApplied`. The test also sweeps **every other effect across every class** and asserts the answer does not move. Without that half, "reads the class when it matters" and "reads the class always" are the same suite — and the second sends an applied-but-unacknowledged order to the `Rejected` terminal the first time a venue's 5xx carries a reject code. This is the standing "apply the fix to its mirror" rule, applied to a matrix rather than to a pair of functions.
+
+### §25f — mutations: 21 aimed, 19 caught, 1 NO-OP re-aimed, 1 SURVIVED and diagnosed (§25c)
+
+Three `NOBUILD!!` results were re-aimed rather than counted: dropping a field from a struct literal leaves its variable unused, so `Journaled: true`, `Cause: placeErr` and `Ack: ports.Ack{}` all failed to compile. The forms that work assign to the variable instead (`unhandled = nil`, `ack = ports.Ack{}`) — worth remembering, because a `NOBUILD!!` on a struct-literal mutation is about Go's unused-variable rule and says nothing about the test.
+
+The kills that matter: Place called twice (18), authorization append skipped (16), a failed authorization append no longer blocking the send (3), the guard removed (2), `EffectUnspecified` dropped from its group (2), and both directions of the `ClassVenueReject` test (6 and 5).
+
+### §25g — what is owed: still FOUR markers, and `singlewriter` STILL has not expired
+
+`grep -rn "SPEC EDIT OWED" internal/ tools/` returns **four**, unchanged — the dispatch use case implements the core as written and contradicts nothing in it. §24c's `PositionSide/Idx` layering call and §25b's seam are both non-deviations and correctly carry no marker.
+
+**`singlewriter` is still unexpired**, and this session is the sharpest test of that deferral yet, because it is the session that made the use case real. It changes nothing: rule 6's subject is "OMS **write repositories**", `ports.Journal` remains a write-ahead log, and `infrastructure/driven/` still does not exist. The gate lands with the repository, in the same session, per the standing rule that a deferral expires when its subject appears.
+
+**No formal-model change** — nothing here touches the fence/takeover/plan composition, so `docs/formal/` stays at the Cx8 verdict.
+
+## RESUME HERE — updated end of session 23
+
+**SESSION 23 UPDATE — READ THIS FIRST.** The **sixth slice (`oms`) is still OPEN**. **The dispatch use case is BUILT** (`oms/application/dispatch.go`) from §24e, which held up — one structural deviation, §25b, and it is worth reading before touching the classifier. `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **FOUR**, unchanged and correct mid-slice. **`singlewriter` has STILL not expired**: `ports.Journal` is a write-ahead log, not a write repository, and there is no `infrastructure/driven/`. Doc set is **still v0.9.10** and correctly so. `make ci` green; 21 mutations, 19 caught, **1 SURVIVED and diagnosed in §25c — it is equivalent by construction and its compensating control is a gate, verified to bite.** Still the user's call: **§3.6 rule 2 silently unmet in `marketdata`** (§24f). Next: `infrastructure/driven` with the write repository, **and `singlewriter` in that same session**. The reasoning is **§25**; §24 stays live for §24e's table and §24f's finding.
+
 ## RESUME HERE — updated end of session 22
 
 **SESSION 22 UPDATE — READ THIS FIRST.** The **sixth slice (`oms`) is still OPEN**. `oms/domain` gained §5.1's order intent (`Side`, `OrderType`, `TimeInForce`, `Order`) and a **FOURTH** owed edge — `DispatchAuthorized → SubmissionUnknown`, the one the core states aloud (§24b). `oms/application/ports/` declares `Journal` and `OrderPlacer`; **the dispatch use case is designed but NOT built, and §24e is that design written out to be implemented rather than re-derived** — start there. `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **FOUR**, correct mid-slice. **`singlewriter` has still NOT expired**: a write-ahead journal is not a write repository, and there is no `infrastructure/driven/`. Doc set is **still v0.9.10** and correctly so. New finding to act on: **§3.6 rule 2 is silently unmet in `marketdata` on both halves** (§24f) — the user's call whether to fix it. `make ci` green, 11 mutations / 11 caught. The reasoning is **§24**; §23 is now history. What follows was written at the end of session 21 and earlier.
