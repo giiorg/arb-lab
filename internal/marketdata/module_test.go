@@ -3,6 +3,7 @@ package marketdata_test
 import (
 	"encoding/json"
 	"errors"
+	"github.com/giiorg/arb-lab/internal/marketdata/application/ports"
 	"testing"
 	"time"
 
@@ -330,9 +331,9 @@ func TestModuleCarriesAnEnvelopeThroughToTheLane(t *testing.T) {
 	if !ok {
 		t.Fatal("nothing reached the funding mailbox")
 	}
-	snap, ok := env.Payload.(application.FundingSnapshot)
+	snap, ok := env.Payload.(ports.FundingSnapshot)
 	if !ok {
-		t.Fatalf("payload is %T, want application.FundingSnapshot", env.Payload)
+		t.Fatalf("payload is %T, want ports.FundingSnapshot", env.Payload)
 	}
 
 	// §3.5's causal traceability, asserted end to end. This is the only test
@@ -492,9 +493,9 @@ func TestModuleCarriesABookThroughToItsOwnMailbox(t *testing.T) {
 	if !ok {
 		t.Fatal("nothing reached the book mailbox")
 	}
-	view, ok := env.Payload.(application.BookView)
+	view, ok := env.Payload.(ports.BookView)
 	if !ok {
-		t.Fatalf("payload is %T, want application.BookView", env.Payload)
+		t.Fatalf("payload is %T, want ports.BookView", env.Payload)
 	}
 
 	// §3.5's causal traceability across the whole chain: the ordinal enters at

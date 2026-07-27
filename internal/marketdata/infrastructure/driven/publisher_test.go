@@ -2,10 +2,10 @@ package driven_test
 
 import (
 	"errors"
+	"github.com/giiorg/arb-lab/internal/marketdata/application/ports"
 	"testing"
 	"time"
 
-	"github.com/giiorg/arb-lab/internal/marketdata/application"
 	"github.com/giiorg/arb-lab/internal/marketdata/domain"
 	"github.com/giiorg/arb-lab/internal/marketdata/infrastructure/driven"
 	"github.com/giiorg/arb-lab/internal/platform/events"
@@ -31,7 +31,7 @@ const venueSeq uint64 = 4242
 // for both would make "inherited the trigger" and "stamped from the watermark's
 // sequence" the same assertion — and the second is a real implementation
 // somebody would write, because the watermark is the field already in hand.
-const acceptOrdinal = application.AcceptOrdinal(9001)
+const acceptOrdinal = ports.AcceptOrdinal(9001)
 
 func perp() ids.VenueInstrument {
 	return ids.VenueInstrument{
@@ -51,9 +51,9 @@ func rate(t *testing.T, s string) fixedpoint.Rate {
 	return r
 }
 
-func snapshot(t *testing.T, verdict domain.Freshness) application.FundingSnapshot {
+func snapshot(t *testing.T, verdict domain.Freshness) ports.FundingSnapshot {
 	t.Helper()
-	return application.FundingSnapshot{
+	return ports.FundingSnapshot{
 		Observation: domain.FundingObservation{
 			Instrument: perp(),
 			Rate:       rate(t, "0.0001"),
@@ -142,9 +142,9 @@ func TestPublishCarriesTheWatermarkOntoTheEnvelope(t *testing.T) {
 		t.Errorf("VenueSeq = %d, want the watermark's %d", env.VenueSeq, venueSeq)
 	}
 
-	got, ok := env.Payload.(application.FundingSnapshot)
+	got, ok := env.Payload.(ports.FundingSnapshot)
 	if !ok {
-		t.Fatalf("Payload is %T, want application.FundingSnapshot", env.Payload)
+		t.Fatalf("Payload is %T, want ports.FundingSnapshot", env.Payload)
 	}
 	if got != snap {
 		t.Errorf("Payload = %+v, want the snapshot published %+v", got, snap)
@@ -257,19 +257,19 @@ func TestPublishRefusesAndNamesTheCheckThatFired(t *testing.T) {
 	// measurement exists to catch. Under the envelope check alone it would
 	// reach the mailbox looking well-formed.
 	cases := map[string]struct {
-		breakIt func(*application.FundingSnapshot)
+		breakIt func(*ports.FundingSnapshot)
 		want    error
 	}{
 		"no instrument — the envelope has no source to address": {
-			breakIt: func(s *application.FundingSnapshot) { s.Observation.Instrument = ids.VenueInstrument{} },
+			breakIt: func(s *ports.FundingSnapshot) { s.Observation.Instrument = ids.VenueInstrument{} },
 			want:    ids.ErrVenueUnset,
 		},
 		"no receive time — the envelope requires ours": {
-			breakIt: func(s *application.FundingSnapshot) { s.Observation.Watermark.RecvTime = time.Time{} },
+			breakIt: func(s *ports.FundingSnapshot) { s.Observation.Watermark.RecvTime = time.Time{} },
 			want:    events.ErrRecvTimeUnset,
 		},
 		"no source time — only the domain requires the venue's": {
-			breakIt: func(s *application.FundingSnapshot) { s.Observation.Watermark.SourceTime = time.Time{} },
+			breakIt: func(s *ports.FundingSnapshot) { s.Observation.Watermark.SourceTime = time.Time{} },
 			want:    domain.ErrWatermarkUnset,
 		},
 		// A well-formed instrument that simply has no funding. Before §4's
@@ -283,7 +283,7 @@ func TestPublishRefusesAndNamesTheCheckThatFired(t *testing.T) {
 		// diagnoses name different owners, and this pins which one the
 		// transport now answers with.
 		"spot instrument — a funding source no venue can produce": {
-			breakIt: func(s *application.FundingSnapshot) {
+			breakIt: func(s *ports.FundingSnapshot) {
 				s.Observation.Instrument = ids.VenueInstrument{
 					Venue: binance, Product: ids.ProductSpot, Symbol: "BTCUSDT",
 				}

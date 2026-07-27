@@ -3,7 +3,7 @@
 //
 // # Which way the arrows run, and why this package is where they turn around
 //
-// application/ports.go declares Budgets and FundingPublisher as interfaces it
+// application/ports/ declares Budgets and FundingPublisher as interfaces it
 // needs. Nothing in application/ or domain/ knows this package exists, and
 // §3.6 rule 1 (hexboundary) makes that a build failure rather than a
 // convention. What lives here is the other half of each of those interfaces —

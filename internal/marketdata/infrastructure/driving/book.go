@@ -2,6 +2,7 @@ package driving
 
 import (
 	"fmt"
+	"github.com/giiorg/arb-lab/internal/marketdata/application/ports"
 
 	"github.com/giiorg/arb-lab/internal/engine/venue"
 	"github.com/giiorg/arb-lab/internal/marketdata/application"
@@ -52,16 +53,16 @@ func NewBookDispatch(r *application.BookReconstruct) (*BookDispatch, error) {
 // FundingDispatch's rule: accepting a pointer as well would give one payload two
 // spellings, one of which shares memory with its producer, on a lane whose
 // contract is that a published envelope is not mutated afterwards.
-func (d *BookDispatch) Deliver(env events.Envelope) (application.BookView, error) {
+func (d *BookDispatch) Deliver(env events.Envelope) (ports.BookView, error) {
 	if err := env.Validate(); err != nil {
-		return application.BookView{}, fmt.Errorf("marketdata book deliver: %w", err)
+		return ports.BookView{}, fmt.Errorf("marketdata book deliver: %w", err)
 	}
 	// Against the stream, not the lane. The lane check would pass: funding and
 	// mark ride the market-data lane too, and a funding payload read as a book
 	// would land on the payload assertion below rather than here — with an error
 	// naming the type instead of the misrouting that caused it.
 	if env.Source.Stream != events.StreamBook {
-		return application.BookView{}, fmt.Errorf(
+		return ports.BookView{}, fmt.Errorf(
 			"marketdata book deliver: stream %s: %w", env.Source.Stream, ErrNotBookStream)
 	}
 
@@ -70,7 +71,7 @@ func (d *BookDispatch) Deliver(env events.Envelope) (application.BookView, error
 	// rather than about this path. Converted rather than passed, because
 	// application declares its own AcceptOrdinal and does not take the
 	// transport's types.
-	trigger := application.AcceptOrdinal(env.AcceptOrdinal)
+	trigger := ports.AcceptOrdinal(env.AcceptOrdinal)
 	wm := domain.Watermark{
 		VenueSeq:   env.VenueSeq,
 		SourceTime: env.SourceTime,
@@ -86,7 +87,7 @@ func (d *BookDispatch) Deliver(env events.Envelope) (application.BookView, error
 		// sent to, and a field this translation transposes still reaches the
 		// domain check, which is the only one positioned to catch it.
 		if err := p.Validate(); err != nil {
-			return application.BookView{}, fmt.Errorf("marketdata book deliver: %w", err)
+			return ports.BookView{}, fmt.Errorf("marketdata book deliver: %w", err)
 		}
 		return d.reconstruct.OnSnapshot(domain.BookSnapshot{
 			// From the SOURCE, never the payload: it is the mailbox key, and a
@@ -99,11 +100,11 @@ func (d *BookDispatch) Deliver(env events.Envelope) (application.BookView, error
 
 	case venue.BookDelta:
 		if err := p.Validate(); err != nil {
-			return application.BookView{}, fmt.Errorf("marketdata book deliver: %w", err)
+			return ports.BookView{}, fmt.Errorf("marketdata book deliver: %w", err)
 		}
 		changes, err := toDomainChanges(p.Changes)
 		if err != nil {
-			return application.BookView{}, fmt.Errorf("marketdata book deliver: %w", err)
+			return ports.BookView{}, fmt.Errorf("marketdata book deliver: %w", err)
 		}
 		return d.reconstruct.OnDelta(domain.BookDelta{
 			Instrument: env.Source.Instrument,
@@ -119,7 +120,7 @@ func (d *BookDispatch) Deliver(env events.Envelope) (application.BookView, error
 		}, trigger)
 	}
 
-	return application.BookView{}, fmt.Errorf(
+	return ports.BookView{}, fmt.Errorf(
 		"marketdata book deliver: payload %T: %w", env.Payload, ErrBookPayloadType)
 }
 
@@ -135,7 +136,7 @@ func (d *BookDispatch) Deliver(env events.Envelope) (application.BookView, error
 // dispatcher routing a book timer here and a funding timer to the other one is
 // the arrangement both namespaces exist to serve; routing either to both would
 // make every fired timer produce one real answer and one ErrUnknownTimer.
-func (d *BookDispatch) Timer(id clock.TimerID) (application.BookView, error) {
+func (d *BookDispatch) Timer(id clock.TimerID) (ports.BookView, error) {
 	return d.reconstruct.OnSilence(id)
 }
 

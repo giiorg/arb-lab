@@ -2,6 +2,7 @@ package application
 
 import (
 	"fmt"
+	"github.com/giiorg/arb-lab/internal/marketdata/application/ports"
 
 	"github.com/giiorg/arb-lab/internal/marketdata/domain"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
@@ -37,9 +38,9 @@ const bookSilenceTimerPrio uint8 = 1
 // leaving the published order nondeterministic.
 type BookReconstruct struct {
 	clock   clock.Clock
-	publish BookPublisher
-	budgets BookBudgets
-	resnap  Resnapshotter
+	publish ports.BookPublisher
+	budgets ports.BookBudgets
+	resnap  ports.Resnapshotter
 
 	// holdDepth bounds the per-instrument buffer of deltas awaiting a
 	// resnapshot. See ErrHoldDepthInvalid: the buffer is what makes resync
@@ -80,7 +81,7 @@ type bookState struct {
 // and panic on the first gap — in the hot path, where the diagnosis is a stack
 // trace rather than a named refusal at boot.
 func NewBookReconstruct(
-	c clock.Clock, p BookPublisher, b BookBudgets, r Resnapshotter, holdDepth int,
+	c clock.Clock, p ports.BookPublisher, b ports.BookBudgets, r ports.Resnapshotter, holdDepth int,
 ) (*BookReconstruct, error) {
 	if c == nil {
 		return nil, ErrClockNil
@@ -119,18 +120,18 @@ func NewBookReconstruct(
 //
 // Held deltas that the snapshot already covers are dropped silently — that is
 // SeqRelationStale, the ordinary case, not a fault.
-func (r *BookReconstruct) OnSnapshot(snap domain.BookSnapshot, trigger AcceptOrdinal) (BookView, error) {
+func (r *BookReconstruct) OnSnapshot(snap domain.BookSnapshot, trigger ports.AcceptOrdinal) (ports.BookView, error) {
 	if trigger == 0 {
-		return BookView{}, fmt.Errorf("instrument %s: %w", snap.Instrument, ErrNoTrigger)
+		return ports.BookView{}, fmt.Errorf("instrument %s: %w", snap.Instrument, ErrNoTrigger)
 	}
 	if err := snap.Validate(); err != nil {
-		return BookView{}, fmt.Errorf("book snapshot: %w", err)
+		return ports.BookView{}, fmt.Errorf("book snapshot: %w", err)
 	}
 
 	inst := snap.Instrument
 	budget, err := r.budgetFor(inst)
 	if err != nil {
-		return BookView{}, err
+		return ports.BookView{}, err
 	}
 
 	st := r.stateFor(inst)
@@ -155,7 +156,7 @@ func (r *BookReconstruct) OnSnapshot(snap domain.BookSnapshot, trigger AcceptOrd
 				// stream disagree. Re-request rather than publish: the
 				// alternative publishes a book whose provenance says it reached
 				// a sequence it did not.
-				return BookView{}, r.desync(st, inst, held[i:], fmt.Errorf("draining held delta: %w", aerr), ErrBookDesynced)
+				return ports.BookView{}, r.desync(st, inst, held[i:], fmt.Errorf("draining held delta: %w", aerr), ErrBookDesynced)
 			}
 			st.book = next
 		case domain.SeqRelationGap:
@@ -165,7 +166,7 @@ func (r *BookReconstruct) OnSnapshot(snap domain.BookSnapshot, trigger AcceptOrd
 			// chain to, so dropping them guarantees the next drain gaps too, and
 			// the recovery loop never converges even though each individual step
 			// looks like it did the right thing.
-			return BookView{}, r.desync(st, inst, held[i:], nil, ErrSequenceGap)
+			return ports.BookView{}, r.desync(st, inst, held[i:], nil, ErrSequenceGap)
 		case domain.SeqRelationUnknown:
 			// Unreachable: synced was just set, and snap.Validate above refuses a
 			// zero VenueSeq (domain.ErrBookSeqUnset). That refusal was ADDED for
@@ -175,7 +176,7 @@ func (r *BookReconstruct) OnSnapshot(snap domain.BookSnapshot, trigger AcceptOrd
 			// Named rather than defaulted, which is rule 10 doing its job: a
 			// relation added later lands here as a build failure instead of
 			// falling into the apply path.
-			return BookView{}, fmt.Errorf(
+			return ports.BookView{}, fmt.Errorf(
 				"instrument %s: held delta %d..%d against seq %d: %w",
 				inst, d.FirstSeq, d.LastSeq, st.book.Watermark.VenueSeq, ErrAwaitingSnapshot)
 		}
@@ -189,18 +190,18 @@ func (r *BookReconstruct) OnSnapshot(snap domain.BookSnapshot, trigger AcceptOrd
 // The relation decides everything, and the switch over it names every member
 // because §3.6 rule 10 makes that a build requirement — the alternative is a
 // new relation landing in whichever branch a `default:` happened to be.
-func (r *BookReconstruct) OnDelta(d domain.BookDelta, trigger AcceptOrdinal) (BookView, error) {
+func (r *BookReconstruct) OnDelta(d domain.BookDelta, trigger ports.AcceptOrdinal) (ports.BookView, error) {
 	if trigger == 0 {
-		return BookView{}, fmt.Errorf("instrument %s: %w", d.Instrument, ErrNoTrigger)
+		return ports.BookView{}, fmt.Errorf("instrument %s: %w", d.Instrument, ErrNoTrigger)
 	}
 	if err := d.Validate(); err != nil {
-		return BookView{}, fmt.Errorf("book delta: %w", err)
+		return ports.BookView{}, fmt.Errorf("book delta: %w", err)
 	}
 
 	inst := d.Instrument
 	budget, err := r.budgetFor(inst)
 	if err != nil {
-		return BookView{}, err
+		return ports.BookView{}, err
 	}
 
 	st := r.stateFor(inst)
@@ -209,7 +210,7 @@ func (r *BookReconstruct) OnDelta(d domain.BookDelta, trigger AcceptOrdinal) (Bo
 		// a sequence gap (pending resnapshot) while a later-arriving input from
 		// an independent source is dispatchable" — the holding is what keeps
 		// this SourceID's unreadiness from stalling anyone else's.
-		return BookView{}, r.hold(st, inst, []domain.BookDelta{d}, ErrAwaitingSnapshot)
+		return ports.BookView{}, r.hold(st, inst, []domain.BookDelta{d}, ErrAwaitingSnapshot)
 	}
 
 	rel := d.Follows(st.book.Watermark.VenueSeq)
@@ -219,7 +220,7 @@ func (r *BookReconstruct) OnDelta(d domain.BookDelta, trigger AcceptOrdinal) (Bo
 		// treated as a fault: an at-least-once transport produces these on every
 		// reconnect, and escalating would make a healthy recovery look like a
 		// feed problem.
-		return BookView{}, fmt.Errorf(
+		return ports.BookView{}, fmt.Errorf(
 			"instrument %s: span %d..%d against seq %d: %w",
 			inst, d.FirstSeq, d.LastSeq, st.book.Watermark.VenueSeq, ErrSuperseded)
 
@@ -230,19 +231,19 @@ func (r *BookReconstruct) OnDelta(d domain.BookDelta, trigger AcceptOrdinal) (Bo
 			// unordered outcome, which domain.Apply refuses. Same recovery as a
 			// gap, different diagnosis: every message arrived, so the disagreement
 			// is with what the venue says rather than with what reached us.
-			return BookView{}, r.desync(st, inst, []domain.BookDelta{d}, aerr, ErrBookDesynced)
+			return ports.BookView{}, r.desync(st, inst, []domain.BookDelta{d}, aerr, ErrBookDesynced)
 		}
 		st.book = next
 
 	case domain.SeqRelationGap:
-		return BookView{}, r.desync(st, inst, []domain.BookDelta{d}, nil, ErrSequenceGap)
+		return ports.BookView{}, r.desync(st, inst, []domain.BookDelta{d}, nil, ErrSequenceGap)
 
 	case domain.SeqRelationUnknown:
 		// Unreachable while synced implies a positioned book, and refused rather
 		// than assumed: it is the shape a future path that sets synced without
 		// setting a book would produce, and the failure would otherwise be a
 		// delta applied to a zero-valued snapshot.
-		return BookView{}, fmt.Errorf("instrument %s: %w", inst, ErrAwaitingSnapshot)
+		return ports.BookView{}, fmt.Errorf("instrument %s: %w", inst, ErrAwaitingSnapshot)
 	}
 
 	return r.emit(st, inst, budget, rel, trigger)
@@ -259,10 +260,10 @@ func (r *BookReconstruct) OnDelta(d domain.BookDelta, trigger AcceptOrdinal) (Bo
 // What it publishes is the SAME book with a WORSE verdict, which is an honest
 // statement rather than a fabricated reading: nothing new has been observed, and
 // that is the news.
-func (r *BookReconstruct) OnSilence(id clock.TimerID) (BookView, error) {
+func (r *BookReconstruct) OnSilence(id clock.TimerID) (ports.BookView, error) {
 	inst, ok := r.armed[id]
 	if !ok {
-		return BookView{}, fmt.Errorf("timer %q: %w", id, ErrUnknownTimer)
+		return ports.BookView{}, fmt.Errorf("timer %q: %w", id, ErrUnknownTimer)
 	}
 	// Dropped before anything that can fail: a re-assessment that errored would
 	// otherwise leave a fired ID mapped, and the next legitimate arm would look
@@ -271,11 +272,11 @@ func (r *BookReconstruct) OnSilence(id clock.TimerID) (BookView, error) {
 
 	st, held := r.books[inst]
 	if !held || !st.synced {
-		return BookView{}, fmt.Errorf("timer %q: %w", id, ErrUnknownTimer)
+		return ports.BookView{}, fmt.Errorf("timer %q: %w", id, ErrUnknownTimer)
 	}
 	budget, err := r.budgetFor(inst)
 	if err != nil {
-		return BookView{}, err
+		return ports.BookView{}, err
 	}
 
 	// Trigger zero and relation Unknown, both meaning "derived from no input".
@@ -305,13 +306,13 @@ func (r *BookReconstruct) Overflows(inst ids.VenueInstrument) (uint64, bool) {
 // emit computes freshness, arms the silence timer and publishes.
 func (r *BookReconstruct) emit(
 	st *bookState, inst ids.VenueInstrument, budget domain.Budget,
-	applied domain.SeqRelation, trigger AcceptOrdinal,
-) (BookView, error) {
+	applied domain.SeqRelation, trigger ports.AcceptOrdinal,
+) (ports.BookView, error) {
 	transport, data, err := assessFreshness(r.clock, budget, st.book.Watermark, inst)
 	if err != nil {
-		return BookView{}, err
+		return ports.BookView{}, err
 	}
-	view := BookView{
+	view := ports.BookView{
 		Book:      st.book,
 		Transport: transport,
 		Data:      data,

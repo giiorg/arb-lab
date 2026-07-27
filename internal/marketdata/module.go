@@ -34,6 +34,7 @@ package marketdata
 
 import (
 	"fmt"
+	"github.com/giiorg/arb-lab/internal/marketdata/application/ports"
 
 	"github.com/giiorg/arb-lab/internal/marketdata/application"
 	"github.com/giiorg/arb-lab/internal/marketdata/infrastructure/driven"
@@ -89,7 +90,7 @@ type Deps struct {
 	// request leaves the book held forever with nothing retrying. Only the
 	// adapter knows the venue's rate limit (§7.6), so the coalescing belongs
 	// there.
-	Resnapshotter application.Resnapshotter
+	Resnapshotter ports.Resnapshotter
 
 	// BookHoldDepth bounds the per-instrument buffer of deltas awaiting a
 	// resnapshot.

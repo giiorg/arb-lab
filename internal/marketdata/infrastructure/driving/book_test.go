@@ -2,6 +2,7 @@ package driving_test
 
 import (
 	"errors"
+	"github.com/giiorg/arb-lab/internal/marketdata/application/ports"
 	"strings"
 	"testing"
 	"time"
@@ -128,15 +129,15 @@ func bookEnvelope(inst ids.VenueInstrument, seq uint64, payload any) events.Enve
 
 // spyBookPublisher accepts everything and remembers it, so a test can tell "the
 // use case ran" from "the adapter returned something plausible".
-type spyBookPublisher struct{ got []application.BookView }
+type spyBookPublisher struct{ got []ports.BookView }
 
-func (s *spyBookPublisher) Publish(v application.BookView) error {
+func (s *spyBookPublisher) Publish(v ports.BookView) error {
 	s.got = append(s.got, v)
 	return nil
 }
 
 // fixedBookBudgets is SEPARATE from fixedBudgets rather than a second method on
-// it, which is application/ports.go's own argument for splitting the two ports:
+// it, which is application/ports/'s own argument for splitting the two ports:
 // a fake that must implement BookBudget to be handed to FundingIngest is a fake
 // asserting a relationship that does not exist.
 type fixedBookBudgets struct{ b domain.Budget }

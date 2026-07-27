@@ -2,9 +2,9 @@ package driven
 
 import (
 	"fmt"
+	"github.com/giiorg/arb-lab/internal/marketdata/application/ports"
 
 	"github.com/giiorg/arb-lab/internal/engine/venue"
-	"github.com/giiorg/arb-lab/internal/marketdata/application"
 	"github.com/giiorg/arb-lab/internal/platform/events"
 )
 
@@ -32,13 +32,13 @@ import (
 // would put market data ahead of the safety kernel because nobody chose.
 const bookPrio = events.PrioNormal
 
-// BookLanePublisher is application.BookPublisher over §3.4's market-data lane.
+// BookLanePublisher is ports.BookPublisher over §3.4's market-data lane.
 //
 // # A second type rather than a second method, and Go decides that, not taste
 //
 // ConfigBudgets satisfies both narrow budget ports from one struct, and the
 // natural symmetry would be one publisher satisfying both. It cannot:
-// application.FundingPublisher and application.BookPublisher both declare
+// ports.FundingPublisher and ports.BookPublisher both declare
 // Publish, differing only in parameter, and one type cannot have both. Naming it
 // away — PublishBook — would stop it satisfying the port.
 //
@@ -48,6 +48,14 @@ const bookPrio = events.PrioNormal
 // envelope-assembly rule — which sequence is inherited and which is left
 // unstamped — and that is stated once, in LanePublisher's doc, and referred to
 // here rather than restated.
+// §3.6 rule 2's compile-time assertion; see LanePublisher's for what it buys.
+//
+// The two publishers exist because Go forbids one type from having two Publish
+// methods, and this assertion is what keeps that split from silently becoming a
+// drift: whichever of the two is edited, the one that stopped satisfying its
+// port names itself at build time.
+var _ ports.BookPublisher = (*BookLanePublisher)(nil)
+
 type BookLanePublisher struct {
 	lane *events.MarketDataLane
 }
@@ -88,7 +96,7 @@ func NewBookLanePublisher(lane *events.MarketDataLane) (*BookLanePublisher, erro
 // last of those is the reason a book that is merely WELL-FORMED is not enough
 // (domain.ErrBookSeqUnset): such a book validates as a lane payload and then
 // never advances.
-func (p *BookLanePublisher) Publish(view application.BookView) error {
+func (p *BookLanePublisher) Publish(view ports.BookView) error {
 	w := view.Book.Watermark
 
 	// venue.BookSource rather than a literal, for FundingSource's structural

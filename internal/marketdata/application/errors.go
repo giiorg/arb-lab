@@ -23,7 +23,7 @@ var (
 	// is the only answer that is not one of those two.
 	ErrNoBudget = errors.New("marketdata: no funding freshness budget configured for venue")
 
-	// ErrNoTrigger reports an Ingest call that supplied no AcceptOrdinal.
+	// ErrNoTrigger reports an Ingest call that supplied no ports.AcceptOrdinal.
 	//
 	// It is what makes a zero Trigger READABLE. §3.5 requires a dispatched
 	// envelope to carry the ordinal of the input that caused it, and this layer

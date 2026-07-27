@@ -2,6 +2,7 @@ package application
 
 import (
 	"fmt"
+	"github.com/giiorg/arb-lab/internal/marketdata/application/ports"
 
 	"github.com/giiorg/arb-lab/internal/marketdata/domain"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
@@ -39,8 +40,8 @@ const silenceTimerPrio uint8 = 1
 // goroutine, and the race detector will say so if it does not.
 type FundingIngest struct {
 	clock   clock.Clock
-	publish FundingPublisher
-	budgets FundingBudgets
+	publish ports.FundingPublisher
+	budgets ports.FundingBudgets
 
 	// held is the last accepted observation per instrument. It is what makes
 	// supersede and gap detection possible at all — both are questions about a
@@ -61,7 +62,7 @@ type FundingIngest struct {
 // observations, publish them into a nil interface, and panic on the first
 // freshness computation — at which point the diagnosis is a stack trace in the
 // hot path rather than a named refusal at boot.
-func NewFundingIngest(c clock.Clock, p FundingPublisher, b FundingBudgets) (*FundingIngest, error) {
+func NewFundingIngest(c clock.Clock, p ports.FundingPublisher, b ports.FundingBudgets) (*FundingIngest, error) {
 	if c == nil {
 		return nil, ErrClockNil
 	}
@@ -80,7 +81,7 @@ func NewFundingIngest(c clock.Clock, p FundingPublisher, b FundingBudgets) (*Fun
 	}, nil
 }
 
-// Ingest accepts one funding observation, together with the AcceptOrdinal of
+// Ingest accepts one funding observation, together with the ports.AcceptOrdinal of
 // the raw input it arrived on.
 //
 // The order of the steps is the point, and it is the order a wrong answer would
@@ -92,12 +93,12 @@ func NewFundingIngest(c clock.Clock, p FundingPublisher, b FundingBudgets) (*Fun
 //
 // # The trigger is a parameter, not a field on the observation
 //
-// An AcceptOrdinal is a fact about the DELIVERY, not about the reading — the
+// An ports.AcceptOrdinal is a fact about the DELIVERY, not about the reading — the
 // same funding numbers re-delivered are a second raw input with a second
 // ordinal, and domain.FundingObservation is a value that two deliveries can
 // legitimately share. Putting it on the observation would also put a transport
 // concern inside the domain, which §3.6 rule 1 exists to prevent.
-func (f *FundingIngest) Ingest(obs domain.FundingObservation, trigger AcceptOrdinal) (FundingSnapshot, error) {
+func (f *FundingIngest) Ingest(obs domain.FundingObservation, trigger ports.AcceptOrdinal) (ports.FundingSnapshot, error) {
 	// Checked before the observation, because the two failures have different
 	// owners and this one is the caller's. A driving adapter reaches here only
 	// after events.Envelope.Validate has refused an unstamped ordinal, so a zero
@@ -105,19 +106,19 @@ func (f *FundingIngest) Ingest(obs domain.FundingObservation, trigger AcceptOrdi
 	// trace out — and reporting a malformed reading first would send the reader
 	// to the feed.
 	if trigger == 0 {
-		return FundingSnapshot{}, fmt.Errorf("instrument %s: %w", obs.Instrument, ErrNoTrigger)
+		return ports.FundingSnapshot{}, fmt.Errorf("instrument %s: %w", obs.Instrument, ErrNoTrigger)
 	}
 	if err := obs.Validate(); err != nil {
-		return FundingSnapshot{}, fmt.Errorf("funding observation: %w", err)
+		return ports.FundingSnapshot{}, fmt.Errorf("funding observation: %w", err)
 	}
 
 	inst := obs.Instrument
 	budget, ok := f.budgets.FundingBudget(inst.Venue)
 	if !ok {
-		return FundingSnapshot{}, fmt.Errorf("venue %s: %w", inst.Venue, ErrNoBudget)
+		return ports.FundingSnapshot{}, fmt.Errorf("venue %s: %w", inst.Venue, ErrNoBudget)
 	}
 	if err := budget.Validate(); err != nil {
-		return FundingSnapshot{}, fmt.Errorf("venue %s budget: %w", inst.Venue, err)
+		return ports.FundingSnapshot{}, fmt.Errorf("venue %s budget: %w", inst.Venue, err)
 	}
 
 	prev, hadPrev := f.held[inst]
@@ -125,7 +126,7 @@ func (f *FundingIngest) Ingest(obs domain.FundingObservation, trigger AcceptOrdi
 	if hadPrev {
 		advanced, hadGap := advances(prev.Watermark, obs.Watermark)
 		if !advanced {
-			return FundingSnapshot{}, fmt.Errorf(
+			return ports.FundingSnapshot{}, fmt.Errorf(
 				"instrument %s: venue seq %d, received %s: %w",
 				inst, obs.Watermark.VenueSeq, obs.Watermark.RecvTime, ErrSuperseded)
 		}
@@ -134,7 +135,7 @@ func (f *FundingIngest) Ingest(obs domain.FundingObservation, trigger AcceptOrdi
 
 	snap, err := f.assess(obs, budget, gap, trigger)
 	if err != nil {
-		return FundingSnapshot{}, err
+		return ports.FundingSnapshot{}, err
 	}
 
 	// The held reading is replaced BEFORE publishing. If publish fails, the
@@ -164,10 +165,10 @@ func (f *FundingIngest) Ingest(obs domain.FundingObservation, trigger AcceptOrdi
 // What it publishes is the SAME observation with a WORSE verdict, which is an
 // honest statement and not a fabricated reading: nothing new has been observed,
 // and that is the news.
-func (f *FundingIngest) OnSilence(id clock.TimerID) (FundingSnapshot, error) {
+func (f *FundingIngest) OnSilence(id clock.TimerID) (ports.FundingSnapshot, error) {
 	inst, ok := f.armed[id]
 	if !ok {
-		return FundingSnapshot{}, fmt.Errorf("timer %q: %w", id, ErrUnknownTimer)
+		return ports.FundingSnapshot{}, fmt.Errorf("timer %q: %w", id, ErrUnknownTimer)
 	}
 	// The timer has fired, so it is no longer pending. Dropped before anything
 	// that can fail, or a re-assessment that errors would leave a dead ID
@@ -180,12 +181,12 @@ func (f *FundingIngest) OnSilence(id clock.TimerID) (FundingSnapshot, error) {
 		// rather than assumed: it is the shape a future caller introducing a
 		// second eviction path would produce, and the failure would otherwise
 		// be a zero-valued observation published as real data.
-		return FundingSnapshot{}, fmt.Errorf("timer %q: %w", id, ErrUnknownTimer)
+		return ports.FundingSnapshot{}, fmt.Errorf("timer %q: %w", id, ErrUnknownTimer)
 	}
 
 	budget, ok := f.budgets.FundingBudget(inst.Venue)
 	if !ok {
-		return FundingSnapshot{}, fmt.Errorf("venue %s: %w", inst.Venue, ErrNoBudget)
+		return ports.FundingSnapshot{}, fmt.Errorf("venue %s: %w", inst.Venue, ErrNoBudget)
 	}
 
 	// Trigger zero, and this is the ONLY place that value is produced. §3.5's
@@ -199,7 +200,7 @@ func (f *FundingIngest) OnSilence(id clock.TimerID) (FundingSnapshot, error) {
 	// is fine, which is the exact opposite of what this timer fired to say.
 	snap, err := f.assess(obs, budget, false, 0)
 	if err != nil {
-		return FundingSnapshot{}, err
+		return ports.FundingSnapshot{}, err
 	}
 
 	// Re-armed for the NEXT rung. NextTransition reports false once the
@@ -221,15 +222,15 @@ func (f *FundingIngest) OnSilence(id clock.TimerID) (FundingSnapshot, error) {
 // verdict is measured against Clock.ServerNow(venue), never Clock.Now, and
 // Clock.Now is the one already in hand. Two copies of that is two chances to
 // write the comparison §3.5 forbids.
-func (f *FundingIngest) assess(obs domain.FundingObservation, b domain.Budget, gap bool, trigger AcceptOrdinal) (FundingSnapshot, error) {
+func (f *FundingIngest) assess(obs domain.FundingObservation, b domain.Budget, gap bool, trigger ports.AcceptOrdinal) (ports.FundingSnapshot, error) {
 	w := obs.Watermark
 
 	transport, data, err := assessFreshness(f.clock, b, w, obs.Instrument)
 	if err != nil {
-		return FundingSnapshot{}, err
+		return ports.FundingSnapshot{}, err
 	}
 
-	return FundingSnapshot{
+	return ports.FundingSnapshot{
 		Observation:  obs,
 		Transport:    transport,
 		Data:         data,
@@ -300,7 +301,7 @@ func advances(prev, next domain.Watermark) (advanced, gap bool) {
 		return true, next.VenueSeq > prev.VenueSeq+1
 	}
 	// No sequence on at least one side, so no gap can be claimed either — and
-	// reporting false for "gap" here is exactly why FundingSnapshot carries
+	// reporting false for "gap" here is exactly why ports.FundingSnapshot carries
 	// SeqAvailable beside it.
 	return !next.RecvTime.Before(prev.RecvTime), false
 }

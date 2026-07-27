@@ -2,6 +2,7 @@ package driving_test
 
 import (
 	"errors"
+	"github.com/giiorg/arb-lab/internal/marketdata/application/ports"
 	"testing"
 	"time"
 
@@ -93,9 +94,9 @@ func envelope(t *testing.T, stream events.StreamKind, payload any) events.Envelo
 
 // spyPublisher accepts everything and remembers it, so a test can tell "the use
 // case ran" from "the adapter returned something plausible".
-type spyPublisher struct{ got []application.FundingSnapshot }
+type spyPublisher struct{ got []ports.FundingSnapshot }
 
-func (s *spyPublisher) Publish(snap application.FundingSnapshot) error {
+func (s *spyPublisher) Publish(snap ports.FundingSnapshot) error {
 	s.got = append(s.got, snap)
 	return nil
 }
@@ -167,7 +168,7 @@ func TestDeliverTakesProvenanceFromTheEnvelope(t *testing.T) {
 	// the input that triggered it, so what the publisher stamps is what arrives
 	// here. The three envelope numbers are pairwise distinct precisely so that
 	// passing IngressSeq or VenueSeq instead is visible rather than absorbed.
-	if got := snap.Trigger; got != application.AcceptOrdinal(acceptOrdinal) {
+	if got := snap.Trigger; got != ports.AcceptOrdinal(acceptOrdinal) {
 		t.Errorf("Trigger = %d, want the envelope's AcceptOrdinal %d", got, acceptOrdinal)
 	}
 }

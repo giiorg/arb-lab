@@ -3,7 +3,7 @@
 //
 // # A driving adapter is a translation, not a second use case
 //
-// application/ports.go records why FundingIngest.Ingest and OnSilence are
+// application/ports/ records why FundingIngest.Ingest and OnSilence are
 // concrete methods rather than an interface: an interface exists to allow
 // substitution, and nothing substitutes the use case itself. What varies is the
 // SHAPE of what arrives — an events.Envelope today, an HTTP request or a replay
@@ -35,6 +35,7 @@ package driving
 
 import (
 	"fmt"
+	"github.com/giiorg/arb-lab/internal/marketdata/application/ports"
 
 	"github.com/giiorg/arb-lab/internal/engine/venue"
 	"github.com/giiorg/arb-lab/internal/marketdata/application"
@@ -85,16 +86,16 @@ func NewFundingDispatch(ingest *application.FundingIngest) (*FundingDispatch, er
 // so there is no disagreement to resolve. The instrument comes from the source
 // for the strongest version of that: it is the mailbox key, and a payload
 // cannot contradict the mailbox it was delivered to if it does not carry one.
-func (d *FundingDispatch) Deliver(env events.Envelope) (application.FundingSnapshot, error) {
+func (d *FundingDispatch) Deliver(env events.Envelope) (ports.FundingSnapshot, error) {
 	if err := env.Validate(); err != nil {
-		return application.FundingSnapshot{}, fmt.Errorf("marketdata funding deliver: %w", err)
+		return ports.FundingSnapshot{}, fmt.Errorf("marketdata funding deliver: %w", err)
 	}
 	// Checked against the funding stream rather than against the lane. The lane
 	// is the coarser question and it would pass: mark and book ride the same
 	// market-data lane, and a book update read as a funding observation is a
 	// zero rate published as a venue reading.
 	if env.Source.Stream != events.StreamFunding {
-		return application.FundingSnapshot{}, fmt.Errorf(
+		return ports.FundingSnapshot{}, fmt.Errorf(
 			"marketdata funding deliver: stream %s: %w", env.Source.Stream, ErrWrongStream)
 	}
 
@@ -104,7 +105,7 @@ func (d *FundingDispatch) Deliver(env events.Envelope) (application.FundingSnaps
 	// is not mutated afterwards.
 	u, ok := env.Payload.(venue.Funding)
 	if !ok {
-		return application.FundingSnapshot{}, fmt.Errorf(
+		return ports.FundingSnapshot{}, fmt.Errorf(
 			"marketdata funding deliver: payload %T: %w", env.Payload, ErrPayloadType)
 	}
 
@@ -121,7 +122,7 @@ func (d *FundingDispatch) Deliver(env events.Envelope) (application.FundingSnaps
 	// translation transposes still reaches the domain check, which is the only
 	// one positioned to catch it.
 	if err := u.Validate(); err != nil {
-		return application.FundingSnapshot{}, fmt.Errorf("marketdata funding deliver: %w", err)
+		return ports.FundingSnapshot{}, fmt.Errorf("marketdata funding deliver: %w", err)
 	}
 
 	obs := domain.FundingObservation{
@@ -147,7 +148,7 @@ func (d *FundingDispatch) Deliver(env events.Envelope) (application.FundingSnaps
 	// The use case's own refusals travel out unwrapped in meaning — a
 	// supersede is the ordinary outcome of an at-least-once transport, and a
 	// caller counting them must be able to tell one from a feed fault.
-	return d.ingest.Ingest(obs, application.AcceptOrdinal(env.AcceptOrdinal))
+	return d.ingest.Ingest(obs, ports.AcceptOrdinal(env.AcceptOrdinal))
 }
 
 // Timer routes a fired silence timer to the use case.
@@ -166,6 +167,6 @@ func (d *FundingDispatch) Deliver(env events.Envelope) (application.FundingSnaps
 // timer no context claims is a question for the dispatcher, and it does not
 // exist yet; answering it here would be inventing a policy for a caller that
 // has not been written.
-func (d *FundingDispatch) Timer(id clock.TimerID) (application.FundingSnapshot, error) {
+func (d *FundingDispatch) Timer(id clock.TimerID) (ports.FundingSnapshot, error) {
 	return d.ingest.OnSilence(id)
 }

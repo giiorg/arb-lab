@@ -2,6 +2,7 @@ package driven
 
 import (
 	"fmt"
+	"github.com/giiorg/arb-lab/internal/marketdata/application/ports"
 	"maps"
 	"slices"
 
@@ -146,7 +147,7 @@ func (c FreshnessConfig) Validate() error {
 //
 // # It re-reads on every call, and that is the point of the port existing
 //
-// application/ports.go states it: reading budgets through a port at decision
+// application/ports/ states it: reading budgets through a port at decision
 // time is what lets a hot-reloaded budget take effect without the use case
 // holding a snapshot of config taken at construction. Caching here would
 // reintroduce exactly that — a service that keeps applying the budget that was
@@ -156,6 +157,25 @@ func (c FreshnessConfig) Validate() error {
 // The read is cheap by construction: config.Store.Current is an atomic pointer
 // load, which is what makes "read it every time" an honest default rather than
 // a cost to be optimised away.
+// §3.6 rule 2's compile-time assertions — TWO ports, one adapter, and the pair
+// is the interesting case rather than a duplication.
+//
+// ports/ declares FundingBudgets and BookBudgets separately so that neither use
+// case depends on the other's method (§4's segregated capability interfaces).
+// One adapter satisfies both, which is where the sharing belongs — module.go
+// reuses a single ConfigBudgets for both paths rather than constructing two
+// read paths over one store.
+//
+// Asserting both is what makes that claim checkable. A single assertion would
+// leave the other port satisfied only by whichever call site happens to pass
+// this value, so deleting BookBudget would break the book path's wiring and say
+// nothing about the funding one — and §3.4's two budget sections are precisely
+// the numbers that must not be interchangeable.
+var (
+	_ ports.FundingBudgets = (*ConfigBudgets)(nil)
+	_ ports.BookBudgets    = (*ConfigBudgets)(nil)
+)
+
 type ConfigBudgets struct {
 	store *config.Store[FreshnessConfig]
 }

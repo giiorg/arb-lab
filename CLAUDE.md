@@ -149,13 +149,22 @@ These are not style preferences. Each one was paid for.
   | `caught` | the suite failed — the claim is checked |
   | `SURVIVED` | the suite passed with broken code |
   | `NO-OP!!` | the pattern did not match; the mutation never ran |
-  | `NOBUILD!!` | the mutant did not compile, so the tests never ran |
+  | `NOBUILD!!` | the mutant did not compile, so the tests never ran — **unless the compiler error is the claim**, see below |
   | `TIMEOUT!!` | the suite **hung**; a hanging test names no defect |
   | `PANIC!!` | the mutant compiled, ran and **crashed** — a kill, but by crash, so the claim you aimed at may still be unchecked |
 
   Set `MUTATE_MODULE=tools/lint` for the analyzers: `go test ./tools/lint/...`
   from the root fails with *"main module does not contain package"*, which is
   non-zero, which the harness would read as a kill.
+
+  **A claim the COMPILER enforces reports `NOBUILD!!`, and that is a kill rather
+  than a non-result.** §3.6 rule 2's `var _ ports.X = (*Impl)(nil)` exists
+  precisely to fail `go build`, so breaking the adapter it guards produces the
+  verdict that means "re-aim" while actually meaning "caught". Read the compiler
+  error the harness prints: *"does not implement ports.X (missing method Y)"* is
+  the assertion doing its job, and it names its own line. Every other `NOBUILD!!`
+  still means re-aim. Same trap as the two above it, one layer out — the verdict
+  and the outcome are not the same thing, and here they point opposite ways.
 
   It scopes the mutation to a line and prints the diff, because a file moving is
   not evidence about which function moved. A surviving mutant is either a test

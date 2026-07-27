@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"errors"
+	"github.com/giiorg/arb-lab/internal/marketdata/application/ports"
 	"testing"
 	"time"
 
@@ -76,11 +77,11 @@ func deltaAt(t *testing.T, first, last uint64, recvAt, sourceAt time.Time) domai
 
 // spyBookPublisher records what was published and can be told to fail.
 type spyBookPublisher struct {
-	got  []application.BookView
+	got  []ports.BookView
 	fail error
 }
 
-func (s *spyBookPublisher) Publish(v application.BookView) error {
+func (s *spyBookPublisher) Publish(v ports.BookView) error {
 	s.got = append(s.got, v)
 	return s.fail
 }
@@ -169,9 +170,9 @@ func TestNewBookReconstructRefusesMissingDependencies(t *testing.T) {
 	cases := []struct {
 		name  string
 		c     clock.Clock
-		p     application.BookPublisher
-		b     application.BookBudgets
-		r     application.Resnapshotter
+		p     ports.BookPublisher
+		b     ports.BookBudgets
+		r     ports.Resnapshotter
 		depth int
 		want  error
 	}{

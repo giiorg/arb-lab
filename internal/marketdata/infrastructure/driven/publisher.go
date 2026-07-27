@@ -2,9 +2,9 @@ package driven
 
 import (
 	"fmt"
+	"github.com/giiorg/arb-lab/internal/marketdata/application/ports"
 
 	"github.com/giiorg/arb-lab/internal/engine/venue"
-	"github.com/giiorg/arb-lab/internal/marketdata/application"
 	"github.com/giiorg/arb-lab/internal/platform/events"
 )
 
@@ -45,7 +45,7 @@ import (
 // timer queue, and the two agreeing is deliberate.
 const fundingPrio = events.PrioNormal
 
-// LanePublisher is application.FundingPublisher over §3.4's market-data lane.
+// LanePublisher is ports.FundingPublisher over §3.4's market-data lane.
 //
 // # What it builds, and what it deliberately leaves unstamped
 //
@@ -54,7 +54,7 @@ const fundingPrio = events.PrioNormal
 //
 // IngressSeq is stamped by the DISPATCHER, on the envelope it consumes, and it
 // is the replay key. This layer does not know the consumption order, so
-// stamping one here would INVENT a value — application/ports.go records the
+// stamping one here would INVENT a value — application/ports/ records the
 // argument, and it does not change by moving one package outward. It leaves.
 //
 // AcceptOrdinal is stamped at INGESTION, in raw arrival order across every raw
@@ -102,6 +102,20 @@ const fundingPrio = events.PrioNormal
 // The lane never blocks, so Publish can only fail by refusing. It refuses two
 // distinct things, and keeping them distinct is what makes the error name the
 // layer that owns the mistake — see Publish.
+// §3.6 rule 2's compile-time assertion.
+//
+// It is the check that this adapter still satisfies the port after either side
+// is edited, and it fails in `go build ./...` rather than only in the binary
+// that wires it — which is the whole of its value, since module.go's
+// construction proves the interface is met only where the wiring is exercised.
+//
+// This context shipped CLOSED without these, on both halves of rule 2 (§24f).
+// Nothing caught it: rule 2 is one of the four §3.6 rules with no analyzer, and
+// the reading pass that closes a slice does not object to a shape a Go reviewer
+// would call correct. What made it visible was oms following the rule and the
+// two contexts then disagreeing inside one repo.
+var _ ports.FundingPublisher = (*LanePublisher)(nil)
+
 type LanePublisher struct {
 	lane *events.MarketDataLane
 }
@@ -149,7 +163,7 @@ func NewLanePublisher(lane *events.MarketDataLane) (*LanePublisher, error) {
 // anything is delivered, so an error here means nothing was published — a
 // publisher that reported failure after delivering would leave a consumer
 // reading a record its producer believes it rejected.
-func (p *LanePublisher) Publish(snap application.FundingSnapshot) error {
+func (p *LanePublisher) Publish(snap ports.FundingSnapshot) error {
 	w := snap.Observation.Watermark
 
 	// The source is built by engine/venue rather than as a literal here, and

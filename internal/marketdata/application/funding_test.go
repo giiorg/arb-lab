@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"errors"
+	"github.com/giiorg/arb-lab/internal/marketdata/application/ports"
 	"testing"
 	"time"
 
@@ -42,7 +43,7 @@ var budget = domain.Budget{MaxAge: 30 * time.Second, Blind: 5 * time.Minute}
 // watermark's sequence cannot agree with this by accident; and 1 would let a
 // hardcoded 1 pass everywhere. The tests that ARE about the ordinal use their
 // own distinctive value and do not read this.
-const anyOrdinal = application.AcceptOrdinal(77)
+const anyOrdinal = ports.AcceptOrdinal(77)
 
 func perp() ids.VenueInstrument {
 	return ids.VenueInstrument{
@@ -87,11 +88,11 @@ func obs(t *testing.T, recvAt, sourceAt time.Time, seq uint64) domain.FundingObs
 
 // spyPublisher records what was published and can be told to fail.
 type spyPublisher struct {
-	got  []application.FundingSnapshot
+	got  []ports.FundingSnapshot
 	fail error
 }
 
-func (s *spyPublisher) Publish(snap application.FundingSnapshot) error {
+func (s *spyPublisher) Publish(snap ports.FundingSnapshot) error {
 	s.got = append(s.got, snap)
 	return s.fail
 }
@@ -158,8 +159,8 @@ func TestNewFundingIngestRefusesMissingDependencies(t *testing.T) {
 	cases := []struct {
 		name string
 		c    clock.Clock
-		p    application.FundingPublisher
-		b    application.FundingBudgets
+		p    ports.FundingPublisher
+		b    ports.FundingBudgets
 		want error
 	}{
 		{"no clock", nil, pub, bud, application.ErrClockNil},
@@ -271,7 +272,7 @@ func TestClockInversionIsRefusedNotPublished(t *testing.T) {
 func TestSnapshotCarriesTheTriggeringOrdinal(t *testing.T) {
 	h := newHarness(t)
 
-	const trigger = application.AcceptOrdinal(4242)
+	const trigger = ports.AcceptOrdinal(4242)
 	snap, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 3), trigger)
 	if err != nil {
 		t.Fatalf("Ingest: %v", err)

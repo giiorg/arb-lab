@@ -2,10 +2,10 @@ package driven_test
 
 import (
 	"errors"
+	"github.com/giiorg/arb-lab/internal/marketdata/application/ports"
 	"testing"
 	"time"
 
-	"github.com/giiorg/arb-lab/internal/marketdata/application"
 	"github.com/giiorg/arb-lab/internal/marketdata/domain"
 	"github.com/giiorg/arb-lab/internal/marketdata/infrastructure/driven"
 	"github.com/giiorg/arb-lab/internal/platform/events"
@@ -41,9 +41,9 @@ func bookLevel(t *testing.T, p, q string) domain.BookLevel {
 // there: equal timestamps make "copies SourceTime" and "copies RecvTime" one
 // assignment, and a VenueSeq of 1 collides with the ordinal a wrong
 // implementation would stamp.
-func bookView(t *testing.T, inst ids.VenueInstrument, trigger application.AcceptOrdinal) application.BookView {
+func bookView(t *testing.T, inst ids.VenueInstrument, trigger ports.AcceptOrdinal) ports.BookView {
 	t.Helper()
-	return application.BookView{
+	return ports.BookView{
 		Book: domain.BookSnapshot{
 			Instrument: inst,
 			Bids:       []domain.BookLevel{bookLevel(t, "43250.10", "0.5"), bookLevel(t, "43250.00", "1.25")},
@@ -119,9 +119,9 @@ func TestBookPublishAddressesTheBookMailbox(t *testing.T) {
 		t.Errorf("Prio = %d, want PrioNormal — not the zero value, which is PrioSafety", env.Prio)
 	}
 
-	view, ok := env.Payload.(application.BookView)
+	view, ok := env.Payload.(ports.BookView)
 	if !ok {
-		t.Fatalf("payload is %T, want application.BookView", env.Payload)
+		t.Fatalf("payload is %T, want ports.BookView", env.Payload)
 	}
 	if view.Book.Watermark.VenueSeq != venueSeq {
 		t.Errorf("payload book seq = %d, want %d", view.Book.Watermark.VenueSeq, venueSeq)
@@ -200,12 +200,12 @@ func TestBookPublishRefuses(t *testing.T) {
 	// an implementation that dropped either is caught. A refused view must not
 	// reach the mailbox at all, which the shared assertion below states.
 	cases := map[string]struct {
-		mutate func(*application.BookView)
+		mutate func(*ports.BookView)
 		want   error
 	}{
 		"unset instrument": {
 			// Caught by the SOURCE constructor, before the probe.
-			func(v *application.BookView) { v.Book.Instrument = ids.VenueInstrument{} },
+			func(v *ports.BookView) { v.Book.Instrument = ids.VenueInstrument{} },
 			ids.ErrVenueUnset,
 		},
 		"no receive time": {
@@ -214,7 +214,7 @@ func TestBookPublishRefuses(t *testing.T) {
 			// because freshness is measured from it. Either sentinel is a
 			// correct answer, so this asserts the one the ORDER produces: the
 			// probe runs first, and if that ever changes this test says so.
-			func(v *application.BookView) { v.Book.Watermark.RecvTime = time.Time{} },
+			func(v *ports.BookView) { v.Book.Watermark.RecvTime = time.Time{} },
 			events.ErrRecvTimeUnset,
 		},
 		"no source time": {
@@ -224,14 +224,14 @@ func TestBookPublishRefuses(t *testing.T) {
 			// cannot answer DataAge, and the venue-side stall is what that
 			// measurement exists to find. Skipping the domain check would let
 			// this reach the lane looking perfectly well-formed.
-			func(v *application.BookView) { v.Book.Watermark.SourceTime = time.Time{} },
+			func(v *ports.BookView) { v.Book.Watermark.SourceTime = time.Time{} },
 			domain.ErrWatermarkUnset,
 		},
 		"crossed book": {
 			// The other domain-only case: an envelope cannot see that the best
 			// bid is above the best ask, and a zero-or-negative spread is the one
 			// number a cost-hurdle comparison treats as free execution.
-			func(v *application.BookView) { v.Book.Bids[0] = bookLevel(t, "43260.00", "1") },
+			func(v *ports.BookView) { v.Book.Bids[0] = bookLevel(t, "43260.00", "1") },
 			domain.ErrBookCrossed,
 		},
 		"no venue sequence": {
@@ -239,7 +239,7 @@ func TestBookPublishRefuses(t *testing.T) {
 			// advances: every later delta computes SeqRelationUnknown. See
 			// domain.ErrBookSeqUnset — this is the refusal that stops a
 			// permanent resync loop reaching consumers as a healthy book.
-			func(v *application.BookView) { v.Book.Watermark.VenueSeq = 0 },
+			func(v *ports.BookView) { v.Book.Watermark.VenueSeq = 0 },
 			domain.ErrBookSeqUnset,
 		},
 	}

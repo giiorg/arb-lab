@@ -7,11 +7,21 @@
 // # taken literally
 //
 // The alternative — declaring these in application/ports.go, in package
-// application — is what internal/marketdata does today, and it is the shape a Go
-// reviewer would prefer, since an interface is conventionally declared in the
-// package that consumes it. The repo's own assessment already answered that
-// objection (decision record §7): application/ IS the consumer, so the interface
-// is still declared where it is used, one directory down.
+// application — is the shape a Go reviewer would prefer, since an interface is
+// conventionally declared in the package that consumes it. The repo's own
+// assessment already answered that objection (decision record §7): application/
+// IS the consumer, so the interface is still declared where it is used, one
+// directory down.
+//
+// internal/marketdata was the flat counterexample for five sessions, in a
+// CLOSED slice, on both halves of the rule (§24f). It has been brought into
+// line, and how the drift was found is the part worth keeping: rule 2 has no
+// analyzer, so nothing objected, and the slice-closing reading pass did not
+// either — because a rule the code silently does not meet looks exactly like a
+// rule it meets. What surfaced it was THIS package existing, at which point one
+// repo held two contexts disagreeing about one sentence. A second
+// implementation is the thing that can see what neither the marker grep nor the
+// reading pass can.
 //
 // The cost of the subpackage is real and worth naming, because it constrains
 // what may live here: package ports must not import package application, or the

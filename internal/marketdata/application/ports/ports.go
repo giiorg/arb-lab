@@ -1,23 +1,48 @@
-// Package application is marketdata's use-case layer: it drives the domain and
-// declares the ports the outside world plugs into.
+// Package ports declares the driven dependencies marketdata's use cases need,
+// as §3.6 rule 2 requires: "every driven dependency is an interface there;
+// adapters live in infrastructure/driven/ with a compile-time
+// var _ ports.X = (*Impl)(nil)".
 //
-// §3.2 gives this context one job on the funding path — "ingest + normalize
-// funding; stamp venue-seq + source/receive time + freshness; publish". The
-// domain owns what an observation MEANS (what a valid one is, when its
-// settlements fall, how stale it is). This layer owns the sequencing decisions
-// that need memory of what came before, and it is where §3.4's two feed-failure
-// modes are actually detected.
+// # This package arrived late, and how it was found is the part worth keeping
 //
-// # Ports are declared here and implemented outward, which is what makes the
-// # dependency point inward
+// These interfaces spent five sessions in application/ports.go, in package
+// application. The context CLOSED that way. Rule 2 is one of the four §3.6
+// rules with no analyzer behind it, so nothing objected — and the closing
+// reading pass did not object either, because the shape it produces is the one
+// a Go reviewer would call correct.
 //
-// Every interface in this file is a DRIVEN port: something this layer needs and
-// infrastructure supplies. There is no interface here for the driving side —
-// Ingest and OnSilence below are the driving port, and they are concrete
-// methods, because an interface exists to allow substitution and nothing
-// substitutes the use case itself. §3.6 rule 1 (hexboundary) is the enforcement,
-// and as of this slice it is a build failure rather than a convention.
-package application
+// What made it visible was oms following the rule, at which point the same repo
+// held two contexts disagreeing about the same sentence. That is a general
+// lesson about which this repo already has a marker discipline and a reading
+// pass: neither can see a rule the code silently does not meet, and the thing
+// that CAN see it is a second implementation of the same rule to compare
+// against. Recorded as §24f, carried three sessions, fixed rather than absorbed.
+//
+// # What lives here, and why the payload types came too
+//
+// package ports must not import package application, or the import cycles. So
+// every type crossing one of these seams lives here or in domain/ — which is
+// why FundingSnapshot, BookView and AcceptOrdinal moved with the interfaces
+// they appear in rather than staying behind in the use-case layer.
+//
+// That is a discipline rather than a limitation, and it has a useful effect
+// oms's own ports doc names: a use-case type that would be convenient to hand
+// an adapter has to be moved deliberately, which is the moment somebody asks
+// whether the adapter should see it at all.
+//
+// # Every port here is DRIVEN, and segregation is §4's rule rather than taste
+//
+// There is no interface for the driving side: the use cases in application/ are
+// the driving port and they are concrete types, because an interface exists to
+// allow substitution and nothing substitutes a use case. §8's backtester
+// substitutes the adapters beneath it, which is what these are for.
+//
+// The budget ports are split per data class for §4's stated reason — contexts
+// "consume segregated capability interfaces" — and not for tidiness. §3.4's
+// classes are independent, so a funding use case declaring a book dependency it
+// never calls is one §3.7's service split would carry across a process boundary
+// for nothing. One adapter satisfies both, which is where the sharing belongs.
+package ports
 
 import (
 	"github.com/giiorg/arb-lab/internal/marketdata/domain"
@@ -205,6 +230,21 @@ type BookBudgets interface {
 //
 // So this returns only whether the request was accepted, and the resulting book
 // arrives later through OnSnapshot, carrying its own AcceptOrdinal.
+// # It is the one port here with NO var _ assertion, and that is not the drift
+// # returning
+//
+// §3.6 rule 2's second half — "adapters live in infrastructure/driven/ with a
+// compile-time var _ ports.X = (*Impl)(nil)" — has nothing to assert for a port
+// with no adapter, and this port has none: a resnapshot is a REST call to a
+// venue, venue clients live outside this context entirely, and §20a defers
+// them. It is why Resnapshotter is the one port a composition root supplies
+// rather than one module.go constructs (marketdata.Deps records the same fact
+// from the other side).
+//
+// Stated here because the absence is otherwise indistinguishable from the
+// omission that §24f actually was, and the two need different responses: this
+// one resolves when the venue client lands, and the assertion goes in beside
+// it.
 type Resnapshotter interface {
 	RequestSnapshot(ids.VenueInstrument) error
 }
