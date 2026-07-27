@@ -159,7 +159,7 @@ func TestNewFundingIngestRefusesMissingDependencies(t *testing.T) {
 		name string
 		c    clock.Clock
 		p    application.FundingPublisher
-		b    application.Budgets
+		b    application.FundingBudgets
 		want error
 	}{
 		{"no clock", nil, pub, bud, application.ErrClockNil},

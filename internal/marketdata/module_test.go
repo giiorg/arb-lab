@@ -62,16 +62,30 @@ func rate(t *testing.T, s string) fixedpoint.Rate {
 	return r
 }
 
+// bookBudget is the book budget every venue in these fixtures gets.
+//
+// Sub-second, per §3.4, and deliberately unlike any funding budget below: these
+// tests are about the funding path, so the book section exists here only to
+// satisfy the schema — and giving it the same numbers would make a
+// funding-reads-the-book-section defect invisible in exactly the file that wires
+// the two together.
+var bookBudget = domain.Budget{MaxAge: 200 * time.Millisecond, Blind: 2 * time.Second}
+
 func document(t *testing.T, venues map[ids.Venue]domain.Budget) []byte {
 	t.Helper()
-	funding := make(map[ids.Venue]driven.BudgetSpec, len(venues))
-	for v, b := range venues {
-		funding[v] = driven.BudgetSpec{
+	toSpec := func(b domain.Budget) driven.BudgetSpec {
+		return driven.BudgetSpec{
 			MaxAge: config.NewDuration(b.MaxAge),
 			Blind:  config.NewDuration(b.Blind),
 		}
 	}
-	doc, err := json.Marshal(driven.FreshnessConfig{Funding: funding})
+	funding := make(map[ids.Venue]driven.BudgetSpec, len(venues))
+	books := make(map[ids.Venue]driven.BudgetSpec, len(venues))
+	for v, b := range venues {
+		funding[v] = toSpec(b)
+		books[v] = toSpec(bookBudget)
+	}
+	doc, err := json.Marshal(driven.FreshnessConfig{Funding: funding, Book: books})
 	if err != nil {
 		t.Fatalf("marshal config: %v", err)
 	}

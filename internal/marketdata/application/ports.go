@@ -153,7 +153,7 @@ func (s FundingSnapshot) Least() domain.Freshness {
 	return domain.Least(s.Transport, s.Data)
 }
 
-// Budgets supplies the freshness budget for a venue's funding data.
+// FundingBudgets supplies the freshness budget for a venue's funding data.
 //
 // A port rather than a map field, because §5.2 makes these configuration and
 // §3.4 makes them per-data-class AND per-venue. Reading them through a port at
@@ -164,6 +164,97 @@ func (s FundingSnapshot) Least() domain.Freshness {
 // The bool is not an error: a venue with no configured budget is a
 // configuration question, and the caller decides whether that is a refusal or a
 // fallback. Returning an error here would make every call site invent one.
-type Budgets interface {
+//
+// # It is per data class, and that is interface segregation rather than taste
+//
+// The obvious shape is one Budgets port with a method per class, and it was
+// rejected: §3.4's classes are independent, so a funding use case declaring a
+// dependency it never calls is a dependency §3.7's service split would have to
+// carry across a process boundary for nothing. The narrow form also makes the
+// test stubs honest — a fake that must implement BookBudget to be handed to
+// FundingIngest is a fake asserting a relationship that does not exist. One
+// adapter satisfies both, which is where the sharing belongs.
+type FundingBudgets interface {
 	FundingBudget(ids.Venue) (domain.Budget, bool)
+}
+
+// BookBudgets supplies the freshness budget for a venue's order-book data.
+//
+// Separate from FundingBudgets because §3.4 is explicit that the numbers are
+// not interchangeable: "order books used for execution need sub-second budgets
+// + a cross-leg skew limit... funding metadata tolerates longer". A single
+// budget for both is one of two wrong answers — funding's tolerance applied to a
+// book lets execution price against a book from a minute ago, and a book's
+// applied to funding reports a healthy 8h feed as permanently blind.
+type BookBudgets interface {
+	BookBudget(ids.Venue) (domain.Budget, bool)
+}
+
+// Resnapshotter asks a venue for a fresh full book.
+//
+// # It requests and returns; the snapshot arrives as a separate input
+//
+// The tempting signature returns the book — one call, no state machine. It is
+// wrong at this seam for §3.5's reason: a REST call "runs outside the
+// state-transition dispatcher and re-enters as a fresh envelope with its own
+// IngressSeq". A method that blocked until a book came back would make the
+// reconstructor wait inside a dispatch, stalling every other SourceID's
+// mailbox on one venue's REST latency — which is exactly the head-of-line block
+// §3.5 forbids when it says an unready SourceID never stalls dispatch of ready
+// inputs from other sources.
+//
+// So this returns only whether the request was accepted, and the resulting book
+// arrives later through OnSnapshot, carrying its own AcceptOrdinal.
+type Resnapshotter interface {
+	RequestSnapshot(ids.VenueInstrument) error
+}
+
+// BookPublisher is where a reconstructed book goes.
+//
+// Same boundary as FundingPublisher and for the same reason: what crosses is the
+// observation and the verdict on it, never an envelope. §3.5 assigns IngressSeq
+// at dispatch, and a producer minting one would be a second authority over the
+// replay key.
+type BookPublisher interface {
+	Publish(BookView) error
+}
+
+// BookView is one reconstructed book together with the freshness verdicts and
+// the provenance of the input that produced it.
+//
+// It is the book path's FundingSnapshot, and the two fields that differ are the
+// ones worth reading.
+type BookView struct {
+	// Book is the reconstructed, validated snapshot.
+	Book domain.BookSnapshot
+
+	// Transport is freshness against engine time — has anything ARRIVED.
+	Transport domain.Freshness
+
+	// Data is freshness against the venue's own server time — is the venue's
+	// VIEW moving. Two verdicts rather than one, because a venue-side stall
+	// keeps updates arriving on schedule with a frozen SourceTime and Transport
+	// reads perfectly fresh for the whole outage.
+	Data domain.Freshness
+
+	// Applied is how the input that produced this book related to the book it
+	// was applied to.
+	//
+	// SeqRelationUnknown means a full snapshot REPLACED the book rather than
+	// following it, which is precisely what that value means on the domain type
+	// — no relation is computable — so it is not a second meaning bolted onto a
+	// sentinel. A consumer counting resyncs reads this; there is no separate
+	// bool, because a bool beside a relation is a second spelling of one fact.
+	Applied domain.SeqRelation
+
+	// Trigger is the AcceptOrdinal of the raw input this view was derived from,
+	// or zero when a silence timer derived it from no input at all. Same
+	// inheritance rule, same sentinel, same reason as FundingSnapshot.Trigger.
+	Trigger AcceptOrdinal
+}
+
+// Least is the view's overall freshness: the worse of the two verdicts, which is
+// the safe reduction a trade decision needs.
+func (v BookView) Least() domain.Freshness {
+	return domain.Least(v.Transport, v.Data)
 }

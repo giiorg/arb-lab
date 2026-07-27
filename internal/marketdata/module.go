@@ -15,14 +15,27 @@
 // So the split is: app/ decides what the store and the lane ARE, this decides
 // what they are plugged into.
 //
-// # Scope: the funding path only
+// # Scope: the funding path is WIRED; the book path is built but not yet wired
 //
 // §3.2 gives this context book reconstruction and mark normalization as well.
-// Both are deferred for this slice by the user's call, and the deferral is
-// visible in the type rather than in a comment somewhere else — Module has one
-// field, so a caller cannot reach a book path that does not exist and there is
-// no nil to check. When the book path lands it is a second field and a second
-// port, not an edit to this one.
+// application.BookReconstruct now exists and is tested — the domain
+// reconstruction, gap detection on VenueSeq, the hold buffer and automatic
+// resnapshot are all built — but Module still has one field, and the reason is
+// specific rather than a leftover deferral.
+//
+// A driving adapter turns an events.Envelope into a use-case call, which means
+// type-asserting a NORMALIZED VENUE DTO out of the payload — venue.Funding is
+// what FundingDispatch asserts. There is no venue.Book yet, so a book dispatch
+// would have to invent one here, in the context that consumes it, which is the
+// dependency direction driving/'s doc comment exists to forbid. The book DTO
+// belongs to engine/venue (§4), and that is the next slice.
+//
+// The deferral stays visible in the TYPE rather than in prose elsewhere: Module
+// has one field, so a caller cannot reach a book path that is not assembled and
+// there is no nil to check. When it lands it is a second field and a second
+// Deps entry — the Resnapshotter, which is a port rather than a concrete kernel
+// type because its adapter is a venue REST client living outside this context
+// entirely (§20a defers those clients, and this is where that deferral surfaces).
 package marketdata
 
 import (

@@ -15,7 +15,7 @@ var (
 	ErrStoreNil = errors.New("marketdata: freshness config store not supplied")
 	ErrLaneNil  = errors.New("marketdata: market-data lane not supplied")
 
-	// ErrNoVenues reports a funding-freshness section with no venues in it.
+	// ErrNoVenues reports a freshness section with no venues in it.
 	//
 	// Refused rather than accepted as "deny everything", on the same argument
 	// application.ErrNoBudget makes one layer in: a process that boots with an
@@ -24,5 +24,11 @@ var (
 	// the exchange status page. It is also §11's zero-value rule applied to a
 	// section rather than to a field — an unpopulated FreshnessConfig must not
 	// be a usable one.
-	ErrNoVenues = errors.New("marketdata: no venue has a funding freshness budget configured")
+	//
+	// The message does NOT name a data class, and that is deliberate now that
+	// there are two: FreshnessConfig.Validate wraps this with the section it
+	// found empty, so a sentinel that named one would produce "book freshness:
+	// no funding budget configured" — a message that contradicts itself and
+	// sends a reader to the wrong half of the document.
+	ErrNoVenues = errors.New("marketdata: no venue has a freshness budget configured")
 )

@@ -27,7 +27,24 @@ const (
 var (
 	binanceBudget = domain.Budget{MaxAge: 30 * time.Second, Blind: 5 * time.Minute}
 	bybitBudget   = domain.Budget{MaxAge: 45 * time.Second, Blind: 9 * time.Minute}
+
+	// The BOOK budgets are sub-second, per §3.4, and they are here for the same
+	// fixture-dimension reason the two venues are: with book and funding sharing
+	// numbers, "read the book section" and "read the funding section" give the
+	// same answer, and BookBudget could be reading Funding with nothing failing.
+	// The whole point of the split is that these two are not interchangeable.
+	binanceBookBudget = domain.Budget{MaxAge: 250 * time.Millisecond, Blind: 2 * time.Second}
+	bybitBookBudget   = domain.Budget{MaxAge: 400 * time.Millisecond, Blind: 3 * time.Second}
 )
+
+// books is the book half of a valid fixture section, so that a test aimed at
+// the FUNDING half does not have to restate it.
+func books() map[ids.Venue]driven.BudgetSpec {
+	return map[ids.Venue]driven.BudgetSpec{
+		binance: spec(binanceBookBudget),
+		bybit:   spec(bybitBookBudget),
+	}
+}
 
 // at is the instant configuration is loaded at. Not the zero time — config.New
 // refuses that, so a bug that dropped it would fail for the wrong reason.
@@ -44,7 +61,7 @@ func twoVenues() driven.FreshnessConfig {
 	return driven.FreshnessConfig{Funding: map[ids.Venue]driven.BudgetSpec{
 		binance: spec(binanceBudget),
 		bybit:   spec(bybitBudget),
-	}}
+	}, Book: books()}
 }
 
 // ---------------------------------------------------------------------------
@@ -76,7 +93,7 @@ func TestFreshnessConfigDefersTheBudgetRuleToTheDomain(t *testing.T) {
 	cfg := driven.FreshnessConfig{Funding: map[ids.Venue]driven.BudgetSpec{
 		binance: spec(binanceBudget),
 		bybit:   spec(domain.Budget{MaxAge: time.Minute, Blind: time.Minute}),
-	}}
+	}, Book: books()}
 
 	err := cfg.Validate()
 	if !errors.Is(err, domain.ErrBudgetUnreachable) {
@@ -93,7 +110,7 @@ func TestFreshnessConfigRefusesAnUnnamedVenue(t *testing.T) {
 	cfg := driven.FreshnessConfig{Funding: map[ids.Venue]driven.BudgetSpec{
 		binance: spec(binanceBudget),
 		"":      spec(bybitBudget),
-	}}
+	}, Book: books()}
 
 	if err := cfg.Validate(); !errors.Is(err, ids.ErrVenueUnset) {
 		t.Fatalf("Validate() = %v, want ids.ErrVenueUnset", err)
@@ -108,7 +125,7 @@ func TestFreshnessConfigNamesTheSAMEVenueOnEveryRun(t *testing.T) {
 	cfg := driven.FreshnessConfig{Funding: map[ids.Venue]driven.BudgetSpec{
 		binance: spec(domain.Budget{MaxAge: time.Minute, Blind: time.Second}),
 		bybit:   spec(domain.Budget{MaxAge: time.Minute, Blind: time.Second}),
-	}}
+	}, Book: books()}
 
 	first := cfg.Validate()
 	if first == nil {
@@ -129,7 +146,9 @@ func TestFreshnessConfigNamesTheSAMEVenueOnEveryRun(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestFreshnessConfigReadsDurationsAsStrings(t *testing.T) {
-	doc := []byte(`{"funding":{"binance":{"max_age":"30s","blind":"5m"},"bybit":{"max_age":"45s","blind":"9m"}}}`)
+	doc := []byte(`{` +
+		`"funding":{"binance":{"max_age":"30s","blind":"5m"},"bybit":{"max_age":"45s","blind":"9m"}},` +
+		`"book":{"binance":{"max_age":"250ms","blind":"2s"},"bybit":{"max_age":"400ms","blind":"3s"}}}`)
 
 	store, err := config.New[driven.FreshnessConfig]("test", at, doc)
 	if err != nil {
@@ -146,6 +165,19 @@ func TestFreshnessConfigReadsDurationsAsStrings(t *testing.T) {
 	}
 	if got != binanceBudget {
 		t.Errorf("FundingBudget(binance) = %+v, want %+v", got, binanceBudget)
+	}
+
+	// The discriminating half: the two sections carry different numbers for the
+	// same venue, so a BookBudget that read the funding map would return a
+	// perfectly valid budget and fail only here. Sub-second on purpose, per
+	// §3.4 — the funding value is three orders of magnitude too loose for a book
+	// that gates execution, and nothing at runtime would say so.
+	gotBook, ok := b.BookBudget(binance)
+	if !ok {
+		t.Fatal("BookBudget(binance) reported no budget")
+	}
+	if gotBook != binanceBookBudget {
+		t.Errorf("BookBudget(binance) = %+v, want %+v — it must read the BOOK section", gotBook, binanceBookBudget)
 	}
 }
 
@@ -216,7 +248,7 @@ func TestConfigBudgetsSeesAHotReload(t *testing.T) {
 	next := driven.FreshnessConfig{Funding: map[ids.Venue]driven.BudgetSpec{
 		binance: spec(widened),
 		bybit:   spec(bybitBudget),
-	}}
+	}, Book: books()}
 	if _, err := store.Reload("test", at.Add(time.Hour), encode(t, next)); err != nil {
 		t.Fatalf("Reload: %v", err)
 	}
@@ -242,7 +274,7 @@ func TestConfigBudgetsSeesAVenueAddedByReload(t *testing.T) {
 	// and nothing about the code would say so.
 	store := newStore(t, driven.FreshnessConfig{Funding: map[ids.Venue]driven.BudgetSpec{
 		binance: spec(binanceBudget),
-	}})
+	}, Book: books()})
 	b, err := driven.NewConfigBudgets(store)
 	if err != nil {
 		t.Fatalf("NewConfigBudgets: %v", err)

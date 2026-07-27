@@ -40,7 +40,7 @@ const silenceTimerPrio uint8 = 1
 type FundingIngest struct {
 	clock   clock.Clock
 	publish FundingPublisher
-	budgets Budgets
+	budgets FundingBudgets
 
 	// held is the last accepted observation per instrument. It is what makes
 	// supersede and gap detection possible at all — both are questions about a
@@ -61,7 +61,7 @@ type FundingIngest struct {
 // observations, publish them into a nil interface, and panic on the first
 // freshness computation — at which point the diagnosis is a stack trace in the
 // hot path rather than a named refusal at boot.
-func NewFundingIngest(c clock.Clock, p FundingPublisher, b Budgets) (*FundingIngest, error) {
+func NewFundingIngest(c clock.Clock, p FundingPublisher, b FundingBudgets) (*FundingIngest, error) {
 	if c == nil {
 		return nil, ErrClockNil
 	}
@@ -213,28 +213,20 @@ func (f *FundingIngest) OnSilence(id clock.TimerID) (FundingSnapshot, error) {
 	return snap, nil
 }
 
-// assess computes both freshness verdicts for an observation.
+// assess wraps the observation in the freshness verdicts computed for it.
 //
-// A clock inversion (§3.6 rule 5's two-disagreeing-clocks defect) yields
-// FreshnessUnknown from the domain and is returned as an error here rather than
-// published: the domain's dual return exists so a caller that IGNORES the error
-// still de-levers, and this caller does not ignore it. Publishing an
-// Unknown-verdict snapshot would be indistinguishable downstream from a venue
-// that has never connected.
+// The two-clock rule itself lives in assessFreshness, shared with the book path.
+// It was inline here until the book path needed the same pair, and the reason it
+// moved rather than being copied is the half a reader gets wrong: the DATA
+// verdict is measured against Clock.ServerNow(venue), never Clock.Now, and
+// Clock.Now is the one already in hand. Two copies of that is two chances to
+// write the comparison §3.5 forbids.
 func (f *FundingIngest) assess(obs domain.FundingObservation, b domain.Budget, gap bool, trigger AcceptOrdinal) (FundingSnapshot, error) {
 	w := obs.Watermark
 
-	transport, err := b.Assess(w, f.clock.Now())
+	transport, data, err := assessFreshness(f.clock, b, w, obs.Instrument)
 	if err != nil {
-		return FundingSnapshot{}, fmt.Errorf("instrument %s transport freshness: %w", obs.Instrument, err)
-	}
-	// Measured against the VENUE's clock, not this process's. §3.5 rejects
-	// cross-venue SourceTime comparison because the clocks are unsynchronized,
-	// and comparing a venue stamp to engine time is the same mistake with one
-	// venue instead of two.
-	data, err := b.AssessData(w, f.clock.ServerNow(obs.Instrument.Venue).Instant())
-	if err != nil {
-		return FundingSnapshot{}, fmt.Errorf("instrument %s data freshness: %w", obs.Instrument, err)
+		return FundingSnapshot{}, err
 	}
 
 	return FundingSnapshot{

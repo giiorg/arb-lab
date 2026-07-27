@@ -46,4 +46,64 @@ var (
 	// process, and a handler that silently accepted foreign IDs would make a
 	// mis-routed timer look like a healthy no-op.
 	ErrUnknownTimer = errors.New("marketdata: silence timer was not armed by this service")
+
+	// ErrBookPublisherNil and ErrResnapshotterNil report a book-path dependency
+	// nobody supplied. Separate from ErrPublisherNil rather than shared with it,
+	// on the rule the funding block above states: the message names the wire
+	// that is missing, and "publisher not supplied" from a process wiring two
+	// publishers names neither.
+	ErrBookPublisherNil = errors.New("marketdata: book publisher not supplied")
+	ErrResnapshotterNil = errors.New("marketdata: resnapshotter not supplied")
+
+	// ErrBookBudgetsNil reports a missing book freshness budget port.
+	ErrBookBudgetsNil = errors.New("marketdata: book freshness budgets not supplied")
+
+	// ErrHoldDepthInvalid reports a non-positive hold-buffer depth.
+	//
+	// Zero is the dangerous value and the reason this is refused rather than
+	// defaulted. A depth of zero holds nothing while awaiting a resnapshot, so
+	// the REST book always lands behind the live stream and the very next delta
+	// gaps — a resync loop that re-requests forever, at a rate that grows with
+	// how far behind the fetch lands, while every metric reports a connected
+	// feed. The buffer is what makes resync TERMINATE; it is not a latency
+	// optimisation.
+	ErrHoldDepthInvalid = errors.New("marketdata: book hold depth is not positive")
+
+	// ErrNoBookBudget reports a venue with no configured book budget. §3.4 makes
+	// the book and funding numbers non-interchangeable, so falling back to the
+	// funding budget would let execution price against a book from a minute ago
+	// — refused for the same reason ErrNoBudget is.
+	ErrNoBookBudget = errors.New("marketdata: no book freshness budget configured for venue")
+
+	// ErrAwaitingSnapshot reports a delta that arrived while the book has no
+	// position to apply it to.
+	//
+	// Not a fault: it is the ordinary state between requesting a resnapshot and
+	// receiving one, and the delta has been HELD (§3.5 permits exactly this —
+	// "reconstruction may hold a book delta behind a sequence gap"). Named so a
+	// caller can count it without escalating, and returned rather than swallowed
+	// so a caller that never sees a snapshot can tell why nothing is publishing.
+	ErrAwaitingSnapshot = errors.New("marketdata: book is awaiting a snapshot")
+
+	// ErrSequenceGap reports a delta whose span begins beyond the book's
+	// position — §3.4's sequence-gap detection firing. A resnapshot has been
+	// requested and the delta held.
+	ErrSequenceGap = errors.New("marketdata: book delta skips a venue sequence")
+
+	// ErrBookDesynced reports a delta that applied cleanly by sequence and
+	// produced an INVALID book — a crossed or unordered result.
+	//
+	// Distinct from ErrSequenceGap although the recovery is identical, because
+	// the diagnoses are not: a gap is a lost message and this is a book that
+	// disagrees with the venue while every sequence arrived. One sends an
+	// operator to the transport, the other to the adapter's decoding.
+	ErrBookDesynced = errors.New("marketdata: book diverged from the venue")
+
+	// ErrHoldOverflow reports that the hold buffer filled and was discarded.
+	//
+	// It is RECORDED rather than silent, which is §3.5's rule for the capture
+	// lane applied here: "any drop is a recorded capture gap — never a silent
+	// reorder". A reconstructor that quietly dropped held deltas would present a
+	// resync loop as a slow venue.
+	ErrHoldOverflow = errors.New("marketdata: book hold buffer overflowed and was discarded")
 )

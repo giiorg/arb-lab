@@ -48,10 +48,23 @@ type FreshnessConfig struct {
 	// a book used for execution needs a sub-second budget while funding
 	// metadata tolerates longer. A single map named "freshness" would invite
 	// one number for both, and the number that is right for funding is
-	// catastrophic for a book. The order-book path is deferred for this slice
-	// (the user's call), and when it lands it gets its own field here rather
-	// than sharing this one.
+	// catastrophic for a book. Book is that separate field, landed with the
+	// reconstruction path exactly as this comment committed to.
 	Funding map[ids.Venue]BudgetSpec `json:"funding" config:"hot"`
+
+	// Book is the per-venue budget for order-book data.
+	//
+	// Its own field rather than a shared one, which the Funding comment above
+	// pre-registered before the book path existed. §3.4's numbers here are
+	// sub-second because this is what execution prices against; sharing
+	// funding's tolerance would let an order be priced from a book a minute old,
+	// and sharing this one with funding would report a healthy 8h feed as
+	// permanently blind.
+	//
+	// Hot for the same reason Funding is: a budget is what an operator reaches
+	// for mid-incident, and a restart to apply one is a restart taken with a
+	// position open.
+	Book map[ids.Venue]BudgetSpec `json:"book" config:"hot"`
 }
 
 // BudgetSpec is one venue's funding budget as it is written in a document.
@@ -102,16 +115,28 @@ func (s BudgetSpec) Validate() error {
 // boot logs produced from one bad file, disagreeing about what is wrong with
 // it. Sorting the keys costs one allocation at boot and buys a refusal an
 // operator can compare against yesterday's.
+// # Both sections are required, and an EMPTY one is the case worth refusing
+//
+// The alternative — accept a missing section and let the use case refuse each
+// observation — was rejected because the two failures are indistinguishable
+// downstream. A book path with no configured budgets refuses every delta with
+// ErrNoBookBudget, per instrument, forever; on a dashboard that is a venue that
+// has gone dark. Refusing at boot names the file and the section instead.
 func (c FreshnessConfig) Validate() error {
-	if len(c.Funding) == 0 {
-		return ErrNoVenues
-	}
-	for _, v := range slices.Sorted(maps.Keys(c.Funding)) {
-		if err := v.Validate(); err != nil {
-			return fmt.Errorf("funding freshness: venue key %q: %w", string(v), err)
+	for _, section := range []struct {
+		name    string
+		budgets map[ids.Venue]BudgetSpec
+	}{{"funding", c.Funding}, {"book", c.Book}} {
+		if len(section.budgets) == 0 {
+			return fmt.Errorf("%s freshness: %w", section.name, ErrNoVenues)
 		}
-		if err := c.Funding[v].Validate(); err != nil {
-			return fmt.Errorf("funding freshness: venue %s: %w", v, err)
+		for _, v := range slices.Sorted(maps.Keys(section.budgets)) {
+			if err := v.Validate(); err != nil {
+				return fmt.Errorf("%s freshness: venue key %q: %w", section.name, string(v), err)
+			}
+			if err := section.budgets[v].Validate(); err != nil {
+				return fmt.Errorf("%s freshness: venue %s: %w", section.name, v, err)
+			}
 		}
 	}
 	return nil
@@ -160,7 +185,23 @@ func NewConfigBudgets(store *config.Store[FreshnessConfig]) (*ConfigBudgets, err
 // contract, and the zero Budget is unusable — domain.Budget.Validate refuses it
 // — so a caller that ignored the bool still cannot trade on the result.
 func (b *ConfigBudgets) FundingBudget(v ids.Venue) (domain.Budget, bool) {
-	spec, ok := b.store.Current().Value.Funding[v]
+	return lookup(b.store.Current().Value.Funding, v)
+}
+
+// BookBudget reports the configured order-book budget for a venue.
+//
+// One adapter satisfying both narrow ports, which is where the sharing belongs:
+// application declares FundingBudgets and BookBudgets separately so neither use
+// case depends on the other's method, and infrastructure supplies both from one
+// store because they come from one document.
+func (b *ConfigBudgets) BookBudget(v ids.Venue) (domain.Budget, bool) {
+	return lookup(b.store.Current().Value.Book, v)
+}
+
+// lookup is the shared read, written once so the copy-not-alias rule above
+// cannot hold on one section and not the other.
+func lookup(section map[ids.Venue]BudgetSpec, v ids.Venue) (domain.Budget, bool) {
+	spec, ok := section[v]
 	if !ok {
 		return domain.Budget{}, false
 	}
