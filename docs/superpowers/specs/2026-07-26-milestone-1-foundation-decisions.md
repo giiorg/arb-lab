@@ -3597,6 +3597,71 @@ Owed to core §3.6: **state that a positional rule reads an external test packag
 
 **No formal-model change** — nothing here touches the fence/takeover/plan composition, so `docs/formal/` stays at the Cx8 verdict.
 
+## §28 — session 25 (continued): the `oms` slice CLOSE, v0.9.11
+
+### §28a — what closed
+
+**Seven normative edits landed, six markers flipped plus one new, the doc set bumped v0.9.10 → v0.9.11 across all six headers, ADR §3 gained the milestone-1 sixth-slice block.** `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **zero**; `make ci` green; `docs` 102 pass; `docs/formal/` untouched, still at Cx8.
+
+Three edits in SM §1's transitions table, two in core §5.1, two in core §3.6. Plus one **code fix carrying no spec edit** — §3.6 rule 2 in `marketdata`, §24f — taken on the user's instruction rather than carried a fourth session.
+
+### §28b — the three SM §1 edits are ONE silence appearing three times
+
+This is the finding of the close, and it is a property of the *table* rather than of any row. SM §1 is complete about the edges somebody **designs** and silent about two other kinds: the ones a **venue** takes on its own, and the ones a **recovery path** re-enters through.
+
+All three failed identically when absent, and the shape is what makes them worth naming together: **not a wrong order — a stall with every light green.** Each source state contributes a §6.7 possible-delta interval, so the hedge group holding it is classified `Ambiguous` indefinitely, §6.7 forbids compensating the residual, new trading holds, and nothing anywhere reports an error.
+
+1. **`DispatchAuthorized` → the five query-resolution outcomes.** The requirement was stated *twice* elsewhere (core §5.3, and SM §1's own crash-recovery invariant) and reached the table in neither. The "no-return / crash" row named the resolution in its ACTION column while the target column pointed back at the same state.
+2. **`DispatchAuthorized` → `SubmissionUnknown` on an ambiguous transport result**, distinct from the crash row. Neither existing path could carry it without recording something untrue, and §7.5 *replays this journal* — so the false fact is read back as evidence.
+3. **Venue-initiated `Canceled`** from `Acknowledged`/`PartiallyFilled`. The sharpest of the three: without it **the only order type this system sends can never terminate on its ordinary outcome**, since §6 step 6 mandates marketable-IOC limits and §2 makes an IOC immediately terminal at the venue.
+
+### §28c — the seventh edit came from the READING PASS, and that is v0.9.8's lesson recurring
+
+Six markers went in during the slice. The seventh edit had no marker and could not have had one: §5.1 says "a `Version int64` (OCC)" and the code **relies on** two things it never states — the version starts at 1, and only a write that changes the record increments it.
+
+A claim the code merely relies on is never marked, so the grep is structurally blind to it. This is the same class as v0.9.8's `AcceptOrdinal` and v0.9.10's `StreamOrders`, on a third kind of claim.
+
+Both halves survive §15b's re-judgement test, and **each fails in a different direction**, which is why stating one without the other would have been worse than stating neither:
+
+- **Base 1.** A 0-based counter satisfies "a `Version int64` (OCC)" completely, and then an `expected` of 0 — what a caller that never loaded a record passes — **matches a real stored record** and races whatever is there. Zero is not a version; it is the absence of one.
+- **No-op does not bump.** §4 puts the same execution on two streams and §5.3 has REST recovery re-reading fills the private stream delivered, so a duplicate is the **ordinary** case several times per fill. A version bumped to record that nothing happened invalidates every other reader's expectation for nothing.
+
+### §28d — §3.6 rule 2 fixed in `marketdata`, and the third named limit on the close gate
+
+`application/ports.go` → `application/ports/ports.go`, package `ports`, with `FundingSnapshot`, `BookView` and `AcceptOrdinal` moving too — package `ports` cannot import package `application` without cycling, so **a type in a port signature belongs to the port**. Four `var _` assertions in `driven/`, two of them for `ConfigBudgets`, which satisfies `FundingBudgets` and `BookBudgets` separately.
+
+`Resnapshotter` keeps **no** assertion and now says why: its adapter is a venue REST client and §20a defers those, so there is nothing to assert. Stated because the absence is otherwise indistinguishable from the omission this fixed.
+
+**The limit this adds to the slice-close gate is the point, and it is genuinely a third one:**
+
+- v0.9.8: the grep cannot see an **unmarked** claim.
+- v0.9.10: nor a rule the code **silently breaks**.
+- v0.9.11: **nor can the reading pass.** Rule 2 has no analyzer, and the closing reading pass did not object either — because a rule the code silently does not meet **looks exactly like a rule it meets**, especially when the non-compliant shape is the one a Go reviewer would call correct.
+
+What found it was `oms` implementing the same sentence, at which point one repo held two contexts disagreeing. **A second implementation sees what neither the grep nor the reading pass can** — which is this repo's "write the oracle before trusting the implementation" rule, arriving at the level of a *structural rule* rather than of an algorithm.
+
+### §28e — two process defects found while closing, both about counts that read as complete
+
+**The ADR tagless tally was stale.** It read "thirty-three … the five blocks above", which was correct at v0.9.9 and silently wrong the moment v0.9.10's fifth-slice block landed — three core edits nobody added to the total. A bare total cannot be checked against the document it summarises, so it goes stale in the one direction that reads as complete. It is now a **per-release breakdown** (10+8+4+8+3+3+7 = **forty-three**), so the next omission is a subtraction somebody can see.
+
+**`mutate.sh` has no verdict for a claim the COMPILER enforces.** Breaking an adapter that a `var _` assertion guards reports `NOBUILD!!` — defined as "the tests never ran", i.e. re-aim — when it is in fact **the kill**, and the assertion names its own line in the error. Every other `NOBUILD!!` still means re-aim. `CLAUDE.md`'s verdict table now says so. Same trap as the five it already lists, pointing the opposite way: there a non-result masqueraded as a kill, here a kill masquerades as a non-result.
+
+### §28f — the milestone-1 slice roster after this close
+
+Six of milestone 1's slices are now CLOSED: `platform` foundations, the shared kernel, `marketdata` (funding), `engine/venue`, `marketdata` (book), and `oms`. **`marketdata` was re-opened and re-closed** by §28d, which is the first time a closed slice has been amended — recorded here because "closed" now demonstrably means "closed against what we could check at the time".
+
+**Still owed and untouched since session 20:** the `venue-profiles.md` verification of the two venues' **depth update-ID shapes**, which `venue.BookDelta`'s span design cites. It is a Profiles verification rather than a core edit, which is exactly the item v0.9.10's block warned gets filed under the wrong process — it is not covered by the marker grep and did not block this close.
+
+## RESUME HERE — updated end of session 25 (the close)
+
+**SESSION 25 UPDATE — READ THIS FIRST.** **Milestone 1's sixth slice (`oms`) is CLOSED at v0.9.11**, and so is the §3.6 rule 2 drift in `marketdata` (§28d). `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **ZERO**, seven markers read `[SPEC EDIT LANDED — v0.9.11]`, `make ci` green, `docs` 102 pass, `docs/formal/` untouched at Cx8.
+
+**Three things to carry forward.** (1) SM §1's three new rows are **one silence three times** — the table is complete about designed edges and silent about venue-taken and recovery-re-entered ones, and all three failed as *a stall with every light green* (§28b). (2) The seventh edit came from the **reading pass, not the grep** (§28c), which now has a **third named limit**: it cannot see a rule the code silently does not meet, because that looks exactly like a rule it meets — what saw it was **a second implementation of the same rule** (§28d). (3) `mutate.sh` reports `NOBUILD!!` for a claim the compiler enforces, which is a **kill wearing a non-result's verdict** (§28e).
+
+**Next: milestone 1's remaining slices, then milestone 2's kill gate.** Nothing is owed to close what exists. The one standing debt is the `venue-profiles.md` depth update-ID verification (§28f), which is a Profiles verification rather than a core edit and is invisible to the close gate by construction.
+
+The reasoning is **§27** (the slice) and **§28** (the close). §26 stays live for §26e's gate scope; §25 for §25b's classifier seam; §24 for §24e's table.
+
 ## RESUME HERE — updated end of session 25
 
 **SESSION 25 UPDATE — READ THIS FIRST.** The **sixth slice (`oms`) has its CODE COMPLETE**; what is left is **the close**. `internal/oms/module.go` is built — `Deps{Journal, Placer}`, `Module{Dispatch}` — and the composition decision worth knowing before touching it is §27b: **`Module` must never expose a `ports.` or `driven.` type**, because the gate reads import edges and Go's interfaces are structural, so a root handed one can pass write authority on with no import anywhere. The write repository is deliberately **not wired** (§27c) and `Deps.Journal` is a temporary field the gate will force into a config field when the durable journal lands (§27d). **`grep -rn "SPEC EDIT OWED" internal/ tools/` now returns SIX** — the five from §26j plus §3.6's silence about external test packages (§27h). `make ci` green.

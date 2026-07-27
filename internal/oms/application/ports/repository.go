@@ -47,6 +47,14 @@ type OrderRecord struct {
 	// Version is §5.1's OCC version, starting at 1 and incremented by every
 	// write that CHANGES the record.
 	//
+	// [SPEC EDIT LANDED — v0.9.11] §5.1 said only "a Version int64 (OCC)" and
+	// stated neither half of what follows. Both were found by the slice-closing
+	// READING PASS rather than by the marker grep — the v0.9.8 shape, since a
+	// claim the code merely relies on is never marked — and both survive §15b's
+	// re-judgement test: a reimplementation can get each wrong in the unsafe
+	// direction while satisfying the sentence as written. §5.1 now states the
+	// base and the no-op rule, with the failure direction of each.
+	//
 	// It starts at 1 rather than 0 so that the zero value of this struct is
 	// unusable in the way the rest of the kernel's types are: a caller that
 	// passes the version out of a record it never loaded expects 0, which

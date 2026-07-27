@@ -38,7 +38,7 @@
 //
 // # There is no driving/ beside this package, and rule 3 is worth reading twice
 //
-// [SPEC EDIT OWED] §3.6 rule 3 reads "Infrastructure shape. infrastructure/
+// [SPEC EDIT LANDED — v0.9.11] §3.6 rule 3 reads "Infrastructure shape. infrastructure/
 // contains exactly driven/ + driving/", which admits two readings: that both
 // directories must exist, or that no third kind may. This context takes the
 // second — oms's inbound adapters are §6's private order and execution streams,
@@ -52,7 +52,8 @@
 // the path. Requiring both halves of a context that only has one would force
 // exactly the empty package this codebase rejects everywhere else.
 //
-// Owed to core §3.6 rule 3: state it as a permitted-children rule ("contains
-// only driven/ and driving/"), so that a context with adapters in one direction
-// is compliant without an empty package in the other.
+// Core §3.6 rule 3 now reads as a PERMITTED-children rule — "contains only
+// driven/ and driving/" — so a context with adapters in one direction is
+// compliant without an empty package in the other, and this context is the
+// case it cites.
 package driven

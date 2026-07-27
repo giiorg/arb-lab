@@ -1,6 +1,6 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-07-27): **v0.9.10 + one mid-slice core edit** — milestone 1's first FIVE slices are CLOSED; the **sixth (`oms`) has its CODE COMPLETE and is awaiting its CLOSE**, with `oms/domain`, `oms/application/ports`, the dispatch use case, the write repository and **`module.go`** built, **all six §3.6 gates enforced** (and one of them fixed this session — it was reporting its own context's test suite), and **six spec edits owed plus the version bump itself**. **Start at `## START HERE` below, not at this line.**
+## Status (2026-07-27): **v0.9.11 — the sixth-slice release, and the one that CLOSES `oms`.** Milestone 1's first SIX slices are now CLOSED. The slice produced **seven normative edits** — three in SM §1's transitions table, two in core §5.1, two in core §3.6 — plus a code fix carrying no spec edit: **§3.6 rule 2's drift in the already-closed `marketdata` slice, fixed rather than carried a fourth session**. `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **ZERO**. **Start at `## START HERE` below, not at this line.**
 
 **v0.9.9 (2026-07-27) — the fourth-slice release, and the one that CLOSES `engine/venue`.** The slice built the normalized funding DTO that retired `marketdata`'s `driving.FundingUpdate` placeholder, and produced **three** spec edits — **all silences in the core rather than disagreements with it**, the v0.9.6 shape rather than v0.9.8's. **This is milestone 1's first close containing no code change**, which is what "the code already agreed with the spec, the spec had just never said it" looks like from outside. **Two of the three are a sharper kind of silence and the distinction is the finding worth carrying: the core does not omit them, it states them twice, incompatibly.** §3.5: the **market-data seam was declared twice** — a flat `DataSource{ Subscribe(VenueInstrument) <-chan Envelope }` here and three per-stream methods in §4, for the same pipeline position, with no type satisfying both. **§4's per-stream shape wins and the seam is `MarketDataSource` throughout**, on three grounds — one channel per instrument merges three `SourceID`s and forces the subscriber to re-derive a key the seam could have kept; the per-stream product constraints are **inexpressible** in `Subscribe(VenueInstrument)`; and §7.6's capacity ladder gets spent on a book feed a funding-only consumer never wanted. The tell that §4 was current is structural rather than a preference: **every other line of §3.5's seam block is written as a reference to §4**, while `DataSource` was the one written as an independent definition — and `venue-profiles.md` §3 was **already** writing `MarketDataSource.StreamMark`, which is cheaper evidence than any of the three arguments. §3.5 also: **a `SourceID` MUST refuse an `(instrument, stream)` pair no venue can produce** — §4 marks funding and mark perp-only per stream and §3.5 never carried it across, so a spot funding source validated cleanly, and §3.4 makes `SourceID` the mailbox key, so an impossible source is **a mailbox that exists, can be subscribed to, and never delivers**, indistinguishable downstream from a venue gone quiet. The rule states the **full table including the negative rows** (the private streams and control are *not* product-constrained), because the constraint reads like a market-data property and is not one — §4.2 makes spot a full API family with its own user-data stream, so inferring it would silently unsubscribe half a cash-and-carry trade. §4: **the units discipline that covered money now covers time.** `fixedpoint` puts a money field's dimension in its type; a duration has none, and a venue duration field's unit lives only in its **name** (Bybit's `fundingIntervalHour`) — so an adapter can multiply by `time.Minute`, satisfy the never-`float64` rule completely, and hand §2.4 a 480-minute interval that enumerates a plausible settlement count while **§12's kill-gate carry figure is wrong by a factor of sixty with nothing failing**. That is §10's own v0.9.7 argument applied one layer earlier, where the duration is *created*. A zero is **refused, never defaulted**: it arrives from three situations a fallback answers identically, two are a wiring failure wearing a correct BTC reading's clothes, and the third **absorbs §2.4's C8 flip**. Three code markers now read `[SPEC EDIT LANDED — v0.9.9]`, `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **zero**, ADR §3 gains the **milestone-1 fourth-slice block** (tagless total now **thirty-three**) and the `C8` traceability row gains core §4, `docs` 102 pass, `make ci` green. **No formal-model change; `docs/formal/` is untouched and still at the Cx8 verdict.** Full reasoning with rejected alternatives: decision record **§20** (the slice) and **§21** (the close).
 
@@ -77,7 +77,75 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 25, 2026-07-27)
+## START HERE (updated end of session 25, 2026-07-27 — the close)
+
+**Branch `feat/milestone-1-foundation`, tree clean, `make ci` green, `docs` 102 pass.** Verify
+rather than trust this sentence: `git status --short` and
+`git rev-list --left-right --count @{u}...HEAD`.
+
+### Where the work is
+
+**Milestone 1's first SIX slices are CLOSED** — `platform` foundations, the shared kernel,
+`marketdata` (funding), `engine/venue`, `marketdata` (book), and `oms`. **Nothing is owed to close
+what exists**, and the marker grep returns zero.
+
+| Path | Holds |
+|---|---|
+| `internal/platform/` | the ten-package shared kernel |
+| `internal/engine/venue/` | the normalized venue-seam DTOs |
+| `internal/marketdata/` | funding + book paths, `application/ports/`, `module.go` — **now rule-2 compliant** |
+| `internal/oms/` | §5.3's lifecycle + ledger, ports, dispatch, the write repository, `module.go` |
+| `tools/lint/` | all six §3.6 gates, enforced |
+
+Reasoning with the rejected alternatives: decision record **§27** (the slice) and **§28** (the
+close). §26 stays live for §26e's gate scope; §25 for §25b's classifier seam; §24 for §24e's table.
+
+### The next work
+
+**Milestone 1's remaining slices, then milestone 2's kill gate.** There is no in-flight slice and
+no owed marker, so the next session starts from §12's roster rather than from a partial context.
+
+### Four things worth carrying, all from the close
+
+1. **SM §1's three new rows are ONE silence appearing three times** (§28b). The transitions table
+   is complete about the edges somebody *designs* and silent about the ones a **venue** takes or a
+   **recovery path** re-enters through. All three failed identically when absent — **a stall with
+   every light green**, never a wrong order — because each source state contributes a §6.7
+   possible-delta interval, so the hedge group sits `Ambiguous` forever with nothing reporting an
+   error. The sharpest: without the venue-initiated `Canceled` row, **the only order type this
+   system sends could never terminate on its ordinary outcome**.
+
+2. **The seventh edit came from the READING PASS, not the marker grep** (§28c). §5.1 said "a
+   `Version int64` (OCC)" and the code *relied on* two things it never stated — the version starts
+   at 1, and only a write that changes the record increments it. A claim the code merely relies on
+   is never marked. Each half fails in a **different** direction, which is why stating one alone
+   would be worse than stating neither.
+
+3. **The slice-close gate now has a THIRD named limit** (§28d), and it is the one to remember.
+   v0.9.8: the grep cannot see an *unmarked* claim. v0.9.10: nor a rule the code *silently breaks*.
+   v0.9.11: **nor can the reading pass** — because a rule the code silently does not meet looks
+   exactly like a rule it meets, especially when the non-compliant shape is the one a reviewer
+   would call correct. What found §3.6 rule 2's drift was `oms` **implementing the same sentence**,
+   so one repo held two contexts disagreeing. **A second implementation sees what neither the grep
+   nor the reading pass can.**
+
+4. **`mutate.sh` reports `NOBUILD!!` for a claim the COMPILER enforces** (§28e) — a kill wearing a
+   non-result's verdict. Breaking an adapter guarded by a `var _ ports.X = (*Impl)(nil)` fails the
+   build, which the harness calls "the tests never ran". Read the error: *"does not implement
+   ports.X"* is the assertion working, and it names its own line. `CLAUDE.md`'s verdict table now
+   says so. Every other `NOBUILD!!` still means re-aim.
+
+### The one standing debt, and it is invisible to the close gate by construction
+
+**The `venue-profiles.md` verification of the two venues' depth update-ID shapes**, which
+`venue.BookDelta`'s span design cites. Owed since session 20 and untouched. It is a **Profiles
+verification rather than a core edit**, which is exactly the item v0.9.10's ADR block warned gets
+filed under the wrong process — the marker grep answers only for spec edits, so this did not and
+will not block a close.
+
+---
+
+## START HERE (updated end of session 25, 2026-07-27, HISTORICAL — mid-slice)
 
 **Branch `feat/milestone-1-foundation`, tree clean, `make ci` green.** Verify rather than trust
 this sentence: `git status --short` and `git rev-list --left-right --count @{u}...HEAD`.

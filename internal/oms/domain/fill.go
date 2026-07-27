@@ -58,7 +58,7 @@ type FillKey struct {
 //
 // # FeeAsset is absent, and that is a deviation worth naming
 //
-// [SPEC EDIT OWED] §5.1's field list is `Fill{… Fee Money, FeeAsset, Ts}`, with
+// [SPEC EDIT LANDED — v0.9.11] §5.1's field list is `Fill{… Fee Money, FeeAsset, Ts}`, with
 // the asset as its own column. That list predates the money kernel. A
 // fixedpoint.Money already carries its asset tag as a runtime-checked field —
 // §3.6 rule 4's own design — so a separate FeeAsset would be a second copy of a
@@ -68,8 +68,9 @@ type FillKey struct {
 // tax export reads the other, and a Binance fill paid in BNB against a USDT
 // notional reconciles to two different numbers with nothing failing.
 //
-// Owed to core §5.1: drop FeeAsset from the Fill field list, since Fee Money
-// carries it.
+// Core §5.1's field list now omits FeeAsset and says why: Fee Money carries
+// the asset tag, so the column would be a second copy of a fact the first
+// field states.
 type Fill struct {
 	// ExecutionID, Account and Instrument are the dedupe identity — see Key.
 	ExecutionID string

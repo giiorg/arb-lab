@@ -57,7 +57,7 @@
 //     one; widening it is a spec edit rather than an implementation of it.
 //   - oms's own EXTERNAL TEST package. See isOwner, and the marker below.
 //
-// # [SPEC EDIT OWED] §3.6 is silent about external test packages, and two
+// # [SPEC EDIT LANDED — v0.9.11] §3.6 is silent about external test packages, and two
 // # gates have now answered it independently
 //
 // Rule 6 says the lint forbids "every package outside internal/oms/", and rules
@@ -82,9 +82,11 @@
 // second writer to order state, because a test double for ports.OrderPlacer has
 // to name ports.Ack in its method signature.
 //
-// Owed to core §3.6: state that a positional rule reads an external test
-// package as the package it tests, so that "policed" and "exempt" are
-// consequences of one sentence rather than two independent judgement calls.
+// Core §3.6 now states it once, ahead of the rules: a rule identified by
+// POSITION reads an external test package as the package it tests. hexboundary
+// policing marketdata/domain_test and this gate exempting internal/oms_test are
+// consequences of that one sentence rather than two independent judgement
+// calls.
 //
 // # The composition root is policed too, and that is the deliberate reading
 //

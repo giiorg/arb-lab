@@ -90,7 +90,7 @@ func successors(from OrderState) ([]OrderState, error) {
 		return []OrderState{StateDispatchAuthorized}, nil
 
 	case StateDispatchAuthorized:
-		// [SPEC EDIT OWED] SM §1's transitions table gives this state exactly two
+		// [SPEC EDIT LANDED — v0.9.11] SM §1's transitions table gives this state exactly two
 		// rows — "send returns → Submitted" and "no-return / crash →
 		// DispatchAuthorized (stays)" — and the second names the resolution
 		// ("resolved by query only") in its ACTION column while leaving the
@@ -115,10 +115,11 @@ func successors(from OrderState) ([]OrderState, error) {
 		// is alerted about an order the venue may well have filled hours ago, and
 		// nothing anywhere reports an error.
 		//
-		// Owed to SM §1's transitions table: the five query-resolution edges,
-		// same set as SubmissionUnknown's.
+		// SM §1's transitions table now carries the five query-resolution edges,
+		// same set and same evidence rules as SubmissionUnknown's — the exit the
+		// "stays" row's action column named but never targeted.
 		//
-		// [SPEC EDIT OWED] The StateSubmissionUnknown edge is a SECOND silence in
+		// [SPEC EDIT LANDED — v0.9.11] The StateSubmissionUnknown edge is a SECOND silence in
 		// the same row, and it is the one the core states in words while SM §1
 		// tabulates no path to it. Core §6 step 6: "A timeout/5xx moves the order
 		// to SubmissionUnknown, resolved by OrderByClientID/Fills, never
@@ -147,9 +148,10 @@ func successors(from OrderState) ([]OrderState, error) {
 		// ack had been parsed. This is that same edge one step earlier, and the
 		// asymmetry is its absence rather than its presence.
 		//
-		// Owed to SM §1's transitions table: DispatchAuthorized → SubmissionUnknown
-		// on an ambiguous transport result (timeout / 5xx / unknown ack),
-		// DISTINCT from the "no-return / crash" row, which is about a crash.
+		// SM §1's transitions table now carries DispatchAuthorized →
+		// SubmissionUnknown on an ambiguous transport result (timeout / 5xx /
+		// unknown ack), as a row DISTINCT from "no-return / crash" — whose
+		// subject is a process that died, not a call that returned.
 		return append([]OrderState{StateSubmitted, StateSubmissionUnknown}, resolved...), nil
 
 	case StateSubmitted:
@@ -165,7 +167,7 @@ func successors(from OrderState) ([]OrderState, error) {
 		}, nil
 
 	case StatePartiallyFilled:
-		// [SPEC EDIT OWED] The StateCanceled edge on this row and the one above is
+		// [SPEC EDIT LANDED — v0.9.11] The StateCanceled edge on this row and the one above is
 		// VENUE-initiated, and SM §1's table has no such edge: its only paths into
 		// Canceled leave CancelPending or CancelUnknown, both of which we enter by
 		// requesting a cancel ourselves.
@@ -187,7 +189,7 @@ func successors(from OrderState) ([]OrderState, error) {
 		// classifier waited for more fills on an order the venue closed
 		// milliseconds after we sent it.
 		//
-		// Owed to SM §1's transitions table: a venue-initiated termination row
+		// SM §1's transitions table now carries a venue-initiated termination row
 		// covering Acknowledged and PartiallyFilled → Canceled — IOC expiry, GTD
 		// expiry, venue cancel-all, self-trade prevention — distinct from the
 		// FLAG-1 rows, which are about a cancel WE requested.
