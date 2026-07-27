@@ -1,6 +1,6 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-07-27): **v0.9.9** — milestone 1's first FOUR slices are CLOSED, including the first bounded context and the venue seam. **Nothing is owed.** **Start at `## START HERE` below, not at this line.**
+## Status (2026-07-27): **v0.9.10** — milestone 1's first FIVE slices are CLOSED, including `marketdata` complete on the funding AND book paths. **Nothing is owed to the core; ONE verification is owed to Profiles — see START HERE.** **Start at `## START HERE` below, not at this line.**
 
 **v0.9.9 (2026-07-27) — the fourth-slice release, and the one that CLOSES `engine/venue`.** The slice built the normalized funding DTO that retired `marketdata`'s `driving.FundingUpdate` placeholder, and produced **three** spec edits — **all silences in the core rather than disagreements with it**, the v0.9.6 shape rather than v0.9.8's. **This is milestone 1's first close containing no code change**, which is what "the code already agreed with the spec, the spec had just never said it" looks like from outside. **Two of the three are a sharper kind of silence and the distinction is the finding worth carrying: the core does not omit them, it states them twice, incompatibly.** §3.5: the **market-data seam was declared twice** — a flat `DataSource{ Subscribe(VenueInstrument) <-chan Envelope }` here and three per-stream methods in §4, for the same pipeline position, with no type satisfying both. **§4's per-stream shape wins and the seam is `MarketDataSource` throughout**, on three grounds — one channel per instrument merges three `SourceID`s and forces the subscriber to re-derive a key the seam could have kept; the per-stream product constraints are **inexpressible** in `Subscribe(VenueInstrument)`; and §7.6's capacity ladder gets spent on a book feed a funding-only consumer never wanted. The tell that §4 was current is structural rather than a preference: **every other line of §3.5's seam block is written as a reference to §4**, while `DataSource` was the one written as an independent definition — and `venue-profiles.md` §3 was **already** writing `MarketDataSource.StreamMark`, which is cheaper evidence than any of the three arguments. §3.5 also: **a `SourceID` MUST refuse an `(instrument, stream)` pair no venue can produce** — §4 marks funding and mark perp-only per stream and §3.5 never carried it across, so a spot funding source validated cleanly, and §3.4 makes `SourceID` the mailbox key, so an impossible source is **a mailbox that exists, can be subscribed to, and never delivers**, indistinguishable downstream from a venue gone quiet. The rule states the **full table including the negative rows** (the private streams and control are *not* product-constrained), because the constraint reads like a market-data property and is not one — §4.2 makes spot a full API family with its own user-data stream, so inferring it would silently unsubscribe half a cash-and-carry trade. §4: **the units discipline that covered money now covers time.** `fixedpoint` puts a money field's dimension in its type; a duration has none, and a venue duration field's unit lives only in its **name** (Bybit's `fundingIntervalHour`) — so an adapter can multiply by `time.Minute`, satisfy the never-`float64` rule completely, and hand §2.4 a 480-minute interval that enumerates a plausible settlement count while **§12's kill-gate carry figure is wrong by a factor of sixty with nothing failing**. That is §10's own v0.9.7 argument applied one layer earlier, where the duration is *created*. A zero is **refused, never defaulted**: it arrives from three situations a fallback answers identically, two are a wiring failure wearing a correct BTC reading's clothes, and the third **absorbs §2.4's C8 flip**. Three code markers now read `[SPEC EDIT LANDED — v0.9.9]`, `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **zero**, ADR §3 gains the **milestone-1 fourth-slice block** (tagless total now **thirty-three**) and the `C8` traceability row gains core §4, `docs` 102 pass, `make ci` green. **No formal-model change; `docs/formal/` is untouched and still at the Cx8 verdict.** Full reasoning with rejected alternatives: decision record **§20** (the slice) and **§21** (the close).
 
@@ -77,7 +77,82 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 19, 2026-07-27)
+## START HERE (updated end of session 20, 2026-07-27)
+
+**Branch `feat/milestone-1-foundation`, tree clean, `make ci` green on Go 1.26.5.** Verify rather
+than trust this sentence: `git rev-list --left-right --count @{u}...HEAD`. The head commit is not
+named here on purpose: a paragraph citing its own hash is stale the moment the commit containing it
+is written.
+
+### Where the work is
+
+**Milestone 1's fifth slice — `marketdata`'s ORDER-BOOK path — is CLOSED.** `Module` now exposes
+`Funding` **and** `Book`; the venue seam gained `BookSnapshot`/`BookDelta`; `platform/events` gained
+the `StreamOrders` constant it had been missing. Doc set at **v0.9.10** across all five stamps plus
+the Georgian header, `tutorial.ka.md` re-assembled, ADR §3 carries the **sixth** milestone-1 block,
+`grep -rn "SPEC EDIT OWED" internal/ tools/` — **both paths** — returns **zero**, `docs` 102 pass
+(`cd docs && bun test`, NOT `node --test`). Reasoning: decision record **§22**; **§21** is history.
+
+**ONE thing is owed, and it is a Profiles verification rather than a spec edit** — which is exactly
+why the slice-close grep says clean and this paragraph exists. `venue.BookDelta`'s design cites an
+asymmetry between the two depth feeds: *Binance's depth events carry a first and a final update ID
+and may cover several venue sequences per message; Bybit's carry one.* `venue-profiles.md` §1
+records the book **topics** (`@depth…` + init snapshot from `GET /api/v3/depth`; `orderbook.50` with
+delete-on-size-0, reset-on-snapshot) and records **neither feed's update-ID shape**. Verify both
+against primary docs, date them, and add them to §1.
+
+**It is not a correctness risk, and knowing why matters before you prioritise it.** The span is
+`FirstSeq..LastSeq` *inclusive*, and a single-sequence venue sets First equal to the envelope's
+`VenueSeq` — the span of length one. So the code is right whichever venue turns out to do which; the
+fact only decides whether the multi-sequence case is ever exercised in production. What is actually
+at stake is that `SeqRelationOverlap` is **unreachable for a single-sequence venue**, so if BOTH
+venues turn out to be single-sequence, one of the four relations is dead code in live trading and
+its tests are the only thing keeping it honest.
+
+**The next slice is `oms`**, and it is no longer a choice between two: the book path was the other
+candidate and is now done. It **expires `singlewriter`'s deferral** — the last unbuilt gate, roster
+6 of 6 — because that deferral was scoped to "until `oms`'s write repository exists", and this
+repo's rule is that a deferral expires when its subject appears. `StreamOrders` now exists for it.
+
+### Three things from this slice that will bite if you do not know them
+
+1. **`SURVIVED` is a question, and two survivors in one session needed OPPOSITE answers.** One was a
+   **third copy of one check** — `toDomainLevels` validated each level as it copied it, so bypassing
+   the venue-seam check entirely still produced the venue sentinel and no test could tell the two
+   apart. "Write a better test" was the wrong response; "the helper is doing two jobs" was the right
+   one, and it now cannot fail. The other was a genuine **test gap**. Diagnosing which is the work,
+   and a session that assumes both are the same kind fixes one of them wrongly.
+2. **Naming the marker grep's pattern inside `internal/` BREAKS the gate.** A comment explaining
+   that the grep cannot find unmarked defects made the grep match forever. A gate whose pattern is a
+   string is a gate the prose can trip — reword rather than accept a permanently dirty gate.
+3. **`Watermark.VenueSeq` is optional by design, and a BOOK is the case that exemption does not
+   reach.** A REST-polled funding read genuinely has no sequence, so `Watermark.Validate` admits
+   zero. A book admitted at position zero validates, is marked **synced**, and then makes every
+   later delta unplaceable forever — a resync loop reporting a connected feed, a valid book and a
+   healthy transport. `domain.ErrBookSeqUnset` is the refusal. **The general shape: an exemption
+   written for one data class silently covers every other one, and the place to look is wherever a
+   field's doc comment says "not validated, because <one specific caller>".**
+
+### Still true, still deferred, still deliberate
+
+- **Mark normalization is unwired** — `Module` has `Funding` and `Book` and no `Mark`. There is no
+  `venue.Mark` and no use case, so there is nothing to compose; the deferral is visible in the type,
+  and a caller cannot reach a path that is not assembled.
+- **`Deps.Resnapshotter` is the one PORT a root supplies**, and that asymmetry is load-bearing:
+  every other driven port has exactly one adapter inside this context, while a resnapshot is a venue
+  REST call and §20a defers those clients. Whatever a root wires there **must be idempotent** — the
+  use case requests on every held delta, deliberately, because a single dropped request leaves the
+  book held forever with nothing retrying.
+- **`Deps.BookHoldDepth` is restart-required, not `config:"hot"`**, and that is a claim rather than
+  an omission: shrinking the depth mid-resync discards held deltas the in-flight snapshot was going
+  to chain to, converting a recovering book into the loop the buffer exists to prevent — at exactly
+  the moment an operator is reaching for a knob.
+- **`observability`'s Prometheus adapter and tracing** — unchanged; see the session-19 section.
+- **No raw Binance/Bybit clients and none of §4's nine capability interfaces** — unchanged (§20a).
+
+---
+
+## START HERE (updated end of session 19, 2026-07-27, HISTORICAL)
 
 **Branch `feat/milestone-1-foundation`, tree clean, `make ci` green on Go 1.26.5.** Verify rather
 than trust this sentence: `git rev-list --left-right --count @{u}...HEAD` should print `0 0`. No PR —

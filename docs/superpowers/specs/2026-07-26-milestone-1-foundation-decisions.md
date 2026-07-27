@@ -3103,6 +3103,70 @@ A gap is visible to a reader of one section. **A contradiction is visible only t
 
 **Next is a new slice, and the choice is the user's.** `marketdata`'s book path (reconstruction, gap detection, resnapshot — the §3.4 machinery the funding path never needed) or `oms`, which **expires `singlewriter`'s deferral** and would complete the six-gate roster.
 
+## §22 — session 20: `marketdata`'s book path COMPLETED and CLOSED — `build-spec.md` v0.9.10
+
+### §22a — what was built
+
+The book path was carried from "domain + use case, unwired" to composed and closed: `engine/venue`'s book DTOs (`BookSnapshot`, `BookDelta`, `BookLevel`, `LevelChange`, `BookSide`), `driving.BookDispatch`, `driven.BookLanePublisher`, and `module.go`'s second field with its two new `Deps` entries. `Module` now exposes `Funding` and `Book`; **mark** normalization stays unwired and the deferral is visible in the type rather than in prose.
+
+### §22b — the decision the slice turns on: the delta payload carries `FirstSeq` and NOT `LastSeq`
+
+§4 says the `Envelope` is authoritative for provenance and a payload carries none. A book delta breaks that cleanly in half: `domain.BookDelta` needs a *span*, and an envelope has one `VenueSeq`. So one end must travel in the payload, and the question is which, not whether.
+
+`LastSeq` is the end the envelope already states — `domain.BookDelta.Validate` **requires** `Watermark.VenueSeq == LastSeq` — so a payload carrying it is §4's forbidden second copy in the one place the repo has already paid to learn the cost. `FirstSeq` is not provenance at all; it is the message's own extent, and nothing else states it.
+
+**Rejected: carry both ends.** It reads as more complete and is strictly worse. It makes the payload internally consistent while contradicting its envelope, which is a *third* condition needing a check nobody would think to write. Under the split, the same defect is an inverted span and lands on `ErrDeltaSeqInverted`, which is exactly what it is.
+
+The cost, paid knowingly: `venue.BookDelta.Validate` can no longer check the span, because it holds one end of it. That check lives where both ends meet, which is the domain — where it already was.
+
+### §22c — the defect the wiring exposed: a book at position zero
+
+`OnSnapshot` carried the comment *"Unreachable: a validated snapshot carries a non-zero VenueSeq."* It did not. `Watermark.Validate` **deliberately** admits a zero `VenueSeq`, because a REST-polled funding read genuinely has none — so a book could hold a complete watermark and no position.
+
+The consequence is not a wrong book, and that is what makes it the interesting class: the book validates, is marked **synced** at position zero, and then `Follows(0)` returns `SeqRelationUnknown` for every subsequent delta forever. Each is refused, each refusal requests a snapshot, each snapshot re-establishes position zero. A permanent resync loop reporting a connected feed, a valid book and a healthy transport.
+
+The fix is `domain.ErrBookSeqUnset`, and its placement is the **mirror rule** applied: `BookDelta` already refused an unset sequence, `BookSnapshot` did not, and they are the same claim about the same stream. No fixture reached it because every fixture states a sequence — the tell being that the fixture did not contain the thing under test.
+
+### §22d — `StreamOrders` was missing from `platform/events`, and NO spec edit was owed
+
+§4's `OrderGateway` declares `StreamOrders()` and `StreamExecutions()` as two channels; §3.5's product table names `StreamOrders` among the private streams. `platform/events` declared six kinds and not that one. **The spec was right and the code silently omitted a member** — the second instance after v0.9.8's `AcceptOrdinal`, which makes it a pattern rather than an incident.
+
+**Rejected: fold it into `StreamExecutions`.** §4 notes fills arrive on both, which makes `StreamOrders` look like a superset. It is not, and §3.4's mailbox is why: `SourceID` is the mailbox key, so one kind puts an accept, a reject and a fill in one queue, and the exactly-once fill rule then has to deduplicate against a stream it shares that queue with.
+
+Declared now rather than with `oms`, despite having no producer: the alternative is a **missing enum member**, which is precisely what rule 10 exists to make impossible, and two of the three switches over `StreamKind` default in the direction that is wrong for a private stream.
+
+### §22e — the marker grep cannot see this class, and naming its pattern in code BREAKS it
+
+Two limits of the slice-close gate were both demonstrated here in one session. It cannot find an *unmarked* claim — §22d is the proof, again. And writing a comment **about** the marker, inside `internal/`, makes the grep match forever: a gate whose pattern is a string is a gate the prose can trip. The comment was reworded. Worth stating because the natural instinct on finding §22d was to write the phrase down next to it.
+
+### §22f — the fixture-collapse checklist, run before the mutations
+
+Two collapses found and one written-then-corrected:
+
+- **`First == Last` on the delta.** A fixture from a single-sequence venue (Bybit's real shape) makes "`LastSeq` from the envelope" and "`LastSeq` from the payload" **the same assignment** — the entire §22b design untested while looking covered. Every fixture now spans three sequences. This is the neighbour of the trap `Follows` already documents for `SeqRelationOverlap`.
+- **Changes on one side only.** With bid-only changes, "translates the side" and "returns bid unconditionally" give the same book.
+- **Corrected while writing:** the delta's inserted prices were first placed *outside* the spread, where a side-swapping translation still yields a **valid** book. Moved inside it, so a swap **crosses** and fails even with the value assertions deleted.
+
+### §22g — mutations: 17 run, 15 caught, 2 SURVIVED, and the two needed OPPOSITE diagnoses
+
+The pair is the reason `SURVIVED` is a question rather than a verdict.
+
+**Snapshot payload unjudged — a THIRD copy of one check, not a test gap.** `toDomainLevels` validated each level as it copied it, so bypassing `venue.BookSnapshot.Validate` entirely still produced the venue sentinel and nothing could tell the two apart. The test was right; the code checked one thing in three places, and the boundary the check exists to *name* was untested while looking covered. Fixed by making `toDomainLevels` a pure translation that **cannot fail** — a helper called "to domain levels" that also refuses them is doing two jobs — which costs nothing, because `venue.BookSnapshot.Validate` already reports the side and index.
+
+**Delta payload unjudged — a genuine test gap.** `toDomainChanges` validates only the *side*, so a negative quantity was checked in exactly one place. The new test uses a negative quantity specifically: a bad *side* would report the same venue sentinel either way and could not tell whether the payload was judged at all.
+
+**One equivalent mutant, correctly.** Dropping `StreamOrders` from `Lane()`'s named case survives the suite, because both branches return `LaneControl` — no test can distinguish them. The guard is `exhaustiveswitch`, verified by hand against the mutant, and it is the known "a trailing `return X` hides the X group from tests" phenomenon.
+
+### §22h — what is owed: nothing
+
+`grep -rn "SPEC EDIT OWED" internal/ tools/` returns **zero**. `build-spec.md` at **v0.9.10** (§3.4 ×2, §4 ×1); the hold-buffer marker reads `[SPEC EDIT LANDED — v0.9.10]`. `make ci` green. **No formal-model change** — nothing here touches the fence/takeover/plan composition, so `docs/formal/` stays at the Cx8 verdict.
+
+**Next is `oms`**, which expires `singlewriter`'s deferral and completes the six-gate roster. `StreamOrders` now exists for it.
+
+## RESUME HERE — updated end of session 20
+
+**SESSION 20 UPDATE — READ THIS FIRST.** `marketdata`'s **book path is COMPLETE and the slice is CLOSED**. `build-spec.md` is at **v0.9.10** with §3.4 ×2 and §4 ×1; `platform/events` gained **`StreamOrders`**, which was a code omission against an already-correct spec and therefore owed no edit. **`grep -rn "SPEC EDIT OWED" internal/ tools/` is CLEAN.** `make ci` green, 17 mutations / 15 caught / 2 diagnosed survivals (opposite diagnoses — §22g). The reasoning is §22; §21 is now history. **Next is `oms`.** What follows was written at the end of session 19 and earlier.
+
 ## RESUME HERE — updated end of session 19
 
 **SESSION 19 UPDATE — READ THIS FIRST.** The `engine/venue` slice is **CLOSED**. `build-spec.md` is at **v0.9.9** with §3.5 ×2 and §4 ×1; all five doc stamps and the Georgian header are re-synced, `tutorial.ka.md` re-assembled, ADR §3 carries the **fifth** milestone-1 block (tagless total **thirty-three**), and the three code markers read `[SPEC EDIT LANDED — v0.9.9]`. **`grep -rn "SPEC EDIT OWED" internal/ tools/` is CLEAN.** `docs` 102 pass, `make ci` green. **Nothing is owed.** The reasoning is §21; §20 is now history. What follows was written at the end of session 18 and earlier.
