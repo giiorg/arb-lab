@@ -75,14 +75,24 @@ func TestSourceIDIsAStreamOfAnInstrument(t *testing.T) {
 	book := mark
 	book.Stream = events.StreamBook
 
+	// Spot BOOK rather than spot mark. Spot has no mark (§4), so the source this
+	// fixture used to build is one no venue can produce — and since
+	// SourceID.Validate now says so, a fixture that could not be subscribed to
+	// would be arguing the mailbox point with a mailbox that cannot exist.
 	spot := mark
+	spot.Stream = events.StreamBook
 	spot.Instrument = ids.VenueInstrument{
 		Venue: "binance", Product: ids.ProductSpot, Symbol: "BTCUSDT",
 	}
 
-	boxes := map[events.SourceID]string{mark: "mark", book: "book", spot: "spot mark"}
+	boxes := map[events.SourceID]string{mark: "perp mark", book: "perp book", spot: "spot book"}
 	if len(boxes) != 3 {
 		t.Errorf("map[SourceID] holds %d entries for three distinct sources, want 3", len(boxes))
+	}
+	for s := range boxes {
+		if err := s.Validate(); err != nil {
+			t.Errorf("%s: Validate() = %v, want nil — a mailbox key must be a source that can exist", s, err)
+		}
 	}
 }
 
@@ -114,6 +124,45 @@ func TestSourceIDRejects(t *testing.T) {
 			name: "stream undeclared",
 			mut:  func(s *events.SourceID) { s.Stream = "trades" },
 			want: events.ErrStreamUnknown,
+		},
+		{
+			// §4: mark is perp-only — "spot has none; price the spot leg from
+			// its book". A mailbox for it is one nothing will ever deliver to,
+			// which presents downstream as a dead feed rather than as a wiring
+			// mistake.
+			name: "mark asked of a spot instrument",
+			mut: func(s *events.SourceID) {
+				s.Instrument = ids.VenueInstrument{
+					Venue: "binance", Product: ids.ProductSpot, Symbol: "BTCUSDT",
+				}
+			},
+			want: events.ErrStreamProductMismatch,
+		},
+		{
+			name: "funding asked of a spot instrument",
+			mut: func(s *events.SourceID) {
+				s.Stream = events.StreamFunding
+				s.Instrument = ids.VenueInstrument{
+					Venue: "binance", Product: ids.ProductSpot, Symbol: "BTCUSDT",
+				}
+			},
+			want: events.ErrStreamProductMismatch,
+		},
+		{
+			// Both halves are wrong at once, and the STREAM error is the one
+			// that must come out. Without this case the ordering inside
+			// Validate is untested: a mismatch check placed first would report
+			// that a source disagrees with itself when in fact half of it is
+			// simply unset, sending a reader to the instrument instead of to
+			// the empty field.
+			name: "unset stream on a spot instrument reports the stream",
+			mut: func(s *events.SourceID) {
+				s.Stream = ""
+				s.Instrument = ids.VenueInstrument{
+					Venue: "binance", Product: ids.ProductSpot, Symbol: "BTCUSDT",
+				}
+			},
+			want: events.ErrStreamUnset,
 		},
 	}
 
@@ -193,6 +242,67 @@ func TestStreamLane(t *testing.T) {
 	// opposite default would lose data for a stream nobody had classified yet.
 	if got := events.StreamKind("trades").Lane(); got != events.LaneControl {
 		t.Errorf("undeclared stream routes to %v, want LaneControl (never-drop is the safe default)", got)
+	}
+}
+
+// TestStreamRequiresPerp is §4's per-stream product constraint, carried across
+// into §3.5's SourceID.
+//
+// The two that matter are funding and mark. Spot has neither — §4 says so of
+// both, and §2.2's cash-and-carry holds spot against a perp, so a spot leg
+// reading "funding 0" is indistinguishable from a perp in a flat regime and the
+// carry computation nets them.
+func TestStreamRequiresPerp(t *testing.T) {
+	cases := []struct {
+		s    events.StreamKind
+		want bool
+	}{
+		{events.StreamFunding, true},
+		{events.StreamMark, true},
+		{events.StreamBook, false},
+		// The private streams carry no product constraint, and that is a claim
+		// rather than an oversight: spot fills and spot balances are real, and
+		// §4.2 makes the spot leg a full API family with its own user-data
+		// stream. Constraining them would silently unsubscribe half the trade.
+		{events.StreamExecutions, false},
+		{events.StreamAccount, false},
+		{events.StreamControl, false},
+	}
+	for _, c := range cases {
+		if got := c.s.RequiresPerp(); got != c.want {
+			t.Errorf("StreamKind(%q).RequiresPerp() = %v, want %v", c.s, got, c.want)
+		}
+	}
+
+	// An undeclared stream answers true — the narrower claim. Unreachable
+	// through Validate, which refuses an undeclared StreamKind first, so this
+	// pins the direction rather than a behaviour anything depends on.
+	if !events.StreamKind("trades").RequiresPerp() {
+		t.Error("an undeclared stream answers false; the safe default denies a source nobody classified")
+	}
+}
+
+// TestPerpConstraintIsAboutPerpsNotAboutLinearOnes is the positive control for
+// the check SourceID.Validate applies, and it exists because the obvious
+// fixture collapses it.
+//
+// Every perp in this repo's fixtures is a LINEAR perp, so `Product.IsPerp()`
+// and `Product == ProductLinearPerp` return the same answer for all of them and
+// a mismatch check written as the second would pass every test. An inverse perp
+// separates them: it has funding and a mark, and §5.1 declares the product for
+// exactly this reason — "no venue adapter trades one in the MVP, and it is
+// declared anyway", so that "this contract is linear" is a checked claim rather
+// than an assumption.
+func TestPerpConstraintIsAboutPerpsNotAboutLinearOnes(t *testing.T) {
+	inverse := ids.VenueInstrument{
+		Venue: "binance", Product: ids.ProductInversePerp,
+		Symbol: "BTCUSD", Contract: ids.ContractInverse,
+	}
+	for _, stream := range []events.StreamKind{events.StreamFunding, events.StreamMark} {
+		s := events.SourceID{Instrument: inverse, Stream: stream}
+		if err := s.Validate(); err != nil {
+			t.Errorf("%s on an inverse perp: Validate() = %v, want nil — an inverse perp has funding and a mark", stream, err)
+		}
 	}
 }
 

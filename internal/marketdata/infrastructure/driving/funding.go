@@ -7,9 +7,22 @@
 // concrete methods rather than an interface: an interface exists to allow
 // substitution, and nothing substitutes the use case itself. What varies is the
 // SHAPE of what arrives — an events.Envelope today, an HTTP request or a replay
-// record tomorrow — and that variation is what lives here. So this package owns
-// exactly two decisions: what a raw funding message must contain, and which
-// parts of an arriving envelope are authoritative for what.
+// record tomorrow — and that variation is what lives here.
+//
+// # It is an anti-corruption layer, and as of engine/venue it is only that
+//
+// This package used to declare the normalized funding payload itself, as a
+// FundingUpdate, because §4's owner of normalized venue DTOs did not exist yet
+// and something had to be the contract. engine/venue now exists and owns
+// venue.Funding, so what is left here is the translation: venue.Funding plus an
+// events.Envelope in, domain.FundingObservation out. That the move cost domain/
+// and application/ nothing is the property §3.6 rule 1 exists to protect, and it
+// is worth noting it was checked rather than assumed — neither package's
+// imports changed.
+//
+// The direction of the dependency is the point. This context depends on the
+// venue seam; the venue seam knows nothing about this context. A venue DTO
+// changing shape is a compile error in this one file.
 //
 // # Nothing here loops, and nothing here is a goroutine
 //
@@ -23,71 +36,12 @@ package driving
 import (
 	"fmt"
 
+	"github.com/giiorg/arb-lab/internal/engine/venue"
 	"github.com/giiorg/arb-lab/internal/marketdata/application"
 	"github.com/giiorg/arb-lab/internal/marketdata/domain"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/events"
-	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
-	"time"
 )
-
-// FundingUpdate is what a venue's funding stream delivers, normalized.
-//
-// # It carries no provenance and no instrument, and that is the whole design
-//
-// §4's MarketDataSource describes StreamFunding as carrying "rate, interval,
-// nextSettle, cap/floor, source, venueSeq" — the last two of which the Envelope
-// already carries, for every stream, as fields whose meaning §3.5 defines. Put
-// them in the payload as well and there are two copies of one fact with nothing
-// forbidding them to disagree, which is the hazard ids.VenueInstrument's doc
-// describes from the other side: a redundant encoding is safe only while
-// something rejects the disagreement. Here the redundancy is removed instead,
-// so Deliver has no reconciliation to get wrong.
-//
-// The instrument is absent for the sharper version of the same reason: it is
-// the mailbox key. A payload naming an instrument other than the source it
-// arrived on is a state no feed can produce and every adapter would have to
-// check.
-//
-// [SPEC EDIT LANDED — v0.9.8] §4's MarketDataSource comment listed what
-// StreamFunding carries as "rate, interval, nextSettle, cap/floor, source,
-// venueSeq", and the last two are Envelope fields §3.5 already defines for
-// every stream. Read literally it asked for both copies, with nothing saying
-// which wins. The unsafe direction was reachable without any implementer
-// noticing they chose: gap detection reads VenueSeq and freshness reads the
-// timestamps, so a payload whose provenance disagrees with its envelope's makes
-// those two questions get answered from different sources — a venue whose
-// payload restamps an unchanged reading is then a fresh observation with no
-// gap, which is precisely the silent stall §3.4's timer exists to catch. §4 now
-// states that the ENVELOPE is authoritative for provenance, that a normalized
-// payload carries none and no instrument either, and that the stream comments
-// list payload contents only.
-//
-// # It is declared here because engine/venue does not exist yet
-//
-// §4 makes engine/venue the owner of normalized venue DTOs, consumed by
-// contexts through thin ACL adapters — this is the ACL. Until that package
-// lands, this type IS the contract: the shape a funding stream must be
-// normalized into before this context will accept it. When engine/venue
-// arrives, the translation into this struct is one function in this package,
-// and domain/ and application/ are untouched — which is the property §3.6
-// rule 1 exists to protect.
-type FundingUpdate struct {
-	// Rate is the venue's estimate for the NEXT settlement — per-settlement,
-	// never per-hour and never annualized (§2.4).
-	Rate fixedpoint.Rate
-
-	// Interval is the live funding interval, read per-symbol on every update
-	// because Bybit can flip an alt 8h↔1h mid-position (§2.4).
-	Interval time.Duration
-
-	// NextSettle is the venue's next settlement instant, in the venue's own
-	// time base.
-	NextSettle time.Time
-
-	// Cap and Floor are the venue's live clamps on the rate.
-	Cap, Floor fixedpoint.Rate
-}
 
 // FundingDispatch adapts §3.5's dispatch surface to marketdata's funding use
 // case.
@@ -144,14 +98,30 @@ func (d *FundingDispatch) Deliver(env events.Envelope) (application.FundingSnaps
 			"marketdata funding deliver: stream %s: %w", env.Source.Stream, ErrWrongStream)
 	}
 
-	// A value assertion, not a pointer one, and not both. Accepting *FundingUpdate
+	// A value assertion, not a pointer one, and not both. Accepting *venue.Funding
 	// as well would give one payload two spellings, one of which shares memory
 	// with its producer — on a lane whose contract is that a published envelope
 	// is not mutated afterwards.
-	u, ok := env.Payload.(FundingUpdate)
+	u, ok := env.Payload.(venue.Funding)
 	if !ok {
 		return application.FundingSnapshot{}, fmt.Errorf(
 			"marketdata funding deliver: payload %T: %w", env.Payload, ErrPayloadType)
+	}
+
+	// The venue reading is judged before it is translated, and the redundancy
+	// with the observation check below is deliberate — engine/venue's doc
+	// records why the two types exist at all (§3.6 rule 1 forbids domain/ from
+	// importing the engine, so the domain cannot BE this type).
+	//
+	// What the ordering buys is which boundary an operator is sent to. A cap
+	// below its floor is the same defect either way, but reported from here it
+	// names the venue reading, and reported from the observation it names this
+	// context's translation of it. Running the venue check first means the
+	// diagnosis is the outer one whenever both apply — and a field this
+	// translation transposes still reaches the domain check, which is the only
+	// one positioned to catch it.
+	if err := u.Validate(); err != nil {
+		return application.FundingSnapshot{}, fmt.Errorf("marketdata funding deliver: %w", err)
 	}
 
 	obs := domain.FundingObservation{

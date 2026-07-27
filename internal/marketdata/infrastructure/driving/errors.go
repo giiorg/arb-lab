@@ -20,7 +20,7 @@ var (
 	// reading, and a zero funding rate is indistinguishable from a flat regime.
 	ErrWrongStream = errors.New("marketdata: envelope is not a funding stream")
 
-	// ErrPayloadType reports an envelope whose payload is not a FundingUpdate.
+	// ErrPayloadType reports an envelope whose payload is not a venue.Funding.
 	// §3.5 types the lanes generically over payload and has the contexts assert
 	// what they subscribed to, so this is where that assertion's failure gets a
 	// name instead of a panic in a dispatcher's hot path.

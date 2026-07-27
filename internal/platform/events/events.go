@@ -59,6 +59,12 @@ var (
 	// ErrStreamUnknown reports a StreamKind outside the declared set.
 	ErrStreamUnknown = errors.New("events: unknown stream kind")
 
+	// ErrStreamProductMismatch reports a SourceID naming a stream the
+	// instrument's product family does not have — funding or mark on a spot
+	// instrument. See StreamKind.RequiresPerp for why the rule is here rather
+	// than left to each consuming context.
+	ErrStreamProductMismatch = errors.New("events: stream does not exist for this product")
+
 	// ErrAcceptOrdinalUnset and ErrIngressSeqUnset report an unstamped sequence
 	// number. Both are 1-based so that the zero value is unusable — §11's rule
 	// applied to a number, and it matters more here than usual: an unstamped

@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/giiorg/arb-lab/internal/engine/venue"
 	"github.com/giiorg/arb-lab/internal/marketdata"
 	"github.com/giiorg/arb-lab/internal/marketdata/application"
 	"github.com/giiorg/arb-lab/internal/marketdata/domain"
 	"github.com/giiorg/arb-lab/internal/marketdata/infrastructure/driven"
-	"github.com/giiorg/arb-lab/internal/marketdata/infrastructure/driving"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/config"
 	"github.com/giiorg/arb-lab/internal/platform/events"
@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	venue      = ids.Venue("binance")
+	binance    = ids.Venue("binance")
 	otherVenue = ids.Venue("bybit")
 )
 
@@ -46,7 +46,7 @@ var (
 
 func perp() ids.VenueInstrument {
 	return ids.VenueInstrument{
-		Venue:    venue,
+		Venue:    binance,
 		Product:  ids.ProductLinearPerp,
 		Symbol:   "BTCUSDT",
 		Contract: ids.ContractLinear,
@@ -102,7 +102,7 @@ func newLane(t *testing.T) *events.MarketDataLane {
 func newClock(t *testing.T) *clock.TestClock {
 	t.Helper()
 	c, err := clock.NewTestClock(base, []clock.Calibration{
-		{Venue: venue, Offset: venueSkew, Uncertainty: time.Second},
+		{Venue: binance, Offset: venueSkew, Uncertainty: time.Second},
 	})
 	if err != nil {
 		t.Fatalf("NewTestClock: %v", err)
@@ -110,9 +110,9 @@ func newClock(t *testing.T) *clock.TestClock {
 	return c
 }
 
-func update(t *testing.T) driving.FundingUpdate {
+func update(t *testing.T) venue.Funding {
 	t.Helper()
-	return driving.FundingUpdate{
+	return venue.Funding{
 		Rate:       rate(t, "0.00013"),
 		Interval:   8 * time.Hour,
 		NextSettle: base.Add(4 * time.Hour),
@@ -145,7 +145,7 @@ func TestNewRefusesEachMissingDependency(t *testing.T) {
 	// Both halves matter: one omission at a time catches a New that checks only
 	// the first, and distinct sentinels catch a New that invented its own
 	// blanket refusal instead of letting each constructor speak.
-	full := marketdata.Deps{Clock: newClock(t), Config: newStore(t, map[ids.Venue]domain.Budget{venue: narrow}), Lane: newLane(t)}
+	full := marketdata.Deps{Clock: newClock(t), Config: newStore(t, map[ids.Venue]domain.Budget{binance: narrow}), Lane: newLane(t)}
 
 	cases := map[string]struct {
 		mutate func(*marketdata.Deps)
@@ -185,7 +185,7 @@ func TestModuleCarriesAnEnvelopeThroughToTheLane(t *testing.T) {
 	lane := newLane(t)
 	m, err := marketdata.New(marketdata.Deps{
 		Clock:  newClock(t),
-		Config: newStore(t, map[ids.Venue]domain.Budget{venue: narrow}),
+		Config: newStore(t, map[ids.Venue]domain.Budget{binance: narrow}),
 		Lane:   lane,
 	})
 	if err != nil {
@@ -259,7 +259,7 @@ func TestModuleAppliesAHotReloadedBudget(t *testing.T) {
 	// observations of the SAME age get opposite verdicts, because the operator
 	// widened the budget in between — and the module was constructed before
 	// either.
-	store := newStore(t, map[ids.Venue]domain.Budget{venue: narrow})
+	store := newStore(t, map[ids.Venue]domain.Budget{binance: narrow})
 	m, err := marketdata.New(marketdata.Deps{Clock: newClock(t), Config: store, Lane: newLane(t)})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -273,7 +273,7 @@ func TestModuleAppliesAHotReloadedBudget(t *testing.T) {
 		t.Fatalf("Transport = %v under the narrow budget, want FreshnessStale", first.Transport)
 	}
 
-	if _, err := store.Reload("test", base.Add(time.Hour), document(t, map[ids.Venue]domain.Budget{venue: wide})); err != nil {
+	if _, err := store.Reload("test", base.Add(time.Hour), document(t, map[ids.Venue]domain.Budget{binance: wide})); err != nil {
 		t.Fatalf("Reload: %v", err)
 	}
 
@@ -297,7 +297,7 @@ func TestModuleArmsTheSilenceTimerThroughTheWiredClock(t *testing.T) {
 	lane := newLane(t)
 	m, err := marketdata.New(marketdata.Deps{
 		Clock:  clk,
-		Config: newStore(t, map[ids.Venue]domain.Budget{venue: narrow}),
+		Config: newStore(t, map[ids.Venue]domain.Budget{binance: narrow}),
 		Lane:   lane,
 	})
 	if err != nil {

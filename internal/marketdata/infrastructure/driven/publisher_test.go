@@ -272,6 +272,24 @@ func TestPublishRefusesAndNamesTheCheckThatFired(t *testing.T) {
 			breakIt: func(s *application.FundingSnapshot) { s.Observation.Watermark.SourceTime = time.Time{} },
 			want:    domain.ErrWatermarkUnset,
 		},
+		// A well-formed instrument that simply has no funding. Before §4's
+		// perp-only rule reached events.SourceID this case came out as
+		// domain.ErrFundingOnSpot — refused, but by the observation check,
+		// three layers in and only because marketdata happens to build a
+		// domain object. Now the envelope itself cannot be addressed, which is
+		// what covers the producers that build no observation at all.
+		//
+		// The sentinel is the assertion, not merely that it fails: the two
+		// diagnoses name different owners, and this pins which one the
+		// transport now answers with.
+		"spot instrument — a funding source no venue can produce": {
+			breakIt: func(s *application.FundingSnapshot) {
+				s.Observation.Instrument = ids.VenueInstrument{
+					Venue: binance, Product: ids.ProductSpot, Symbol: "BTCUSDT",
+				}
+			},
+			want: events.ErrStreamProductMismatch,
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

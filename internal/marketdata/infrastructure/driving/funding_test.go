@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/giiorg/arb-lab/internal/engine/venue"
 	"github.com/giiorg/arb-lab/internal/marketdata/application"
 	"github.com/giiorg/arb-lab/internal/marketdata/domain"
 	"github.com/giiorg/arb-lab/internal/marketdata/infrastructure/driving"
@@ -14,7 +15,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
 
-const venue = ids.Venue("binance")
+const binance = ids.Venue("binance")
 
 var base = time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
 
@@ -46,7 +47,7 @@ var (
 
 func perp() ids.VenueInstrument {
 	return ids.VenueInstrument{
-		Venue:    venue,
+		Venue:    binance,
 		Product:  ids.ProductLinearPerp,
 		Symbol:   "BTCUSDT",
 		Contract: ids.ContractLinear,
@@ -65,9 +66,9 @@ func rate(t *testing.T, s string) fixedpoint.Rate {
 // update's three rates are pairwise distinct and the interval is not a round
 // multiple of anything else in the fixture, so a field crossed with another
 // field is visible rather than absorbed.
-func update(t *testing.T) driving.FundingUpdate {
+func update(t *testing.T) venue.Funding {
 	t.Helper()
-	return driving.FundingUpdate{
+	return venue.Funding{
 		Rate:       rate(t, "0.00013"),
 		Interval:   8 * time.Hour,
 		NextSettle: base.Add(4 * time.Hour),
@@ -112,7 +113,7 @@ type harness struct {
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	clk, err := clock.NewTestClock(base, []clock.Calibration{
-		{Venue: venue, Offset: venueSkew, Uncertainty: time.Second},
+		{Venue: binance, Offset: venueSkew, Uncertainty: time.Second},
 	})
 	if err != nil {
 		t.Fatalf("NewTestClock: %v", err)
@@ -283,6 +284,60 @@ func TestDeliverRefusesAPayloadItCannotRead(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestDeliverJudgesTheVenueReadingBeforeTranslatingIt is what makes the
+// venue-boundary check observable at all, and the reason it needs its own test
+// is that the check is otherwise INVISIBLE.
+//
+// domain.FundingObservation.Validate covers a strict superset of what
+// venue.Funding.Validate covers — the same five fields, plus the instrument and
+// the watermark — so there is no input the venue check refuses that the domain
+// check would accept. Delete the venue check and every assertion about WHETHER
+// a malformed reading is refused still passes. What changes is which boundary
+// the refusal names, and that is a real difference: the sentinels are distinct
+// values in distinct packages, and an operator reading one is sent to the venue
+// adapter while the other sends them to this context's translation.
+//
+// Two things this pins, and both are directional. The venue diagnosis must WIN
+// when both apply, or the outer boundary is decorative. And the domain
+// diagnosis must still be reachable — the case below breaks a field the venue
+// type does not carry, which is what shows the venue check has not swallowed
+// the boundary underneath it.
+func TestDeliverJudgesTheVenueReadingBeforeTranslatingIt(t *testing.T) {
+	t.Run("a malformed venue reading names the venue", func(t *testing.T) {
+		h := newHarness(t)
+
+		u := update(t)
+		u.Cap, u.Floor = u.Floor, u.Cap
+
+		_, err := h.dispatch.Deliver(envelope(t, events.StreamFunding, u))
+		if !errors.Is(err, venue.ErrClampInverted) {
+			t.Fatalf("Deliver = %v, want venue.ErrClampInverted", err)
+		}
+		if errors.Is(err, domain.ErrClampInverted) {
+			t.Error("the domain's diagnosis won; the outer boundary is then unobservable and deletable")
+		}
+		if len(h.pub.got) != 0 {
+			t.Error("a malformed venue reading reached the use case")
+		}
+	})
+
+	t.Run("a fault the venue type cannot see still names the domain", func(t *testing.T) {
+		// The venue payload carries no watermark — §4 puts provenance on the
+		// Envelope — so a missing SourceTime is a fault only the observation
+		// can report. events.Envelope.Validate accepts an absent SourceTime,
+		// deliberately, because not every venue message carries one.
+		h := newHarness(t)
+
+		env := envelope(t, events.StreamFunding, update(t))
+		env.SourceTime = time.Time{}
+
+		_, err := h.dispatch.Deliver(env)
+		if !errors.Is(err, domain.ErrWatermarkUnset) {
+			t.Fatalf("Deliver = %v, want domain.ErrWatermarkUnset", err)
+		}
+	})
 }
 
 func TestDeliverRefusesAnEmptyEnvelopeAsMalformedNotAsForeign(t *testing.T) {

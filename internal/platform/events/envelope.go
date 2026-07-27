@@ -92,6 +92,50 @@ func (s StreamKind) Lane() Lane {
 	return LaneControl
 }
 
+// RequiresPerp reports whether this stream exists only for perpetuals.
+//
+// # [SPEC EDIT OWED] §3.5's SourceID can name a source no venue can produce
+//
+// §4 states the rule per stream — StreamFunding is "perp only", StreamMark is
+// "perp only: mark/index — spot has none; price the spot leg from its book",
+// StreamBook is "spot & perp both" — and §3.5, which defines SourceID and gives
+// it a Validate, never carries the constraint across. So a SourceID pairing a
+// spot instrument with the funding stream validates cleanly today, and the
+// envelope built from it validates too.
+//
+// The rule belongs here for the same structural reason ids.VenueInstrument
+// checks its product against its contract type: this is the type that holds
+// BOTH fields, and a rule about two fields agreeing has exactly one place it
+// can be enforced rather than remembered. Leaving it to consumers is what the
+// codebase already did, and it is covered by accident — marketdata's
+// FundingObservation refuses a spot instrument, so the funding path is safe
+// while every other consumer of the same source is not. §3.4 also makes
+// SourceID the mailbox key, which means an impossible source is a mailbox that
+// exists, can be subscribed to, and never delivers.
+//
+// # An unrecognised stream answers true, and that direction is chosen
+//
+// Unreachable through Validate, which refuses an undeclared StreamKind first —
+// so the choice costs nothing and is made on principle. Constraining an
+// unclassified stream to perpetuals is the narrower claim: it denies a source
+// nobody has classified rather than admitting one. The opposite default would
+// let a stream added next year reach spot instruments because nobody got around
+// to saying whether it should, which is the metric-cardinality and hot-reload
+// argument (§10, §5.2) applied to a routing key.
+func (s StreamKind) RequiresPerp() bool {
+	switch s {
+	case StreamFunding, StreamMark:
+		return true
+	case StreamBook, StreamExecutions, StreamAccount, StreamControl:
+		// Named rather than left to the trailing return (§3.6 rule 10). Book
+		// exists on both families; the three private streams are not
+		// product-constrained — spot fills and spot balances are real. That is a
+		// different fact from the unclassified case below.
+		return false
+	}
+	return true
+}
+
 // SourceID identifies one stream of one instrument — §3.5's "a VenueInstrument
 // stream". It is NOT globally ordered `[→ Z1]`: VenueSeq is authoritative within
 // a SourceID and means nothing across two.
@@ -111,11 +155,23 @@ type SourceID struct {
 }
 
 // Validate reports whether the source could exist.
+//
+// The product-vs-stream check runs last because it is the only one that needs
+// both halves to already be well-formed: RequiresPerp answers for a declared
+// stream, and IsPerp answers for a declared product. Asked earlier it would
+// report a disagreement between two values, one of which is simply unset.
 func (s SourceID) Validate() error {
 	if err := s.Instrument.Validate(); err != nil {
 		return err
 	}
-	return s.Stream.Validate()
+	if err := s.Stream.Validate(); err != nil {
+		return err
+	}
+	if s.Stream.RequiresPerp() && !s.Instrument.Product.IsPerp() {
+		return fmt.Errorf("%s stream on %s: %w",
+			s.Stream, s.Instrument.Product, ErrStreamProductMismatch)
+	}
+	return nil
 }
 
 // Lane reports the lane this source's traffic belongs on.

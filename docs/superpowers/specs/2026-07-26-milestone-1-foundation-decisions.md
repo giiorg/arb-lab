@@ -2963,6 +2963,117 @@ Two edits went in that no marker demanded, both from §18g's answered questions:
 
 The mechanism of the mistake generalizes past this file: **a true rule stated without its scope becomes a false rule.** "This layer must not invent a sequence" is true of `IngressSeq` and false of `AcceptOrdinal`, and one sentence covering both cost the trace. Worth looking for wherever two fields of one type sit behind one prohibition.
 
+## §20 — session 18: `engine/venue`, the fourth slice — the placeholder contract is retired
+
+**The user chose `engine/venue` from the three candidates HANDOFF listed, on the decay argument: `driving.FundingUpdate` was explicitly the contract "until `engine/venue` lands", and exactly ONE consumer held that placeholder. The book path would have added a second and `oms` a third and fourth.** The slice is code-complete and **NOT closed** — three `[SPEC EDIT OWED]` markers are open (§20e).
+
+### §20a — what was built, and the three things deliberately NOT built
+
+`internal/engine/venue/` — flat, no DDD layering, which is §3.2's rule for an engine subsystem rather than an omission. There is no domain here because there is no domain *language* here: a funding rate means one thing to `marketdata` and another to `strategy`, and this package owns neither meaning, only the shape both agree the venue's reading arrives in.
+
+| File | Holds |
+|---|---|
+| `doc.go` | The charter, what is absent and why, and marker #1 |
+| `funding.go` | `Funding` (the normalized DTO) + `Validate` + `FundingIntervalFromHours`, and marker #3 |
+| `source.go` | `FundingSource` — the funding mailbox key, written down once |
+| `errors.go` | Four sentinels, and a note recording one that is deliberately absent |
+
+**Three absences, each with a reason that is the same reason:**
+
+1. **No raw Binance/Bybit clients**, though §4 assigns them here. Nothing can consume one — §3.5 says the dispatcher is "not yet built", there is no composition root under `app/`, and a WS client with no dispatcher to feed would have to invent its own arbitration, which is the second-authority defect §3.5 spends a paragraph forbidding.
+2. **None of §4's nine capability interfaces is declared.** Eight are consumed by contexts that do not exist (`oms`, `treasury`, `risk`). Declaring them is §3.6's own argument for deferring `singlewriter` — *a gate over an empty tree passes trivially, and an interface with no implementer and no caller is a declaration nothing can disagree with.* §4's own rule also cuts against it: contexts declare the segregated capability they need in their **own** application layer and this package satisfies it, which is what `marketdata` already does, so an interface here would be a third statement of a contract that already has two ends.
+3. **No `DefaultFundingInterval = 8 * time.Hour` constant**, despite Profiles §1 recording Binance's "absent ⇒ 8h default" as a verified fact. Rejected on this repo's standing rule about default direction — see §20b.
+
+### §20b — the decision the slice turns on: there is no 8-hour fallback
+
+Profiles §1: Binance's funding stream carries **no interval field**; it comes from a REST overlay (`GET /fapi/v1/fundingInfo`), and the rule is "absent ⇒ 8h default". The obvious implementation is a fallback on the zero value — `if hours == 0 { return 8 * time.Hour }`.
+
+**Rejected.** A zero reaches that conversion from three completely different situations, and a zero-value fallback answers all three identically:
+
+| Zero because | 8h is |
+|---|---|
+| Binance's overlay was fetched and genuinely reported nothing | **correct** |
+| the overlay was never fetched, or a decode dropped the field | a wiring failure wearing a correct BTC reading's clothes |
+| Bybit sent a ticker **delta** whose unchanged field is simply absent (Profiles §1: *"absent field = unchanged, never null-coerce"*) | §2.4's **C8 defect** — the venue that flips an alt 8h↔1h with no notice, and the flip gets absorbed |
+
+So zero is **refused**, and the Binance adapter (when it lands) applies its default from a *positive* fact — an overlay that was fetched and came back empty — which is a state the caller has to be holding in order to express. That is "when a default has two directions, pick the one that is right when somebody forgets it", applied to a case where forgetting produces a *plausible* number rather than a crash.
+
+**`MaxFundingIntervalHours = 24` is a unit check, not venue policy.** Every perp either venue runs settles at 1/2/4/8h, so 24 admits every real value; what it rejects is an argument that is not in hours — 480 (minutes), 28800 (seconds), a truncated `time.Duration`. Each would otherwise be silently wrong by orders of magnitude, and §2.4's settlement count is a division by it, so the error surfaces as a plausible number of settlements rather than as a failure.
+
+### §20c — the perp-only rule went into `platform/events`, not here, and that was a close call
+
+§4 marks `StreamFunding` and `StreamMark` **perp-only**. §3.5 defines `SourceID` and gives it a `Validate` that never carries the constraint across — so `SourceID{spot BTCUSDT, StreamFunding}` validated cleanly, and so did an envelope built from it.
+
+The rule was first written in `venue.FundingSource` with its own `ErrFundingOnSpot`. **Moved to `events.StreamKind.RequiresPerp` + `SourceID.Validate`**, on three grounds:
+
+- **It is a rule about two fields of one struct**, and this is the type that holds both — the identical argument `ids.VenueInstrument` already makes for checking its product against its contract type.
+- **Placement decides who is covered.** On `SourceID`, every producer gets it — including the ones not yet written — and `Envelope.Validate` enforces it process-wide. In `venue.FundingSource`, only callers who remember the helper get it.
+- **The hole was real and covered by accident.** `marketdata/domain.FundingObservation` refuses a spot instrument, so the funding path was safe; every other consumer of the same source was not, and the coverage came from a *context's domain*, three layers downstream of the transport that had already accepted it.
+
+*Rejected:* leaving it in `venue` (narrower coverage, and a second sentinel to keep in step); and putting a translated `venue.ErrFundingOnSpot` in front of the events one (a second name for one refusal — the value a caller branches on should name the rule's owner).
+
+**Direction of the unrecognised-stream answer: `true`.** Unreachable through `Validate`, which refuses an undeclared `StreamKind` first, so it costs nothing and is chosen on principle. Constraining an unclassified stream to perps *denies* a source nobody has classified; the opposite default admits one. Loud-wrong beats silent-dead.
+
+### §20d — two types with overlapping validation, and why that is structural rather than sloppy
+
+`venue.Funding` and `marketdata/domain.FundingObservation` carry the same five fields and both validate them. **§3.6 rule 1 forbids a context's `domain/` from importing `engine/`, so the domain literally cannot be expressed in terms of the venue type.** That is the anti-corruption layer §4 asks for, and its cost is paid in one visible place — the field-by-field translation in `driving/` — rather than spread across a shared struct both layers would be free to add to.
+
+Neither check is deletable. This one judges a **venue reading** and has producers the domain will never see (§8's capture lane records normalized DTOs; §3.5's replay `DataSource` produces them with no context in the process). The domain's judges an **observation** — this plus an instrument and a watermark — and is the stronger check wherever both apply.
+
+**But the overlap made the venue check invisible, and that needed a test rather than a comment.** `domain`'s check is a strict superset over the shared five fields, so *no input exists* that the venue check refuses and the domain check accepts: delete `u.Validate()` from `Deliver` and every assertion about whether a malformed reading is refused still passes. What changes is only which boundary the error names — and the sentinels are distinct values in distinct packages, so `TestDeliverJudgesTheVenueReadingBeforeTranslatingIt` asserts `venue.ErrClampInverted` and explicitly asserts that `domain.ErrClampInverted` did **not** win. Its second subtest breaks a field the venue type does not carry (`SourceTime`), showing the outer check has not swallowed the boundary underneath it.
+
+### §20e — three `[SPEC EDIT OWED]` markers, all of one kind
+
+All three are **silences in the core, not disagreements with it** — the v0.9.6 shape rather than the v0.9.8 one.
+
+1. **`engine/venue/doc.go` — §3.5 and §4 declare the market-data seam twice, with different shapes.** §3.5 gives `DataSource interface { Subscribe(VenueInstrument) <-chan Envelope }`; §4 gives `StreamBook`/`StreamFunding`/`StreamMark`. Same position in the pipeline — both are what the dispatcher reads and what §8 substitutes a replay adapter for — and a type satisfying one does not satisfy the other. §3.5's block *references* §4 everywhere else in it (`ExecutionVenue` is written as a composition of §4's four interfaces and says "see §4" inline); `DataSource` is the one line written as a definition, and its signature has not kept up. §4's shape wins, on three arguments recorded in the doc comment. **The edit is a resolution, not a new rule** — the same shape as v0.9.8's §3.2-vs-§3.3 `MarketView` call. It is deliberately *not* resolved by declaring the interface: that is the empty-tree case above.
+2. **`platform/events/envelope.go` — §3.5's `SourceID` can name a source no venue can produce.** §4 states the constraint per stream; §3.5 never carries it across. The edit should state the full per-stream table, including that the three private streams are **not** product-constrained (§4.2 makes spot a full API family with its own user-data stream, so constraining them would silently unsubscribe half the trade).
+3. **`engine/venue/funding.go` — §4 states a units discipline for money and none for time.** §4 requires numeric fields to cross as dimensional `fixedpoint`, "never `float64`" — money, and a good rule. Nothing covers the venue fields that are **durations**, and Bybit's `fundingIntervalHour` is load-bearing: a conforming reimplementation can multiply it by `time.Minute`, satisfy this spec completely, and hand §2.4 a 480-minute interval that enumerates a plausible settlement count while the kill-gate carry figure is wrong by a factor of sixty. **This is §10's own argument, landed in v0.9.7 for the observability seam** — where "a duration recorded in the wrong unit renders as a plausible dashboard number and fails nothing" — and the venue seam is where the duration is *created*, one layer earlier with the same consequence. The edit is the rule, not the constant.
+
+### §20f — the fixture-collapse checklist, run BEFORE the mutations, found four
+
+Per `CLAUDE.md`'s tenth entry. Each has a precedent in the ledger:
+
+| Collapse | The fixture that hides it | Precedent |
+|---|---|---|
+| `c < 0` vs `c <= 0` on the clamps | every natural cap/floor pair is strictly ordered | `ratelimit`'s `freeAt` |
+| `hours > Max` vs `>=` | testing only 480 | same |
+| `IsPerp()` vs `== ProductLinearPerp` | **every perp fixture in this repo is linear** | `ids`' own redundancy rule |
+| `FundingSource` returning the right stream | asserting only `err == nil` — `StreamMark` is *also* perp-only, so it validates identically | new |
+
+Fixed before writing the assertions: a **Cap == Floor** case that must be *accepted* (a pinned rate is degenerate, not inverted); **exactly 24 accepted and 25 refused**; an **inverse perp** accepted for funding and mark, in both `events` and `venue`; and `FundingSource`'s returned `Stream` asserted directly. The valid fixture's cap and floor are also deliberately **asymmetric** (`0.0075` / `-0.0031`) — under the natural `±0.0075` pair, a comparison in the wrong direction and one against the wrong operand give the same verdict for every input.
+
+Two non-checks are pinned by tests rather than left to comments: a **rate outside its own clamps is accepted** (the clamp bounds §2.4's *forecast*, not the wire reading — refusing it would drop the single most informative funding reading there is, and drop it as *malformed* rather than as *clamped*), and `FundingIntervalFromHours(0)` **does not return 8h**.
+
+### §20g — mutations: 16 run, 14 caught, 2 SURVIVED — and both survivals are findings
+
+The two survivals are wrong mutants, not test gaps, and diagnosing which was the work.
+
+**SURVIVED 1 — `case StreamFunding, StreamMark:` → `case StreamMark:`.** `RequiresPerp` still answers `true` for funding, via the trailing `return true` that *is* the safe default. The claim is real and it is checked — by **`exhaustiveswitch`**, verified by hand rather than assumed: applying the mutation and running `make lint` gives exit 3 and *"switch over StreamKind does not name StreamFunding"*.
+
+**The generalization, and it was tested rather than asserted.** A trailing `return X` makes the membership of the `X` group unobservable to tests: any member dropped from it falls through to the same answer. Probed against **committed code from an earlier slice** — `StreamKind.Lane`, whose default is `LaneControl`:
+
+- dropping `StreamControl` from `case StreamExecutions, StreamAccount, StreamControl:` → **SURVIVED**, as predicted
+- dropping `StreamFunding` from the market-data case (a member *outside* the default group) → **caught**
+
+So the two gates are not redundant and neither substitutes for the other: the test suite covers the non-default groups, `exhaustiveswitch` covers the default one. Flipping the default to make it test-observable would trade a checkable claim for a dangerous default, which is the wrong trade.
+
+**SURVIVED 2 — replacing `venue.FundingSource(...)` in `LanePublisher` with the literal it used to be, plus a nil error.** The spot instrument is still refused, because the probe two lines down calls `Envelope.Validate` → `SourceID.Validate` → §20c's rule. The rule is enforced by **construction**, not by remembering to call the constructor.
+
+**That is the good outcome, and it falsified the comment I had written at that call site.** The comment claimed the constructor produced the outer, better-named diagnosis; in fact both paths produce the *identical* wrapped `ErrStreamProductMismatch`. **§19e's lesson arriving again inside one session** — a doc comment confidently arguing for a property the code does not have. Rewritten to say what the call actually buys, which is narrower and structural: one place in the codebase writes down which stream carries funding.
+
+Everything else caught, including the two that matter most: `StreamFunding` → `StreamMark` in `FundingSource` (1 failing test — the assertion the collapse checklist added), and dropping `u.Validate()` from `Deliver` (2 failing tests — the diagnosis-ordering pair).
+
+### §20h — WHAT IS OWED (the slice close)
+
+1. **The reading pass is DONE and produced marker #3** — it is in the count above, not additional to it. The other two were taken while building.
+2. **The spec edits**, as `build-spec.md` **v0.9.9**: §3.5 (the `DataSource` resolution + the `SourceID` product rule) and §4 (the time-units discipline). Then the release checklist: five doc stamps, ADR §3's fifth milestone-1 block, marker flip to `[SPEC EDIT LANDED — v0.9.9]`, Georgian header re-sync + `tutorial.ka.md` re-assemble, `cd docs && bun test`, `make ci`.
+3. **Not owed and worth saying so:** no formal-model change. Nothing here touches the fence/takeover/plan composition; `docs/formal/` stays at the Cx8 verdict.
+
+## RESUME HERE — updated end of session 18
+
+**SESSION 18 UPDATE — READ THIS FIRST.** `engine/venue` is **built and NOT closed**. §20 is the record. `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **three** — `engine/venue/doc.go`, `engine/venue/funding.go`, `platform/events/envelope.go`. `make ci` green, 16 mutations / 14 caught / 2 diagnosed survivals. `driving.FundingUpdate` no longer exists. The next work is §20h. What follows was written at the end of session 17 and earlier.
+
 ## RESUME HERE — updated end of session 17
 
 **SESSION 17 UPDATE — READ THIS FIRST.** The `marketdata` slice is **CLOSED**. The §18f fix is applied (`c8db027`) and `build-spec.md` is at **v0.9.8** (`9136f90`), with all five doc stamps, ADR §3's **fourth** milestone-1 block (tagless total **thirty**), six code markers flipped to `[SPEC EDIT LANDED — v0.9.8]`, the Georgian header re-synced and `tutorial.ka.md` re-assembled. **`grep -rn "SPEC EDIT OWED" internal/ tools/` is CLEAN.** `make ci` green, `docs` 102 pass, 7/7 mutations caught. **Nothing is owed.** The reasoning is §19; §18 is now history. What follows was written at the end of session 16 and earlier, and the environment paragraphs below are still accurate.

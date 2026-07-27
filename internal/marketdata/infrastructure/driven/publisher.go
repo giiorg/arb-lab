@@ -3,6 +3,7 @@ package driven
 import (
 	"fmt"
 
+	"github.com/giiorg/arb-lab/internal/engine/venue"
 	"github.com/giiorg/arb-lab/internal/marketdata/application"
 	"github.com/giiorg/arb-lab/internal/platform/events"
 )
@@ -151,6 +152,27 @@ func NewLanePublisher(lane *events.MarketDataLane) (*LanePublisher, error) {
 func (p *LanePublisher) Publish(snap application.FundingSnapshot) error {
 	w := snap.Observation.Watermark
 
+	// The source is built by engine/venue rather than as a literal here, and
+	// what that is worth was measured rather than assumed. Replacing this call
+	// with the literal it used to be — Stream: events.StreamFunding, no error —
+	// changes NOTHING observable: §4's perp-only rule lives on
+	// events.SourceID.Validate, so the probe below reaches it anyway and
+	// produces the identical wrapped ErrStreamProductMismatch. The mutation
+	// survives, correctly.
+	//
+	// That is the good outcome and it is worth saying plainly rather than
+	// dressing this call up as a safety check. The rule is enforced by
+	// CONSTRUCTION, not by a producer remembering to route through a
+	// constructor, which is what makes it hold for the venue clients that do
+	// not exist yet. What this call buys is narrower and structural: one place
+	// in the codebase writes down which stream carries funding. §3.4 makes that
+	// the mailbox key, and events.StreamKind.Lane makes the same argument one
+	// layer down — routing decided at each call site is routing that drifts.
+	src, err := venue.FundingSource(snap.Observation.Instrument)
+	if err != nil {
+		return fmt.Errorf("marketdata funding publish: %w", err)
+	}
+
 	env := events.Envelope{
 		// Inherited, not minted. §3.5 requires the dispatched envelope to carry
 		// the ordinal of the input that triggered it, and the use case carried
@@ -159,7 +181,7 @@ func (p *LanePublisher) Publish(snap application.FundingSnapshot) error {
 		// why this is copied unconditionally rather than guarded.
 		AcceptOrdinal: uint64(snap.Trigger),
 
-		Source:     events.SourceID{Instrument: snap.Observation.Instrument, Stream: events.StreamFunding},
+		Source:     src,
 		SourceTime: w.SourceTime,
 		RecvTime:   w.RecvTime,
 		VenueSeq:   w.VenueSeq,
