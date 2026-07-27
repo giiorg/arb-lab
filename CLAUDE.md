@@ -68,7 +68,7 @@ as the CI pin — the split is what keeps both honest.
 
 ## The rules that bite
 
-§3.6 of the core has ten structural rules. Six are gates; three are enforced
+§3.6 of the core has ten structural rules. Six are gates; five are enforced
 today as custom `golang.org/x/tools/go/analysis` analyzers in `tools/lint/`,
 because a linter you cannot unit-test cannot be *shown* to bite:
 
@@ -77,11 +77,18 @@ because a linter you cannot unit-test cannot be *shown* to bite:
 | `nofloat` | No `float64` anywhere under `internal/`. Type-based, default-deny, `//nofloat:allow <reason>` escape. |
 | `notimenow` | No ambient clock reads in `domain/`, `application/` or `engine/`. Transport-only escape, `engine/` alone. |
 | `kernelpurity` | A `platform/` package may import only the standard library and other `platform/` packages. |
+| `hexboundary` | `domain/` and `application/` may not import `infrastructure/` or `engine/`. Classifies both ends of the edge, so it scopes to this module's `internal/` rather than matching a bare path segment. |
+| `exhaustiveswitch` | A switch over a module-declared enum-like must name every member. A `default:` does not excuse a missing one — that is where the new member lands silently. No escape: name the rest in a grouped case, which the compiler checks. |
 
-`hexboundary`, `singlewriter` and `exhaustiveswitch` are deferred until there is
-a bounded context, an OMS write repository and a state machine to police. A lint
-over an empty tree passes trivially, which is indistinguishable from a broken
-lint.
+`singlewriter` alone is still deferred, until `oms`'s write repository exists. A
+lint over an empty tree passes trivially, which is indistinguishable from a
+broken lint — but that deferral **expires when its subject appears**, and both
+gates above landed the moment it did rather than after the code they police.
+
+Rule 10's deferral names the wrong trigger, and it is worth knowing why: it
+waited on a *state machine*, while what actually made it buildable was the
+kernel's eleven enum-likes, which had existed for several slices. It found 13
+silent fallthroughs on its first real run.
 
 ## How work is done here
 
@@ -118,8 +125,8 @@ These are not style preferences. Each one was paid for.
   review. `fixedpoint` has a `math/big` oracle; `ids` has one for its base32
   codec.
 - **Every claim gets bite-checked.** Before a test is trusted, mutate the code it
-  covers and confirm it fails. `tools/mutate.sh` does this, and it reports five
-  verdicts rather than two — because four separate things have masqueraded as a
+  covers and confirm it fails. `tools/mutate.sh` does this, and it reports six
+  verdicts rather than two — because five separate things have masqueraded as a
   kill here, and each guard exists because its absence produced a false
   all-clear:
 
@@ -130,6 +137,11 @@ These are not style preferences. Each one was paid for.
   | `NO-OP!!` | the pattern did not match; the mutation never ran |
   | `NOBUILD!!` | the mutant did not compile, so the tests never ran |
   | `TIMEOUT!!` | the suite **hung**; a hanging test names no defect |
+  | `PANIC!!` | the mutant compiled, ran and **crashed** — a kill, but by crash, so the claim you aimed at may still be unchecked |
+
+  Set `MUTATE_MODULE=tools/lint` for the analyzers: `go test ./tools/lint/...`
+  from the root fails with *"main module does not contain package"*, which is
+  non-zero, which the harness would read as a kill.
 
   It scopes the mutation to a line and prints the diff, because a file moving is
   not evidence about which function moved. A surviving mutant is either a test
@@ -163,7 +175,12 @@ These are not style preferences. Each one was paid for.
   worst" were the same answer; and every `freeAt` case sat strictly inside or
   strictly outside the ceiling, where `<=` and `<` are the same predicate. Then
   `boot`'s reverse-teardown test used **three** closers, where reversing the
-  slice and swapping only its ends produce the same order. **Seven times now**,
+  slice and swapping only its ends produce the same order. Then
+  `exhaustiveswitch`'s single-member fixture *covered* its one member, where
+  "one constant is a set" and "one constant is not a set" give the same answer —
+  and the mirror of it, `within()`'s `pkgPath == dir` arm, was untested in
+  **both** `hexboundary` and the `kernelpurity` it was copied from, because
+  every fixture in either imported a SUBpackage. **Nine times now**,
   which makes it a checklist item and not a war story: before believing a suite,
   find the fixture parameter pinned to the value that collapses the distinction
   the code makes, and vary it. The tell is that the fixture does not contain the
@@ -184,6 +201,13 @@ These are not style preferences. Each one was paid for.
 - **Deviations from the spec are marked, not absorbed.** Take the deviation if it
   is right, mark it `[SPEC EDIT OWED]`, and land it in the spec before the slice
   closes. External review has to be able to tell deliberate change from drift.
+  The slice-close gate is `grep -rn "SPEC EDIT OWED" internal/ tools/` — **both
+  paths**, and the second was added the session normative claims first appeared
+  outside `internal/` (the analyzers assert things about §3.6). Scoped to code
+  because the doc set is full of prose about past markers. Two limits, both paid
+  for: the grep cannot see an **unmarked** claim, so a reading pass over what the
+  slice asserts normatively goes beside it, not into it; and it cannot see a
+  marker in a directory nobody added to the pattern.
 
 ## Commits
 
