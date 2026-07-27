@@ -12,9 +12,12 @@ import (
 // # It is a constant, and the fact that it does not vary with the verdict is
 // # the decision
 //
-// [SPEC EDIT OWED] §3.5 gives Prio a direction — lower is more urgent — and
-// never says whether a source's priority may depend on the CONTENT of what it
-// publishes. It may not, and the reason is a safety one that reads backwards:
+// [SPEC EDIT LANDED — v0.9.8] §3.5 gave Prio a direction — lower is more
+// urgent — and never said whether a source's priority may depend on the CONTENT
+// of what it publishes. It may not, and the reason is a safety one that reads
+// backwards; §3.5 now states the constancy as a separate requirement from the
+// direction, because a spec that fixes only the direction leaves the reordering
+// below available to anyone who reads it and complies fully:
 // §3.4's mailboxes are per-SourceID and §3.5 makes VenueSeq authoritative
 // within one, so two envelopes from one source published at different
 // priorities are two envelopes that can be drained out of sequence. The
@@ -71,23 +74,27 @@ const fundingPrio = events.PrioNormal
 // mailbox until the dispatcher has stamped it — correct, and why Publish does
 // not call it directly.
 //
-// [SPEC EDIT OWED] §3.5 says who stamps each sequence number and never says
-// WHEN an envelope is required to carry them, which leaves Validate looking
-// like an invariant of the type rather than of a position in the pipeline. The
-// unsafe reading is available and it is the natural one: a producer that
-// validates before publishing cannot satisfy the check without minting an
-// IngressSeq, and a locally-minted replay key is a second authority over the
-// order determinism keys on. The requirement is that a lane holds PRE-DISPATCH
-// envelopes — AcceptOrdinal inherited, IngressSeq unstamped — and that Validate
-// is the DISPATCHER's post-stamp check, not a producer-side one.
+// [SPEC EDIT LANDED — v0.9.8] §3.5 said who stamps each sequence number and
+// never said WHEN an envelope is required to carry them, which left Validate
+// looking like an invariant of the type rather than of a position in the
+// pipeline. The unsafe reading was available and it was the natural one: a
+// producer that validates before publishing cannot satisfy the check without
+// minting an IngressSeq, and a locally-minted replay key is a second authority
+// over the order determinism keys on. §3.5's Envelope field comments now say it
+// per field — AcceptOrdinal present from ingestion onward, IngressSeq assigned
+// only at dispatch — and the paragraph states that Validate is the DISPATCHER's
+// post-stamp check rather than a producer-side one.
 //
-// [SPEC EDIT OWED] §3.5's causal-traceability sentence states the inheritance
-// rule for an envelope derived from a raw input, and has no case for one
-// derived from the ABSENCE of an input. §3.4's silence timer produces exactly
-// that, so the rule needs scoping rather than extending: a timer-triggered
-// envelope carries no ordinal, and zero is how it says so. The alternative an
-// implementer reaches for — reusing the last input's ordinal — makes the
-// capture log claim one raw input produced two dispatched envelopes.
+// [SPEC EDIT LANDED — v0.9.8] §3.5's causal-traceability sentence stated the
+// inheritance rule for an envelope derived from a raw input, and had no case for
+// one derived from the ABSENCE of an input. §3.4's silence timer produces
+// exactly that, so the rule needed SCOPING rather than extending. §3.5 now says
+// the rule binds every producer and not only book reconstruction — the
+// reconstructed snapshot was an example being read as the extent, which is how
+// this file came to publish zero — that a timer-triggered envelope carries no
+// ordinal and zero is how it says so, and that reusing the last input's ordinal
+// is forbidden: it makes the capture log claim one raw input produced two
+// dispatched envelopes.
 //
 // # Publishing is not fire-and-forget here either
 //

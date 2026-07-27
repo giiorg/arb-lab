@@ -10,16 +10,18 @@
 // and a fifth arriving as a silent fallthrough is not a class of bug worth
 // leaving available.
 //
-// [SPEC EDIT OWED] Rule 10 carries "(planned, not yet enforced — no state
-// machines exist to police)" and closes with "Evaluate golangci-lint's
+// [SPEC EDIT LANDED — v0.9.8] Rule 10 carried "(planned, not yet enforced — no
+// state machines exist to police)" and closed with "Evaluate golangci-lint's
 // exhaustive first; build a custom analyzer only if it does not suffice". Both
-// are now discharged and both are stale: the evaluation was run and is recorded
-// below, and the rule is enforced. §3.6's "Gate status" paragraph needs rule 10
-// moved across with rule 1. Note also that the deferral's stated trigger was
-// wrong in a way worth recording rather than quietly fixing — it waited on a
-// STATE MACHINE, and what actually made the gate buildable was the shared
-// kernel's eleven enum-likes, which existed for several slices while the rule
-// described itself as having nothing to police.
+// are discharged: the evaluation was run and is recorded below, and the rule is
+// enforced. §3.6 now states rule 10 as enforced, that a `default:` does not
+// excuse a missing member, and that there is no escape directive. It also keeps
+// the part worth more than the status change — the deferral's stated trigger
+// was WRONG. It waited on a STATE MACHINE, while what actually made the gate
+// buildable was the shared kernel's eleven enum-likes, which had existed for
+// several slices while the rule described itself as having nothing to police.
+// A deferral should name the construct the analyzer reads, not the feature that
+// motivated it, and rule 6's trigger was re-checked against that.
 //
 // # golangci-lint's `exhaustive` was evaluated first, as the rule instructs
 //

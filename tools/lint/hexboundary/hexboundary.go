@@ -8,11 +8,13 @@
 // the domain can no longer be tested without a socket and the backtest can no
 // longer substitute an adapter because the domain named a concrete one.
 //
-// [SPEC EDIT OWED] §3.6's "Gate status" paragraph names rule 1 as deferred and
-// lists three analyzers as enforced today; both are now false. §1's foundation
-// roster says hexboundary "lands with the first context", which is what just
-// happened, so that sentence is right and only the status is stale. Landed at
-// slice close with the rest, not piecemeal.
+// [SPEC EDIT LANDED — v0.9.8] §3.6's "Gate status" paragraph named rule 1 as
+// deferred and listed three analyzers as enforced; both went stale the moment
+// this landed. §1's foundation roster said hexboundary "lands with the first
+// context", which is exactly what happened — that sentence was right and only
+// the status was not. §3.6 now lists rule 1 as enforced, and it also records
+// what the bite-check for this gate cost, because a clean run over this tree
+// proved nothing: see the positive-control note below.
 //
 // # Why this is the gate that had to exist BEFORE the first context's
 // # application layer, not after it

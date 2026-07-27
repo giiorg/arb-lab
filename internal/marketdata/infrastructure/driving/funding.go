@@ -49,18 +49,19 @@ import (
 // arrived on is a state no feed can produce and every adapter would have to
 // check.
 //
-// [SPEC EDIT OWED] §4's MarketDataSource comment lists what StreamFunding
-// carries as "rate, interval, nextSettle, cap/floor, source, venueSeq", and the
-// last two are Envelope fields §3.5 already defines for every stream. Read
-// literally it asks for both copies, and nothing says which wins. The unsafe
-// direction is reachable without any implementer noticing they chose: gap
-// detection reads VenueSeq and freshness reads the timestamps, so a payload
-// whose provenance disagrees with its envelope's makes those two questions get
-// answered from different sources — a venue whose payload restamps an unchanged
-// reading is then a fresh observation with no gap, which is precisely the
-// silent-stall §3.4's timer exists to catch. The requirement is that the
-// ENVELOPE is authoritative for provenance and a normalized payload carries
-// none.
+// [SPEC EDIT LANDED — v0.9.8] §4's MarketDataSource comment listed what
+// StreamFunding carries as "rate, interval, nextSettle, cap/floor, source,
+// venueSeq", and the last two are Envelope fields §3.5 already defines for
+// every stream. Read literally it asked for both copies, with nothing saying
+// which wins. The unsafe direction was reachable without any implementer
+// noticing they chose: gap detection reads VenueSeq and freshness reads the
+// timestamps, so a payload whose provenance disagrees with its envelope's makes
+// those two questions get answered from different sources — a venue whose
+// payload restamps an unchanged reading is then a fresh observation with no
+// gap, which is precisely the silent stall §3.4's timer exists to catch. §4 now
+// states that the ENVELOPE is authoritative for provenance, that a normalized
+// payload carries none and no instrument either, and that the stream comments
+// list payload contents only.
 //
 // # It is declared here because engine/venue does not exist yet
 //
