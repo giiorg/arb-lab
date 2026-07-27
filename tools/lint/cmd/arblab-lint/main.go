@@ -16,6 +16,7 @@ import (
 	"github.com/giiorg/arb-lab/tools/lint/kernelpurity"
 	"github.com/giiorg/arb-lab/tools/lint/nofloat"
 	"github.com/giiorg/arb-lab/tools/lint/notimenow"
+	"github.com/giiorg/arb-lab/tools/lint/singlewriter"
 )
 
 func main() {
@@ -25,5 +26,6 @@ func main() {
 		kernelpurity.Analyzer,
 		nofloat.Analyzer,
 		notimenow.Analyzer,
+		singlewriter.Analyzer,
 	)
 }
