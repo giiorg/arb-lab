@@ -2640,7 +2640,200 @@ despite §7.5's posture edit being its near neighbour: the rungs are what a *pro
 while that doc's machines are what an *incident* does — the same reasoning v0.9.6 used for §7.5's
 latching rule. `make ci` green.
 
-## RESUME HERE — updated end of session 14
+## 17. Session 15 — the two sleeping gates woke, and each found something
+
+The slice is `marketdata`, the first bounded context. Session 14 landed its `domain/`. This
+session landed the two analyzers that context makes buildable, then the `application/` layer
+underneath them. Order was chosen, not incidental: see §17a.
+
+### 17a. Why the gates went in BEFORE the application layer
+
+§1 states the preference for the other three — a gate is built first "so the code they police is
+never written unpoliced". Rules 1, 6 and 10 were deferred against that preference on a *different*
+argument, not a weakening of it: a lint over an empty tree passes trivially, which is
+indistinguishable from a broken lint.
+
+**That deferral expires the moment its subject exists**, and `internal/marketdata/domain` was its
+subject. Writing `application/` first would have made the repo's first hexagonal layering the one
+piece of code the layering lint never saw during authoring. So both gates landed first, and
+`application/` is the first code in this repo written with rule 1 live.
+
+`singlewriter` stays deferred. It is the one gate whose subject is genuinely absent — `oms`'s write
+repository — and its reasoning is unchanged.
+
+### 17b. `hexboundary` (rule 1), and the fixture that found a defect the design did not
+
+domain/ and application/ may not import infrastructure/ or engine/. Scoped to **this module's own
+`internal/` tree** rather than by a bare path segment, which is where it differs from `notimenow`
+and the difference is not stylistic: `notimenow` only ever classifies the package under analysis,
+ours by construction, while this classifies **both ends of an import edge** and the far end can be
+anything on the network. A dependency published at `example.com/thirdparty/engine` is not §3.5's
+parity seam, and reporting it would be the gate inventing a violation. testdata carries that import.
+
+**The defect the fixtures found.** Go names an external test package by appending `_test` to the
+last segment of the directory's import path. For `internal/marketdata/domain` that yields
+`.../domain_test` — no `domain` segment, unpoliced — but for the nested `.../domain/sub` it yields
+`.../domain/sub_test`, which keeps the segment and IS policed. Same language construct, opposite
+treatment, decided by how deep the package happens to sit. A domain package would acquire or lose
+lint coverage by being moved into a subdirectory.
+
+Normalised away, and **both are policed** — the default-deny direction, on the standing rule. The
+cost of policing is that a genuine wiring test moves, and it has two unpoliced homes (the adapter's
+own package under `infrastructure/`, or the context root). The cost of not policing is the domain's
+whole test surface naming concrete adapters, one file at a time, with nothing failing.
+
+**Rejected, and recorded so it is not silently reopened:** widening rule 1 to deny *all* third-party
+imports in `domain/`. It is the purest statement of the hexagonal rule and this gate does not
+implement it. Rule 1 names two path-shaped targets, so widening is a spec change rather than an
+implementation; and the engine module has zero production dependencies by recorded decision (§12a),
+so it would be a lint over an empty tree — the very thing this gate's own deferral was about.
+Revisit when the first production dependency lands, where the escape-hatch question (test-only?
+generated?) can be answered against a real case.
+
+12 claims, 12 caught, one after a `NOBUILD!!` re-aim. Verified over the real tree with a temporary
+violation, because `internal/` today has no `engine/` or `infrastructure/` at all — a clean run
+there proves nothing on its own.
+
+### 17c. `exhaustiveswitch` (rule 10) — the evaluation the rule asked for, run
+
+Rule 10 says to evaluate `golangci-lint`'s `exhaustive` first and build custom only if it does not
+suffice. It was built against this module's `x/tools` and run over `./internal/...`:
+
+| Configuration | Reports |
+|---|---|
+| defaults | 18 |
+| — of which `reflect.Kind` | 3 (stdlib; never rule 10's subject) |
+| — of which test-declared enums | 3 (partial by design) |
+| — genuinely rule 10's | **12** |
+| `-package-scope-only` | 18 — **no effect**; it means "members declared at package scope", not "enums from this package" |
+| `-default-signifies-exhaustive` | 15 — inverts rule 10's stated purpose |
+
+**Verdict: it finds the right things and cannot express rule 10's SCOPE.** "A rule-8 enum-like"
+means an enum this module declares. Its only scoping knob is `-ignore-enum-types`, a regex exclusion
+list that grows every time somebody switches on a new stdlib enum — the precise mechanism §3.6
+rejects **by name** for `forbidigo`. Asking "was this enum declared in this module?" is structural.
+Put to the user with the numbers; custom analyzer confirmed.
+
+**The measurement worth more than the verdict:** only **3 of 18** sites use a `default:` clause at
+all. This codebase's idiom is a switch with no default followed by a trailing return — a fallthrough
+in different clothes — so rule 10 bites harder here than its own wording ("instead of falling
+through to `default`") anticipates.
+
+**Scope is asymmetric, and the asymmetry is the decision.** An enum *declared* in a `_test.go` file
+is out: `clock`'s `defect` double would need ~40 no-op case labels across five methods, and a gate
+that produces that is a gate somebody turns off. A switch *in* a `_test.go` file over a
+**production** enum is in: `fixedpoint`'s `math/big` oracle dispatches on `RoundingMode`, and a mode
+added without an oracle branch is a mode whose independent implementation silently stops existing
+while the cross-check passes. That made it **13 sites, not 12**.
+
+**No escape annotation, unlike `nofloat` and `notimenow`.** Their escape exists for a case with no
+in-language alternative — a live-only socket deadline has nowhere else to go. A subset switch has an
+alternative strictly better than an annotation: name the remaining members in one grouped case,
+which the compiler checks and which documents the decision at the decision site. The asymmetry that
+made `notimenow`'s escape cheap to add EARLY makes this one cheap to add LATE — an escape is purely
+additive — whereas shipping one now would have turned 13 decisions into 13 annotations. **Put to the
+user; "refactor, explicit zero case" chosen over "annotate".**
+
+All 13 refactored, behaviour unchanged (every suite green under `-race`). Two sites came out better
+than unchanged: `events.StreamKind.Lane` had ONE branch for "classified as control" and
+"unclassified, therefore delivered intact" while its doc comment argued they were different facts,
+and `ratelimit.Decision.detail` would have rendered "refused the request (admitted)".
+
+15 claims caught, 1 documented equivalent (Go's grammar admits only case clauses in a switch body),
+2 positive controls. One unmeasurable branch was **dropped rather than shipped**: no fixture can
+produce a constant of unknown kind, since `analysistest` will not load a package that fails to
+typecheck, and an untestable branch in a build-failing gate is indistinguishable from a broken one.
+
+### 17d. Three harness/coverage findings, none of them in this slice's code
+
+1. **`mutate.sh` could not reach the analyzers at all.** `go test ./tools/lint/...` from the root
+   fails with *"main module does not contain package"* — non-zero, which the harness reads as a
+   kill. **Every analyzer bite-check run through it would have been a phantom.** `nofloat` and
+   `notimenow` predate the harness (session 6) and so were never exposed to it. Fixed with
+   `MUTATE_MODULE`, and the fix is *measured* rather than assumed — a positive control confirms the
+   harness can still report `SURVIVED` through the new `-C` path.
+
+2. **A sixth verdict: `PANIC!!`.** A mutation dropping a nil guard made the analyzer segfault. A
+   panic prints no `--- FAIL` line, so the harness reported `NOBUILD!!` — *"the tests never ran"* —
+   about a mutant that compiled cleanly and crashed. Two diagnoses under one verdict, the same
+   defect `NOBUILD` and `TIMEOUT` were each added to fix. It is a kill, reported separately because
+   what it proves is weaker: the suite observed a **crash**, not a wrong answer, so the claim aimed
+   at may still be unchecked.
+
+3. **`within()`'s equality arm was untested in TWO gates.** Bite-checking `hexboundary` showed
+   `pkgPath == dir` could be deleted with the suite green — every fixture imports a SUBpackage — and
+   `kernelpurity`, which the helper was copied from, had the identical gap. This is the standing
+   "apply the fix to its mirror" rule arriving from the direction of a *copied helper* rather than a
+   symmetric API. Both now carry a fixture at the directory itself.
+
+### 17e. The release-checklist grep had gone blind
+
+The slice-close gate is `grep -rn "SPEC EDIT OWED" internal/`, scoped to `internal/` because the doc
+set is full of prose about past markers. Correct while all code lived under `internal/`. It no
+longer does — **the analyzers make normative claims about §3.6**, and the grep returned **0 while
+two markers existed** in `tools/lint/`.
+
+Third instance of this shape, after §16b: a gate reporting clean because it cannot see its subject.
+The checklist grep is now `internal/ tools/` and `CLAUDE.md` carries both limits — it cannot see an
+*unmarked* claim (hence the reading pass beside it, not merged into it), and it cannot see a marker
+in a directory nobody added to the pattern.
+
+**Two `[SPEC EDIT OWED]` markers are open**, both about §3.6's own status text:
+- `hexboundary.go` — the "Gate status" paragraph names rule 1 as deferred and lists three enforced.
+- `exhaustiveswitch.go` — rule 10 carries "(planned, not yet enforced)" and the "evaluate
+  `exhaustive` first" instruction, both now discharged. It also records that **rule 10's deferral
+  named the wrong trigger**: it waited on a *state machine*, while what actually made it buildable
+  was the kernel's eleven enum-likes, which had existed for several slices.
+
+### 17f. `marketdata/application` — and the spin it found in committed domain code
+
+The funding use case: accept, decide whether it advances the source, stamp freshness, publish, arm
+the silence timer. No goroutine and no ticker (`clock`'s argument, §3.5). **Not mutex-guarded,
+deliberately** — §3.4 makes the reducer single-writer, and a mutex would make concurrent use
+*compile* while leaving the published order nondeterministic under replay. Not locking is the honest
+encoding; the race detector says so if the dispatcher gets it wrong.
+
+**Two freshness verdicts, not one.** §3.4 says "per-venue max-age budget", singular, but a feed dies
+two ways and the second is invisible to the check written first. Both are carried on the snapshot;
+`Least()` is the decision and the pair is the diagnosis. *(This is the `Age`/`DataAge` question
+session 14 flagged and declined to answer until the application layer existed. Answered: both, and
+the spec question stands — see RESUME HERE.)*
+
+**THE FINDING. `domain.Budget.NextTransition` returned the boundary instant, and `Budget.At` is
+inclusive-fresh by deliberate design.** So the timer fired at an instant where the verdict had NOT
+changed, and `arm()` re-armed for that same instant. Not a wasted wakeup — a **spin**: firing
+forever while the observation stays marked fresh, with the ladder frozen short of the rung that
+triggers §5.2's `mark_blind_action`. A dead feed, a busy process, and every rung of the escalation
+§3.4 built the timer for unreachable.
+
+**The domain suite had a test for exactly this.** `TestNextTransitionAgreesWithAssess`, written to
+catch a shared off-by-one between the classifier and the timer arithmetic, checks the verdict one
+tick BEFORE the named instant and one tick AFTER — **and never AT it**, which is the only instant
+that matters because it is when the timer fires. Both neighbours pass under the defect. The bracket
+missed by exactly one point. Two table cases named the spin and asserted it as correct ("still the
+stale boundary" — which is *now*).
+
+Fixed in the domain, where the arithmetic belongs, with a named `tick` constant so a later reader
+does not tune it as a "margin" and reintroduce the spin. **Invisible from inside that package**:
+`At` and `NextTransition` are each self-consistent and only their *composition* is wrong, which is
+why it took a caller to surface it. This is the strongest argument yet for the layering itself —
+the second implementation that disagrees was not an oracle, it was the layer above.
+
+**Ordering is two rules because only one is always available.** `VenueSeq` where both readings carry
+one (§3.5 makes it authoritative within a `SourceID`; a jump is §3.4's gap); arrival order
+otherwise, since a REST-polled funding read carries none. **`SourceTime` is deliberately NOT the
+fallback** — §3.5 rejects it as a reorder key, and a venue restamping an unchanged rate would make a
+duplicate look like an advance. `SeqAvailable` rides on the snapshot so `GapDetected == false` on an
+unsequenced source cannot read as an assurance.
+
+18 mutations, 15 caught, 3 positive controls. Four diagnosed survivors were real gaps, **three of
+them one root**: every route to `arm()`'s terminal branch went through `OnSilence`, where the timer
+has already fired — so cancelling is a no-op and the delete was already done. Both cleanups looked
+covered while the fixture never put the code in a state where they do anything. The path that
+reaches it is an observation arriving *already blind*. The fourth: nothing tested that `Ingest`
+refuses an invalid observation, because every other fixture is a valid one.
+
+## RESUME HERE — updated end of session 15
 
 **Environment, verified — do not re-derive.** **Go 1.26.5** (upgraded from 1.26.0 in session 5;
 both modules declare `go 1.26.0` as the minimum and `toolchain go1.26.5` as what to build with —
@@ -2702,6 +2895,15 @@ third-party is deliberately out.
 where the per-binary `/metrics` decision lives (§11 gives `arblab-actuator` no HTTP surface at all),
 and tracing lands once §3.5's `DispatchSeq` exists to hang a span on. Both deferred on argument
 (§12a, §12f), not forgotten.
+
+**SESSION 15 UPDATE — READ THIS BEFORE THE PARAGRAPHS BELOW.** Two `[SPEC EDIT OWED]` markers are
+now open, both in `tools/lint/` and both about §3.6's own status text (§17e). The slice-close grep
+is now **`grep -rn "SPEC EDIT OWED" internal/ tools/`** — scoped to `internal/` alone it returns
+**0 while both markers exist**, which is the third instance of a gate reporting clean because it
+cannot see its subject. The analyzer roster is **5 of 6 built**; only `singlewriter` is deferred.
+`mutate.sh` needs **`MUTATE_MODULE=tools/lint`** to reach them, and has a sixth verdict, `PANIC!!`.
+`marketdata` now has `domain/` **and** `application/`; `infrastructure/` and `module.go` are the
+next work. What follows was written at the end of session 14 and is otherwise still accurate.
 
 **NOTHING IS OWED. The doc set is at v0.9.7** (session 14, §16 — §15b's four, landed doc-only);
 the eight before them landed as **v0.9.6** (session 13, §15).
@@ -2777,7 +2979,9 @@ working rules. That item is discharged.
    `math/big` source, and its corpus reach measured rather than assumed (§5d). **`platform/fixedpoint`
    is COMPLETE.** Do not reopen it; `make fuzz` is available if a longer explorer run is wanted.
 5. ✅ **`nofloat` (§4b) and `notimenow` (§4c, §4d)** — both built, registered in the multichecker, and
-   bite-checked at 8/8 and 16/16 mutations. **The analyzer roster is 3 of 6 built**; the other three
+   bite-checked at 8/8 and 16/16 mutations. **[SUPERSEDED session 15: the roster is now 5 of 6 —
+   `hexboundary` and `exhaustiveswitch` landed, §17b/§17c. Only `singlewriter` is deferred.]**
+   **The analyzer roster is 3 of 6 built**; the other three
    stay deferred for the reasons §4 gives (nothing to police yet). `nofloat` fired on real code and
    both hits were resolved, not suppressed. **`notimenow` now polices `engine/` too, with a
    transport-only escape** — user-approved, §4d, and it carries a falsifiable claim to revisit: if
@@ -2927,7 +3131,13 @@ working rules. That item is discharged.
    forgotten. When it lands, the thing to check first is that the append and the journal write are
    genuinely one transaction, because everything in `platform/outbox` assumes it and nothing there
    can test it.
-2. **The three sleeping gates split at item 0c, and the split is the point.** `hexboundary` and
+2. ~~**The three sleeping gates split at item 0c**~~ — **DONE (session 15, §17b/§17c).**
+   `hexboundary` and `exhaustiveswitch` are built, registered and bite-checked, and they went in
+   **before** `application/` rather than after it: §1's "so the code they police is never written
+   unpoliced" applies the moment the deferral's subject exists. `singlewriter` remains deferred on
+   unchanged reasoning. Historical statement below.
+
+   **The three sleeping gates split at item 0c, and the split is the point.** `hexboundary` and
    `exhaustiveswitch` become buildable **with `marketdata`** — a context with `domain/` /
    `application/` / `infrastructure/` layering is all either needs to police, and building them
    against the first context is what proves the layering rather than asserting it. **`singlewriter`
@@ -3084,3 +3294,33 @@ and §12.2 is an explicit kill gate the spec predicts BTC/VIP0 may fail. The OMS
 
 **Standing rules:** build test-first, red shown before green, per operation; **no AI attribution** in
 commits or any authored content.
+
+### Next work, session 16 onward
+
+1. **`marketdata/infrastructure/{driven,driving}` and `module.go`** — the context's adapters and its
+   composition seam, and the last piece of the slice. `driven/` implements `application.Budgets`
+   (over `platform/config`) and `application.FundingPublisher`; `driving/` is what a dispatcher
+   calls. **`hexboundary` is live**, so an import running inward-to-outward is a build failure now,
+   not a review comment. Note `internal/engine/` still does not exist — the funding path can be
+   completed without it, and `engine/venue`'s `DataSource` seam is §3.5's, not this context's.
+
+2. **Two spec questions this slice raised, both deliberately unanswered in code.** Decide them at
+   slice close, not before:
+   - **`Age` vs `DataAge`.** §3.4 says "per-venue max-age budget", **singular**, and the code now
+     carries **two** verdicts because a feed dies two ways and the venue-side stall is invisible to
+     the check written first. The application layer confirmed both are needed (§17f). Does the spec
+     owe a second budget, or is one budget applied to two measurements the right reading? The code
+     currently does the latter.
+   - **§3.2 vs §3.3 on `MarketView`.** §3.2's marketdata row says this context publishes one; §3.3
+     says `MarketView` is strategy-owned and `engine/state` translates into it. Built to the
+     consistent reading — this context publishes a `FundingSnapshot`, not a `MarketView`.
+
+3. **The slice-close release, when `infrastructure/` lands.** Run the checklist in the paragraph
+   above, with the **widened** grep. The two open markers are §3.6 status text (§17e); the reading
+   pass should also ask whether §3.6 rule 10's deferral trigger being **wrong** (it named a state
+   machine; enum-likes were what mattered) is worth stating, since the same mis-naming could defer
+   `singlewriter` past its own trigger.
+
+4. **Do NOT re-run the `exhaustive` evaluation.** It is done and recorded with numbers (§17c). The
+   verdict was scope, not capability, and the flags were measured rather than recalled —
+   `-package-scope-only` does **not** mean what its name suggests.
