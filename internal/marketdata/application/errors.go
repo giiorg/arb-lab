@@ -23,6 +23,18 @@ var (
 	// is the only answer that is not one of those two.
 	ErrNoBudget = errors.New("marketdata: no funding freshness budget configured for venue")
 
+	// ErrNoTrigger reports an Ingest call that supplied no AcceptOrdinal.
+	//
+	// It is what makes a zero Trigger READABLE. §3.5 requires a dispatched
+	// envelope to carry the ordinal of the input that caused it, and this layer
+	// assigns zero exactly one meaning: derived from no input at all, which only
+	// §3.4's silence timer produces. Accepting a zero from Ingest would give the
+	// value a second meaning — "the caller forgot" — and the two are
+	// indistinguishable downstream, where the reader is a replay reconciling
+	// dispatched envelopes against raw inputs. A refusal at the one call site
+	// that has an ordinal in hand is what keeps the sentinel a sentinel.
+	ErrNoTrigger = errors.New("marketdata: ingest was given no accept ordinal")
+
 	// ErrSuperseded reports an observation that does not advance the source —
 	// a replayed or reordered delivery. Not an error in the sense of a defect:
 	// it is the ordinary outcome of an at-least-once transport, and it is

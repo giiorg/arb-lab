@@ -167,10 +167,16 @@ func (d *FundingDispatch) Deliver(env events.Envelope) (application.FundingSnaps
 		},
 	}
 
+	// The trigger comes from the envelope and is CONVERTED rather than passed,
+	// because application declares its own AcceptOrdinal — that layer does not
+	// take the transport's types, and this cast is the seam. It cannot be zero:
+	// Validate above refuses an unstamped ordinal, which is what makes
+	// ErrNoTrigger a claim about hand-built calls rather than about this path.
+	//
 	// The use case's own refusals travel out unwrapped in meaning — a
 	// supersede is the ordinary outcome of an at-least-once transport, and a
 	// caller counting them must be able to tell one from a feed fault.
-	return d.ingest.Ingest(obs)
+	return d.ingest.Ingest(obs, application.AcceptOrdinal(env.AcceptOrdinal))
 }
 
 // Timer routes a fired silence timer to the use case.

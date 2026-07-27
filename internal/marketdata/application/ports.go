@@ -24,6 +24,35 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
 
+// AcceptOrdinal is the raw arrival order of the input that triggered a
+// snapshot: §3.5's RawIngressSeq, stamped once at ingestion across every raw
+// input in the process.
+//
+// # It is a named type rather than a uint64, and that is not decoration
+//
+// A watermark's VenueSeq is also a uint64 and means something else entirely —
+// one is per-source and venue-assigned, the other is process-wide and ours. As
+// bare integers a call site swapping them compiles and produces a capture log
+// that is wrong in a way no test of either value alone can see. This is the
+// same argument fixedpoint makes for Money and Quantity being distinct types.
+//
+// # It is declared here rather than imported from platform/events
+//
+// This layer does not take the transport's types — that is what makes the
+// dependency point inward, and FundingPublisher below is the same rule applied
+// to the envelope. The conversion is one cast in each adapter, which is a place
+// a reader can look; an import would be a coupling nobody would look for.
+//
+// # Zero means TIMER-TRIGGERED, and it is the only thing it may mean
+//
+// §3.5 states the inheritance rule for an envelope derived from a raw input and
+// has no case for one derived from the ABSENCE of an input, which is exactly
+// what §3.4's silence timer produces: the one envelope on the lane whose entire
+// news is that nothing arrived. There is no raw input to inherit from, so zero
+// is the honest answer. What makes zero readable as that answer rather than as
+// "somebody forgot" is that Ingest REFUSES it — see ErrNoTrigger.
+type AcceptOrdinal uint64
+
 // FundingPublisher is where an accepted observation goes.
 //
 // # It takes a snapshot, not an envelope, and that is the boundary
@@ -34,6 +63,19 @@ import (
 // decides the replay key in two places, which is the same argument §3.5 makes
 // for keeping timer delivery out of Clock. So what crosses is the observation
 // and the verdict on it, and the envelope is built by whoever dispatches.
+//
+// # INVENTED and INHERITED are different, and conflating them lost a rule
+//
+// The paragraph above is about IngressSeq, and it does NOT generalize to the
+// other sequence number. AcceptOrdinal is stamped at ingestion, upstream of
+// here, so a snapshot does not INVENT it — it INHERITS it, and §3.5 requires the
+// dispatched envelope to carry it for causal traceability. Reading the
+// no-sequences rule as covering both is what produced a publisher stamping zero,
+// and a published snapshot that could not be traced back to the input that
+// caused it. That is why Trigger is on the snapshot: it is the one piece of
+// envelope provenance that must survive this boundary, and it survives as a
+// value the driving side already holds rather than as an envelope this port
+// would then have to accept whole.
 //
 // # Publish returns an error, and callers must not treat it as fire-and-forget
 //
@@ -87,6 +129,18 @@ type FundingSnapshot struct {
 	// error. A consumer needing gap detection must check this rather than read
 	// GapDetected == false as an assurance.
 	SeqAvailable bool
+
+	// Trigger is the AcceptOrdinal of the raw input this snapshot was derived
+	// from, or zero when a silence timer derived it from no input at all.
+	//
+	// §3.5 requires a dispatched envelope to carry the ordinal of what caused
+	// it — causal traceability — so this is what a publisher stamps. It is
+	// carried on the snapshot rather than recovered by the publisher because
+	// the publisher has no envelope: FundingPublisher's whole shape is that
+	// what crosses is the observation and the verdict, and an adapter with
+	// nothing to put here would have to either invent an ordinal or drop the
+	// trace. Both were tried in the design and both are recorded as rejected.
+	Trigger AcceptOrdinal
 }
 
 // Least is the snapshot's overall freshness: the worse of the two verdicts.

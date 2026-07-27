@@ -45,33 +45,49 @@ const fundingPrio = events.PrioNormal
 //
 // # What it builds, and what it deliberately leaves unstamped
 //
-// §3.5 gives the two sequence numbers on an Envelope two different owners.
-// AcceptOrdinal is stamped at INGESTION, in raw arrival order across every raw
-// input — one authority for the whole process, so an adapter minting its own
-// would produce ordinals that collide with another source's and mean nothing
-// when the capture lane is replayed. IngressSeq is stamped by the DISPATCHER,
-// on the envelope it consumes, and it is the replay key; application/ports.go
-// already records why this layer must not invent one, and the argument does not
-// change by moving one package outward.
+// §3.5 gives the two sequence numbers on an Envelope two different owners, and
+// the difference between them decides what this adapter may write.
 //
-// So an envelope leaving here carries neither, and that is a property of WHERE
-// it is rather than of what it holds: everything on a market-data mailbox is
-// pre-dispatch by definition, because Consume is what dispatching starts with.
-// The consequence worth stating plainly is that events.Envelope.Validate will
-// refuse an envelope from this mailbox until the dispatcher has stamped it —
-// which is correct, and is why Publish does not call it.
+// IngressSeq is stamped by the DISPATCHER, on the envelope it consumes, and it
+// is the replay key. This layer does not know the consumption order, so
+// stamping one here would INVENT a value — application/ports.go records the
+// argument, and it does not change by moving one package outward. It leaves.
+//
+// AcceptOrdinal is stamped at INGESTION, in raw arrival order across every raw
+// input, one authority for the whole process. That authority is UPSTREAM of
+// here, which is what makes it different in kind: the snapshot carries the
+// ordinal of the input that produced it, so writing it is INHERITING a value,
+// not minting a second one. §3.5 requires it — the dispatched envelope carries
+// the ordinal of what triggered it, for causal traceability — and it is stamped
+// here because this is the last place that knows both the snapshot and the
+// envelope. Reading the no-sequences rule as covering both is what this file
+// did until the reading pass, and the cost was a published snapshot no replay
+// could tie to its cause.
+//
+// So an envelope leaving here carries one of the two. That is still a property
+// of WHERE it is: everything on a market-data mailbox is pre-dispatch, because
+// Consume is what dispatching starts with, and the missing IngressSeq is what
+// says so. events.Envelope.Validate will therefore refuse an envelope from this
+// mailbox until the dispatcher has stamped it — correct, and why Publish does
+// not call it directly.
 //
 // [SPEC EDIT OWED] §3.5 says who stamps each sequence number and never says
 // WHEN an envelope is required to carry them, which leaves Validate looking
 // like an invariant of the type rather than of a position in the pipeline. The
 // unsafe reading is available and it is the natural one: a producer that
-// validates before publishing cannot satisfy the check without minting both
-// values, and a locally-minted AcceptOrdinal is a second authority over raw
-// arrival order — ordinals that collide across sources, silently, in the log
-// §3.5 requires the RawIngressSeq→DispatchSeq mapping be replayed from. The
-// requirement is that a lane holds pre-dispatch envelopes, that both sequence
-// fields are unstamped there, and that Validate is the DISPATCHER's post-stamp
-// check.
+// validates before publishing cannot satisfy the check without minting an
+// IngressSeq, and a locally-minted replay key is a second authority over the
+// order determinism keys on. The requirement is that a lane holds PRE-DISPATCH
+// envelopes — AcceptOrdinal inherited, IngressSeq unstamped — and that Validate
+// is the DISPATCHER's post-stamp check, not a producer-side one.
+//
+// [SPEC EDIT OWED] §3.5's causal-traceability sentence states the inheritance
+// rule for an envelope derived from a raw input, and has no case for one
+// derived from the ABSENCE of an input. §3.4's silence timer produces exactly
+// that, so the rule needs scoping rather than extending: a timer-triggered
+// envelope carries no ordinal, and zero is how it says so. The alternative an
+// implementer reaches for — reusing the last input's ordinal — makes the
+// capture log claim one raw input produced two dispatched envelopes.
 //
 // # Publishing is not fire-and-forget here either
 //
@@ -105,8 +121,13 @@ func NewLanePublisher(lane *events.MarketDataLane) (*LanePublisher, error) {
 // restating events.Envelope's field list, so a required field added to the
 // envelope tomorrow is caught here instead of silently skipped. The probe
 // carries fabricated sequence numbers ONLY so that Validate's two unstamped-
-// sequence checks do not fire; the probe is discarded and the published
-// envelope keeps them zero.
+// sequence checks do not fire, and it is discarded: the published envelope
+// keeps its IngressSeq zero and its inherited AcceptOrdinal.
+//
+// BOTH are forced on the probe, including the one the envelope really carries.
+// A snapshot from the silence timer legitimately has a zero ordinal, so probing
+// with the real value would make Publish refuse precisely the envelope §3.4's
+// timer exists to emit — a feed dying is the one case that would go unreported.
 //
 // The second asks whether the snapshot is a real READING — which the domain
 // owns, and which covers the one thing the envelope cannot: SourceTime is
@@ -124,6 +145,13 @@ func (p *LanePublisher) Publish(snap application.FundingSnapshot) error {
 	w := snap.Observation.Watermark
 
 	env := events.Envelope{
+		// Inherited, not minted. §3.5 requires the dispatched envelope to carry
+		// the ordinal of the input that triggered it, and the use case carried
+		// it here for exactly that. Zero is a legitimate value and means the
+		// snapshot came from a silence timer — from no input at all — which is
+		// why this is copied unconditionally rather than guarded.
+		AcceptOrdinal: uint64(snap.Trigger),
+
 		Source:     events.SourceID{Instrument: snap.Observation.Instrument, Stream: events.StreamFunding},
 		SourceTime: w.SourceTime,
 		RecvTime:   w.RecvTime,

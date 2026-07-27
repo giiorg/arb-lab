@@ -24,6 +24,15 @@ var (
 
 const venueSeq uint64 = 4242
 
+// acceptOrdinal is the trigger a non-timer snapshot carries, and it is
+// deliberately NOT venueSeq.
+//
+// Both are uint64 and both ride the same envelope, so a fixture using one value
+// for both would make "inherited the trigger" and "stamped from the watermark's
+// sequence" the same assertion — and the second is a real implementation
+// somebody would write, because the watermark is the field already in hand.
+const acceptOrdinal = application.AcceptOrdinal(9001)
+
 func perp() ids.VenueInstrument {
 	return ids.VenueInstrument{
 		Venue:    binance,
@@ -61,6 +70,7 @@ func snapshot(t *testing.T, verdict domain.Freshness) application.FundingSnapsho
 		Transport:    verdict,
 		Data:         verdict,
 		SeqAvailable: true,
+		Trigger:      acceptOrdinal,
 	}
 }
 
@@ -141,11 +151,19 @@ func TestPublishCarriesTheWatermarkOntoTheEnvelope(t *testing.T) {
 	}
 }
 
-func TestPublishStampsNeitherSequenceNumber(t *testing.T) {
-	// §3.5 gives AcceptOrdinal to ingestion and IngressSeq to the dispatcher.
-	// This adapter is neither, and a locally-minted value for either would be a
-	// second authority over an ordering that has to have exactly one — the same
-	// argument the port's doc makes for the snapshot not carrying a sequence.
+// The two sequence numbers get opposite treatment here, and the difference is
+// INVENTED versus INHERITED.
+//
+// §3.5 gives IngressSeq to the dispatcher, in the order the state machine
+// consumes an envelope. This adapter does not know that order, so a value
+// minted here would be a second authority over the replay key — it stays zero.
+// AcceptOrdinal is stamped at ingestion, UPSTREAM, and §3.5 requires the
+// dispatched envelope to carry the ordinal of the input that triggered it. The
+// snapshot carried it here for exactly that, so writing it invents nothing.
+//
+// One test rather than two, because a suite that asserted them separately could
+// not show they were treated differently — which is the whole claim.
+func TestPublishInheritsTheOrdinalAndStampsNoReplayKey(t *testing.T) {
 	lane := newLane(t)
 	if err := newPublisher(t, lane).Publish(snapshot(t, domain.FreshnessFresh)); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -155,11 +173,38 @@ func TestPublishStampsNeitherSequenceNumber(t *testing.T) {
 	if !ok {
 		t.Fatal("nothing on the funding mailbox")
 	}
-	if env.AcceptOrdinal != 0 {
-		t.Errorf("AcceptOrdinal = %d, want 0 — ingestion stamps it, not this layer", env.AcceptOrdinal)
+	if env.AcceptOrdinal != uint64(acceptOrdinal) {
+		t.Errorf("AcceptOrdinal = %d, want the snapshot's trigger %d — a published snapshot no replay can tie to its cause",
+			env.AcceptOrdinal, acceptOrdinal)
 	}
 	if env.IngressSeq != 0 {
 		t.Errorf("IngressSeq = %d, want 0 — the dispatcher stamps the replay key", env.IngressSeq)
+	}
+}
+
+// A snapshot from §3.4's silence timer carries a ZERO trigger, and it must
+// still publish.
+//
+// This is what forces the probe to fabricate BOTH sequence numbers rather than
+// only the replay key. Probing with the real ordinal reads naturally — it is the
+// value the envelope actually carries — and it would make Publish refuse
+// precisely the envelope whose entire news is that a feed has gone quiet. The
+// one failure that must never be silent would be the one this adapter drops.
+func TestPublishAcceptsATimerTriggeredSnapshot(t *testing.T) {
+	lane := newLane(t)
+	snap := snapshot(t, domain.FreshnessStale)
+	snap.Trigger = 0
+
+	if err := newPublisher(t, lane).Publish(snap); err != nil {
+		t.Fatalf("Publish: %v — a silence snapshot must reach the lane", err)
+	}
+
+	env, ok := lane.Consume(fundingSource())
+	if !ok {
+		t.Fatal("nothing on the funding mailbox")
+	}
+	if env.AcceptOrdinal != 0 {
+		t.Errorf("AcceptOrdinal = %d, want 0 — there was no raw input to inherit from", env.AcceptOrdinal)
 	}
 }
 

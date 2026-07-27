@@ -80,7 +80,8 @@ func NewFundingIngest(c clock.Clock, p FundingPublisher, b Budgets) (*FundingIng
 	}, nil
 }
 
-// Ingest accepts one funding observation.
+// Ingest accepts one funding observation, together with the AcceptOrdinal of
+// the raw input it arrived on.
 //
 // The order of the steps is the point, and it is the order a wrong answer would
 // be cheapest to catch in: validate what arrived, decide whether it is newer
@@ -88,7 +89,24 @@ func NewFundingIngest(c clock.Clock, p FundingPublisher, b Budgets) (*FundingIng
 // publish. An observation that fails any earlier step never becomes the
 // baseline the next one is compared against — which is what stops one corrupt
 // reading from poisoning supersede detection for the rest of the session.
-func (f *FundingIngest) Ingest(obs domain.FundingObservation) (FundingSnapshot, error) {
+//
+// # The trigger is a parameter, not a field on the observation
+//
+// An AcceptOrdinal is a fact about the DELIVERY, not about the reading — the
+// same funding numbers re-delivered are a second raw input with a second
+// ordinal, and domain.FundingObservation is a value that two deliveries can
+// legitimately share. Putting it on the observation would also put a transport
+// concern inside the domain, which §3.6 rule 1 exists to prevent.
+func (f *FundingIngest) Ingest(obs domain.FundingObservation, trigger AcceptOrdinal) (FundingSnapshot, error) {
+	// Checked before the observation, because the two failures have different
+	// owners and this one is the caller's. A driving adapter reaches here only
+	// after events.Envelope.Validate has refused an unstamped ordinal, so a zero
+	// arriving here means a caller that built the call by hand and left the
+	// trace out — and reporting a malformed reading first would send the reader
+	// to the feed.
+	if trigger == 0 {
+		return FundingSnapshot{}, fmt.Errorf("instrument %s: %w", obs.Instrument, ErrNoTrigger)
+	}
 	if err := obs.Validate(); err != nil {
 		return FundingSnapshot{}, fmt.Errorf("funding observation: %w", err)
 	}
@@ -114,7 +132,7 @@ func (f *FundingIngest) Ingest(obs domain.FundingObservation) (FundingSnapshot, 
 		gap = hadGap
 	}
 
-	snap, err := f.assess(obs, budget, gap)
+	snap, err := f.assess(obs, budget, gap, trigger)
 	if err != nil {
 		return FundingSnapshot{}, err
 	}
@@ -170,7 +188,16 @@ func (f *FundingIngest) OnSilence(id clock.TimerID) (FundingSnapshot, error) {
 		return FundingSnapshot{}, fmt.Errorf("venue %s: %w", inst.Venue, ErrNoBudget)
 	}
 
-	snap, err := f.assess(obs, budget, false)
+	// Trigger zero, and this is the ONLY place that value is produced. §3.5's
+	// inheritance rule covers an envelope derived from a raw input; this one is
+	// derived from the absence of one, and there is nothing to inherit.
+	//
+	// Rejected, and it is what an implementation with nothing to put here would
+	// reach for: reusing the held observation's ordinal. That makes the capture
+	// log say one raw input produced two dispatched envelopes, so a replay
+	// reconciling the two reports a phantom duplicate — and concludes the feed
+	// is fine, which is the exact opposite of what this timer fired to say.
+	snap, err := f.assess(obs, budget, false, 0)
 	if err != nil {
 		return FundingSnapshot{}, err
 	}
@@ -194,7 +221,7 @@ func (f *FundingIngest) OnSilence(id clock.TimerID) (FundingSnapshot, error) {
 // still de-levers, and this caller does not ignore it. Publishing an
 // Unknown-verdict snapshot would be indistinguishable downstream from a venue
 // that has never connected.
-func (f *FundingIngest) assess(obs domain.FundingObservation, b domain.Budget, gap bool) (FundingSnapshot, error) {
+func (f *FundingIngest) assess(obs domain.FundingObservation, b domain.Budget, gap bool, trigger AcceptOrdinal) (FundingSnapshot, error) {
 	w := obs.Watermark
 
 	transport, err := b.Assess(w, f.clock.Now())
@@ -216,6 +243,7 @@ func (f *FundingIngest) assess(obs domain.FundingObservation, b domain.Budget, g
 		Data:         data,
 		GapDetected:  gap,
 		SeqAvailable: w.VenueSeq != 0,
+		Trigger:      trigger,
 	}, nil
 }
 

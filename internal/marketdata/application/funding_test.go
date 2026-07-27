@@ -34,6 +34,16 @@ const venueSkew = 90 * time.Second
 // gap between them is what makes the three-rung ladder observable at all.
 var budget = domain.Budget{MaxAge: 30 * time.Second, Blind: 5 * time.Minute}
 
+// anyOrdinal is the AcceptOrdinal for calls that are not about the ordinal.
+//
+// It is 77 rather than 1, and that is the fixture-collapse check applied to a
+// value that would otherwise get one by default. Every VenueSeq in this file is
+// 0, 1, 2, 4, 5, 6, 8 or 9999, so a snapshot stamping AcceptOrdinal from the
+// watermark's sequence cannot agree with this by accident; and 1 would let a
+// hardcoded 1 pass everywhere. The tests that ARE about the ordinal use their
+// own distinctive value and do not read this.
+const anyOrdinal = application.AcceptOrdinal(77)
+
 func perp() ids.VenueInstrument {
 	return ids.VenueInstrument{
 		Venue:    venue,
@@ -192,7 +202,7 @@ func TestFreshnessIsTwoIndependentQuestions(t *testing.T) {
 	// Delivered just now, but carrying a venue stamp from ten minutes ago.
 	// Ten minutes is past Blind, one nanosecond of transport age is not.
 	stale := base.Add(venueSkew).Add(-10 * time.Minute)
-	snap, err := h.svc.Ingest(obs(t, base, stale, 1))
+	snap, err := h.svc.Ingest(obs(t, base, stale, 1), anyOrdinal)
 	if err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
@@ -217,7 +227,7 @@ func TestTransportStallIsSeenWhenDataIsCurrent(t *testing.T) {
 	// Arrived 45s ago — past MaxAge (30s), inside Blind (5m) — while the venue
 	// stamped it at what is, in server time, effectively now.
 	recv := base.Add(-45 * time.Second)
-	snap, err := h.svc.Ingest(obs(t, recv, base.Add(venueSkew), 1))
+	snap, err := h.svc.Ingest(obs(t, recv, base.Add(venueSkew), 1), anyOrdinal)
 	if err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
@@ -237,12 +247,100 @@ func TestClockInversionIsRefusedNotPublished(t *testing.T) {
 	h := newHarness(t)
 
 	// Received in the future relative to engine time: two clocks that disagree.
-	_, err := h.svc.Ingest(obs(t, base.Add(time.Minute), base.Add(venueSkew), 1))
+	_, err := h.svc.Ingest(obs(t, base.Add(time.Minute), base.Add(venueSkew), 1), anyOrdinal)
 	if !errors.Is(err, domain.ErrClockInversion) {
 		t.Fatalf("err = %v, want %v", err, domain.ErrClockInversion)
 	}
 	if len(h.pub.got) != 0 {
 		t.Fatalf("published %d snapshots on a broken clock, want 0", len(h.pub.got))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Causal traceability — §3.5's AcceptOrdinal
+// ---------------------------------------------------------------------------
+
+// The ordinal of the input that triggered a snapshot travels WITH the snapshot,
+// which is what lets a publisher stamp it and a replay tie a dispatched envelope
+// back to the raw input that caused it.
+//
+// The two fixture values are deliberately unequal and neither is 1: an ordinal
+// of 4242 against a VenueSeq of 3 is what separates "carried the trigger" from
+// the two implementations that would otherwise look identical here — stamping
+// from the watermark's sequence, and stamping a constant.
+func TestSnapshotCarriesTheTriggeringOrdinal(t *testing.T) {
+	h := newHarness(t)
+
+	const trigger = application.AcceptOrdinal(4242)
+	snap, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 3), trigger)
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	if snap.Trigger != trigger {
+		t.Errorf("Trigger = %d, want %d — a published snapshot no replay can tie to its cause", snap.Trigger, trigger)
+	}
+	// And it must reach the publisher, which is the only consumer that can act
+	// on it. A returned-but-not-published trigger would still lose the trace.
+	if len(h.pub.got) != 1 {
+		t.Fatalf("published %d, want 1", len(h.pub.got))
+	}
+	if got := h.pub.got[0].Trigger; got != trigger {
+		t.Errorf("published Trigger = %d, want %d", got, trigger)
+	}
+}
+
+// A silence-timer snapshot carries ZERO, and this is the test that fixes the
+// meaning of that value.
+//
+// §3.5's inheritance rule covers an envelope derived from a raw input. This one
+// is derived from the ABSENCE of an input, so there is nothing to inherit. The
+// preceding Ingest deliberately supplies a distinctive ordinal, because the
+// implementation this test exists to refuse is the tempting one: re-using the
+// held observation's trigger, which would make the capture log claim one raw
+// input produced two dispatched envelopes — a replay reconciling them reports a
+// phantom duplicate and concludes the feed is healthy, which is the exact
+// opposite of what this timer fired to say.
+func TestSilenceCarriesNoTriggeringOrdinal(t *testing.T) {
+	h := newHarness(t)
+
+	if _, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 3), 4242); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	fired := advanceAndFire(t, h)
+	snap, err := h.svc.OnSilence(fired.ID)
+	if err != nil {
+		t.Fatalf("OnSilence: %v", err)
+	}
+	if snap.Trigger != 0 {
+		t.Errorf("Trigger = %d, want 0 — a timer-triggered snapshot has no raw input to inherit from", snap.Trigger)
+	}
+}
+
+// Ingest refuses a zero ordinal, and that refusal is what makes zero READABLE
+// as "timer-triggered" rather than as "somebody forgot".
+//
+// Without it the two are the same value with two meanings, and the reader who
+// cannot tell them apart is a replay reconciling dispatched envelopes against
+// raw inputs.
+func TestIngestRefusesAnUnstampedOrdinal(t *testing.T) {
+	h := newHarness(t)
+
+	if _, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 3), 0); !errors.Is(err, application.ErrNoTrigger) {
+		t.Fatalf("err = %v, want %v", err, application.ErrNoTrigger)
+	}
+	if len(h.pub.got) != 0 {
+		t.Errorf("published %d snapshots from an untraceable ingest, want 0", len(h.pub.got))
+	}
+	if n := h.clk.Pending(); n != 0 {
+		t.Errorf("Pending() = %d, want 0 — a refused ingest must not arm a timer", n)
+	}
+
+	// The positive control. Without it a service refusing every ingest would
+	// score a pass above, and the two assertions after it would pass twice over.
+	if _, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 3), 1); err != nil {
+		t.Fatalf("the same observation with an ordinal: %v", err)
 	}
 }
 
@@ -269,11 +367,11 @@ func TestSequenceOrdering(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t)
-			if _, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), tc.prev)); err != nil {
+			if _, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), tc.prev), anyOrdinal); err != nil {
 				t.Fatalf("seeding Ingest: %v", err)
 			}
 
-			snap, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), tc.next))
+			snap, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), tc.next), anyOrdinal)
 			if !tc.accepted {
 				if !errors.Is(err, application.ErrSuperseded) {
 					t.Fatalf("err = %v, want %v", err, application.ErrSuperseded)
@@ -316,11 +414,11 @@ func TestArrivalOrderingWhenNoSequence(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t)
 			first := base.Add(-10 * time.Second)
-			if _, err := h.svc.Ingest(obs(t, first, base.Add(venueSkew), 0)); err != nil {
+			if _, err := h.svc.Ingest(obs(t, first, base.Add(venueSkew), 0), anyOrdinal); err != nil {
 				t.Fatalf("seeding Ingest: %v", err)
 			}
 
-			snap, err := h.svc.Ingest(obs(t, first.Add(tc.offset), base.Add(venueSkew), 0))
+			snap, err := h.svc.Ingest(obs(t, first.Add(tc.offset), base.Add(venueSkew), 0), anyOrdinal)
 			if !tc.accepted {
 				if !errors.Is(err, application.ErrSuperseded) {
 					t.Fatalf("err = %v, want %v", err, application.ErrSuperseded)
@@ -345,7 +443,7 @@ func TestArrivalOrderingWhenNoSequence(t *testing.T) {
 // test seeds first, which would hide a nil-map or a first-write bug.
 func TestFirstObservationIsAlwaysAccepted(t *testing.T) {
 	h := newHarness(t)
-	snap, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 9999))
+	snap, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 9999), anyOrdinal)
 	if err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
@@ -403,7 +501,7 @@ func TestInvalidObservationsAreRefusedBeforePublishing(t *testing.T) {
 			o := obs(t, base, base.Add(venueSkew), 1)
 			tc.mut(&o)
 
-			if _, err := h.svc.Ingest(o); !errors.Is(err, tc.want) {
+			if _, err := h.svc.Ingest(o, anyOrdinal); !errors.Is(err, tc.want) {
 				t.Fatalf("err = %v, want %v", err, tc.want)
 			}
 			if len(h.pub.got) != 0 {
@@ -421,7 +519,7 @@ func TestUnconfiguredVenueIsRefused(t *testing.T) {
 	other := obs(t, base, base.Add(venueSkew), 1)
 	other.Instrument.Venue = ids.Venue("bybit")
 
-	if _, err := h.svc.Ingest(other); !errors.Is(err, application.ErrNoBudget) {
+	if _, err := h.svc.Ingest(other, anyOrdinal); !errors.Is(err, application.ErrNoBudget) {
 		t.Fatalf("err = %v, want %v", err, application.ErrNoBudget)
 	}
 }
@@ -440,7 +538,7 @@ func TestUnreachableStaleRungIsRefused(t *testing.T) {
 		t.Fatalf("NewFundingIngest: %v", err)
 	}
 
-	if _, err := svc.Ingest(obs(t, base, base, 1)); !errors.Is(err, domain.ErrBudgetUnreachable) {
+	if _, err := svc.Ingest(obs(t, base, base, 1), anyOrdinal); !errors.Is(err, domain.ErrBudgetUnreachable) {
 		t.Fatalf("err = %v, want %v", err, domain.ErrBudgetUnreachable)
 	}
 }
@@ -451,7 +549,7 @@ func TestUnreachableStaleRungIsRefused(t *testing.T) {
 
 func TestIngestArmsTheSilenceTimer(t *testing.T) {
 	h := newHarness(t)
-	if _, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 1)); err != nil {
+	if _, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 1), anyOrdinal); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 	if n := h.clk.Pending(); n != 1 {
@@ -501,7 +599,7 @@ func TestReArmingReplacesRatherThanAccumulates(t *testing.T) {
 		if err := h.clk.SetNow(at); err != nil {
 			t.Fatalf("SetNow: %v", err)
 		}
-		if _, err := h.svc.Ingest(obs(t, at, at.Add(venueSkew), i)); err != nil {
+		if _, err := h.svc.Ingest(obs(t, at, at.Add(venueSkew), i), anyOrdinal); err != nil {
 			t.Fatalf("Ingest %d: %v", i, err)
 		}
 	}
@@ -514,7 +612,7 @@ func TestReArmingReplacesRatherThanAccumulates(t *testing.T) {
 // behaviour §3.4 requires and the one an update-triggered check never produces.
 func TestSilenceDegradesTheVerdictWithoutANewObservation(t *testing.T) {
 	h := newHarness(t)
-	if _, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 1)); err != nil {
+	if _, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 1), anyOrdinal); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 	if got := h.pub.got[0].Transport; got != domain.FreshnessFresh {
@@ -543,7 +641,7 @@ func TestSilenceDegradesTheVerdictWithoutANewObservation(t *testing.T) {
 // leak clock.TimerSource.Pending exists to make visible.
 func TestSilenceLadderTerminatesAtBlind(t *testing.T) {
 	h := newHarness(t)
-	if _, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 1)); err != nil {
+	if _, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 1), anyOrdinal); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 
@@ -579,7 +677,7 @@ func TestSilenceLadderTerminatesAtBlind(t *testing.T) {
 // put the code in the state where they do anything.
 func TestAnAlreadyBlindObservationCancelsThePendingTimer(t *testing.T) {
 	h := newHarness(t)
-	if _, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 1)); err != nil {
+	if _, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 1), anyOrdinal); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 	if n := h.clk.Pending(); n != 1 {
@@ -592,7 +690,7 @@ func TestAnAlreadyBlindObservationCancelsThePendingTimer(t *testing.T) {
 	if err := h.clk.SetNow(later); err != nil {
 		t.Fatalf("SetNow: %v", err)
 	}
-	snap, err := h.svc.Ingest(obs(t, base.Add(time.Second), base.Add(venueSkew+time.Second), 2))
+	snap, err := h.svc.Ingest(obs(t, base.Add(time.Second), base.Add(venueSkew+time.Second), 2), anyOrdinal)
 	if err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
@@ -621,7 +719,7 @@ func TestAnAlreadyBlindObservationCancelsThePendingTimer(t *testing.T) {
 // counted.
 func TestAFailedReassessmentStillConsumesTheTimer(t *testing.T) {
 	h := newHarness(t)
-	if _, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 1)); err != nil {
+	if _, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 1), anyOrdinal); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 	fired := advanceAndFire(t, h)
@@ -653,7 +751,7 @@ func TestUnknownTimerIsRefused(t *testing.T) {
 // stop is claiming it after there is nowhere further to age.
 func TestATerminalTimerIsNotClaimableAgain(t *testing.T) {
 	h := newHarness(t)
-	if _, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 1)); err != nil {
+	if _, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 1), anyOrdinal); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 
@@ -687,14 +785,14 @@ func TestPublishFailureIsReportedButTheObservationStillCounts(t *testing.T) {
 	boom := errors.New("lane closed")
 	h.pub.fail = boom
 
-	if _, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 5)); !errors.Is(err, boom) {
+	if _, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 5), anyOrdinal); !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want %v", err, boom)
 	}
 
 	h.pub.fail = nil
 	// Seq 5 again: if the failed publish had rolled back the held reading, this
 	// duplicate would be accepted as a first observation.
-	if _, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 5)); !errors.Is(err, application.ErrSuperseded) {
+	if _, err := h.svc.Ingest(obs(t, base, base.Add(venueSkew), 5), anyOrdinal); !errors.Is(err, application.ErrSuperseded) {
 		t.Fatalf("err = %v, want %v", err, application.ErrSuperseded)
 	}
 }

@@ -161,6 +161,14 @@ func TestDeliverTakesProvenanceFromTheEnvelope(t *testing.T) {
 	if got := snap.Observation.Instrument; got != perp() {
 		t.Errorf("Instrument = %+v, want the source's %+v", got, perp())
 	}
+	// AcceptOrdinal is provenance too, and it is the one piece that leaves this
+	// context again: §3.5 requires the dispatched envelope carry the ordinal of
+	// the input that triggered it, so what the publisher stamps is what arrives
+	// here. The three envelope numbers are pairwise distinct precisely so that
+	// passing IngressSeq or VenueSeq instead is visible rather than absorbed.
+	if got := snap.Trigger; got != application.AcceptOrdinal(acceptOrdinal) {
+		t.Errorf("Trigger = %d, want the envelope's AcceptOrdinal %d", got, acceptOrdinal)
+	}
 }
 
 func TestDeliverTakesTheVenueReadingFromThePayload(t *testing.T) {

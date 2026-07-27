@@ -192,7 +192,8 @@ func TestModuleCarriesAnEnvelopeThroughToTheLane(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	if _, err := m.Funding.Deliver(envelope(t, perp(), 1)); err != nil {
+	in := envelope(t, perp(), 1)
+	if _, err := m.Funding.Deliver(in); err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
 
@@ -203,6 +204,20 @@ func TestModuleCarriesAnEnvelopeThroughToTheLane(t *testing.T) {
 	snap, ok := env.Payload.(application.FundingSnapshot)
 	if !ok {
 		t.Fatalf("payload is %T, want application.FundingSnapshot", env.Payload)
+	}
+
+	// §3.5's causal traceability, asserted end to end. This is the only test
+	// that can make the claim: the ordinal enters at driving/, crosses
+	// application/ as a value on the snapshot, and is stamped back onto an
+	// envelope by driven/ — so each layer's own suite can show its half while
+	// the chain is still broken in the middle. The replay key must NOT survive
+	// the same trip; the lane holds pre-dispatch envelopes.
+	if env.AcceptOrdinal != in.AcceptOrdinal {
+		t.Errorf("AcceptOrdinal = %d, want the inbound envelope's %d — the published snapshot cannot be traced to its cause",
+			env.AcceptOrdinal, in.AcceptOrdinal)
+	}
+	if env.IngressSeq != 0 {
+		t.Errorf("IngressSeq = %d, want 0 — a mailbox holds pre-dispatch envelopes", env.IngressSeq)
 	}
 
 	// The two verdicts DIFFER here, which is what proves the two measurements
