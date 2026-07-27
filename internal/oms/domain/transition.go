@@ -117,7 +117,40 @@ func successors(from OrderState) ([]OrderState, error) {
 		//
 		// Owed to SM §1's transitions table: the five query-resolution edges,
 		// same set as SubmissionUnknown's.
-		return append([]OrderState{StateSubmitted}, resolved...), nil
+		//
+		// [SPEC EDIT OWED] The StateSubmissionUnknown edge is a SECOND silence in
+		// the same row, and it is the one the core states in words while SM §1
+		// tabulates no path to it. Core §6 step 6: "A timeout/5xx moves the order
+		// to SubmissionUnknown, resolved by OrderByClientID/Fills, never
+		// resubmitted." The order it moves is this one — the fsync of
+		// DispatchAuthorized happens "immediately before the single Place" — and
+		// SM §1's only entry edge into SubmissionUnknown leaves Submitted.
+		//
+		// Neither path the table does offer can carry it, and each fails by
+		// recording something untrue:
+		//
+		//   - Routing through Submitted journals "the single Place returned a
+		//     transport RESULT", which is precisely what a timeout is not. §7.5
+		//     replays this journal to decide what to do about every order that was
+		//     in flight, so the false fact is not cosmetic — it is read back as
+		//     evidence the request reached the venue's edge.
+		//   - Staying here relies on the "no-return / crash → stays" row, whose
+		//     subject is a process that DIED (its action column is the recovery
+		//     path, "resolved by query only"). A call that returned an error is
+		//     not a send still in flight, and the live path that just watched it
+		//     fail is not crash recovery.
+		//
+		// The symmetry argument is the cheap one, and it is FLAG-1's own: the
+		// round-4 ruling created CancelUnknown as a first-class entry edge on an
+		// "ambiguous cancel transport result … by symmetry with Submitted →
+		// SubmissionUnknown", rather than routing it through a state claiming an
+		// ack had been parsed. This is that same edge one step earlier, and the
+		// asymmetry is its absence rather than its presence.
+		//
+		// Owed to SM §1's transitions table: DispatchAuthorized → SubmissionUnknown
+		// on an ambiguous transport result (timeout / 5xx / unknown ack),
+		// DISTINCT from the "no-return / crash" row, which is about a crash.
+		return append([]OrderState{StateSubmitted, StateSubmissionUnknown}, resolved...), nil
 
 	case StateSubmitted:
 		return []OrderState{StateAcknowledged, StateRejected, StateSubmissionUnknown}, nil

@@ -8,7 +8,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/oms/domain"
 )
 
-// specEdges is SM §1's transition table transcribed edge by edge, plus the two
+// specEdges is SM §1's transition table transcribed edge by edge, plus the three
 // edge groups this slice found the table silent about.
 //
 // # It is deliberately a different SHAPE from the implementation
@@ -19,7 +19,7 @@ import (
 // list of `from->to` strings, so a transposed pair or a state written into the
 // wrong case does not survive in both.
 //
-// Every entry cites the row it came from. The two groups marked OWED are the
+// Every entry cites the row it came from. The three groups marked OWED are the
 // ones no row states — see transition.go for what each costs when absent.
 var specEdges = []string{
 	// | Planned | authorize dispatch | DispatchAuthorized |
@@ -27,6 +27,11 @@ var specEdges = []string{
 
 	// | DispatchAuthorized | send returns | Submitted |
 	"dispatch_authorized->submitted",
+
+	// OWED — core §6 step 6 states this edge in words ("A timeout/5xx moves the
+	// order to SubmissionUnknown") while SM §1's only entry into that state
+	// leaves Submitted, whose meaning a timeout does not satisfy.
+	"dispatch_authorized->submission_unknown",
 
 	// OWED — core §5.3's rules paragraph + SM §1's crash-recovery invariant +
 	// FLAG-2's "applies equally to DispatchAuthorized-recovery resolution".
@@ -97,8 +102,8 @@ func TestCanTransitionMatrix(t *testing.T) {
 		}
 		legal[e] = true
 	}
-	if got := len(legal); got != 29 {
-		t.Fatalf("transcribed %d edges, want 29 — the count is a check on the transcription", got)
+	if got := len(legal); got != 30 {
+		t.Fatalf("transcribed %d edges, want 30 — the count is a check on the transcription", got)
 	}
 
 	permitted, refused := 0, 0
@@ -128,9 +133,9 @@ func TestCanTransitionMatrix(t *testing.T) {
 	// Positive control on the matrix itself. A predicate that objected to
 	// everything would satisfy every assertion above if `permitted` were zero,
 	// and one that permitted everything would if `refused` were.
-	if permitted != 29 || refused != 12*12-12-29 {
-		t.Errorf("walked %d permitted and %d refused pairs, want 29 and %d",
-			permitted, refused, 12*12-12-29)
+	if permitted != 30 || refused != 12*12-12-30 {
+		t.Errorf("walked %d permitted and %d refused pairs, want 30 and %d",
+			permitted, refused, 12*12-12-30)
 	}
 }
 
