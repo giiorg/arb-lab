@@ -1,6 +1,8 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-07-27): **v0.9.7** — milestone 1's first TWO slices closed; the THIRD (the first bounded context) is in progress. **Start at `## START HERE` below, not at this line.**
+## Status (2026-07-27): **v0.9.8** — milestone 1's first THREE slices are CLOSED, including the first bounded context. **Nothing is owed.** **Start at `## START HERE` below, not at this line.**
+
+**v0.9.8 (2026-07-27) — the third-slice release, and the one that CLOSES `marketdata`.** The slice built the first bounded context on the funding path — `domain/` + `application/` + `infrastructure/{driven,driving}` + `module.go` — and produced **eight** spec edits. **The lead one is a different kind from every milestone-1 edit before it: a violation of the core, not a silence in it.** §3.5 already required a dispatched envelope to carry the `AcceptOrdinal` of the input that triggered it; `driven.LanePublisher` published zero, so a published funding snapshot could not be traced back to its cause — and its doc comment confidently argued the rule did not apply. **The `[SPEC EDIT OWED]` grep could not have found it**, because a violation is by definition unmarked; the reading pass beside the grep is what caught it, which is why that pass is not replaceable by the grep. The mechanism generalizes: **a true rule stated without its scope becomes a false rule** — "this layer must not invent a sequence" is true of `IngressSeq` (the replay key, assigned in consumption order) and false of `AcceptOrdinal` (stamped upstream, merely *inherited*), and one sentence covering both is what cost the trace. §3.5 takes four edits: the causal-traceability rule is **scoped, not extended** (it binds every producer, not only book reconstruction — the reconstructed snapshot was an *example* being read as the extent); the envelope derived from the **absence** of an input — §3.4's silence timer — carries **no ordinal**, and reusing the last one is **forbidden** (it makes the capture log claim one raw input produced two dispatched envelopes, so a replay reports a phantom duplicate and concludes the feed is healthy); **`Envelope.Validate()` is the dispatcher's post-stamp check**, so a §3.4 mailbox holds pre-dispatch envelopes and each field now says *when* it is required rather than only who stamps it; and **`Prio` is a per-`SourceID` constant that may not depend on content** (fixing only the direction leaves the `FreshnessBlind` escalation available, which reorders one source inside its own mailbox so **a degrading feed appears to recover**). §3.4: **one budget per (data class, venue), measured against two clocks** — transport age from `RecvTime` against `Clock.Now()` and data age from `SourceTime` against `Clock.ServerNow(venue)`, reported separately and reduced by minimum, because a venue-side stall keeps updates arriving on schedule with a frozen `SourceTime` and the transport verdict reads perfectly fresh for the whole outage. §4: the **`Envelope` is authoritative for provenance** and a normalized payload carries none. §3.2: `marketdata` stops claiming to publish `MarketView`, resolving its contradiction with §3.3 in §3.3's favour. §3.6: rules **1 (`hexboundary`) and 10 (`exhaustiveswitch`) move to enforced**, leaving `singlewriter` the only deferral — and the paragraph keeps two findings worth more than the status change: rule 10's deferral **named the wrong trigger** (it waited on a state machine while the kernel's eleven enum-likes were what made it buildable; it found **13 silent fallthroughs** on its first real run), and **rule 1's obvious positive control is an import cycle**, so the type-checker refuses before the analyzer runs and a clean gate run proves nothing. Six code markers now read `[SPEC EDIT LANDED — v0.9.8]`, `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **zero**, ADR §3 gains the **milestone-1 third-slice block** (tagless total now **thirty**), 7/7 mutations caught, `docs` 102 pass, `make ci` green. **No formal-model change; `docs/formal/` is untouched and still at the Cx8 verdict.** Full reasoning with rejected alternatives: decision record **§18** (the finding) and **§19** (the close).
 
 **v0.9.7 (2026-07-27) — the re-judgement release, doc-only.** Four normative statements the shared kernel's *code* makes that the core had never stated, held out of v0.9.6 because they carried no `[SPEC EDIT OWED]` marker, re-tested and landed: core **§3.2** (+ a D2 pointer), **§7.5**, **§7.6**, **§10**. Details and the process finding behind them are under **NEXT REQUEST** below; full reasoning in decision record **§16**. No formal-model change.
 
@@ -73,7 +75,63 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 16, 2026-07-27)
+## START HERE (updated end of session 17, 2026-07-27)
+
+**Branch `feat/milestone-1-foundation`, tree clean, `make ci` green on Go 1.26.5, pushed and in
+sync.** Verify rather than trust this sentence: `git rev-list --left-right --count @{u}...HEAD`
+should print `0 0`. No PR — deliberate. The head commit is not named here on purpose: a paragraph
+citing its own hash is stale the moment the commit containing it is written.
+
+### Where the work is
+
+**Milestone 1's third slice is CLOSED.** `marketdata` — the first bounded context, scoped to the
+funding path — is built, its spec edits are landed as `build-spec.md` **v0.9.8**, and **nothing is
+owed**. Verify with the slice-close gate itself: `grep -rn "SPEC EDIT OWED" internal/ tools/`
+returns nothing. **Both paths** — the second was added the session normative claims first appeared
+outside `internal/`.
+
+| Piece | State |
+|---|---|
+| `internal/marketdata/{domain,application,infrastructure,module.go}` | **Done** — funding path complete end to end |
+| `tools/lint/{hexboundary,exhaustiveswitch}` | **Done** — analyzer roster is **5 of 6** |
+| The slice CLOSE | **Done** (session 17) — code fix, then v0.9.8, then the release checklist |
+
+### What is next, and it is a decision rather than a queue
+
+The funding path is complete; the **book and mark paths of `marketdata` are not built**, and
+`marketdata.Module` has one field so that absence is visible in the type rather than as a nil to
+check. Three candidates, and the choice has not been made:
+
+- **`engine/venue`** — the normalized venue DTOs §4 assigns to it. `driving.FundingUpdate` is
+  explicitly the contract *until then*, and when `engine/venue` lands the translation is one
+  function in that package with `domain/` and `application/` untouched. That property is the
+  reason to do it soon rather than late.
+- **`marketdata`'s book path** — book reconstruction, sequence-gap detection and resnapshot
+  (§3.4). It is what §3.5's causal-traceability rule was originally *written* about, so it
+  exercises v0.9.8's edits at their intended target.
+- **`oms`** — which is what **expires `singlewriter`'s deferral**: the last unbuilt gate waits on
+  its write repository, and this project's standing rule is that such a deferral expires the moment
+  its subject appears, not after the code it polices is written.
+
+### The two findings from this slice worth carrying, because both are about method
+
+**The `[SPEC EDIT OWED]` grep cannot find a rule the code silently broke.** It gates claims the code
+*marked*; a violation is unmarked by definition, and this one shipped with a doc comment arguing the
+rule did not apply. The reading pass beside the grep is what caught it. The generalizable form: **a
+true rule stated without its scope becomes a false rule** — worth looking for wherever two fields of
+one type sit behind one prohibition.
+
+**A clean gate run proves nothing, and `hexboundary`'s obvious positive control does not work.**
+Importing `infrastructure/` from `application/` is an **import cycle**, so the type-checker refuses
+before the analyzer runs. Every infrastructure package in a context imports `application` or
+`domain`, so *within one context Go's own no-cycles rule already covers most of §3.6 rule 1*. The
+probe that works is a package under `infrastructure/` importing **only `domain`** — no cycle, and
+the gate objects with exit 3. Where rule 1 earns its place is the edge Go cannot catch: `engine/`,
+and another context's infrastructure.
+
+---
+
+## START HERE (updated end of session 16, 2026-07-27, HISTORICAL)
 
 **Branch `feat/milestone-1-foundation`, tree clean, `make ci` green on Go 1.26.5, pushed and in
 sync.** Verify rather than trust this sentence: `git rev-list --left-right --count @{u}...HEAD`

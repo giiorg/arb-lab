@@ -2924,6 +2924,49 @@ The user chose **run the full slice close**. None of it is done. In order:
 
 **Worth asking in the reading pass, still unanswered:** rule 10's deferral named the wrong trigger — it waited on a *state machine*, while the kernel's eleven enum-likes are what actually made it buildable, and they had existed for several slices. `singlewriter` may be mis-triggered the same way.
 
+## §19 — session 17: the slice CLOSED — the §18f fix applied, and `build-spec.md` v0.9.8
+
+Commits `c8db027` (code) then `9136f90` (docs). **§18h's four steps are done in its stated order, and the order was the point: the code fix landed first so the spec describes what the code does rather than what it was about to do.**
+
+### §19a — the fix, as built, and the two places §18f's design needed a decision it had not made
+
+The design in §18f survived contact. `application.AcceptOrdinal` is a named type; `FundingSnapshot.Trigger` carries it; `Ingest(obs, trigger)` refuses zero with a new `ErrNoTrigger`; `OnSilence` passes zero; `driving/` converts from the envelope; `driven/` stamps it back. Two things §18f left open were decided while building:
+
+- **Where the zero check goes in `Ingest`'s step order.** It goes **first**, ahead of `obs.Validate()`, and the argument is about who owns each failure. A driving adapter reaches `Ingest` only after `events.Envelope.Validate` has already refused an unstamped ordinal, so a zero arriving here means a **caller that built the call by hand** and left the trace out. Reporting a malformed *reading* first would send the reader to the feed for a defect in the wiring. *Rejected:* after validation, on the existing comment's "validate what arrived" ordering — but the trigger is not part of what arrived, it is a fact about the delivery.
+- **The trigger is a PARAMETER, not a field on `domain.FundingObservation`.** An `AcceptOrdinal` is a fact about the delivery: the same funding numbers re-delivered are a second raw input with a second ordinal, and an observation is a value two deliveries can legitimately share. Putting it on the observation would also put a transport concern inside `domain/`, which is what §3.6 rule 1 exists to prevent.
+
+`LanePublisher`'s probe keeps forcing **both** sequence numbers. That looked like something to tighten — the envelope really does carry an `AcceptOrdinal` now, so probing with the real value reads naturally — and it is wrong: a silence-timer snapshot legitimately has zero, so the tightened probe would refuse **precisely the envelope §3.4's timer exists to emit**. The one failure that must never be silent would be the one this adapter drops. It has a test of its own (`TestPublishAcceptsATimerTriggeredSnapshot`) rather than a comment, because a comment does not fail.
+
+### §19b — the fixture-collapse checklist, applied to a value that would have got 1 by default
+
+Run **before** the mutations, per the standing rule, and it changed three fixtures:
+
+- **`TestPublishStampsNeitherSequenceNumber` asserted the OLD behaviour and passed.** It passed only because `snapshot()` left `Trigger` unset, so the fixture did not contain the thing under test — the tell, exactly as the checklist states it. It is now `TestPublishInheritsTheOrdinalAndStampsNoReplayKey`, and it is **one test rather than two** because a suite asserting the two sequence numbers separately cannot show they are treated *differently*, which is the whole claim.
+- **Every trigger value is chosen against the sequence it sits beside.** `driven`'s is 9001 against a `VenueSeq` of 4242; `application`'s is 4242 against a seq of 3; `driving`'s three envelope numbers were already pairwise distinct. Both are `uint64` and both ride the same envelope, so a fixture reusing one value would make "inherited the trigger" and "stamped from the watermark's sequence" the same assertion — and the second is a real implementation somebody would write, because the watermark is the field already in hand.
+- **The shared `anyOrdinal` is 77, not 1.** 1 would let a hardcoded `Trigger: 1` pass everywhere, and 77 collides with no `VenueSeq` in the file (0, 1, 2, 4, 5, 6, 8, 9999).
+
+### §19c — mutations: 7 run, 7 caught, and one of them is only reachable end to end
+
+`if trigger == 0` → `if false` (caught); `Trigger: trigger` → `AcceptOrdinal(w.VenueSeq)` (caught, 2 tests); `OnSilence`'s literal zero → the held observation's ordinal, **the rejected alternative itself** (caught); the publisher dropping the inherited ordinal, i.e. the original violation restored (caught); the probe forcing only `IngressSeq` (caught); `driving` passing `IngressSeq` as the trigger (caught).
+
+The seventh is the one worth keeping: **the publisher's drop, run again against `./internal/marketdata`.** Each layer's own suite passes with the chain broken in the middle — `driving` proves the ordinal enters, `driven` proves a snapshot's trigger is stamped, and neither proves the value that enters is the value that leaves. `TestModuleCarriesAnEnvelopeThroughToTheLane` is the only test that can make that claim, and it asserts against the **inbound envelope's** field rather than a literal.
+
+### §19d — what landed in the spec, and the one edit §18h did not have on its list
+
+The eight ADR rows are the record. One correction to §18h's accounting: it counted "the three from §18f (§3.5 ×2, §4 ×1)", but the §3.5 marker was really **two rules wearing one marker** — *when* an envelope must carry each sequence number, and *what a timer-triggered envelope carries*. They landed as two, and `publisher.go` now carries two markers where it carried one. **A marker is not a unit of spec change**, and counting them as if it were is how a release gate keyed on marker count under-delivers.
+
+Two edits went in that no marker demanded, both from §18g's answered questions: §3.4's one-budget-two-measurements sentence and §3.2's `marketdata` row. Neither was ever marked, because neither was a deviation the code took — they are a **silence** and a **contradiction** found by reading. That is the same lesson as the lead finding, from the other side.
+
+### §19e — the finding this slice contributes to method
+
+**The `[SPEC EDIT OWED]` grep cannot find a rule the code silently broke.** It is a gate over claims the code *marked*; a violation is by definition unmarked, and this one came with a doc comment confidently arguing the rule did not apply. It was found by the reading pass, which is why that pass sits **beside** the grep and not inside it — a limit already written down in `CLAUDE.md`, now with a case behind it.
+
+The mechanism of the mistake generalizes past this file: **a true rule stated without its scope becomes a false rule.** "This layer must not invent a sequence" is true of `IngressSeq` and false of `AcceptOrdinal`, and one sentence covering both cost the trace. Worth looking for wherever two fields of one type sit behind one prohibition.
+
+## RESUME HERE — updated end of session 17
+
+**SESSION 17 UPDATE — READ THIS FIRST.** The `marketdata` slice is **CLOSED**. The §18f fix is applied (`c8db027`) and `build-spec.md` is at **v0.9.8** (`9136f90`), with all five doc stamps, ADR §3's **fourth** milestone-1 block (tagless total **thirty**), six code markers flipped to `[SPEC EDIT LANDED — v0.9.8]`, the Georgian header re-synced and `tutorial.ka.md` re-assembled. **`grep -rn "SPEC EDIT OWED" internal/ tools/` is CLEAN.** `make ci` green, `docs` 102 pass, 7/7 mutations caught. **Nothing is owed.** The reasoning is §19; §18 is now history. What follows was written at the end of session 16 and earlier, and the environment paragraphs below are still accurate.
+
 ## RESUME HERE — updated end of session 16
 
 **SESSION 16 UPDATE — READ THIS FIRST.** The `marketdata` slice's **code is complete** (commit `c695cd2`: `infrastructure/{driven,driving}` + `module.go`), `make ci` green, 18/18 mutations caught. **The slice is NOT closed and the full close was user-approved — the complete owed list is §18h, and it starts with a code fix (§18f), not with a doc edit.** Five `[SPEC EDIT OWED]` markers are open; the grep is still `grep -rn "SPEC EDIT OWED" internal/ tools/` — **both paths**. The two spec questions session 15 left open are **ANSWERED** (§18g) — do not re-ask them. What follows was written at the end of session 15 and is otherwise still accurate.
