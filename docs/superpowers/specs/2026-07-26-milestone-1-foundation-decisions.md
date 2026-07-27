@@ -3652,6 +3652,99 @@ Six of milestone 1's slices are now CLOSED: `platform` foundations, the shared k
 
 **Still owed and untouched since session 20:** the `venue-profiles.md` verification of the two venues' **depth update-ID shapes**, which `venue.BookDelta`'s span design cites. It is a Profiles verification rather than a core edit, which is exactly the item v0.9.10's block warned gets filed under the wrong process — it is not covered by the marker grep and did not block this close.
 
+## §29 — session 26: `engine/state`, and the cache that must not remember a verdict
+
+### §29a — what was built, and why this slice was the one the roster picked
+
+`internal/engine/state/` — `doc.go`, `skew.go`, `cache.go`, `errors.go`, plus `skew_test.go` and `cache_test.go`. `make ci` green, all six gates clean, **22 mutations / 22 caught** (three re-aims, one of them a genuine `NOBUILD!!`) plus **one claim hand-checked under `-race`** that the harness cannot report on.
+
+§12 milestone 1's roster is `platform/*` + `engine/venue` + `engine/state` + `platform/observability`. The six closed slices cover every item but one, so the slice picked itself rather than being chosen — which is the roster doing the job §26j credited it with when `singlewriter`'s trigger did not have to be re-derived.
+
+### §29b — the scope decision: the cache is built, the read port is DEFERRED, and the trigger is a construct
+
+§3.2 gives this package four jobs and the fourth is "translates to the strategy-owned `MarketView`". §3.3 makes that type "owned by `strategy` (or a domain-safe shared kernel)" and the read ports consumer-owned, and **`strategy` does not exist**. Three options were put to the user and the third is worth recording as rejected on grounds rather than on taste:
+
+1. **Build the cache, defer the translation** — taken.
+2. **Open `internal/strategy/domain/` for `MarketView` now.** Rejected: it commits the view's shape before `cashcarry`, its only consumer, exists to constrain it — a contract with one end.
+3. **Put `MarketView` in `platform/`.** §3.3 explicitly permits "a domain-safe shared kernel" and `kernelpurity` would allow it (it needs only `ids` and `fixedpoint`). Rejected because §3.6 rule 9's *rationale* argues the other direction on the same coupling: a technical shared library that acquires domain types becomes a shared **domain** kernel, "DDD's most tightly coupled integration pattern". The gate would have been silent; the reasoning behind the gate is not.
+
+**The deferral names the construct the package would IMPLEMENT, not the feature that motivates it** — §3.6's own rule about deferrals, and the one rule 10's deferral got wrong. The trigger is **the first consumer-owned read port** (strategy's `MarketView` reader or §6 step 8's OMS-owned mark-risk port, whichever lands first), not "the strategy context exists". A port is what this package implements; a context is merely where one tends to live.
+
+### §29c — THE FINDING: a latest-value cache is §3.4's silence-timer defect one hop downstream
+
+`ports.FundingSnapshot` and `ports.BookView` arrive carrying `Transport` and `Data` verdicts that `marketdata` computed **at accept time**. The obvious cache stores what it is given.
+
+That cache reports `FreshnessFresh` for the entire outage. It is exactly the failure §3.4 builds the silence timer for — "a feed that simply stops emits no event, so staleness MUST be detected by a timer, not only by the next update" — reappearing one hop later, where §3.4 does not name it: the observation ages while nothing arrives to re-judge it, and a stored verdict has no mechanism to notice. Every light stays green.
+
+**The response is structural rather than careful: `FundingEntry` and `BookEntry` have no `Freshness` field at all.** The stale verdict is not merely unused, it is unrepresentable. What they carry is the `Watermark`, and `Age`/`DataAge` against an instant the *caller* supplies — so re-judging is forced to the moment of the read, which is what `marketdata`'s own ports doc already says freshness is a property of.
+
+Two alternatives, both rejected with the reason stated in the code:
+
+- **Store the verdicts alongside re-derived ones.** Keeps a field whose only remaining use is to be read by mistake.
+- **Re-derive them here.** Makes this a second freshness authority holding a second copy of §5.2's budgets, and `Budget.NextTransition`'s own doc records what this repo paid for one mechanism written down in two places.
+
+The claim is bite-checked by a **reflection test over the struct fields**, not by a comment: adding the field back is caught. It is a test rather than a comment because the field somebody adds next year will look like a helpful convenience.
+
+`[SPEC EDIT OWED]` in `doc.go` — §3.4 names the timer and does not name the cache.
+
+### §29d — [SPEC EDIT OWED] cross-leg skew is measured over `RecvTime`, and the spec names both timestamps
+
+§3.4 lists "max cross-leg skew" on the watermark and requires "a cross-leg skew limit" beside sub-second book budgets. §3.5 says `SourceTime`/`RecvTime` are carried "for freshness, cross-leg-skew metrics, and offline analysis only" — **both of them, for that list of three**. Neither says which one skew is computed from, and the two answers differ in the direction that matters.
+
+`SourceTime` is the wrong one, by §3.5's own argument turned one notch: the venues "stamp with unsynchronized clocks", so a `SourceTime` skew across a spot leg on one venue and a perp on another **is** the forbidden subtraction. It fails quietly, because the number it produces is the venues' clock *offset* rather than any property of the market — and against a sub-second limit a few hundred milliseconds of offset is indistinguishable from a genuinely skewed package. The gate then either blocks a healthy pair forever or is widened until it admits a real one.
+
+`clock.ServerNow` models the offset, so a corrected version is arithmetically available. Also rejected: `clock.ServerTime` carries an **uncertainty band**, and a measurement whose error bar is the size of the threshold it feeds is not a measurement.
+
+**`RecvTime` is stamped by this process from the one clock both legs share** — the injected one, which §3.6 rule 5 extends into `engine/` specifically to keep single. The cost is stated rather than hidden: it measures when we *learned*, not when the world *was*, so it absorbs transport-latency asymmetry. That is the right quantity for the decision §3.4 attaches it to, and it yields an identity worth keeping:
+
+> **skew over `RecvTime` = |`Age(a)` − `Age(b)`| for any single instant**, since the instant cancels.
+
+So skew and freshness are computed from the same clock and cannot contradict each other, and `Skew` **takes no clock at all** — it is a pure function of the watermarks, testable with none, and structurally incapable of the two-disagreeing-clock-readings defect rule 5 exists for. The identity is used as the function's **oracle** in the test, which is this repo's "write the oracle before trusting the implementation" rule applied to a five-line function.
+
+Where the finding came from is worth noting: `marketdata/domain.Watermark` **refuses** the skew field and says why — "It is computed where the legs meet, and putting a field for it here would give every producer a number it cannot fill in." That comment is a forward reference. Arriving at the place it points to is what made the unanswered question visible.
+
+### §29e — three smaller decisions, each with a failure direction
+
+**`Skew` of fewer than two observations is an ERROR, not zero.** Zero is the most permissive answer the function has — it says the legs are perfectly aligned — so returning it to a caller who compared nothing makes "nothing was compared" and "everything agrees" the same answer. That is `domain.Least`'s fold-identity trap on the other side of the same decision, and `Cache.BookSkew` extends it: **a missing leg is `ErrEntryAbsent`, not a skew scored over the legs that happen to be present**, which would return a smaller number the less the cache knows.
+
+**A regression is refused on write, and EQUAL is accepted.** Every age here is measured from `RecvTime`, so storing an earlier observation makes the cache report data *staler* than a moment ago on a feed that just delivered — the ladder walks down while the transport is healthy, and the newer reading that would explain it has been overwritten. §3.4's per-`SourceID` mailboxes are FIFO so this should not arise, and "should not" is load-bearing: §3.5's dispatcher is explicitly "not yet built", so the invariant lives inside a component that does not exist. The equal case is the half that would have broken parity — under `clock.TestClock` every observation dispatched between advances shares a `RecvTime`, so refusing equality drops all but the first update at each instant in a **backtest only**.
+
+**The check compares `RecvTime`, not `VenueSeq`.** §3.5 makes `VenueSeq` authoritative only *within* a `SourceID`, and a full snapshot **replaces** rather than follows — `SeqRelationUnknown` is exactly that case — so a resnapshot recovering a desynced book legitimately carries a lower sequence than the one held. A sequence-based check would reject the one write this cache most needs to accept: recovery.
+
+### §29f — "single-writer" is a claim about AUTHORITY, and reading it as one about synchronization is a data race
+
+§3.4: "`engine/state` is single-writer (the marketdata reducer) handing immutable `MarketView`s to readers." That names who may **write**. It says nothing about who may read, and the answer is `strategy`, `risk` and `oms`, from their own goroutines, concurrently.
+
+The reading worth refusing out loud is "single-writer, therefore no lock needed" — true of a single-threaded actor, false here. One writer plus many concurrent readers over a Go map is a race, and the detector's report would name a map access rather than the architectural sentence that licensed it. So the maps are `sync.RWMutex`-guarded and the sentence keeps meaning what §3.2 and the authoritative-state principle mean by it: exactly one component is *allowed* to mutate this, which is an invariant no mutex supplies.
+
+**This is the claim `mutate.sh` cannot report on**, and it is §26i's situation recurring: the harness runs `go test` without `-race`, so deleting `Funding`'s `RLock` is a survivor in its output. Hand-checked instead — removing it produces `WARNING: DATA RACE` and a failing `TestConcurrentReadersAndWriter`, and restoring it passes. Recorded because a harness's silence on a claim is not the same as a harness clearing it.
+
+### §29g — the fixture-collapse checklist, run BEFORE the tests, changed the CODE once
+
+Run first rather than after, per the standing rule. It found four pinned parameters and one dead branch:
+
+1. **Two legs collapse `Skew`.** With exactly two watermarks, "max minus min", "last minus first" and "absolute difference" are the same computation. The fixture is **three legs with the widest pair in the interior**, plus a descending-arrival case that separates a `Before`/`After` swap.
+2. **The helper moved both timestamps together.** `at(d)` offsets `SourceTime` from `RecvTime` by a *different* constant, and `TestSkewIgnoresSourceTime` makes one of them wrong on purpose — otherwise every fixture would have passed against the `SourceTime` implementation §29d spends a doc comment rejecting.
+3. **`Len`'s two counts were symmetric.** With the same number in each class, a `Len` returning its values swapped is indistinguishable from a correct one. The fixture is asymmetric (1 funding, 2 books).
+4. **The published verdict fixture was at its zero value.** `FreshnessUnknown` would make "dropped" and "carried" produce the same observable state, so the fixtures set `FreshnessFresh`.
+5. **A branch that could never decide anything — and this one changed the code.** `Skew`'s max arm was written `i == 0 || w.RecvTime.After(latest)`, which is correct *only because* the zero instant precedes every real one — making the `i == 0` half unreachable, and resting the code on the very assumption `Watermark.Validate` exists to refuse. Rewritten to seed both extremes from the first element. Both arms are now live and both are caught (`min seed dropped`, `max seed dropped`).
+
+The tell in (5) is the one the checklist names: the branch's condition did not depend on anything the branch was about.
+
+### §29h — what is NOT here, and the reason is the empty-tree rule
+
+**The mark data class**, because `marketdata/module.go` already says from the other side that there is no `venue.Mark` and no use case — so there is nothing to cache. **§3.4's adverse-preserving mark coalescing**, because `platform/events` already owns it as `AdversePreserving`, applied on the lane *ahead* of this cache, which is where §3.4 puts coalescing — building a second copy here would be the two-mechanisms defect §29c rejects one paragraph earlier. **The silence timer**, because `marketdata` arms it and read-time re-judging is what makes this package correct without one; the timer answers for consumers who do not ask, this answers for consumers who do, and both are needed.
+
+`engine/state` **does** import `marketdata/application/ports`, and the duplication would have been the unjustified choice. `engine/venue`'s doc is careful that its two-types-for-one-reading split is *forced* — rule 1 forbids a context's `domain/` from importing `engine/` — and frames the cost as one paid under compulsion. Nothing compels it here: rule 1 classifies the **importer**, this package is neither an inward layer nor a context, and what flows down §3.1's pipeline **is** `ports.FundingSnapshot`. A third struct with the same fields would be duplication with no rule demanding it.
+
+## RESUME HERE — updated end of session 26
+
+**SESSION 26 UPDATE — READ THIS FIRST.** Milestone 1's **seventh slice (`engine/state`) is BUILT and NOT closed.** `internal/engine/state/` holds §3.2's latest-value cache and §3.4's cross-leg skew; the read port and the `MarketView` translation are **deferred with a named trigger** (§29b) — *the first consumer-owned read port*, not "the strategy context exists". `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **TWO**, which is correct mid-slice: markers land at the close. Doc set is **still v0.9.11** and correctly so. `make ci` green, all six gates clean, 22 mutations / 22 caught, **one claim hand-checked under `-race`** because the harness runs without it (§29f).
+
+**The finding is §29c:** a latest-value cache that stores the freshness verdict `marketdata` computed at accept time is §3.4's silence-timer defect one hop downstream — it reports a dead feed fresh for the whole outage, with every light green. The fix is that the entry types **have no `Freshness` field**, so the stale verdict is unrepresentable rather than merely unused; re-judging is forced to the instant of the read. **§29d is the second edit owed:** cross-leg skew is measured over `RecvTime`, which the spec never says while naming both timestamps — over `SourceTime` it is the unsynchronized-clock subtraction §3.5 forbids, and the number it yields is the venues' clock offset rather than anything about the market.
+
+**Next: the close** (two spec edits, the doc-set bump, the ADR block, the reading pass), then §12 milestone 2's kill gate. The reasoning is **§29**; §28 stays live for §28d's third named limit on the close gate.
+
 ## RESUME HERE — updated end of session 25 (the close)
 
 **SESSION 25 UPDATE — READ THIS FIRST.** **Milestone 1's sixth slice (`oms`) is CLOSED at v0.9.11**, and so is the §3.6 rule 2 drift in `marketdata` (§28d). `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **ZERO**, seven markers read `[SPEC EDIT LANDED — v0.9.11]`, `make ci` green, `docs` 102 pass, `docs/formal/` untouched at Cx8.
