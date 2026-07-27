@@ -1,6 +1,6 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-07-27): **v0.9.10** — milestone 1's first FIVE slices are CLOSED; the **sixth (`oms`) is OPEN**, with `oms/domain` built and **three spec edits owed**. **Start at `## START HERE` below, not at this line.**
+## Status (2026-07-27): **v0.9.10** — milestone 1's first FIVE slices are CLOSED; the **sixth (`oms`) is OPEN**, with `oms/domain` and `oms/application/ports` built and **four spec edits owed**. **Start at `## START HERE` below, not at this line.**
 
 **v0.9.9 (2026-07-27) — the fourth-slice release, and the one that CLOSES `engine/venue`.** The slice built the normalized funding DTO that retired `marketdata`'s `driving.FundingUpdate` placeholder, and produced **three** spec edits — **all silences in the core rather than disagreements with it**, the v0.9.6 shape rather than v0.9.8's. **This is milestone 1's first close containing no code change**, which is what "the code already agreed with the spec, the spec had just never said it" looks like from outside. **Two of the three are a sharper kind of silence and the distinction is the finding worth carrying: the core does not omit them, it states them twice, incompatibly.** §3.5: the **market-data seam was declared twice** — a flat `DataSource{ Subscribe(VenueInstrument) <-chan Envelope }` here and three per-stream methods in §4, for the same pipeline position, with no type satisfying both. **§4's per-stream shape wins and the seam is `MarketDataSource` throughout**, on three grounds — one channel per instrument merges three `SourceID`s and forces the subscriber to re-derive a key the seam could have kept; the per-stream product constraints are **inexpressible** in `Subscribe(VenueInstrument)`; and §7.6's capacity ladder gets spent on a book feed a funding-only consumer never wanted. The tell that §4 was current is structural rather than a preference: **every other line of §3.5's seam block is written as a reference to §4**, while `DataSource` was the one written as an independent definition — and `venue-profiles.md` §3 was **already** writing `MarketDataSource.StreamMark`, which is cheaper evidence than any of the three arguments. §3.5 also: **a `SourceID` MUST refuse an `(instrument, stream)` pair no venue can produce** — §4 marks funding and mark perp-only per stream and §3.5 never carried it across, so a spot funding source validated cleanly, and §3.4 makes `SourceID` the mailbox key, so an impossible source is **a mailbox that exists, can be subscribed to, and never delivers**, indistinguishable downstream from a venue gone quiet. The rule states the **full table including the negative rows** (the private streams and control are *not* product-constrained), because the constraint reads like a market-data property and is not one — §4.2 makes spot a full API family with its own user-data stream, so inferring it would silently unsubscribe half a cash-and-carry trade. §4: **the units discipline that covered money now covers time.** `fixedpoint` puts a money field's dimension in its type; a duration has none, and a venue duration field's unit lives only in its **name** (Bybit's `fundingIntervalHour`) — so an adapter can multiply by `time.Minute`, satisfy the never-`float64` rule completely, and hand §2.4 a 480-minute interval that enumerates a plausible settlement count while **§12's kill-gate carry figure is wrong by a factor of sixty with nothing failing**. That is §10's own v0.9.7 argument applied one layer earlier, where the duration is *created*. A zero is **refused, never defaulted**: it arrives from three situations a fallback answers identically, two are a wiring failure wearing a correct BTC reading's clothes, and the third **absorbs §2.4's C8 flip**. Three code markers now read `[SPEC EDIT LANDED — v0.9.9]`, `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **zero**, ADR §3 gains the **milestone-1 fourth-slice block** (tagless total now **thirty-three**) and the `C8` traceability row gains core §4, `docs` 102 pass, `make ci` green. **No formal-model change; `docs/formal/` is untouched and still at the Cx8 verdict.** Full reasoning with rejected alternatives: decision record **§20** (the slice) and **§21** (the close).
 
@@ -77,7 +77,99 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 21, 2026-07-27)
+## START HERE (updated end of session 22, 2026-07-27)
+
+**Branch `feat/milestone-1-foundation`, tree clean, `make ci` green.** Verify rather than trust
+this sentence: `git status --short` and `git rev-list --left-right --count @{u}...HEAD`.
+
+### Where the work is
+
+**Milestone 1's sixth slice — `oms` — is still OPEN.** What exists now:
+
+| Path | Holds |
+|---|---|
+| `internal/oms/domain/` | §5.3's twelve-state lifecycle + `CanTransition` (**30 edges**), the fill ledger, and now §5.1's order intent — `Side`, `OrderType`, `TimeInForce`, `Order` |
+| `internal/oms/application/ports/` | `Journal`, `OrderPlacer`, `Ack` — the driven ports, in `application/ports/` as §3.6 rule 2 wrote it |
+| `internal/oms/application/errors.go` | the refusals the dispatch path makes |
+
+Reasoning with the rejected alternatives: decision record **§24**. §23 is now history.
+
+### The next work, and it is already designed
+
+**Build the dispatch use case — §6 step 6's crash-boundary sequence — from decision record §24e.**
+That section is not a summary; it is the design taken this session, written out with the rejected
+alternatives, so the next session **implements rather than re-derives**. It gives the exact
+signature and why, the seven-step sequence, `admit`'s three checks, the full `Effect` × `Class` →
+`OrderState` classification table with the argument for its one contested row, the double-dispatch
+guard, and the fixture-collapse checklist to run **before** the mutations.
+
+The two things in §24e most likely to be got wrong if skimmed:
+
+1. **`Dispatch` returns `(Outcome, error)`, not `(OrderState, error)`.** The rejected signature is
+   the point: with it, the returned state is authoritative *even when the error is non-nil*, and the
+   universal Go reflex `if err != nil { return }` then silently drops an order that may be live at a
+   venue. Splitting them makes the mistake inexpressible — `err != nil` means **nothing was sent**.
+2. **`EffectNotApplied` does not mean `Rejected`** unless the class is `ClassVenueReject`. `Effect`
+   answers "did the side effect happen", not "which evidence class proves it didn't", and FLAG-2
+   makes SM §1's two absence terminals differ by exactly that. Everything else goes to
+   `SubmissionUnknown` and costs one query.
+
+Then `infrastructure/driven` with the write repository, **and `singlewriter` lands in that same
+session** rather than after the code it polices. Then `module.go`, then the slice closes.
+
+### Three things to know before you touch anything
+
+1. **`singlewriter`'s deferral has STILL not expired.** Its subject is `oms`'s **write repository** —
+   a port plus an adapter. `ports.Journal` is a write-ahead **log**, not rule 6's "OMS write
+   repositories", and `infrastructure/driven/` does not exist. Landing the gate now is a lint over a
+   tree with nothing to police, which is what the deferral was written to prevent.
+
+2. **FOUR markers are owed, and that is correct mid-slice.**
+   `grep -rn "SPEC EDIT OWED" internal/ tools/` returns 3 × `transition.go` + 1 × `fill.go`. The doc
+   set is **still v0.9.10** and correctly so: nothing has landed in the spec yet.
+
+3. **Do not "simplify" `ContributesPossibleDelta` to `!IsTerminal()`** (§23c), and do not read
+   `return false, s.Validate()` as the fix for the trailing-return trap (§23d).
+
+### The four owed edits, stated so they can be landed without re-deriving
+
+All four are **silences or stale field lists — none is a disagreement with the core.**
+
+- **SM §1, `DispatchAuthorized` row — the five query-resolution edges** (`Acknowledged` /
+  `PartiallyFilled` / `Filled` / `Rejected` / `AbsentAfterFinality`), same set as
+  `SubmissionUnknown`'s. Cost of the silence: the hedge group is permanently `Ambiguous`, exposure
+  open, new trading held, nothing erroring. (§23b)
+- **SM §1, `DispatchAuthorized` row — `→ SubmissionUnknown`** on an ambiguous transport result,
+  distinct from the "no-return / **crash**" row. **This is the one the core states aloud** (§6 step 6)
+  while SM §1 tabulates no path to it, and the two paths the table does offer each record something
+  untrue — `Submitted` claims a transport result a timeout never produced, into the log §7.5 replays;
+  "stays" claims a send still in flight after the call returned. FLAG-1 already created the
+  symmetric edge one step later. (§24b)
+- **SM §1 — a NEW venue-initiated termination row.** `Acknowledged` / `PartiallyFilled` → `Canceled`
+  on IOC expiry, GTD expiry, venue cancel-all or self-trade prevention, distinct from the FLAG-1
+  rows. Without it the only order type this system sends can never terminate on its ordinary
+  outcome. (§23b)
+- **Core §5.1, the `Fill` field list.** Drop `FeeAsset`; `Fee Money` carries the asset tag. (§23i)
+
+### A finding this session raised that is the USER'S call, not the next session's
+
+**§3.6 rule 2 is silently unmet in `marketdata`, on both halves** (§24f). The rule reads "Ports in
+`application/ports/` … adapters live in `infrastructure/driven/` with a compile-time
+`var _ ports.X = (*Impl)(nil)`". `marketdata` declares its ports flat in `application/ports.go`, and
+`grep -rn "var _ " internal/marketdata/infrastructure/` returns **nothing** — in a **closed** slice,
+against a decision record (§7) that had already ruled *for* the subdirectory.
+
+**Third demonstration of the class the OWED grep cannot see**, after v0.9.8's `AcceptOrdinal` and
+v0.9.10's missing `StreamOrders`. `oms` follows rule 2 as written, so the inconsistency between the
+two contexts is itself the flag. Fixing `marketdata` is a real refactor of a closed slice and was
+deliberately not absorbed into this one. The `var _` assertions are separately cheap.
+
+**Still owed from session 20 and untouched since:** the `venue-profiles.md` verification of the two
+venues' **depth update-ID shapes**, which `venue.BookDelta`'s span design cites.
+
+---
+
+## START HERE (updated end of session 21, 2026-07-27, HISTORICAL)
 
 **Branch `feat/milestone-1-foundation`, tree clean, `make ci` green.** Verify rather than trust
 this sentence: `git status --short` and `git rev-list --left-right --count @{u}...HEAD`. The head

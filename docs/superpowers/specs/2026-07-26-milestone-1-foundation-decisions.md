@@ -3220,6 +3220,140 @@ Nine on the state machine, thirteen on the ledger. One `NOBUILD!!` and two `NO-O
 
 **No formal-model change** — nothing here touches the fence/takeover/plan composition, so `docs/formal/` stays at the Cx8 verdict.
 
+## §24 — session 22: `oms`'s order intent, a fourth owed edge, and the dispatch ports
+
+### §24a — what was built
+
+`internal/oms/domain/order.go`: `Side`, `OrderType`, `TimeInForce` (§3.6 rule 8 enum-likes) and `Order` — §5.1's order minus the two things that change. `internal/oms/application/ports/`: `Journal`, `OrderPlacer`, `Ack`. `internal/oms/application/errors.go`: the refusals the dispatch path makes.
+
+**The dispatch use case itself is NOT built.** Its design was taken and is recorded in §24e below in enough detail to be implemented without re-deriving it — that section is the deliverable of this record, not a summary of one.
+
+### §24b — the fourth owed edge: `DispatchAuthorized → SubmissionUnknown`
+
+Found by the same method as §23b's two — reading the table against the prose — but it is a **sharper** kind than either, and the sharpness is the finding. §23b's two silences are things the core requires *by implication*. This one the core **states aloud**: §6 step 6, "A timeout/5xx moves the order to `SubmissionUnknown`, resolved by `OrderByClientID`/`Fills`, never resubmitted." The order it moves is one at `DispatchAuthorized`, because the fsync of that state happens "immediately before the single `Place`". SM §1's only entry edge into `SubmissionUnknown` leaves `Submitted`.
+
+**Neither path the table offers can carry a timeout, and each fails by recording something untrue.**
+
+- **Through `Submitted`.** That state means "the single `Place` returned a **transport result**; awaiting/parsing venue ack". A timeout is precisely the absence of a transport result. §7.5 replays this journal to decide what to do about every order that was in flight when the process died, so the false record is not cosmetic — it is read back as evidence the request reached the venue's edge. (Note the split: a **5xx** *is* a transport result, so `DispatchAuthorized → Submitted → SubmissionUnknown` is correct for it and both statements already agree. The gap is the timeout, not the pair.)
+- **Staying put.** The "no-return / crash → `DispatchAuthorized` (stays)" row's subject is a process that **died** — its action column is the recovery path, "resolved by query only". A call that returned an error is not a send still in flight, and the live path that just watched it fail is not crash recovery. Under this reading the live path would leave a timed-out order for a reconciler that is looking for crash survivors.
+
+**The cheap argument is FLAG-1's own**, and it is worth more than either above because it is the spec arguing with itself: the round-4 ruling created `CancelUnknown` as a **first-class entry edge** on an "ambiguous cancel transport result … **by symmetry with `Submitted → SubmissionUnknown`**", rather than routing it through a state claiming an ack had been parsed. This is that same edge one step earlier. The asymmetry is its **absence**, not its presence.
+
+**Rejected: "the timeout and the crash are the same event, so the stays-row covers it."** They are the same event to the *venue* and different events to *us*, and the state machine is ours. The whole purpose of `DispatchAuthorized` is to be the state a process that died leaves behind; a live process that knows its call failed holds strictly more information, and a machine that discards it makes recovery re-derive at boot what the process knew at the time.
+
+**Owed to SM §1's transitions table:** `DispatchAuthorized → SubmissionUnknown` on an ambiguous transport result (timeout / 5xx / unknown ack), **distinct** from the "no-return / crash" row.
+
+The **oracle caught the omission the moment the edge landed** — `TestCanTransitionMatrix` failed on exactly this pair. That is the "different shape from the implementation" rule paying: the transcribed edge list is flat `from->to` strings and the implementation is a switch returning a slice per source state, so the edge had to be added in both places by two different acts.
+
+### §24c — `Order` carries no `State`, and that is §5.3's orthogonality, not a shortcut
+
+§5.1's field list ends `…, State`. `domain.Order` has no `State` field and no fill list, because this package already holds both mechanisms separately and §5.3 makes them **orthogonal on purpose**: "order state tracks submission/finality; the fill ledger tracks realized quantity". A struct carrying an identity beside a mutable `State` is a second home for a fact `CanTransition` governs, and the two disagree the first time something writes one without the other.
+
+So `Order` is the **immutable half** — everything fixed at planning time that no venue event changes. That is exactly what §6 step 5 fsyncs and exactly what §4's `Place` takes. The aggregate binding an `Order` to its state and fills **composes** this when it lands; it does not restate it.
+
+**`PositionSide/Idx` is left out as a layering call, recorded rather than dropped.** §4.1 pins one-way position mode and §7.5 makes a Hedge position mode a refuse-to-trade condition asserted at boot and before every trade, so the field's legal domain here has exactly one member. What the venues need is a wire field whose spelling differs between them (Binance `positionSide`, Bybit `positionIdx`), derivable from the pinned mode. Carried instead, it would be a field with one legal value that a construction site can set wrong and that `Validate` could only check against a constant. **No marker** — this is layering, not a contradiction of a normative claim. It goes in the slice-close reading pass.
+
+### §24d — the price rule that runs in the direction nobody writes
+
+`Order.Validate` checks the type × price pairing **both** ways. "A limit order needs a price" is the check that gets written, and it is the one that fails loudly at the venue anyway. The mirror — **a market order MUST NOT carry a limit price** — fails silently everywhere: §6 step 4 sizes the naked-leg price gap against the price the order is supposed to be bounded by, so a market order carrying one presents a bound the venue ignores. The order fills through it and the slippage budget reconciles against a number that never bound anything.
+
+"Absent" has exactly one spelling — the zero `fixedpoint.Price` — because fixedpoint's zero value is unusable by construction (§3.6 rule 4's design), so a caller cannot express absence two ways.
+
+### §24e — THE DISPATCH USE CASE, AS DESIGNED AND NOT YET BUILT
+
+Everything here was decided this session with the alternatives weighed. It is written out so the next session implements rather than re-derives.
+
+**Signature, and the whole reason for its shape:**
+
+```go
+func (d *Dispatcher) Dispatch(o domain.Order) (Outcome, error)
+
+type Outcome struct {
+    State     domain.OrderState // where the order actually is
+    Ack       ports.Ack
+    Cause     error // why State is not StateSubmitted; nil on a clean place
+    Journaled bool  // whether State reached the journal
+}
+```
+
+**`err != nil` means NOTHING WAS SENT** — the order is still `Planned` and §5.3's "safe to replan or discard" applies. `err == nil` means `Place` ran exactly once and `Outcome.State` is where the order is.
+
+**The rejected signature is `(domain.OrderState, error)`**, and rejecting it is the point. Under it, the returned state is authoritative *even when the error is non-nil* — a contract that reads fine and that the universal Go reflex `if err != nil { return }` silently breaks, dropping an order that may be live at the venue. Splitting the two makes the dangerous mistake **impossible to express**: when `err != nil` there is no state to ignore, because nothing was sent.
+
+**The sequence:**
+
+1. `admit(o)` — see below. Failure ⇒ `return Outcome{}, err`. Nothing journaled, nothing sent.
+2. `journal.AppendState(id, StateDispatchAuthorized)`. Failure ⇒ `return Outcome{}, err` — **the `Place` MUST NOT run**, because a send whose authorization is not on disk is an order a crash cannot find. The port's error is read as "not durable", and that reading is safe **only because the journal is local**: a failed local fsync is a failed fsync, unlike the network write that follows it. That asymmetry is the entire reason the ordering is journal-then-network.
+3. Record the id in the in-process `authorized` set (only now — steps 1 and 2 sent nothing, so a corrected retry there is legitimate).
+4. `ack, placeErr := placer.Place(o)` — **once**, no retry, on any error.
+5. `state, unhandled := classifyPlace(placeErr)`.
+6. `journalErr := journal.AppendState(id, state)`.
+7. `return Outcome{State: state, Ack: ack, Cause: errors.Join(placeErr, unhandled), Journaled: journalErr == nil}, nil`.
+
+**Step 6 failing is not a safety failure, and the reason is worth keeping:** the journal still holds `DispatchAuthorized`, which recovery resolves by query — exactly the right behaviour. It is an alerting matter (the journal is failing, which threatens the *next* order), not a correctness one. Hence `Journaled` is a field rather than a returned error.
+
+**`admit(o)` — three checks, in order:**
+
+1. `o.Validate()`.
+2. `ids.ParseClientOrderID(string(o.ClientOrderID))` ⇒ `ErrOrderNotOMSMinted`. **This is why `domain.Order.Validate` deliberately does not parse**: §6 step 10's foreign orders carry venue-minted ids and the reconciler must hold them. The strict check belongs at the one place an id stops being something we read and becomes something we write to a venue.
+3. `o.Type == OrderTypeLimit && o.TimeInForce == TimeInForceIOC` ⇒ else `ErrNotMarketableIOCLimit` (§6 step 6). **A comparison, not an exhaustive switch, and that is deliberate** — a member added to either enum next year is refused without anyone editing this line. The gate-checked switch is the loud shape everywhere else in this repo and the wrong one here, because it would have to be re-answered, and answered wrongly once, for a value nobody intended to send.
+
+**`classifyPlace(err error) (domain.OrderState, error)` — the safety-critical decision of the use case.** A **tagged** `switch apperror.EffectOf(err)`, so §3.6 rule 10 forces all four `Effect` members to be named:
+
+| Input | State | Why |
+|---|---|---|
+| `err == nil` | `Submitted` | §5.3's own definition of the state |
+| `EffectApplied` | `Submitted` | the send definitely happened; the *ack* is what could not be read, which is exactly what `Submitted` means. Not `SubmissionUnknown` — that state is ambiguous about **whether we submitted**, and here we are not |
+| `EffectNotApplied` **and** `ClassOf == ClassVenueReject` | `Rejected` | FLAG-2 requires an **explicit venue rejection** for this terminal, and this is precisely that evidence class |
+| `EffectNotApplied`, any other class | `SubmissionUnknown` | see below |
+| `EffectUnknown`, `EffectUnspecified` | `SubmissionUnknown` | `EffectUnspecified` is `apperror`'s deliberate degrade-to-safe |
+| fallthrough (an undeclared `Effect`) | `SubmissionUnknown` **+ `ErrEffectUnhandled`** | see below |
+
+**The `EffectNotApplied`-without-`VenueReject` row is the one that took the argument.** We *know* no order exists — a connection refused before a byte was written, a local governor declining, our own `Validate` refusing — so a terminal looks justified and one query looks wasted. It is refused on evidence-class grounds: `Effect` answers "did the side effect happen", **not** "which evidence class proves it didn't", and SM §1's two absence terminals are distinguished by exactly that (FLAG-2: proved absence and venue rejection are different evidence classes). `EffectNotApplied` explicitly covers both "never left the socket" **and** "the venue rejected it on its merits", so the value alone cannot choose between `Rejected` and `AbsentAfterFinality` — and `AbsentAfterFinality` is unavailable anyway, since it requires the stable-not-found rule to have *completed*. Inventing either would write an evidence class into the journal that no evidence supports. One resolving query converts an honest ambiguity into the right terminal; the cost is one REST call on a path that already failed.
+
+**The fallthrough returns a state AND an error, and this is §23d's lesson applied one layer up.** It must not return only an error: `Place` has already run, so a caller left without a state has a possibly-live order and nowhere to record it. It must not return only a state: `SubmissionUnknown` with `nil` is the identical answer to the `EffectUnknown` case, so dropping a member from that case would change nothing any test could observe — the trailing-return-hides-its-own-group trap. Returning `(SubmissionUnknown, ErrEffectUnhandled)` makes the group observable while keeping the state safe. **The contract to state in the doc comment: the state is always safe to act on; the error means the classification came from the fallback rather than from a rule, and must be reported.**
+
+**The in-process double-dispatch guard** — `authorized map[ids.ClientOrderID]struct{}` ⇒ `ErrOrderAlreadyDispatched`. It is a **backstop, not the mechanism**: durable enforcement is the journal, and a fresh process correctly starts empty, because an order it finds at `DispatchAuthorized` must be queried about rather than dispatched again. It earns its place because it defends against the misuse the *use case's own signature* invites — a caller treating a failed dispatch as retryable. Follow `Ledger`'s precedent exactly, including the **not-safe-for-concurrent-use** statement and its reason: §5.1 gives the aggregate an OCC `Version` and §6 a journal-then-apply write path, so serialisation is decided one layer out, and a mutex here would make two writers safe from the race detector while leaving them just as wrong about the version.
+
+**Assert the classifier against SM §1 in a TEST, not at runtime.** Every state `classifyPlace` can return must be a successor of `DispatchAuthorized` under `domain.CanTransition`, and the returned set must be exactly `{Submitted, SubmissionUnknown, Rejected}`. A runtime guard was considered and rejected: its only possible fallback is `SubmissionUnknown`, which is what the fallthrough already returns, so it would change no behaviour and cost a branch on the dispatch path. **This is why the fourth owed edge had to land first** — `DispatchAuthorized → SubmissionUnknown` is one of the three, and without it this test fails.
+
+**Fixture-collapse checklist to run BEFORE the mutations on this file:**
+- The journal fake must distinguish **which** append failed. A fake that fails every call cannot tell "refuses to place when authorization is not durable" from "reports any journal error", and those are the two claims of steps 2 and 6.
+- The fake must **count** `Place` calls, not merely record the last one — the single-`Place` rule is a count, and every other assertion is satisfied by a dispatcher that calls it twice.
+- The `EffectNotApplied` cases must include **both** `ClassVenueReject` and a non-reject class. With only one, "checks the class" and "ignores the class" give the same answer.
+- The `admit` cases must vary the order type and the TIF **independently** — a fixture that is wrong in both cannot tell which check fired.
+- At least one case must have a **valid** order that the guard refuses (the second dispatch), or "refuses a repeat" collapses into "refuses an invalid order".
+
+### §24f — §3.6 rule 2 is silently unmet in `marketdata`, on both halves
+
+Rule 2 reads: "**Ports in `application/ports/`.** Every driven dependency is an interface there; adapters live in `infrastructure/driven/` with a compile-time `var _ ports.X = (*Impl)(nil)`." The assertion is written `var _ ports.X`, so the rule presupposes the package.
+
+`internal/marketdata` declares its ports **flat**, in `application/ports.go`, package `application`; and `grep -rn "var _ " internal/marketdata/infrastructure/` returns **nothing**. Both halves unmet, unmarked, in a **closed** slice. Decision record §7 had already ruled *for* the subdirectory ("`application/ports/` survives the Go-idiom objection, because `application/` *is* the consumer"), so this is drift against a recorded decision rather than an open question.
+
+**This is the third demonstration of the class the OWED grep cannot see** — after v0.9.8's `AcceptOrdinal` and v0.9.10's missing `StreamOrders` — and the cheapest one yet to state: the grep finds claims the code *marked*, and a silently unmet rule is by definition unmarked.
+
+**`oms` follows rule 2 as written**, and the resulting inconsistency between the two contexts is itself the flag. **Not fixed here**: moving `marketdata`'s ports is a real refactor of a closed slice (`FundingSnapshot`/`BookView` have methods and are used by the use case, so they move to `ports` and come back as imports), and scaling that into this slice is the user's call, not one to absorb. The `var _` assertions are separately cheap and should land regardless.
+
+**Note the cost the subpackage imposes, since it constrains what may live there:** `ports` must not import `application`, so every type crossing one of these seams lives in `ports` or `domain` — never in `application`. That is a discipline with a useful side effect: a use-case type that would be convenient to hand an adapter has to be moved deliberately, which is the moment somebody asks whether the adapter should see it at all.
+
+### §24g — mutations: 11 run, 11 caught
+
+Ten on `order.go`, one on the new transition edge. The fixture-collapse checklist ran first and shaped four fixtures: quantity varies **zero and negative** (`<= 0` and `< 0` agree on a negative), the type × price matrix walks **all four cells** rather than the diagonal, each enum is refused on both an empty **and** a plausibly-miscased value (`"SELL"`, `"LIMIT"`, `"IOC"` — the mapping bug that actually happens is a venue token reaching the field unnormalised), and both sides are accepted **through `Order.Validate`** rather than only through `Side.Validate`.
+
+`validatePrice`'s fallthrough is unreachable through the exported API — `Validate` runs `Type.Validate` first — so it is asserted from an **in-package** test, with a positive control that each declared type reaches its own case. Without the pair, an implementation whose switch had no cases at all would pass the reachability test and fail nothing else.
+
+### §24h — what is owed: FOUR markers, and `singlewriter` still has not expired
+
+`grep -rn "SPEC EDIT OWED" internal/ tools/` returns **four**: three in `transition.go` (§23b's two + §24b) and one in `fill.go`. All four are silences or stale field lists; **none is a disagreement with the core.**
+
+`singlewriter`'s deferral is **still unexpired**. `oms/application/ports/` declares no repository — `Journal` is a write-ahead log, not §3.6 rule 6's "OMS write repositories" — and there is no `infrastructure/driven/`. The subject is a port **plus** an adapter, and neither exists.
+
+**No formal-model change** — nothing here touches the fence/takeover/plan composition, so `docs/formal/` stays at the Cx8 verdict.
+
+## RESUME HERE — updated end of session 22
+
+**SESSION 22 UPDATE — READ THIS FIRST.** The **sixth slice (`oms`) is still OPEN**. `oms/domain` gained §5.1's order intent (`Side`, `OrderType`, `TimeInForce`, `Order`) and a **FOURTH** owed edge — `DispatchAuthorized → SubmissionUnknown`, the one the core states aloud (§24b). `oms/application/ports/` declares `Journal` and `OrderPlacer`; **the dispatch use case is designed but NOT built, and §24e is that design written out to be implemented rather than re-derived** — start there. `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **FOUR**, correct mid-slice. **`singlewriter` has still NOT expired**: a write-ahead journal is not a write repository, and there is no `infrastructure/driven/`. Doc set is **still v0.9.10** and correctly so. New finding to act on: **§3.6 rule 2 is silently unmet in `marketdata` on both halves** (§24f) — the user's call whether to fix it. `make ci` green, 11 mutations / 11 caught. The reasoning is **§24**; §23 is now history. What follows was written at the end of session 21 and earlier.
+
 ## RESUME HERE — updated end of session 21
 
 **SESSION 21 UPDATE — READ THIS FIRST.** Milestone 1's **sixth slice (`oms`) is OPEN**, not closed. `internal/oms/domain/` holds §5.3's order lifecycle and fill ledger; **nothing above `domain/` exists yet**, so `singlewriter`'s deferral has **not** expired — its subject is the write *repository*, which is a port plus an adapter and belongs to the next slice. `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **THREE** (2 × `transition.go`, 1 × `fill.go`) — that is correct mid-slice; markers land at slice close. `make ci` green, 22 mutations / 22 caught, one diagnosed survivor fixed (§23d). Doc set is **still v0.9.10** and correctly so: no spec edit has landed yet. The reasoning is **§23**; §22 is now history. What follows was written at the end of session 20 and earlier.
