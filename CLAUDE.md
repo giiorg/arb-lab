@@ -68,8 +68,8 @@ as the CI pin — the split is what keeps both honest.
 
 ## The rules that bite
 
-§3.6 of the core has ten structural rules. Six are gates; five are enforced
-today as custom `golang.org/x/tools/go/analysis` analyzers in `tools/lint/`,
+§3.6 of the core has ten structural rules. Six are gates, and **all six are
+enforced** as custom `golang.org/x/tools/go/analysis` analyzers in `tools/lint/`,
 because a linter you cannot unit-test cannot be *shown* to bite:
 
 | Gate | Enforces |
@@ -79,16 +79,30 @@ because a linter you cannot unit-test cannot be *shown* to bite:
 | `kernelpurity` | A `platform/` package may import only the standard library and other `platform/` packages. |
 | `hexboundary` | `domain/` and `application/` may not import `infrastructure/` or `engine/`. Classifies both ends of the edge, so it scopes to this module's `internal/` rather than matching a bare path segment. |
 | `exhaustiveswitch` | A switch over a module-declared enum-like must name every member. A `default:` does not excuse a missing one — that is where the new member lands silently. No escape: name the rest in a grouped case, which the compiler checks. |
+| `singlewriter` | Only `oms` may import the OMS write path — `oms/application/ports` **and** `oms/infrastructure/driven`, by position, `app/` roots included. The port is policed as well as the adapter, because depending on the abstraction is the *recommended* way to depend on anything. `oms/domain` is deliberately out: a projection naming the state enum is §5.1's pattern working. |
 
-`singlewriter` alone is still deferred, until `oms`'s write repository exists. A
-lint over an empty tree passes trivially, which is indistinguishable from a
-broken lint — but that deferral **expires when its subject appears**, and both
-gates above landed the moment it did rather than after the code they police.
+**The last deferral expired on 2026-07-27 and the gate landed the same session
+as its subject**, which is now the rule rather than the exception: three gates
+were deferred against the "build it before the code it polices" preference, for
+the one reason that survives scrutiny — a lint over an empty tree passes
+trivially, which is indistinguishable from a broken lint — and all three landed
+the session their subject appeared.
 
-Rule 10's deferral names the wrong trigger, and it is worth knowing why: it
-waited on a *state machine*, while what actually made it buildable was the
-kernel's eleven enum-likes, which had existed for several slices. It found 13
-silent fallthroughs on its first real run.
+A deferral must name **the construct the analyzer reads**, not the feature that
+motivated it. Rule 10's named the wrong one: it waited on a *state machine*,
+while what actually made it buildable was the kernel's eleven enum-likes, which
+had existed for several slices — it found 13 silent fallthroughs on its first
+real run, all reachable the whole time. Rule 6's named the right one ("the
+write repository"), and §12's milestone roster named the same trigger, so
+nothing had to be re-derived to know when it was due.
+
+**A clean gate run is not evidence, and neither is a probe two gates can see.**
+`singlewriter`'s obvious probe — `marketdata/application` importing
+`oms/infrastructure/driven` — trips `hexboundary` as well, so it shows that
+something objected rather than that this rule did. The isolating probe is a
+context **root** importing `oms/application/ports`, where rule 1 is silent
+because the importer is not an inward layer. That is also the realistic
+accident, so the isolating fixture and the motivating case are the same one.
 
 ## How work is done here
 

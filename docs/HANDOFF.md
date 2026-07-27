@@ -1,6 +1,6 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-07-27): **v0.9.10** — milestone 1's first FIVE slices are CLOSED; the **sixth (`oms`) is OPEN**, with `oms/domain`, `oms/application/ports` and **the dispatch use case** built, and **four spec edits owed**. **Start at `## START HERE` below, not at this line.**
+## Status (2026-07-27): **v0.9.10 + one mid-slice core edit** — milestone 1's first FIVE slices are CLOSED; the **sixth (`oms`) is OPEN**, with `oms/domain`, `oms/application/ports`, the dispatch use case and **the write repository** built, **all six §3.6 gates now enforced** (`singlewriter` landed with its subject), and **five spec edits owed plus the version bump itself**. **Start at `## START HERE` below, not at this line.**
 
 **v0.9.9 (2026-07-27) — the fourth-slice release, and the one that CLOSES `engine/venue`.** The slice built the normalized funding DTO that retired `marketdata`'s `driving.FundingUpdate` placeholder, and produced **three** spec edits — **all silences in the core rather than disagreements with it**, the v0.9.6 shape rather than v0.9.8's. **This is milestone 1's first close containing no code change**, which is what "the code already agreed with the spec, the spec had just never said it" looks like from outside. **Two of the three are a sharper kind of silence and the distinction is the finding worth carrying: the core does not omit them, it states them twice, incompatibly.** §3.5: the **market-data seam was declared twice** — a flat `DataSource{ Subscribe(VenueInstrument) <-chan Envelope }` here and three per-stream methods in §4, for the same pipeline position, with no type satisfying both. **§4's per-stream shape wins and the seam is `MarketDataSource` throughout**, on three grounds — one channel per instrument merges three `SourceID`s and forces the subscriber to re-derive a key the seam could have kept; the per-stream product constraints are **inexpressible** in `Subscribe(VenueInstrument)`; and §7.6's capacity ladder gets spent on a book feed a funding-only consumer never wanted. The tell that §4 was current is structural rather than a preference: **every other line of §3.5's seam block is written as a reference to §4**, while `DataSource` was the one written as an independent definition — and `venue-profiles.md` §3 was **already** writing `MarketDataSource.StreamMark`, which is cheaper evidence than any of the three arguments. §3.5 also: **a `SourceID` MUST refuse an `(instrument, stream)` pair no venue can produce** — §4 marks funding and mark perp-only per stream and §3.5 never carried it across, so a spot funding source validated cleanly, and §3.4 makes `SourceID` the mailbox key, so an impossible source is **a mailbox that exists, can be subscribed to, and never delivers**, indistinguishable downstream from a venue gone quiet. The rule states the **full table including the negative rows** (the private streams and control are *not* product-constrained), because the constraint reads like a market-data property and is not one — §4.2 makes spot a full API family with its own user-data stream, so inferring it would silently unsubscribe half a cash-and-carry trade. §4: **the units discipline that covered money now covers time.** `fixedpoint` puts a money field's dimension in its type; a duration has none, and a venue duration field's unit lives only in its **name** (Bybit's `fundingIntervalHour`) — so an adapter can multiply by `time.Minute`, satisfy the never-`float64` rule completely, and hand §2.4 a 480-minute interval that enumerates a plausible settlement count while **§12's kill-gate carry figure is wrong by a factor of sixty with nothing failing**. That is §10's own v0.9.7 argument applied one layer earlier, where the duration is *created*. A zero is **refused, never defaulted**: it arrives from three situations a fallback answers identically, two are a wiring failure wearing a correct BTC reading's clothes, and the third **absorbs §2.4's C8 flip**. Three code markers now read `[SPEC EDIT LANDED — v0.9.9]`, `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **zero**, ADR §3 gains the **milestone-1 fourth-slice block** (tagless total now **thirty-three**) and the `C8` traceability row gains core §4, `docs` 102 pass, `make ci` green. **No formal-model change; `docs/formal/` is untouched and still at the Cx8 verdict.** Full reasoning with rejected alternatives: decision record **§20** (the slice) and **§21** (the close).
 
@@ -77,7 +77,74 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 23, 2026-07-27)
+## START HERE (updated end of session 24, 2026-07-27)
+
+**Branch `feat/milestone-1-foundation`, tree clean, `make ci` green.** Verify rather than trust
+this sentence: `git status --short` and `git rev-list --left-right --count @{u}...HEAD`.
+
+### Where the work is
+
+**Milestone 1's sixth slice — `oms` — is still OPEN**, and what is left in it is `module.go` and
+the close. What exists now:
+
+| Path | Holds |
+|---|---|
+| `internal/oms/domain/` | §5.3's twelve-state lifecycle + `CanTransition` (30 edges), the fill ledger, §5.1's order intent |
+| `internal/oms/application/ports/` | `Journal`, `OrderPlacer`, `Ack`, **`OrderWriteRepository` + `OrderRecord`**, **`errors.go`** |
+| `internal/oms/application/dispatch.go` | §6 step 6's crash boundary |
+| `internal/oms/infrastructure/driven/` | **NEW — `MemoryOrderWriteRepository`**, §3.6 rule 6's subject, with rule 2's `var _` assertion (the first in the repo) |
+| `tools/lint/singlewriter/` | **NEW — the last deferred gate, now enforced** |
+
+Reasoning with the rejected alternatives: decision record **§26**. §25 stays live for §25b's
+classifier seam and §25c's diagnosed survivor; §24 for §24e's table and §24f's finding.
+
+### The next work
+
+**`internal/oms/module.go`, then the slice closes.** The composition seam has a real decision in
+it this time and `marketdata/module.go` is the precedent: the context constructs its own adapters,
+and a root supplies only what varies between binaries. Note that `singlewriter` now polices `app/`
+roots, so anything a root would have to *name* from `ports` or `driven` is a signal to move the
+type rather than to widen the gate (§26e).
+
+**The slice close owes five markers AND a doc-set version bump** — see below.
+
+### Four things to know before you touch anything
+
+1. **`singlewriter` is live and it polices `application/ports` as well as `infrastructure/driven`.**
+   By position, not by naming a type, so a `TradeWriteRepository` added to `ports/` is covered the
+   day it is declared. `oms/domain` is deliberately outside it (a projection naming the state enum
+   is §5.1's pattern working) and so is `oms/application` (rule 6 forbids *bypassing* the write
+   path, not using it). §26e has all three decisions with their failure directions.
+
+2. **The doc set is v0.9.10 while §3.6's text has moved, deliberately** (§26j). Rule 6 and the
+   gate-status paragraph were rewritten when the gate landed, because leaving the core saying
+   "remains deferred" while it runs in CI is a live contradiction. The version marks a **slice
+   close**; the bump is owed at that close, along with the markers. `build-spec.md`'s status line
+   says this in its first sentence.
+
+3. **`grep -rn "SPEC EDIT OWED" internal/ tools/` now returns FIVE.** Three in `transition.go`, one
+   in `fill.go`, and a new one in `oms/infrastructure/driven/doc.go`: §3.6 rule 3's "contains
+   **exactly** driven/ + driving/" should read as a permitted-children rule, or a context with
+   adapters in one direction has to create an empty package in the other.
+
+4. **The write repository's mutex claim is hand-checked, not in the mutation output** (§26i).
+   `mutate.sh` is line-scoped and removing `Load`'s `Lock`/`defer Unlock` takes two lines. The
+   check: delete both, `TestConcurrentWritesAndReadsAreFreeOfDataRaces` reports three `DATA RACE`s
+   and fails; restore, and it is green.
+
+### Still the user's call, carried forward from session 22
+
+**§3.6 rule 2 is silently unmet in `marketdata`, on both halves** (§24f) — ports flat in
+`application/ports.go`, and no `var _` assertions in `infrastructure/driven/`, in a **closed**
+slice against decision record §7. It now has an in-repo counterexample: `oms` follows the rule on
+both halves, so the inconsistency between the two contexts is visible rather than theoretical.
+
+**Still owed from session 20 and untouched since:** the `venue-profiles.md` verification of the two
+venues' **depth update-ID shapes**, which `venue.BookDelta`'s span design cites.
+
+---
+
+## START HERE (updated end of session 23, 2026-07-27, HISTORICAL)
 
 **Branch `feat/milestone-1-foundation`, tree clean, `make ci` green.** Verify rather than trust
 this sentence: `git status --short` and `git rev-list --left-right --count @{u}...HEAD`.

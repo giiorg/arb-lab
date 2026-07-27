@@ -3420,6 +3420,103 @@ The kills that matter: Place called twice (18), authorization append skipped (16
 
 **No formal-model change** — nothing here touches the fence/takeover/plan composition, so `docs/formal/` stays at the Cx8 verdict.
 
+## §26 — session 24: the write repository, and the last deferred gate expiring on schedule
+
+### §26a — what was built
+
+`internal/oms/application/ports/repository.go`: `OrderRecord` and `OrderWriteRepository` (`ApplyPlanned`, `Load`, `ApplyState`, `ApplyFill`). `internal/oms/application/ports/errors.go`: `ErrOrderUnknown`, `ErrVersionConflict`. `internal/oms/infrastructure/driven/`: `doc.go` and `MemoryOrderWriteRepository`, with §3.6 rule 2's `var _ ports.OrderWriteRepository = (*MemoryOrderWriteRepository)(nil)` — **the first such assertion in the repo**, since `marketdata` has none (§24f). `tools/lint/singlewriter/` with ten testdata fixtures, registered in `cmd/arblab-lint`.
+
+**§3.6 rule 6 and its gate-status paragraph were rewritten in the core**, and the doc-set version deliberately did NOT bump — see §26j.
+
+### §26b — the method names mirror the journal's, and the ONE missing pair is the finding
+
+`Journal.AppendPlanned`/`AppendState` ↔ repository `ApplyPlanned`/`ApplyState`. §6's write path is literally "journal, then apply", so naming the halves alike makes a write to one with no write to the other read as the omission it is at the call site.
+
+`ApplyFill` has no counterpart, and that asymmetry is worth keeping visible rather than smoothing over: there is no `Journal.AppendFill` because §5.3's fill requirement is the harder one — applying a fill, advancing the per-instrument REST recovery cursor and appending journal and outbox events happen in **one transaction** — and that needs a transaction seam no port here declares. It lands with the durable adapter and the fill use case **together**, because a transaction spanning two stores cannot be retrofitted into one of them.
+
+**The memory backing is the MVP's design, not a stub**, and the argument is §7.5's: durability is the journal's job, boot "rebuilds from journal ⋈ venue truth", so a current-state store reconstructed at boot from an append-only log is exactly what the architecture asks for. The scoped absence is that nothing here replays the journal — the repository starts empty, which is right for a process that has not booted reconciliation and wrong for one that skipped it, a distinction the boot sequence owns.
+
+### §26c — the port's sentinels live in `ports/`, and rule 1 forces it
+
+`ErrVersionConflict` in `infrastructure/driven` would mean every use case that wanted to retry an OCC conflict had to import an adapter package — which `hexboundary` refuses — or match on message text, which is the same coupling with nothing checking it. So the error is part of the interface in the literal sense, stated the way `Journal`'s comment states durability: **an implementation that reports a conflict some other way does not satisfy the port, whatever its method set says.**
+
+This is a general rule the repo had not yet needed and will need again: **a port's error contract belongs with the port.** It is also the first concrete cost of §24f's subpackage decision paying off in the right direction — `ports` cannot import `application`, so the sentinel could not have drifted there either.
+
+### §26d — a mutex AND a version, because `Ledger`'s comment named the boundary and this is it
+
+`domain.Ledger` is deliberately unsynchronised and says why: "serialisation is a property of how a write reaches this type, **decided one layer out**". This is that layer, and it takes both halves, which are two different failures:
+
+- **The mutex answers memory safety.** Two goroutines writing one Go map is undefined behaviour.
+- **The version answers lost updates.** §6's writes come from genuinely independent producers (private order stream, executions stream, REST recovery sweep, §6.7 finality timers), and the collision that matters is **invisible to the state set**: two writers reading an order at `Acknowledged` and advancing it to `Canceled` and `PartiallyFilled` are both making a LEGAL transition under `CanTransition`. Only the version notices, and what is lost is not a field but an *event*.
+
+The `Ledger`'s refusal to hold a mutex is therefore not contradicted here. Its point was that a mutex **alone** buys safety from the race detector and not from the defect — which is precisely why this type has both.
+
+**Two ordering decisions inside the methods, each with a rejected alternative:**
+
+- `ApplyState` checks the **version before the legality**. A caller holding a stale version has a stale idea of the state, so the transition it computed may be illegal against what is stored — reporting *that* sends a reader to SM §1's edge table to explain a race. The conflict is the cause; the forbidden edge is its symptom, and only the cause is actionable.
+- `ApplyFill` checks the **version before the dedupe**. The tempting order is the reverse, since a duplicate cannot lose an update and answering `(record, false, nil)` costs nothing arithmetically. Refused on `Ledger.Apply`'s own argument one layer up — that method dedupes *after* the order and instrument checks because "the second copy is exactly where a mapping error becomes visible". A goroutine holding a version nobody else has is the second-writer condition rule 6 exists to prevent, and this is the call that can still see it.
+
+`ApplyState`'s legality check is in the **repository** rather than in the caller, which is the opposite of `Journal`'s choice and for a compatible reason: the journal is a recorder and refuses to hold a second copy of the edge set, while the repository holds the CURRENT state and is therefore the last place that can compare the two. It calls `domain.CanTransition` rather than restating any of it, so there is still one home. A use case that forgot the check would otherwise store a transition no evidence supports, and §7.5 replays it as fact.
+
+### §26e — `singlewriter`'s scope: three decisions, each with a failure direction
+
+1. **The port is policed as well as the adapter.** Policing only `infrastructure/driven` looks stricter than it is: depending on the abstraction is the *recommended* way to depend on anything, so the gate would forbid the shape nobody writes and permit the shape everybody does — a context holding `ports.OrderWriteRepository` has full write authority and a clean run.
+2. **Position, not a marker.** A `//arblab:writerepository` tag is more precise and fails in the wrong direction: the repository added next year without the tag is silently unpoliced. A package tree covers a `TradeWriteRepository` the day it is declared, by nobody remembering anything.
+3. **The composition roots are policed**, though rule 6 says "other contexts" and a root is not one. Each context wires its own adapters in `module.go` (the `marketdata` precedent), so a root never needs to *name* one; and a root that may hold a repository may pass it to another context, which needs **no import at all** to accept it. If a root ever does need a type from these packages, the answer is to move the type, not to widen the gate.
+
+**`oms/domain` is deliberately NOT policed**, and **`oms/application` is not either.** The domain: §5.1 makes `audit` and `reconcile` projections over the journal, and denying a read model the state enum forces a second copy of SM §1's twelve states — worse than the import. The use cases: rule 6 forbids **bypassing** the write path, not using it, and a use case *is* the journal-then-apply sequence. That distinction is what settles the whole scope question — `ports` and `driven` are the two ways to write order state without going through it.
+
+**The limit, stated rather than left to be found:** the gate reads declared import edges, and Go's interfaces are structural, so a determined context can satisfy `OrderWriteRepository`, or hand its own journal to `NewDispatcher`, without naming a policed package. What the gate makes impossible is doing it **by accident** and doing it **invisibly** — an import is the short way round and is what a hurried change reaches for.
+
+**One implementation detail that is a real difference from the sibling gates:** the module root is resolved from the **imported** path, not from the analyzed one. `hexboundary` and `kernelpurity` split the analyzed package's path on `/internal/`, which is sound for them because their rules only apply to packages under `internal/` by construction. This rule applies to *every* importer there is, so resolving from the analyzed package would answer "not ours" for anything under `cmd/` and leave a binary free to import the write repository with no diagnostic anywhere. `testdata` carries `cmd/arblab` for exactly that. There is deliberately **no** second check that the importer shares the resolved root: Go's internal-visibility rule already guarantees it, and an unreachable branch no fixture can exercise is the shape this repo has paid for twice.
+
+### §26f — the positive control has to isolate the gate, which rule 1's did not have to
+
+§3.6 already records that a clean gate run is not evidence. This session adds the next turn of it: **a probe two gates can see is not evidence about either.** `marketdata/application` importing `oms/infrastructure/driven` fires `singlewriter` and `hexboundary` together — it shows something objected. The isolating probe is a context **root** (`internal/marketdata`) importing `oms/application/ports`: rule 1 is silent because the importer is not an inward layer, and rule 6 reports it alone. Both probes were run against the real tree, not only against `testdata`.
+
+That the isolating fixture is also the realistic accident — a context reaching for order state to *read* it — is what makes the gate worth its weight rather than a formality.
+
+### §26g — the fixture-collapse checklist, run before the mutations; it changed four fixtures
+
+- **Two consecutive advances**, not one. With a single `ApplyState`, `version++` and `version = 2` are the same implementation and no test can tell them apart.
+- **Three version-conflict cases**, not one: behind, ahead, and the zero a caller that never loaded produces. With only the zero, `<` and `!=` agree — and `<` admits every writer that is behind, which is the lost update.
+- **Three fills of different sizes** summing to a total that is neither any of them nor twice any of them, so "sums every fill", "keeps the last" and "doubles the first" give three different answers.
+- **The duplicate-order fixture is a VALID order** (§25d's item), and the second case repeats the id on a **different instrument** — the repeat that silently attaches a new order's fills to the old order's instrument, where both quantities stay plausible.
+- **The invalid-order table is wrong in a different field per case, reaching a different sentinel each time**, so a repository that refused everything for one reason cannot pass. This paid off immediately: the mutation that skips `o.Validate()` is caught **only** by the bad-`Side` case, because the other two are still refused by `Ledger.Register`.
+- A sixth the checklist did not name: **every fixture used by a goroutine is built before the goroutine starts**, because the helpers call `t.Fatalf` and `t.Fatalf` off the test goroutine ends the wrong goroutine — turning a fixture bug into a hang or a silent pass.
+
+### §26h — the survivor was a CODE smell, not a test gap, and fixing the code killed it
+
+`snapshot`'s two error checks — one after `ledger.Cumulative`, one after `ledger.FillCount` — **both survived**, and the diagnosis is the interesting part. They are not two claims: each accessor fails for exactly one reason (the ledger does not hold the order), so the two checks are **two guards on one fact** and neither can be deleted while the other still catches it. Individually equivalent, jointly necessary — which is the "second copy of one rule" shape this repo has paid for before, arriving in the form of a redundant guard rather than a redundant validation.
+
+The fix was to the code, not to the suite: one `errors.Join(cumulativeErr, fillsErr)` branch. It is necessary, and it is caught.
+
+Reaching it at all needed **`orders_internal_test.go`**, on §24g's precedent (`domain.validatePrice`'s fallthrough): the branch is unreachable through the exported API, because `ApplyPlanned` writes the record and registers the ledger entry under one lock, so no id can be in one store and not the other. An in-package test constructs exactly that impossible state — plus the positive control that a consistently-built record snapshots fine, without which a `snapshot` that failed for *every* record would pass the first test perfectly.
+
+**Why the check is kept rather than deleted as dead code:** the invariant that makes it unreachable lives eight lines away and is one edit from being false — a delete path, a §7.5 replay that rebuilds records without re-registering fills, a second constructor. The check turns that edit into a refusal naming the order, instead of a snapshot reporting a cumulative quantity of zero for an order that has filled.
+
+### §26i — mutations: 22 aimed, 20 caught, 2 NOBUILD re-aimed, 2 SURVIVED → one code change → caught
+
+Sixteen on the repository, six on the analyzer (`MUTATE_MODULE=tools/lint`). The kills that matter: the record never stored, a new record starting dispatch-authorized, `ApplyState` checking the edge against a **constant** instead of the stored state, both directions of the version comparison (`<` and `>`), `ApplyFill` deduping before it checks the version, a duplicate fill bumping the version, and — on the analyzer — `within()` losing its equality arm, `within()` matching a sibling by bare prefix (`internal/omsx`), and the module root resolved from the importer instead of the import.
+
+Two `NOBUILD!!` were re-aimed rather than counted, both the same Go rule as §25f's: `if !applied {` → `if false {` orphans `applied`. The form that works keeps the variable in the condition (`if !applied && false`).
+
+**The mutex is checked by hand rather than by the harness**, because `mutate.sh` is line-scoped and the claim needs a pair of lines removed: deleting `Load`'s `Lock`/`defer Unlock` makes `TestConcurrentWritesAndReadsAreFreeOfDataRaces` report three `DATA RACE`s and fail, and restoring it makes the same run green. Recorded because the next person will look for it in the harness output and not find it.
+
+### §26j — what is owed: FIVE markers now, and a version bump at slice close
+
+`grep -rn "SPEC EDIT OWED" internal/ tools/` returns **five**: the four from §25g plus a new one in `oms/infrastructure/driven/doc.go`. **§3.6 rule 3** ("infrastructure/ contains **exactly** driven/ + driving/") admits two readings — both directories must exist, or no third kind may — and this context takes the second, because oms's inbound adapters are §6's private order and execution streams and creating an empty `driving/` to satisfy a literal reading is the same mistake as a lint over an empty tree. Owed: state it as a permitted-children rule.
+
+**The doc-set version stays at v0.9.10 while §3.6's text moved**, which is a deliberate and reversible call. Leaving the core saying rule 6 "remains deferred" while the gate runs in CI is a live contradiction in the normative document; bumping the version mid-slice would spend the marker this project uses for slice closes, and touches five doc headers plus the **generated** `tutorial.ka.md`. So the text landed, the version lags, and the status line at the top of `build-spec.md` says so in the first sentence. **The bump belongs to the sixth slice's close, together with the five markers.**
+
+**Still the user's call, unchanged:** §3.6 rule 2 silently unmet in `marketdata` (§24f). It now has an in-repo counterexample — `oms/infrastructure/driven` carries the `var _` assertion the rule asks for — so the inconsistency between the two contexts is visible rather than theoretical.
+
+**No formal-model change** — nothing here touches the fence/takeover/plan composition, so `docs/formal/` stays at the Cx8 verdict.
+
+## RESUME HERE — updated end of session 24
+
+**SESSION 24 UPDATE — READ THIS FIRST.** The **sixth slice (`oms`) is still OPEN**, and the work left in it is `module.go` and the close. **`singlewriter` has LANDED** — the last deferred gate, in the same session as its subject — and §3.6 rule 6 plus the gate-status paragraph were **rewritten in the core** to match, while the **doc set stays at v0.9.10 deliberately** (§26j: the version marks a slice close; the bump is owed at that close). `grep -rn "SPEC EDIT OWED" internal/ tools/` now returns **FIVE** — the fourth from §25g plus §3.6 rule 3's permitted-children reading, in `driven/doc.go`. `make ci` green. 22 mutations, 20 caught, 2 NOBUILD re-aimed, **2 SURVIVED and the fix was to the CODE** (§26h — two guards on one fact; they are now one `errors.Join` branch, which is caught). The mutex claim is hand-checked, not in the harness output (§26i). Still the user's call: **§3.6 rule 2 in `marketdata`** (§24f), which now has an in-repo counterexample. The reasoning is **§26**; §25 stays live for §25b's classifier seam and §25c's diagnosed survivor; §24 stays live for §24e's table and §24f's finding.
+
 ## RESUME HERE — updated end of session 23
 
 **SESSION 23 UPDATE — READ THIS FIRST.** The **sixth slice (`oms`) is still OPEN**. **The dispatch use case is BUILT** (`oms/application/dispatch.go`) from §24e, which held up — one structural deviation, §25b, and it is worth reading before touching the classifier. `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **FOUR**, unchanged and correct mid-slice. **`singlewriter` has STILL not expired**: `ports.Journal` is a write-ahead log, not a write repository, and there is no `infrastructure/driven/`. Doc set is **still v0.9.10** and correctly so. `make ci` green; 21 mutations, 19 caught, **1 SURVIVED and diagnosed in §25c — it is equivalent by construction and its compensating control is a gate, verified to bite.** Still the user's call: **§3.6 rule 2 silently unmet in `marketdata`** (§24f). Next: `infrastructure/driven` with the write repository, **and `singlewriter` in that same session**. The reasoning is **§25**; §24 stays live for §24e's table and §24f's finding.
