@@ -222,6 +222,26 @@ func (b Budget) AssessData(w Watermark, serverNow time.Time) (Freshness, error) 
 //
 // False means there is no later transition: an observation already blind has
 // nowhere further to age, so there is nothing to arm.
+//
+// # The instant is one tick PAST the bound, and that is not a rounding detail
+//
+// At is inclusive-fresh on purpose — an observation exactly at MaxAge is still
+// FreshnessFresh, because a budget is a permission to trust up to and including
+// its bound. So the first instant at which the verdict actually DIFFERS is one
+// tick after it, and returning the bound itself would name an instant where
+// nothing has changed.
+//
+// The cost of getting this wrong is not a wasted wakeup. A caller arms a timer
+// at the returned instant, re-assesses when it fires, gets the same verdict,
+// and arms again — at the same instant, which is already now. That is a SPIN:
+// a timer firing forever while the observation stays marked fresh and the
+// ladder never reaches the rung that fires §5.2's mark_blind_action. The feed
+// is dead, the process is busy, and every rung of the escalation §3.4 built
+// this timer for is unreachable.
+//
+// Found by application/FundingIngest rather than by review: the boundary is
+// invisible from inside this package, where At and NextTransition are each
+// self-consistent and only their COMPOSITION is wrong.
 func (b Budget) NextTransition(w Watermark, now time.Time) (time.Time, bool) {
 	f, err := b.Assess(w, now)
 	if err != nil {
@@ -229,11 +249,19 @@ func (b Budget) NextTransition(w Watermark, now time.Time) (time.Time, bool) {
 	}
 	switch f {
 	case FreshnessFresh:
-		return w.RecvTime.Add(b.MaxAge), true
+		return w.RecvTime.Add(b.MaxAge + tick), true
 	case FreshnessStale:
-		return w.RecvTime.Add(b.Blind), true
+		return w.RecvTime.Add(b.Blind + tick), true
 	case FreshnessBlind, FreshnessUnknown:
 		return time.Time{}, false
 	}
 	return time.Time{}, false
 }
+
+// tick is the smallest interval time.Time distinguishes, and therefore the
+// smallest step that can carry an age past an inclusive bound.
+//
+// Named rather than written as a literal 1 so that the reason it is here is
+// attached to it: this is "the next representable instant", not "a small
+// margin", and a later reader tuning it as a margin would reintroduce the spin.
+const tick = time.Nanosecond

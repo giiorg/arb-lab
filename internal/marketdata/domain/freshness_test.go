@@ -278,27 +278,34 @@ func TestBudgetNextTransition(t *testing.T) {
 			// but the assertion below also checks it is NOT RecvTime+Blind —
 			// otherwise a mutant returning the wrong bound passes whenever the
 			// two happen to be computed from the same field.
-			name:   "from fresh, next transition is the stale boundary",
+			// One tick PAST the bound, not the bound: At is inclusive-fresh, so
+			// the bound itself is an instant where nothing has changed.
+			name:   "from fresh, next transition is just past the stale boundary",
 			now:    base.Add(time.Second),
-			want:   base.Add(budget.MaxAge),
+			want:   base.Add(budget.MaxAge + time.Nanosecond),
 			wantOK: true,
 		},
 		{
-			name:   "from fresh at EXACTLY the stale boundary, still the stale boundary",
+			// Standing AT the bound, still fresh, so the answer is the very
+			// next instant — one tick away, never zero away. This case used to
+			// assert the bound itself, which is now: a caller arming a timer
+			// for "now" fires immediately, re-derives the same verdict and
+			// arms again. The test named the spin and called it correct.
+			name:   "from fresh at EXACTLY the stale boundary, the very next instant",
 			now:    base.Add(budget.MaxAge),
-			want:   base.Add(budget.MaxAge),
+			want:   base.Add(budget.MaxAge + time.Nanosecond),
 			wantOK: true,
 		},
 		{
-			name:   "from stale, next transition is the blind boundary",
+			name:   "from stale, next transition is just past the blind boundary",
 			now:    base.Add(budget.MaxAge + time.Nanosecond),
-			want:   base.Add(budget.Blind),
+			want:   base.Add(budget.Blind + time.Nanosecond),
 			wantOK: true,
 		},
 		{
-			name:   "from stale at EXACTLY the blind boundary, still the blind boundary",
+			name:   "from stale at EXACTLY the blind boundary, the very next instant",
 			now:    base.Add(budget.Blind),
-			want:   base.Add(budget.Blind),
+			want:   base.Add(budget.Blind + time.Nanosecond),
 			wantOK: true,
 		},
 		{
@@ -328,9 +335,17 @@ func TestBudgetNextTransition(t *testing.T) {
 				t.Errorf("NextTransition = %s, want %s", got, c.want)
 			}
 			// The two bounds are distinct instants, so naming the wrong one is
-			// caught rather than coincidentally equal.
-			if other := base.Add(budget.MaxAge + budget.Blind - c.want.Sub(base)); got.Equal(other) && !c.want.Equal(other) {
-				t.Errorf("NextTransition returned the other bound, %s", got)
+			// caught rather than coincidentally equal. Stated as "not the other
+			// rung's answer" rather than as arithmetic on the wanted value,
+			// which stopped being readable once the answers moved a tick off
+			// the bounds they are derived from.
+			stale := base.Add(budget.MaxAge + time.Nanosecond)
+			blind := base.Add(budget.Blind + time.Nanosecond)
+			if other := stale; c.want.Equal(blind) && got.Equal(other) {
+				t.Errorf("NextTransition returned the stale rung, %s, from a stale observation", got)
+			}
+			if other := blind; c.want.Equal(stale) && got.Equal(other) {
+				t.Errorf("NextTransition returned the blind rung, %s, from a fresh observation", got)
 			}
 		})
 	}
@@ -369,6 +384,20 @@ func TestNextTransitionAgreesWithAssess(t *testing.T) {
 		// changed verdict at that instant.
 		if got, _ := budget.Assess(w, at.Add(-time.Nanosecond)); got != before {
 			t.Errorf("from %s at %s: verdict already %s one ns before the named transition", before, now, got)
+		}
+		// AT the named instant — the case this test omitted, and the only one
+		// that matters, because it is the instant a caller's timer fires.
+		//
+		// The two neighbours alone pass against an implementation naming the
+		// inclusive bound itself: MaxAge-1ns is Fresh (unchanged, correct) and
+		// MaxAge+1ns is Stale (degraded, correct), while MaxAge — where At is
+		// inclusive-fresh and the verdict has NOT moved — was never asked. A
+		// caller re-arming from that instant re-derives the same verdict and
+		// re-arms at the same instant: a spin, with the freshness ladder frozen
+		// on a dead feed. Found from application/FundingIngest; the bracket was
+		// written to catch a shared off-by-one and missed by exactly one point.
+		if got, _ := budget.Assess(w, at); got >= before {
+			t.Errorf("from %s at %s: verdict still %s AT the named transition — a caller arming here spins", before, now, got)
 		}
 		if got, _ := budget.Assess(w, at.Add(time.Nanosecond)); got >= before {
 			t.Errorf("from %s at %s: verdict still %s just past the named transition", before, now, got)
