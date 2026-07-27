@@ -31,6 +31,38 @@ var (
 	// than an order that moves anywhere.
 	ErrOrderStateUnhandled = errors.New("oms: order state has no transition-table entry")
 
+	// ErrSideInvalid, ErrOrderTypeInvalid and ErrTimeInForceInvalid report an
+	// order attribute that is neither declared value.
+	//
+	// One sentinel each rather than one shared "invalid order field", because the
+	// three send a reader to different places: a bad side is a mapping bug in an
+	// adapter's direction table, a bad type is usually a venue order kind nothing
+	// has taught us to read, and a bad TIF is the field venues spell most
+	// differently. Each is also, unlike OrderState, a single sentinel covering
+	// both the empty and the misspelt value — see Side.Validate for why the
+	// two-way split OrderState takes does not pay for itself on a two-member set.
+	ErrSideInvalid        = errors.New("oms: order side is not a declared value")
+	ErrOrderTypeInvalid   = errors.New("oms: order type is not a declared value")
+	ErrTimeInForceInvalid = errors.New("oms: order time in force is not a declared value")
+
+	// ErrOrderTypeUnhandled reports a DECLARED order type that a decision site
+	// has no case for — ErrOrderStateUnhandled's counterpart one type over, and
+	// it exists for the same reason: it makes the fallthrough of an exhaustive
+	// switch observable, so the group that switch does NOT report on stays
+	// testable.
+	ErrOrderTypeUnhandled = errors.New("oms: order type has no case at this decision site")
+
+	// ErrMarketOrderHasLimitPrice reports a market order carrying a price.
+	//
+	// The refusal runs in the direction nobody writes. "A limit order needs a
+	// price" is the check that gets written and it fails loudly at the venue
+	// anyway; this one fails silently everywhere. §6 step 4 sizes the naked-leg
+	// price gap against the price the order is bounded by, so a market order with
+	// a limit price presents a bound the venue ignores — the order fills through
+	// it, and the slippage budget reconciles against a number that never bound
+	// anything.
+	ErrMarketOrderHasLimitPrice = errors.New("oms: market order carries a limit price")
+
 	// ErrTransitionForbidden reports an order state change that is not an edge of
 	// SM §1.
 	//
