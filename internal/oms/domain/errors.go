@@ -105,15 +105,23 @@ var (
 	// perfectly hedged while each leg is individually wrong.
 	ErrFillInstrumentMismatch = errors.New("oms: fill instrument is not the order's instrument")
 
-	// ErrFillAssetMismatch reports fills on one order whose quantity assets
-	// disagree.
+	// ErrFillTimestampUnset reports a fill with no venue execution instant.
 	//
-	// fixedpoint's asset tag is a runtime field rather than a compile-time type
-	// (§3.6 rule 4 — dynamic venue assets cannot be phantom-typed), so this is
-	// where the question gets asked. Summing a BTC quantity and an ETH quantity
-	// into one cumulative execution is a number with no unit that still compares
-	// against a target quantity.
-	ErrFillAssetMismatch = errors.New("oms: fills on one order disagree on asset")
+	// The zero time is about fifty-five years ago, which is the reason it is
+	// refused rather than tolerated as "unknown": every consumer that windows on
+	// it — §5.1's funding-settlement keys, the §6 step 9 PnL decomposition,
+	// §7.5's reconcile-only boot ordering fills against a recovery cursor —
+	// sorts it before every real record and inside every lookback. It is
+	// therefore not dropped from a window; it is included in all of them.
+	//
+	// (There is deliberately NO sentinel here for fills on one order whose
+	// quantity assets disagree. fixedpoint.Quantity.Add already refuses that,
+	// and a second check would be a second copy of one rule — the shape that
+	// produced a surviving mutant in marketdata, where a helper validated what
+	// its caller had already validated and no test could tell which check fired.
+	// The Ledger wraps fixedpoint's refusal with the order and the execution
+	// instead.)
+	ErrFillTimestampUnset = errors.New("oms: fill carries no execution timestamp")
 
 	// ErrDuplicateOrder reports registering a ClientOrderID the ledger already
 	// holds.
@@ -128,4 +136,16 @@ var (
 
 	// ErrOrderUnset reports an order registered with no client order ID.
 	ErrOrderUnset = errors.New("oms: order carries no client order ID")
+
+	// ErrOrderedQuantityNotPositive reports an order registered for zero size or
+	// less.
+	//
+	// Zero is the reading that would otherwise go through, and it inverts the
+	// §6.7 classification rather than merely being odd: an order for nothing has
+	// no remaining executable quantity from the instant it is registered, so the
+	// classifier reads its residual as DETERMINED and its possible-delta
+	// interval as the point zero — while the venue holds a live order whose size
+	// nobody recorded. The compensating trade is then sized against a delta that
+	// omits it.
+	ErrOrderedQuantityNotPositive = errors.New("oms: ordered quantity is not positive")
 )
