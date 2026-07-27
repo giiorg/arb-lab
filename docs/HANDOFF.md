@@ -73,7 +73,70 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 15, 2026-07-27)
+## START HERE (updated end of session 16, 2026-07-27)
+
+**Branch `feat/milestone-1-foundation`, tree clean, `make ci` green on Go 1.26.5, pushed and in
+sync.** Verify rather than trust this sentence: `git rev-list --left-right --count @{u}...HEAD`
+should print `0 0`. No PR — deliberate. The head commit is not named here on purpose: a paragraph
+citing its own hash is stale the moment the commit containing it is written.
+
+### Where the work is
+
+Milestone 1's **third slice** is `marketdata`, the first bounded context, scoped to the
+**funding-rate path only**. **All of its code is now built:**
+
+| Piece | State |
+|---|---|
+| `internal/marketdata/domain/` | **Done** (session 14) |
+| `tools/lint/{hexboundary,exhaustiveswitch}` | **Done** (session 15) — analyzer roster is **5 of 6** |
+| `internal/marketdata/application/` | **Done** (session 15) |
+| `internal/marketdata/infrastructure/{driven,driving}` | **Done** (session 16) |
+| `internal/marketdata/module.go` | **Done** (session 16) |
+| **The slice CLOSE** | **OWED — this is the next work, and the user approved running it in full** |
+
+### Do this next — the order matters, and it does NOT start with a doc edit
+
+The full owed list, with every decision and its rejected alternatives, is **decision record §18h**.
+Summarised:
+
+1. **First, a CODE fix (§18f).** The reading pass found a real **spec violation**, not an ambiguity.
+   §3.5 (line 242) requires a dispatched envelope to carry the `AcceptOrdinal` of the raw input that
+   triggered it — *causal traceability* — and `driven.LanePublisher` publishes with zero, so a
+   published snapshot cannot be traced back to the input that produced it. The fix is designed in
+   full (a named `application.AcceptOrdinal`, a `FundingSnapshot.Trigger`, `Ingest` refusing a zero,
+   and **zero meaning timer-triggered** — because §3.4's silence timer produces the one envelope
+   whose entire news is that *nothing arrived*, a case §3.5 has no rule for). It was started and
+   **deliberately reverted** at a clean commit rather than left half-applied.
+2. **Then the spec edits**, so the spec describes what the code does: five `[SPEC EDIT OWED]`
+   markers plus the two answered questions below, as `build-spec.md` **v0.9.8**.
+3. **Then the release checklist** (below): five stamps, ADR §3 block, marker flip, i18n re-assemble,
+   `cd docs && bun test`, `make ci`.
+
+**The exact edit sites are already located** and recorded in §18h, so they need not be re-found.
+
+### The two spec questions are ANSWERED — do not re-ask them
+
+The user decided both in session 16 (reasoning and rejected alternatives: decision record §18g).
+
+- **`Age` vs `DataAge` → one budget, two measurements.** §3.4's per-venue budget is per *data
+  class*, applied to both the transport age and the venue-side data age, reported separately and
+  reduced by minimum. This is what the code already does.
+- **§3.2 vs §3.3 on `MarketView` → §3.3 wins, fix §3.2.** `marketdata` publishes normalized,
+  freshness-stamped observations; `engine/state` translates into the strategy-owned `MarketView`.
+
+### The session-16 finding worth carrying, because it is about method
+
+**A clean gate run proves nothing, and the obvious positive control for `hexboundary` does not
+work.** Importing `infrastructure/` from `application/` is an **import cycle**, so the type-checker
+refuses before the analyzer runs. Every infrastructure package in a context imports `application` or
+`domain`, so *within one context Go's own no-cycles rule already covers most of rule 1*. The probe
+that works is a package under `infrastructure/` importing **only `domain`** — no cycle, and the gate
+objects with exit 3. Where rule 1 earns its place is the edge Go does not catch: `engine/`, and
+another context's infrastructure.
+
+---
+
+## START HERE (updated end of session 15, 2026-07-27, HISTORICAL)
 
 **Branch `feat/milestone-1-foundation`, PUSHED and in sync (`0 0`), tree clean, `make ci` green on
 Go 1.26.5. No PR — deliberate; open one only if asked.** Verify rather than trust this sentence:

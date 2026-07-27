@@ -2833,6 +2833,101 @@ covered while the fixture never put the code in a state where they do anything. 
 reaches it is an observation arriving *already blind*. The fourth: nothing tested that `Ingest`
 refuses an invalid observation, because every other fixture is a valid one.
 
+## §18 — session 16: `marketdata/infrastructure` + `module.go`, and the reading pass that found a real violation
+
+Commit `c695cd2`. The slice's **code** is complete: `domain/` + `application/` + `infrastructure/{driven,driving}` + `module.go`. `make ci` green, 18 mutations / 18 caught, `hexboundary` shown to bite. **The slice is NOT closed** — see §18f for exactly what is owed.
+
+### §18a — `driven/`: two adapters, and what each one's shape argues
+
+**`ConfigBudgets` over `platform/config`.** `FreshnessConfig{Funding map[ids.Venue]BudgetSpec}`, tagged `config:"hot"`, with `BudgetSpec.Validate` delegating to `domain.Budget.Validate` rather than restating "MaxAge strictly below Blind".
+
+Four decisions, each with its rejected alternative:
+
+- **The section is scoped to `funding`, not named `freshness`.** §3.4 is explicit that freshness is per-data-class. A single map would invite one number for both, and the number that is right for funding is catastrophic for a book. *Rejected:* one `freshness` map with a per-class sub-key — same hazard, one level deeper.
+- **The map is `config:"hot"`, and that tag is load-bearing rather than decorative.** `platform/config` treats a **key-set change as structural**, refused outright unless tagged. Without the tag, onboarding a venue or widening a budget during a degrading feed needs a process restart and *nothing in the code says so*. The test that proves the tag is present is `TestConfigBudgetsSeesAVenueAddedByReload`.
+- **Validation sorts the map keys.** Go randomises map iteration, so a validator reporting "the first bad entry" names a different venue on different runs — two boot logs from one bad file that disagree about what is wrong with it. *Rejected:* reporting all of them (a config refusal an operator reads is better as one name than as a list they must diff).
+- **An empty section is `ErrNoVenues`, refused at load.** *Rejected:* accepting it as deny-everything — safe in effect, but it presents as a total market-data outage and sends an operator to the exchange status page, which is `application.ErrNoBudget`'s own recorded argument one layer in.
+
+**`LanePublisher` over the §3.4 market-data lane.** Two decisions worth carrying:
+
+- **The probe.** `Publish` validates a **copy** of the envelope with both sequence fields forced to 1, then discards the copy. This reuses `events.Envelope.Validate` *in full* — so a required field added to `Envelope` next year is caught here — without stamping a replay key this layer has no authority to mint. *Rejected:* restating the field list (goes stale silently); *rejected:* calling `Validate` and tolerating the two sequence sentinels via `errors.Is` (`Validate` returns on first failure, so an envelope missing both a sequence *and* `RecvTime` would be let through — order-dependent and wrong).
+- **Two checks that look redundant and are not.** `SourceTime` is **optional** on an envelope (not every venue message carries one) and **required** by `domain.Watermark` (an observation with no venue stamp cannot answer `DataAge`, the venue-side-stall detector). That single asymmetry is what makes both load-bearing. The tests assert **sentinels**, not `err != nil`, because otherwise deleting either check looks identical — and the discriminating case is a missing `RecvTime`: the probe gives `events.ErrRecvTimeUnset`, the observation check gives `domain.ErrWatermarkUnset`.
+
+### §18b — `driving/`: the envelope is authoritative for provenance
+
+`FundingDispatch.Deliver(events.Envelope)` + `Timer(clock.TimerID)`, and `FundingUpdate` — the normalized funding payload, **carrying no provenance and no instrument**.
+
+- **Provenance from the envelope, venue reading from the payload, neither stated twice.** §4's `StreamFunding` comment lists "source, venueSeq" as payload contents, which are *also* `Envelope` fields §3.5 defines for every stream. Read literally it asks for both copies with nothing saying which wins. Removing the redundancy leaves `Deliver` with no reconciliation to get wrong — the inverse of `ids.VenueInstrument`'s "a redundant encoding is safe only while something rejects the disagreement".
+- **The instrument comes from `Source`, which is the mailbox key.** A payload naming a different instrument is a state no feed can produce and every adapter would otherwise have to check.
+- **The stream guard checks `StreamFunding`, not the lane.** The lane check would pass: mark and book ride the same market-data lane. The fixture proving the difference uses `StreamMark` — a control-lane fixture alone would make "is it funding" and "is it on my lane" the same predicate.
+- **`Deliver` validates the envelope in full, sequence numbers included.** What reaches a context handler is post-dispatch. An observation accepted with no `IngressSeq` is not merely missing from a replay — it becomes the held reading the *next* observation's supersede check compares against, so an unreplayable envelope silently changes what a replay accepts.
+- **No `Handles(TimerID) bool`.** *Rejected deliberately:* the membership test already exists once, inside `FundingIngest`'s armed map, and this package cannot see it. A second test written from the ID prefix would copy a naming rule that lives in `application/`, and the two would agree until somebody changed one. A foreign ID returns `application.ErrUnknownTimer`, which a dispatcher can branch on; what a dispatcher should *do* with it is a policy for a caller that does not exist yet.
+- **`FundingUpdate` is declared in `driving/` because `engine/venue` does not exist.** It *is* the contract until then. When `engine/venue` lands, the translation is one function in this package and `domain/`/`application/` are untouched — which is the property §3.6 rule 1 exists to protect.
+
+### §18c — `module.go`: the composition seam adds no refusals of its own
+
+`Deps{Clock, Config, Lane}` → `Module{Funding}`. It contributes **order, not validation**: every dependency already has exactly one constructor that owns its refusal, and a nil check here would be the copy that drifts. The consequence a root can rely on: an error from `New` is one of the constructors' sentinels, so branching on `driven.ErrStoreNil` or `application.ErrClockNil` works directly.
+
+*Rejected:* wiring in `app/` instead. What varies between §11's binaries is what the store and lane **are**; which adapter satisfies which port does **not** vary, and spreading it across four roots makes it four copies of one fact — while the backtest's parity claim rests on the wiring being the same wiring.
+
+`Module` has **one field**, so the deferred book/mark paths are visible in the type rather than as a nil to check.
+
+### §18d — the `hexboundary` positive control, and why the obvious probe fails
+
+A clean gate run proves nothing. Shown to bite: **exit 3**, with the named diagnostic, then clean again at exit 0.
+
+**The obvious probe does not work, and that is worth knowing.** Importing `infrastructure/driven` from `application/` is an **import cycle** — the type-checker refuses first and the analyzer never runs. Every infrastructure package here imports `application` or `domain`, so within one context Go's own no-cycles rule already covers most of rule 1. The probe that works is a package under `infrastructure/` importing **only `domain`**, imported from `application/`: no cycle, and the gate objects. **Where rule 1 earns its place is the edge Go does not catch** — `engine/`, and another context's infrastructure.
+
+### §18e — mutations: 18 run, 18 caught
+
+Re-aimed **two `NOBUILD!!`** (both mine: substituting an undefined helper, and orphaning a variable by returning a constant instead of using it) and **one `NO-OP!!`** (line numbers taken from a `grep -n` on a *pre-gofmt* file). All three are the harness working as designed.
+
+The mutations that mattered: the stream guard weakened to a lane check (caught, 3 tests); priority derived from the freshness verdict (caught); the adapter minting its own sequence numbers (caught); each of the publisher's two checks disabled independently (caught, and by *different* tests, which is what proves neither is vacuous); sorted-key validation replaced by map order (caught) and by reverse order (caught — two separate claims, stability and which-one-is-named).
+
+### §18f — THE READING PASS, and the one finding that is a real violation
+
+Three claims were marked `[SPEC EDIT OWED]` in code. **The reading pass then found the first one is not an ambiguity at all — the code violates a rule the spec already states.**
+
+**§3.5, line 242, states it outright:** *"the **dispatched** envelope — a reconstructed snapshot for book streams — carries the `AcceptOrdinal` of the delta that triggered it (causal traceability)"*. The parenthetical is an example; the rule is general. **`LanePublisher` publishes with `AcceptOrdinal == 0`, so a published `FundingSnapshot` cannot be traced back to the raw input that produced it.** The port signature is what makes it unimplementable: `FundingPublisher.Publish(FundingSnapshot)` carries no envelope context, and `ports.go`'s argument for that is about **`IngressSeq`** — the replay key, which this layer must not *invent* — while `AcceptOrdinal` is **inherited**, not invented, and `driving/` has it in hand.
+
+**The fix, designed but NOT YET APPLIED** (the edit was reverted mid-flight; the tree is at `c695cd2`):
+
+- `application.AcceptOrdinal uint64` — a **named type**, because `VenueSeq` and `AcceptOrdinal` are both `uint64`, mean entirely different things, and a call site crossing them would otherwise compile. Declared in `application/` rather than imported from `platform/events`, per that layer's rule about not taking the transport's types; `driving/` converts.
+- `FundingSnapshot.Trigger AcceptOrdinal`, with `Ingest(obs, trigger)` **refusing a zero** — which is what makes zero mean something rather than mean "somebody forgot".
+- **Zero = timer-triggered.** §3.5 states the inheritance rule for envelopes derived from raw inputs and has **no case for one derived from the ABSENCE of an input**, which is exactly what §3.4's silence timer produces — the one envelope on the lane whose entire news is that nothing arrived. *Rejected, and it is what an implementation with nothing to put there would reach for:* reusing the last input's ordinal. That makes the capture log say one raw input produced two dispatched envelopes, so a replay reconciling dispatched envelopes against raw inputs reports a phantom duplicate and finds nothing wrong with the feed.
+- `LanePublisher` sets `env.AcceptOrdinal = snap.Trigger`; the probe still forces both fields, since a timer-triggered snapshot legitimately has zero.
+
+**So the §3.5 edit owed is a SCOPING one, not a new rule:** the inheritance requirement is scoped to input-triggered envelopes, timer-triggered ones carry no ordinal, and `IngressSeq` is never stamped by a producer — an envelope resting on a §3.4 mailbox is **pre-dispatch**, so `Envelope.Validate` cannot be a producer-side check.
+
+The other two markers stand as written:
+
+- **Priority may not depend on content** (`driven/publisher.go`). §3.5 gives `Prio` a direction and never says a source's priority must be constant. Escalating a `FreshnessBlind` snapshot — tempting, since it fires §5.2's `mark_blind_action` — reorders within a `SourceID` where §3.5 makes `VenueSeq` authoritative, so **a consumer sees a degrading feed recover**.
+- **The envelope is authoritative for provenance** (`driving/funding.go`), against §4's literal `StreamFunding` field list.
+
+### §18g — the two spec questions, ANSWERED BY THE USER (session 16)
+
+Both were put to the user and decided. **Do not reopen; do not re-ask.**
+
+1. **`Age` vs `DataAge` → one budget, two measurements.** §3.4's per-venue budget is per **data class**, and it applies to *both* the transport age (`Clock.Now`, from `RecvTime`) and the venue-side data age (`Clock.ServerNow(venue)`, from `SourceTime`), reported separately and reduced by minimum for a trade decision. *Rejected:* a second independent budget — it buys a looser tolerance for a venue whose own clock is known to lag, at the cost of a config field per venue and a second unreachable-rung validation; the deciding argument is that §3.4's stated reason for per-class budgets is the data's tolerance for staleness, which does not change with which clock measured it.
+2. **§3.2 vs §3.3 on `MarketView` → §3.3 wins; fix §3.2.** `marketdata` publishes normalized, freshness-stamped observations; **`engine/state` translates into the strategy-owned `MarketView`**. *Rejected:* §3.2 winning — it would make `marketdata` know cross-leg skew and the strategy's view shape, and reduce `engine/state` to a cache; it also needs the book path to exist first. The deciding argument is §3.6 rule 1: a context publishing a strategy-owned type couples the two across the boundary the read ports exist to keep.
+
+### §18h — WHAT IS OWED (the slice close, user-approved as "run the full close")
+
+The user chose **run the full slice close**. None of it is done. In order:
+
+1. **Apply the §18f code fix** (`AcceptOrdinal`/`Trigger`). This touches `application/ports.go`, `application/funding.go` (the `Ingest` signature, `assess`, `OnSilence`), `application/funding_test.go` (every `Ingest` call site), `driving/funding.go`, `driven/publisher.go` and the three test files. **Do this before the spec edit** — the spec should describe what the code does.
+2. **Land five `[SPEC EDIT OWED]` markers** as `build-spec.md` **v0.9.8**: the three from §18f (§3.5 ×2, §4 ×1) plus the two pre-existing §3.6 status-text ones (`tools/lint/hexboundary.go` — rule 1 no longer deferred; `tools/lint/exhaustiveswitch.go` — rule 10 no longer planned, and the "evaluate `exhaustive` first" instruction discharged).
+3. **Land the two answered questions** from §18g: §3.4's freshness sentence (one budget, two measurements) and §3.2's `marketdata` row (no `MarketView`).
+4. Bump **all five** doc-set stamps to v0.9.8 · ADR §3 **milestone-1 third-slice block** · flip code markers to `[SPEC EDIT LANDED — v0.9.8]` · re-sync `i18n/ka/tutorial/header.md` and run `node i18n/tools/assemble.mjs` · **`cd docs && bun test`** · `make ci`.
+
+**Exact edit sites, already located, so they need not be re-found:** `docs/build-spec.md` line **131** (§3.2 marketdata row), line **199** (§3.4 freshness sentence), lines **224–225** + **242** (§3.5 `Envelope` field comments and the causal-traceability sentence), line **271** (§4 `StreamFunding` comment), line **~257** (§3.6 rule 10 text) and the **"Gate status"** paragraph below it.
+
+**Worth asking in the reading pass, still unanswered:** rule 10's deferral named the wrong trigger — it waited on a *state machine*, while the kernel's eleven enum-likes are what actually made it buildable, and they had existed for several slices. `singlewriter` may be mis-triggered the same way.
+
+## RESUME HERE — updated end of session 16
+
+**SESSION 16 UPDATE — READ THIS FIRST.** The `marketdata` slice's **code is complete** (commit `c695cd2`: `infrastructure/{driven,driving}` + `module.go`), `make ci` green, 18/18 mutations caught. **The slice is NOT closed and the full close was user-approved — the complete owed list is §18h, and it starts with a code fix (§18f), not with a doc edit.** Five `[SPEC EDIT OWED]` markers are open; the grep is still `grep -rn "SPEC EDIT OWED" internal/ tools/` — **both paths**. The two spec questions session 15 left open are **ANSWERED** (§18g) — do not re-ask them. What follows was written at the end of session 15 and is otherwise still accurate.
+
 ## RESUME HERE — updated end of session 15
 
 **Environment, verified — do not re-derive.** **Go 1.26.5** (upgraded from 1.26.0 in session 5;
