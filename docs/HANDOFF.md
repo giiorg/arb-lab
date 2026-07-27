@@ -1,6 +1,6 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-07-27): **v0.9.7** — implementation-ready *by capital tier* (§1.1); milestone 1's first TWO slices are complete and closed
+## Status (2026-07-27): **v0.9.7** — milestone 1's first TWO slices closed; the THIRD (the first bounded context) is in progress. **Start at `## START HERE` below, not at this line.**
 
 **v0.9.7 (2026-07-27) — the re-judgement release, doc-only.** Four normative statements the shared kernel's *code* makes that the core had never stated, held out of v0.9.6 because they carried no `[SPEC EDIT OWED]` marker, re-tested and landed: core **§3.2** (+ a D2 pointer), **§7.5**, **§7.6**, **§10**. Details and the process finding behind them are under **NEXT REQUEST** below; full reasoning in decision record **§16**. No formal-model change.
 
@@ -73,7 +73,105 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## NEXT REQUEST (2026-07-27): **the doc set is at v0.9.7; next is `marketdata`, the first bounded context**
+## START HERE (updated end of session 15, 2026-07-27)
+
+**Branch `feat/milestone-1-foundation`, PUSHED and in sync (`0 0`), tree clean, `make ci` green on
+Go 1.26.5. No PR — deliberate; open one only if asked.** Verify rather than trust this sentence:
+`git rev-list --left-right --count @{u}...HEAD`.
+
+### Where the work is
+
+Milestone 1's **third slice** is `marketdata`, the first bounded context, scoped to the
+**funding-rate path only** (order-book reconstruction deferred — the user's call). Built so far:
+
+| Piece | State |
+|---|---|
+| `internal/marketdata/domain/` | **Done** (session 14) — `Watermark`, `Freshness`+`Budget`, `FundingObservation` |
+| `tools/lint/hexboundary` (§3.6 rule 1) | **Done** (session 15) |
+| `tools/lint/exhaustiveswitch` (§3.6 rule 10) | **Done** (session 15) |
+| `internal/marketdata/application/` | **Done** (session 15) — ports + the funding use case |
+| `internal/marketdata/infrastructure/{driven,driving}` | **OWED — this is the next work** |
+| `internal/marketdata/module.go` | **OWED** |
+
+**The analyzer roster is 5 of 6.** Only `singlewriter` is deferred, and it is the one gate whose
+subject genuinely does not exist yet (`oms`'s write repository).
+
+### Do this next
+
+1. **`marketdata/infrastructure/{driven,driving}` + `module.go`.** `driven/` implements
+   `application.Budgets` (over `platform/config`) and `application.FundingPublisher`; `driving/` is
+   the surface a dispatcher calls. **`hexboundary` is live**, so an import running inward-to-outward
+   is a build failure now, not a review comment. `internal/engine/` still does not exist and the
+   funding path does not need it — `engine/venue`'s `DataSource` is §3.5's seam, not this context's.
+2. **Then close the slice** with the release checklist below.
+
+### Four things that will bite if you do not know them
+
+1. **The slice-close grep is `grep -rn "SPEC EDIT OWED" internal/ tools/` — BOTH paths.** Scoped to
+   `internal/` alone it returns **0 while two markers exist** in `tools/lint/`. The analyzers make
+   normative claims about §3.6, so code that owes spec edits now lives outside `internal/`. This is
+   the third instance of a gate reporting clean because it cannot see its subject.
+2. **`tools/mutate.sh` needs `MUTATE_MODULE=tools/lint` to reach the analyzers.** Without it,
+   `go test ./tools/lint/...` from the root fails with *"main module does not contain package"* —
+   non-zero, which the harness reads as a **kill**. Every analyzer bite-check would be a phantom.
+   The harness also has a **sixth verdict, `PANIC!!`** (a mutant that compiled and crashed; a kill,
+   but a weaker one — the suite saw a crash, not a wrong answer).
+3. **Do NOT re-run the `golangci-lint exhaustive` evaluation.** It is done, with numbers, in
+   `exhaustiveswitch`'s doc comment and decision record §17c. The verdict was **scope, not
+   capability**, and one flag does not mean what its name suggests: `-package-scope-only` means
+   "members declared at package scope", **not** "enums from this package", and had no effect.
+4. **Two `[SPEC EDIT OWED]` markers are open**, both about §3.6's *own status text* —
+   `hexboundary.go` (the "Gate status" paragraph still lists rule 1 as deferred and names three
+   enforced) and `exhaustiveswitch.go` (rule 10 still says "planned, not yet enforced" and still
+   carries the "evaluate `exhaustive` first" instruction, both discharged).
+
+### Two spec questions this slice raised and deliberately left open
+
+Decide them at slice close, in the reading pass — not before.
+
+- **`Age` vs `DataAge`.** §3.4 says "per-venue max-age budget", **singular**, but a feed dies two
+  ways and the venue-side stall (transport healthy, `SourceTime` frozen) is invisible to the check
+  written first. The application layer confirmed both verdicts are needed. Does the spec owe a
+  **second budget**, or is one budget applied to two measurements the right reading? The code does
+  the latter.
+- **§3.2 vs §3.3 on `MarketView`.** §3.2's marketdata row says this context publishes one; §3.3 says
+  `MarketView` is strategy-owned and `engine/state` translates into it. Built to the consistent
+  reading — this context publishes a `FundingSnapshot`.
+
+### The release checklist, for when `infrastructure/` lands
+
+`grep -rn "SPEC EDIT OWED" internal/ tools/` → land what it finds → **then a reading pass** over
+what the slice asserts *normatively* that the spec does not (the grep cannot see an **unmarked**
+claim, which is how four of them sat through a whole release with the gate green; ask of each: *could
+a reimplementation get this wrong in the UNSAFE direction while still satisfying the core as
+written?*) → bump **all five** doc-set stamps → ADR §3 block → flip code markers to
+`[SPEC EDIT LANDED — v<version>]` → re-sync `i18n/ka/tutorial/header.md` and run
+`node i18n/tools/assemble.mjs` → **`cd docs && bun test`** → `make ci`.
+
+Worth asking in that reading pass: **rule 10's deferral named the wrong trigger.** It waited on a
+*state machine*, while what actually made it buildable was the kernel's eleven enum-likes, which had
+existed for several slices. `singlewriter` may be mis-triggered the same way.
+
+### The finding from session 15 worth carrying, because it is about method
+
+`domain.Budget.NextTransition` returned the boundary instant while `Budget.At` is **inclusive-fresh
+by design** — so the silence timer fired at an instant where the verdict had *not* changed, and the
+caller re-armed for that same instant. A **spin**: a timer firing forever while a dead feed stays
+marked fresh, with the ladder frozen short of the rung that fires §5.2's `mark_blind_action`.
+
+The domain suite had a test written to catch exactly this class of defect. It checks the verdict one
+tick **before** the named instant and one tick **after** — and never **at** it, which is the only
+instant that matters, because it is when the timer fires. **A bracket around a boundary is not a
+test of the boundary.** It was invisible from inside `domain/`: `At` and `NextTransition` are each
+self-consistent and only their *composition* is wrong. The second implementation that disagreed was
+not an oracle — it was the layer above, which is the strongest argument yet for the layering itself.
+
+**Full detail, every decision and its rejected alternatives: decision record §17, and the
+`RESUME HERE` block below it (it carries a session-15 header at its top).**
+
+---
+
+## NEXT REQUEST — session 14 (2026-07-27, HISTORICAL): **the doc set is at v0.9.7; next is `marketdata`, the first bounded context**
 
 **Both scope calls the previous brief left open were put to the user and answered (session 14).**
 
