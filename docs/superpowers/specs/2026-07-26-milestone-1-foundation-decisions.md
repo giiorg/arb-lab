@@ -3513,6 +3513,98 @@ Two `NOBUILD!!` were re-aimed rather than counted, both the same Go rule as §25
 
 **No formal-model change** — nothing here touches the fence/takeover/plan composition, so `docs/formal/` stays at the Cx8 verdict.
 
+## §27 — session 25: `oms/module.go`, and the gate that reported its own context's test suite
+
+### §27a — what was built
+
+`internal/oms/module.go` (`Deps`, `Module`, `New`) and `internal/oms/module_test.go`. Plus a **defect fix in `singlewriter`**, a **simplification in both `singlewriter` and `hexboundary`**, and a **sixth `[SPEC EDIT OWED]` marker**. `make ci` green.
+
+The `oms` slice's code is now complete. What is left is the close.
+
+### §27b — the composition decision: what `Module` must NOT hand out
+
+`marketdata`'s `Module` exposes driving dispatchers and keeps its driven adapters unexported, which reads there as a style choice. Here it is load-bearing, and the rejected alternative is the one that would have looked *more* finished.
+
+A field `Module.Orders` typed `ports.OrderWriteRepository` would make the wiring look complete and is the one shape §3.6 rule 6 cannot survive. The gate reads **declared import edges**, and Go's interfaces are structural: a root receiving that field can pass it to any other context's constructor, and the receiving context needs **no import at all** to accept it. Every diagnostic the gate would have produced disappears, and what is left is a second writer to order state with a clean lint run — the exact outcome §26e reasoned the gate's scope backwards from.
+
+So the rule, stated generally because it will recur: **when the repository is wired, it is wired INTO a use case here, and the use case is what `Module` exposes.** A field of a policed type on that struct is never the answer.
+
+### §27c — the write repository is built and deliberately NOT wired
+
+Nothing consumes it yet. `ApplyPlanned` belongs to §6 step 5's planning use case; `ApplyState` and `ApplyFill` to the private order and execution stream handlers. None exist. `Dispatch` takes a `domain.Order` and carries no OCC version, and the order it dispatches was never `ApplyPlanned`'d — so wiring the repository into it today would mean inventing the planning path to have produced a record for it to advance.
+
+Constructing it anyway and holding it in an unread field was the tempting alternative, and it is refused on `driven/doc.go`'s own argument about the empty `driving/` package: **a shape that looks compliant while asserting nothing.** The worse reading is the one it invites — that the dispatch path applies, when it journals only. The absence stays visible in the TYPE, which is `marketdata`'s mark-path precedent.
+
+### §27d — `Deps` has two ports for two different reasons, and only one is permanent
+
+`Placer`'s adapter is a venue client living outside this context entirely (§20a defers them) — `marketdata.Deps.Resnapshotter`'s situation exactly, so the field is permanent.
+
+`Journal`'s adapter is **this context's own**: §5.1's write-ahead journal belongs in `infrastructure/driven/` beside the write repository, and it is a `Deps` field only because it has not been written yet.
+
+The consequence is worth predicting rather than rediscovering: **when the durable journal lands, `singlewriter` forces the correction instead of merely inviting it.** The adapter will sit in a policed package, so no root can name its constructor, and the field becomes the journal's *configuration* with `module.go` constructing the adapter from it. That is §26e point 3's "move the type rather than widen the gate" arriving as a scheduled consequence.
+
+`Module` exposes `*application.Dispatcher` directly rather than a driving adapter, because this context has no `infrastructure/driving/` and interposing a forwarding wrapper would be `driven/doc.go`'s empty package one directory over — with a specific extra cost here, since `Dispatch`'s `(Outcome, error)` split exists so that `if err != nil { return }` cannot silently drop a live order, and a wrapper is one more place to re-derive that wrongly.
+
+### §27e — THE FINDING: the gate reported its own context's test suite as a second writer
+
+`module_test.go` needs a double for `ports.OrderPlacer`, whose method signature names `ports.Ack`. `make lint` refused it: *"only oms may import the OMS write path."*
+
+The cause is that Go names an external test package by suffixing the **last segment** of the path. `internal/oms`'s test suite compiles as `internal/oms_test`, and `within()` compares full segments — its equality arm matches `internal/oms`, its prefix arm `internal/oms/`, and neither matches. The owner could not name its own ports.
+
+**Every other external test package in the repo hid it by accident.** `internal/oms/application_test` and `internal/oms/infrastructure/driven_test` sit *below* the exempt path, so the prefix arm already covered them. Only the **owner package's own** external test suffixes the exempt path itself — and no fixture in `testdata` had that shape. This repo's standing tell, for the tenth time: **the fixture did not contain the thing under test.** There is a fixture now, and the mutation harness confirms it is *analysed* rather than merely present (`analysistest` loads with tests enabled — worth checking rather than assuming, since a fixture that is never loaded is decoration).
+
+**The fix already existed one directory over.** `hexboundary` had diagnosed this exact asymmetry and normalises it away with `withoutTestSuffix`; `singlewriter` was written from the same template and copied `within()` without the normalisation beside it. So this is a mirror that was not carried across, not a new problem — and the repo's rule about applying a fix to its symmetric case is the one that would have caught it at authoring time.
+
+**Same normalisation, opposite consequence, and that is correct.** In `hexboundary` the analyzed path is matched against the set of things the rule *covers*, so stripping the suffix makes an external test package **policed**. Here it is matched against the single *exemption*, so the same strip makes `oms`'s test package **exempt**. One principle underneath both: an external test package **is** the package it tests.
+
+### §27f — the equivalent mutant that was a code smell, and the comment that was worse than the code
+
+Mutating `LastIndex` → `Index` in `withoutTestSuffix` **SURVIVED**. Diagnosed with a `strings.TrimSuffix` oracle over 21 paths — `a_test/b`, `a/b_test/c`, `internal/oms_test/sub`, `x_test_test` among them — with **zero disagreements**.
+
+The mutant is equivalent because `CutSuffix` only fires on a **string-final** `_test`, and a string-final substring is necessarily inside the final segment. The `LastIndex` split could not change the answer: `withoutTestSuffix` was exactly `strings.TrimSuffix` wearing nine lines.
+
+§26h's shape in the opposite direction. There, two guards on one fact could not be killed individually; here, one guard was doing nothing at all. **Both read as safety in review and neither was.**
+
+The sharper cost is the comment, and it is the part worth generalising. It credited the split with the mid-path protection — *"a real directory named `application_test` somewhere mid-path would silently start being read as `application/`"*. The protection is real and `TrimSuffix` provides it for free. **A true rule attributed to the wrong mechanism makes the mechanism look load-bearing**, so the next person to simplify it has to re-derive that it never was. That is v0.9.8's "a true rule stated without its scope becomes a false rule", one level down: a true rule stated with the wrong *cause*.
+
+Both copies are now one line, and both are bite-checked (`return pkgPath` → caught in each; `TrimPrefix` → caught). `hexboundary`'s was carried the same session under the mirror rule rather than noted for later.
+
+### §27g — the mutations, and the claim the harness cannot reach
+
+`module.go`: 6 aimed, **3 NOBUILD re-aimed, 3 caught** after re-aiming (`%w` → `%v`; `if err != nil` → `if err == nil`; dropping `Deps.Placer`). `singlewriter`/`hexboundary`: 8 aimed, **6 caught, 1 NOBUILD re-aimed → caught, 1 SURVIVED → diagnosed equivalent → code simplified** (§27f).
+
+The three NOBUILDs on `module.go` are all the same shape and worth naming: a file this thin has almost no line whose mutation both compiles and matters. Removing the error wrap orphans the `fmt` import; substituting a stand-in port needs a type that does not exist.
+
+**One claim is hand-checked rather than in the harness output**, §26i's precedent: *the SUPPLIED ports are what get wired*, which needs two edits (declare a discarding journal, then wire it instead of `deps.Journal`) and `mutate.sh` is line-scoped. Done by hand — the mutant fails `TestModuleDispatchesThroughTheSuppliedPorts` with `the supplied journal recorded []` and `TestNewRefusesEachMissingPort/no_journal`; restored, green.
+
+The fixture-collapse checklist ran before the assertions were written and set three parameters: a **non-zero** `Ack` (against a zero one, "the venue's answer survives the module" is indistinguishable from "the module returns a zero `Ack`"), the **ordered pair** of journal states rather than a count, and **one omission at a time with a distinct sentinel per case**.
+
+### §27h — what is owed: SIX markers now
+
+`grep -rn "SPEC EDIT OWED" internal/ tools/` returns **six** — the five from §26j plus a new one in `tools/lint/singlewriter/singlewriter.go`.
+
+**§3.6 is silent about external test packages.** Rule 6 forbids "every package outside `internal/oms/`", and rules identified **by position** rest on that phrase. An external test package is the one Go construct where a package's **import path and its directory disagree**: `internal/oms_test` is outside by path and inside by directory, so "outside" does not decide the case and nothing else in §3.6 does either.
+
+Two gates have now answered it independently, with no rule to consult, and reached **opposite conclusions — both correct**. `hexboundary`: policed. `singlewriter`: exempt. Both follow from one unstated principle, and neither states it, so the third gate to meet the case re-derives it or gets it wrong. The cost is measured rather than hypothetical: `singlewriter` shipped without it and reported `oms/module_test.go`.
+
+Owed to core §3.6: **state that a positional rule reads an external test package as the package it tests**, so that "policed" and "exempt" are consequences of one sentence rather than two independent judgement calls.
+
+**The fix itself carries no marker**, and the reasoning matters for the reading pass: rule 6's own wording covers the case once "position" is read as the directory, so the *code* was wrong and the spec was not. The marker is for the **silence about which reading is meant**, not for the behaviour.
+
+**The doc-set version is still v0.9.10**, and the bump is still owed at the close together with the markers (§26j, unchanged).
+
+**Still the user's call, unchanged:** §3.6 rule 2 silently unmet in `marketdata` (§24f).
+
+**No formal-model change** — nothing here touches the fence/takeover/plan composition, so `docs/formal/` stays at the Cx8 verdict.
+
+## RESUME HERE — updated end of session 25
+
+**SESSION 25 UPDATE — READ THIS FIRST.** The **sixth slice (`oms`) has its CODE COMPLETE**; what is left is **the close**. `internal/oms/module.go` is built — `Deps{Journal, Placer}`, `Module{Dispatch}` — and the composition decision worth knowing before touching it is §27b: **`Module` must never expose a `ports.` or `driven.` type**, because the gate reads import edges and Go's interfaces are structural, so a root handed one can pass write authority on with no import anywhere. The write repository is deliberately **not wired** (§27c) and `Deps.Journal` is a temporary field the gate will force into a config field when the durable journal lands (§27d). **`grep -rn "SPEC EDIT OWED" internal/ tools/` now returns SIX** — the five from §26j plus §3.6's silence about external test packages (§27h). `make ci` green.
+
+**The finding is §27e:** `singlewriter` reported `oms`'s own test suite as a second writer, because Go suffixes the **last segment** and `internal/oms_test` matches neither of `within()`'s arms. Every other external test package in the repo sits *below* the exempt path and was covered by accident. **The fix already existed in `hexboundary`** and had not been carried across. §27f is the follow-on: the shared helper's `LastIndex` split was an **equivalent mutant** — it is exactly `strings.TrimSuffix` — and its comment credited it with a protection `TrimSuffix` provides for free. Both copies simplified and bite-checked.
+
+Still the user's call: **§3.6 rule 2 in `marketdata`** (§24f). The reasoning is **§27**; §26 stays live for §26e's gate scope and §26j's owed list; §25 for §25b's classifier seam; §24 for §24e's table and §24f's finding.
+
 ## RESUME HERE — updated end of session 24
 
 **SESSION 24 UPDATE — READ THIS FIRST.** The **sixth slice (`oms`) is still OPEN**, and the work left in it is `module.go` and the close. **`singlewriter` has LANDED** — the last deferred gate, in the same session as its subject — and §3.6 rule 6 plus the gate-status paragraph were **rewritten in the core** to match, while the **doc set stays at v0.9.10 deliberately** (§26j: the version marks a slice close; the bump is owed at that close). `grep -rn "SPEC EDIT OWED" internal/ tools/` now returns **FIVE** — the fourth from §25g plus §3.6 rule 3's permitted-children reading, in `driven/doc.go`. `make ci` green. 22 mutations, 20 caught, 2 NOBUILD re-aimed, **2 SURVIVED and the fix was to the CODE** (§26h — two guards on one fact; they are now one `errors.Join` branch, which is caught). The mutex claim is hand-checked, not in the harness output (§26i). Still the user's call: **§3.6 rule 2 in `marketdata`** (§24f), which now has an in-repo counterexample. The reasoning is **§26**; §25 stays live for §25b's classifier seam and §25c's diagnosed survivor; §24 stays live for §24e's table and §24f's finding.

@@ -1,6 +1,6 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-07-27): **v0.9.10 + one mid-slice core edit** — milestone 1's first FIVE slices are CLOSED; the **sixth (`oms`) is OPEN**, with `oms/domain`, `oms/application/ports`, the dispatch use case and **the write repository** built, **all six §3.6 gates now enforced** (`singlewriter` landed with its subject), and **five spec edits owed plus the version bump itself**. **Start at `## START HERE` below, not at this line.**
+## Status (2026-07-27): **v0.9.10 + one mid-slice core edit** — milestone 1's first FIVE slices are CLOSED; the **sixth (`oms`) has its CODE COMPLETE and is awaiting its CLOSE**, with `oms/domain`, `oms/application/ports`, the dispatch use case, the write repository and **`module.go`** built, **all six §3.6 gates enforced** (and one of them fixed this session — it was reporting its own context's test suite), and **six spec edits owed plus the version bump itself**. **Start at `## START HERE` below, not at this line.**
 
 **v0.9.9 (2026-07-27) — the fourth-slice release, and the one that CLOSES `engine/venue`.** The slice built the normalized funding DTO that retired `marketdata`'s `driving.FundingUpdate` placeholder, and produced **three** spec edits — **all silences in the core rather than disagreements with it**, the v0.9.6 shape rather than v0.9.8's. **This is milestone 1's first close containing no code change**, which is what "the code already agreed with the spec, the spec had just never said it" looks like from outside. **Two of the three are a sharper kind of silence and the distinction is the finding worth carrying: the core does not omit them, it states them twice, incompatibly.** §3.5: the **market-data seam was declared twice** — a flat `DataSource{ Subscribe(VenueInstrument) <-chan Envelope }` here and three per-stream methods in §4, for the same pipeline position, with no type satisfying both. **§4's per-stream shape wins and the seam is `MarketDataSource` throughout**, on three grounds — one channel per instrument merges three `SourceID`s and forces the subscriber to re-derive a key the seam could have kept; the per-stream product constraints are **inexpressible** in `Subscribe(VenueInstrument)`; and §7.6's capacity ladder gets spent on a book feed a funding-only consumer never wanted. The tell that §4 was current is structural rather than a preference: **every other line of §3.5's seam block is written as a reference to §4**, while `DataSource` was the one written as an independent definition — and `venue-profiles.md` §3 was **already** writing `MarketDataSource.StreamMark`, which is cheaper evidence than any of the three arguments. §3.5 also: **a `SourceID` MUST refuse an `(instrument, stream)` pair no venue can produce** — §4 marks funding and mark perp-only per stream and §3.5 never carried it across, so a spot funding source validated cleanly, and §3.4 makes `SourceID` the mailbox key, so an impossible source is **a mailbox that exists, can be subscribed to, and never delivers**, indistinguishable downstream from a venue gone quiet. The rule states the **full table including the negative rows** (the private streams and control are *not* product-constrained), because the constraint reads like a market-data property and is not one — §4.2 makes spot a full API family with its own user-data stream, so inferring it would silently unsubscribe half a cash-and-carry trade. §4: **the units discipline that covered money now covers time.** `fixedpoint` puts a money field's dimension in its type; a duration has none, and a venue duration field's unit lives only in its **name** (Bybit's `fundingIntervalHour`) — so an adapter can multiply by `time.Minute`, satisfy the never-`float64` rule completely, and hand §2.4 a 480-minute interval that enumerates a plausible settlement count while **§12's kill-gate carry figure is wrong by a factor of sixty with nothing failing**. That is §10's own v0.9.7 argument applied one layer earlier, where the duration is *created*. A zero is **refused, never defaulted**: it arrives from three situations a fallback answers identically, two are a wiring failure wearing a correct BTC reading's clothes, and the third **absorbs §2.4's C8 flip**. Three code markers now read `[SPEC EDIT LANDED — v0.9.9]`, `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **zero**, ADR §3 gains the **milestone-1 fourth-slice block** (tagless total now **thirty-three**) and the `C8` traceability row gains core §4, `docs` 102 pass, `make ci` green. **No formal-model change; `docs/formal/` is untouched and still at the Cx8 verdict.** Full reasoning with rejected alternatives: decision record **§20** (the slice) and **§21** (the close).
 
@@ -77,7 +77,81 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 24, 2026-07-27)
+## START HERE (updated end of session 25, 2026-07-27)
+
+**Branch `feat/milestone-1-foundation`, tree clean, `make ci` green.** Verify rather than trust
+this sentence: `git status --short` and `git rev-list --left-right --count @{u}...HEAD`.
+
+### Where the work is
+
+**Milestone 1's sixth slice — `oms` — has its CODE COMPLETE. What is left is the close.**
+
+| Path | Holds |
+|---|---|
+| `internal/oms/domain/` | §5.3's twelve-state lifecycle + `CanTransition` (30 edges), the fill ledger, §5.1's order intent |
+| `internal/oms/application/ports/` | `Journal`, `OrderPlacer`, `Ack`, `OrderWriteRepository` + `OrderRecord`, `errors.go` |
+| `internal/oms/application/dispatch.go` | §6 step 6's crash boundary |
+| `internal/oms/infrastructure/driven/` | `MemoryOrderWriteRepository`, §3.6 rule 6's subject |
+| `internal/oms/module.go` | **NEW — the composition seam. `Deps{Journal, Placer}`, `Module{Dispatch}`** |
+| `tools/lint/singlewriter/` | **FIXED this session — it was reporting `oms`'s own test suite** |
+
+Reasoning with the rejected alternatives: decision record **§27**. §26 stays live for §26e's gate
+scope and §26j's owed list; §25 for §25b's classifier seam; §24 for §24e's table and §24f's finding.
+
+### The next work
+
+**The slice close.** It owes **SIX markers AND the doc-set version bump** — see below. There is no
+code left in the slice.
+
+### Five things to know before you touch anything
+
+1. **`Module` must never expose a type from `ports/` or `driven/`** (§27b). A field
+   `Module.Orders` typed `ports.OrderWriteRepository` is the shape that makes the wiring look
+   finished and is the one §3.6 rule 6 cannot survive: the gate reads **declared import edges**,
+   Go's interfaces are structural, so a root handed that value passes write authority to a context
+   that needs **no import at all** to accept it — and every diagnostic disappears. When the
+   repository is wired, it is wired **into a use case** here, and the use case is what `Module`
+   exposes.
+
+2. **The write repository is deliberately NOT wired** (§27c). Nothing consumes it: `ApplyPlanned`
+   belongs to §6 step 5's planning use case, `ApplyState`/`ApplyFill` to the stream handlers, and
+   `Dispatch` carries no OCC version. Constructing it into an unread field was refused on
+   `driven/doc.go`'s own argument — a shape that looks compliant while asserting nothing.
+
+3. **`Deps.Journal` is temporary and `Deps.Placer` is not** (§27d). The placer's adapter is a venue
+   client outside this context (§20a); the journal's belongs in `oms/infrastructure/driven/` and
+   just is not written. When it lands, **`singlewriter` forces the correction** — the adapter sits
+   in a policed package, so no root can name its constructor, and the field becomes the journal's
+   *configuration*.
+
+4. **`grep -rn "SPEC EDIT OWED" internal/ tools/` now returns SIX.** Three in `transition.go`, one
+   in `fill.go`, one in `oms/infrastructure/driven/doc.go`, and a new one in
+   `tools/lint/singlewriter/singlewriter.go`: **§3.6 is silent about external test packages**
+   (§27h). An external test package is the one Go construct where a package's import path and its
+   directory disagree, and two gates have now answered it independently — `hexboundary` polices
+   them, `singlewriter` exempts the owner's — both correct, neither derived from a stated rule.
+
+5. **The gate fix is worth reading before writing any analyzer** (§27e/§27f). `singlewriter`
+   reported `oms/module_test.go` because Go suffixes the **last segment**, so `internal/oms_test`
+   matches neither of `within()`'s arms — and every *other* external test package in the repo sits
+   below the exempt path and was covered by accident. **The fix already existed in `hexboundary`
+   and had not been carried across.** Then the shared helper's `LastIndex` split turned out to be
+   an **equivalent mutant** (it is exactly `strings.TrimSuffix`, verified against an oracle over 21
+   paths) whose comment credited it with a protection `TrimSuffix` gives for free.
+
+### Still the user's call, carried forward from session 22
+
+**§3.6 rule 2 is silently unmet in `marketdata`, on both halves** (§24f) — ports flat in
+`application/ports.go`, and no `var _` assertions in `infrastructure/driven/`, in a **closed**
+slice against decision record §7. `oms` follows the rule on both halves, so the inconsistency
+between the two contexts is visible rather than theoretical.
+
+**Still owed from session 20 and untouched since:** the `venue-profiles.md` verification of the two
+venues' **depth update-ID shapes**, which `venue.BookDelta`'s span design cites.
+
+---
+
+## START HERE (updated end of session 24, 2026-07-27, HISTORICAL)
 
 **Branch `feat/milestone-1-foundation`, tree clean, `make ci` green.** Verify rather than trust
 this sentence: `git status --short` and `git rev-list --left-right --count @{u}...HEAD`.
