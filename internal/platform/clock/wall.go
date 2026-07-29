@@ -23,6 +23,16 @@ type Wall struct {
 	// last is Now's high-water mark. See Now.
 	last time.Time
 
+	// lastSys is the previous SYSTEM reading, and it is a separate field from
+	// last on purpose — see Backsteps, where the difference between them is the
+	// whole measurement.
+	lastSys time.Time
+
+	// backsteps and backstepTotal are what the clamp has absorbed. See
+	// Backsteps.
+	backsteps     uint64
+	backstepTotal time.Duration
+
 	// systemNow is the system clock, indirected for one specific reason: it is
 	// the only way to test that the monotonic clamp is actually WIRED UP.
 	//
@@ -69,8 +79,72 @@ func (w *Wall) Now() time.Time {
 }
 
 func (w *Wall) nowLocked() time.Time {
-	w.last = clampMonotonic(w.systemNow(), w.last)
+	sys := w.systemNow()
+	// No first-call special case, for clampMonotonic's reason one function
+	// along: the zero lastSys is year 1, so no reading a clock can produce is
+	// before it. An explicit IsZero guard was written here first and a mutation
+	// removing it survived — correctly, because nothing could reach it. A guard
+	// no input can trigger reads as protection while protecting nothing.
+	if sys.Before(w.lastSys) {
+		w.backsteps++
+		w.backstepTotal += w.lastSys.Sub(sys)
+	}
+	w.lastSys = sys
+	w.last = clampMonotonic(sys, w.last)
 	return w.last
+}
+
+// Backsteps reports what the clamp in Now has absorbed: how many times the
+// system clock moved backwards, and by how much in total. It is a pure
+// accessor; nothing here changes Now's contract.
+//
+// [SPEC EDIT OWED] §3.5's Clock block states neither the clamp's existence nor
+// its observability. Capture's design record §32i is where this is argued.
+//
+// # Why a clock needs an observability seam at all
+//
+// Now's doc gives the clamp's reasoning honestly — "a backwards step is absorbed
+// rather than reported, because Now has no error to return" — and that is right
+// for the engine, where a timer firing late beats a settlement evaluated twice.
+// It is wrong for anything writing an ARCHIVE, and the composition is what makes
+// it quiet: NTP steps the host's clock backwards, this clamp makes a run of
+// records carry IDENTICAL instants, §3.4's latest-value cache accepts an equal
+// RecvTime by deliberate design, and the replay then proceeds over a squashed
+// time axis with every freshness and cross-leg-skew number wrong and nothing
+// failing. A capture archive is unrecoverable, so that cannot be repaired after
+// the fact.
+//
+// The gap being closed is not capture's, it is this package's: until now NO
+// caller could learn that the clamp engaged, and the engine has the same blind
+// spot for the same reason.
+//
+// Two alternatives were rejected. A second monotonic reference held by the
+// caller under //notimenow:allow works and leaves platform/ untouched, but it
+// puts a second time authority in a tool whose job is to detect a defect in the
+// first one. Making Now itself report the step changes every call site in the
+// codebase to fix a problem one caller has.
+//
+// # What a "backstep" counts, and why it is not "how often the clamp engaged"
+//
+// Those are different numbers, and the difference is the reason lastSys exists
+// as a field separate from last. After a single 2.5 s correction the clamp keeps
+// engaging on every read until real time catches up, so counting engagements
+// would report one NTP event as four or five backsteps and would sum several
+// seconds of absorbed time that never elapsed.
+//
+// A backstep is therefore a reading BELOW THE PREVIOUS READING — the system
+// clock actually moving backwards — and total is the sum of those jumps. Every
+// backstep necessarily engages the clamp (last is the maximum of all readings,
+// so a reading below the previous one is below the maximum too), which is what
+// makes this the stricter and more informative of the two counts.
+//
+// Both are monotonic and never reset: a caller that wants a delta subtracts two
+// observations. Resetting on read would make two readers silently steal each
+// other's events, and the realistic second reader is a metrics scrape.
+func (w *Wall) Backsteps() (count uint64, total time.Duration) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.backsteps, w.backstepTotal
 }
 
 func (w *Wall) ServerNow(v Venue) ServerTime {
