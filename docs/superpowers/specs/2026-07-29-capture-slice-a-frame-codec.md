@@ -129,6 +129,45 @@ a five-line edit today and an archive migration afterwards. **Open for the user.
 
 ---
 
+### CORRECTION (session 31, before slice B): the rejected alternative does not close the hole
+
+**The paragraph above is wrong about what reordering buys, and the error is worth
+keeping rather than editing away, because it is the reason the question sat open
+for two sessions looking like a cheap win that was being declined.**
+
+A decoder must **bound `frameLen` and check that the claimed bytes are AVAILABLE**
+before it can compute any checksum over them — `codec.go`'s availability check
+precedes the CRC by necessity, not by choice. **No field order covers an absent
+span.** So for the third row, the one that mis-diagnoses:
+
+| `frameLen` corrupted | Under `frameLen ‖ crc` (today) | Under `crc ‖ frameLen` |
+|---|---|---|
+| **larger**, last frame | `ErrTruncated` — the mis-diagnosis | `ErrTruncated` — **unchanged** |
+| **smaller**, last frame | `ErrChecksum` — correct | `ErrChecksum` — unchanged |
+
+Reordering helps only in the second row, which is already diagnosed correctly.
+The five-line edit was never available.
+
+**What would actually close it** is a second, header-only checksum over the fixed
+32-byte header including `frameLen` — verifiable **without** the payload, so a
+corrupt length reports `ErrChecksum` in both directions. That costs 4 bytes per
+record and a format-major bump, against a residual §32e's layering already covers
+from outside (a `Close` record and a SHA-256 on a clean file; a torn tail is the
+*expected* finding on a file with no `Close`).
+
+**Decided by the user, session 31: keep v1.0.** The format is unchanged and the
+"last cheap moment" pressure is gone, because there was no cheap moment to miss.
+The residual stands as §33c already describes it, and
+`TestDecodeRecordFrameLenIsOutsideTheChecksum` still asserts all three outcomes.
+
+**The reusable part:** a *rejected* alternative recorded with a stated benefit is
+an unchecked claim in the same way an untested guard is. This one survived four
+reviews and two sessions' handoffs by being written down confidently. A rejection
+is worth as much scrutiny as an acceptance, because nobody re-derives it — they
+re-read it.
+
+---
+
 ## §33d — `Wall.Backsteps()`, and what a backstep counts
 
 Built as §32i specifies, signature unchanged: `Backsteps() (count uint64, total
@@ -263,7 +302,18 @@ returned nothing would satisfy a forbid-everything check perfectly.
 
 ---
 
-## RESUME HERE — end of slice A
+## RESUME HERE — **SUPERSEDED by session 31.** Historical from here down
+
+**The live statement is `2026-07-29-capture-slice-b-writer.md` `## RESUME HERE`,
+and `HANDOFF.md` `## START HERE (session 31)`.** Slice B is **BUILT**; the next
+work is **slice C**, which is blocked on §13's five Profiles verifications.
+§33c is **closed** — see the correction above; the format stays v1.0.
+
+Marked at the block rather than left to the next reader, because a stale resume
+block has now been the failure twice in this document set (§31's, then §32's),
+and both times it pointed a fresh session at work that was already done.
+
+**Historical, end of slice A:**
 
 **Next is slice B** (§32m): the writer — files, hourly rotation on UTC
 `RecvTime`, the exclusive `flock`, torn-tail recovery, gap records and `Alive`

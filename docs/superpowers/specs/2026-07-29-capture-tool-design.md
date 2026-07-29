@@ -531,7 +531,10 @@ it, and it cannot see a rule the code silently fails to meet.
 | 4 | core §8 | (probable) the fidelity contract's data line, if §12.2's widening needs restating where the fill model is defined |
 | 5 | core §3.6 rule 8 | **a SECOND documented integer-enum exception**: `capture.RecordKind` crosses a persistence boundary, which rule 8 says takes the `type X string` shape, and is `uint8` anyway — §33a. Found by building slice A, not by this design |
 
-**Row 3 is now marked in code**, at `platform/clock.Wall.Backsteps` (built in slice A alongside the codec, §33d). Row 5 is marked at `capture.RecordKind`. `grep -rn "SPEC EDIT OWED" internal/ tools/` returns exactly those two.
+**Rows 2, 3 and 5 are now marked in code.** Row 3 at `platform/clock.Wall.Backsteps` and row 5 at
+`capture.RecordKind` (both slice A, §33d and §33a); row 2 at `capture.StreamKey` (slice B, §34 — that
+is where the per-`(Source, Topic)` counter first exists in code). `grep -rn "SPEC EDIT OWED" internal/
+tools/` returns exactly those three. Rows 1 and 4 are not yet marked because no code asserts them yet.
 
 ---
 

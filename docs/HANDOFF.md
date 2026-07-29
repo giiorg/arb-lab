@@ -77,7 +77,66 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 30, 2026-07-29 — slice A is BUILT; the next work is slice B, the writer)
+## START HERE (updated end of session 31, 2026-07-29 — slice B is BUILT; the next work is slice C, and it is BLOCKED)
+
+**Branch `feat/milestone-1-foundation`, `make ci` green, all six gates clean, `-race` clean.**
+Verify rather than trust: `git status --short`, `git rev-list --left-right --count @{u}...HEAD`, and
+`grep -rn "SPEC EDIT OWED" internal/ tools/` — expect **exactly three**, all intended and all on the
+design's §12 roster (rows 2, 3, 5).
+
+**Session 31 built slice B of §32m: the writer.** Archive layout and its inverse, the gap taxonomy, the
+exclusive per-stream `flock`, torn-tail recovery, the bounded drop-newest queue, and the writer itself —
+rotation on UTC `RecvTime`, unconditional `Alive` ticks, two digests at close. The record is
+**`docs/superpowers/specs/2026-07-29-capture-slice-b-writer.md` §34** — read that, not this summary.
+The design it implements is §32; slice A's codec underneath it is §33.
+
+Verification: **23 mutations, 23 kills**, after diagnosing **three survivors** that were all real test
+gaps (§34e). `exhaustiveswitch`'s binding on `Cause` was probed by hand rather than assumed.
+
+### §33c is CLOSED, and not the way it was parked
+
+The two previous handoffs carried it as an open five-line format change that got cheaper the sooner it
+was taken. **It was never available.** A decoder must bound `frameLen` and check that the claimed bytes
+are AVAILABLE before it can checksum them, and no field order covers an absent span — so moving the
+checksum ahead of the length leaves the one mis-diagnosed case exactly as it was. **The user decided:
+keep v1.0.** §33c now carries the correction in place. What would actually close the hole is a second
+header-only checksum, costing 4 bytes per record; it is recorded there and not taken.
+
+### The next work: slice C (§32m) — **the calendar moment, and the first BLOCKED slice**
+
+Raw WS transport, subscribe + ack + first-data assertion, reconnect-with-gap, `arblab capture run`,
+config, observability, and the **minimal `capture verify`** with its positive control. Funding capture
+for BTC on both venues starts running here.
+
+**It cannot start until §13's five Profiles verifications are done, and they have not moved for three
+sessions.** Three are missing venue endpoint facts — 1 (Binance per-symbol funding topic), 3/4/7
+(Binance futures book host, path, cadences), 5/6 (Bybit linear public WS URL) — plus standing debt #1
+and the public-vs-authenticated question for the REST overlays. **Nothing goes into Profiles unverified,
+and nothing built may depend on an unverified fact.** This is a research task against primary venue
+documentation and it wants its own scope. **It is now the critical path for the whole milestone.**
+
+Also open, and smaller: **the live `Mono` source** (§34c). Either a `Mono` method on
+`platform/clock.Wall` or an adapter in `internal/app/capture`. **It must not be `Now() - start`** — that
+satisfies the interface and defeats the field, because `Wall.Now` is clamped monotonic and a derived
+`Mono` stands still during exactly the window it exists to measure.
+
+### Three findings worth carrying
+
+1. **A topic of `..` climbed out of the archive tree** (§34d), found by the `rapid` round-trip property
+   on its fourth case. `.` is in §32e's unencoded set and `filepath.Join` CLEANS `.` and `..` away, so
+   two streams shared a path and one escaped the root — with encoder, decoder and every hand-written
+   fixture agreeing nothing had happened. Fixed by escaping a LEADING dot only.
+2. **All three surviving mutants were fixtures on the cheap side of a SIZE threshold** (§34e): a torn
+   tail smaller than the recovery's own writes, a record smaller than the scan buffer, a gap refused by
+   a second check as well as the one under test. That is a new checklist entry beside "pinned to the
+   value that collapses the distinction" — *find the fixture too small for the mechanism to matter.*
+3. **A rejected alternative recorded with a stated benefit is an unchecked claim.** §33c's survived four
+   reviews and two handoffs by being written down confidently. Nobody re-derives a rejection; they
+   re-read it.
+
+---
+
+## START HERE (updated end of session 30, 2026-07-29 — HISTORICAL — slice A was BUILT; slice B was the open work)
 
 **Branch `feat/milestone-1-foundation`, `make ci` green, all six gates clean, `-race` clean.**
 Verify rather than trust: `git status --short`, `git rev-list --left-right --count @{u}...HEAD`, and
