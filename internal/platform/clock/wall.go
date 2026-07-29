@@ -33,6 +33,13 @@ type Wall struct {
 	backsteps     uint64
 	backstepTotal time.Duration
 
+	// monoStart is Mono's baseline, and it is read from time.Now() DIRECTLY in
+	// NewWall rather than through systemNow. That is not an oversight and it is
+	// not laziness about the seam — it is the whole point, and see Mono.
+	//
+	// It is immutable after construction, which is why Mono takes no lock.
+	monoStart time.Time
+
 	// systemNow is the system clock, indirected for one specific reason: it is
 	// the only way to test that the monotonic clamp is actually WIRED UP.
 	//
@@ -60,7 +67,12 @@ func NewWall(cals []Calibration) (*Wall, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Wall{queue: newTimerQueue(), cals: table, systemNow: time.Now}, nil
+	return &Wall{
+		queue:     newTimerQueue(),
+		cals:      table,
+		systemNow: time.Now,
+		monoStart: time.Now(),
+	}, nil
 }
 
 // Now returns wall time, clamped so it never goes backwards. The clamp itself is
@@ -146,6 +158,44 @@ func (w *Wall) Backsteps() (count uint64, total time.Duration) {
 	defer w.mu.Unlock()
 	return w.backsteps, w.backstepTotal
 }
+
+// Mono reports elapsed time since this Wall was constructed, measured on the
+// host's MONOTONIC clock — a reading that keeps advancing across a wall-clock
+// step, including the step Now absorbs and Backsteps counts.
+//
+// It is the third of the three readings capture stamps into every record
+// (§32e), and the one whose requirement a signature cannot express. Backsteps
+// says a step HAPPENED; Mono is what still measures duration WHILE it is
+// happening. During an NTP correction Now stands still by design, so a run of
+// records carries identical instants — and Mono is the only field in that run
+// that still distinguishes them.
+//
+// # The implementation this must not have
+//
+// Not `w.Now().Sub(start)`. That satisfies the same signature, passes a test
+// that only ever runs the clock forwards, and DEFEATS THE FIELD: Now is clamped,
+// so a derived Mono stands still during precisely the window Mono exists to
+// measure, and a record's Mono becomes redundant with its RecvTime exactly when
+// RecvTime is untrustworthy. Capture's §34c states the contract for this reason.
+//
+// The trap is that the two spellings are one token apart and Go hides the
+// difference: a time.Time from time.Now() carries a monotonic reading that Sub
+// silently prefers, so `time.Since(monoStart)` is immune to wall-clock steps
+// while `w.Now().Sub(monoStart)` — same package, same field, same arithmetic —
+// is not. Nothing in the type system separates them. What separates them is that
+// monoStart is filled from time.Now() rather than through systemNow, so no fake
+// clock can reach it and the independence is structural rather than promised.
+// TestWall_MonoAdvancesAcrossABackstep is the assertion, and it fails against
+// the derived spelling.
+//
+// # Scope
+//
+// The baseline is per-Wall, so two Walls in one process yield two unrelated
+// timelines. Records are only ever compared against records from the same
+// process, and the composition root builds exactly one Wall — but the field is
+// meaningless across a restart either way, which is what the Open record's
+// provenance and CaptureSeq are for.
+func (w *Wall) Mono() time.Duration { return time.Since(w.monoStart) }
 
 func (w *Wall) ServerNow(v Venue) ServerTime {
 	w.mu.Lock()

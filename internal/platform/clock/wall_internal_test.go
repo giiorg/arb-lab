@@ -231,3 +231,124 @@ func TestWall_ServerNowInheritsTheClamp(t *testing.T) {
 		t.Errorf("ServerNow().Instant() = %v; want the clamped %v", second.Instant(), want)
 	}
 }
+
+// monoPast waits for Mono to pass a reading, and it is BOUNDED because the
+// failure it is watching for is a Mono that stands still — which, polled in an
+// unbounded loop, is a test that hangs rather than a test that fails. `clock`
+// found that on a non-blocking send and `boot` found it on a channel receive;
+// this is the same discipline one package later.
+//
+// It polls rather than sleeping a fixed span because the claim is "advances",
+// not "advances by at least X" — the monotonic clock's granularity is the host's
+// business and pinning a number here would make the test a hardware assertion.
+func monoPast(t *testing.T, w *Wall, from time.Duration) time.Duration {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if got := w.Mono(); got > from {
+			return got
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Mono() never advanced past %v within 2s. A Mono derived from "+
+				"the clamped Now stands still exactly here — see Mono's doc.", from)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// TestWall_MonoAdvancesAcrossABackstep is the assertion Mono's contract needs
+// and its signature cannot carry: elapsed time keeps being measurable while the
+// wall clock is going backwards.
+//
+// The fixture has to make the clamp ENGAGE, and that is the whole design of it.
+// Against a forward-only clock, `time.Since(monoStart)` and the forbidden
+// `w.Now().Sub(monoStart)` agree on every reading, so a test that never steps
+// the clock back is a test both spellings pass.
+//
+// TWO clamped reads, not one, per the fixture-collapse checklist: with a single
+// held read, "the clamp holds Now" and "Now happened to repeat once" are the
+// same observation, and the run of identical instants that Mono exists to
+// disambiguate is not present in the fixture at all.
+func TestWall_MonoAdvancesAcrossABackstep(t *testing.T) {
+	at := time.Date(2026, time.July, 29, 14, 0, 0, 0, time.UTC)
+
+	// A plausible NTP correction: a reading, a 2.5 s step back, then time
+	// resuming from the corrected value but still short of the high-water mark.
+	w := newWallAt(t,
+		at,
+		at.Add(-2500*time.Millisecond), // the step
+		at.Add(-2400*time.Millisecond), // corrected clock, still behind
+	)
+
+	first := w.Now()
+	startMono := w.Mono()
+
+	// The premise: for the next two reads the wall clock stands still, so
+	// RecvTime cannot separate the records stamped in this window.
+	for i, got := range []time.Time{w.Now(), w.Now()} {
+		if !got.Equal(first) {
+			t.Fatalf("clamped read %d: Now() = %v; want the held %v — the fixture is "+
+				"not exercising the clamp, so it cannot discriminate Mono", i+1, got, first)
+		}
+	}
+
+	// The clamp says a step happened...
+	if count, total := w.Backsteps(); count != 1 || total != 2500*time.Millisecond {
+		t.Errorf("Backsteps() = %d, %v; want 1, 2.5s", count, total)
+	}
+
+	// ...and Mono is what still measures duration while it is happening.
+	if got := monoPast(t, w, startMono); got <= startMono {
+		t.Errorf("Mono() = %v; want > %v", got, startMono)
+	}
+}
+
+// TestWall_MonoMovesWhileTheWallClockIsFrozen is the limit case of the one
+// above, and it is a separate test because it kills a different wrong
+// implementation: a Mono that reads the system clock at all, whether or not it
+// goes through the clamp. Pinned readings freeze Now, Backsteps AND any
+// system-derived arithmetic; only a genuinely independent source still moves.
+//
+// This is also the realistic shape for capture's Alive ticks — a stalled host
+// clock with the process still running is exactly the case where an archive must
+// not silently claim a frozen timeline.
+func TestWall_MonoMovesWhileTheWallClockIsFrozen(t *testing.T) {
+	at := time.Date(2026, time.July, 29, 14, 0, 0, 0, time.UTC)
+	w := newWallAt(t, at) // one reading, repeated forever
+
+	before := w.Mono()
+	if got := w.Now(); !got.Equal(at) {
+		t.Fatalf("Now() = %v; want the pinned %v", got, at)
+	}
+	if count, _ := w.Backsteps(); count != 0 {
+		t.Fatalf("Backsteps() count = %d; want 0 — a pinned clock never steps back", count)
+	}
+
+	after := monoPast(t, w, before)
+
+	// And Now is still pinned afterwards, so the advance above cannot be
+	// explained by anything the wall clock did.
+	if got := w.Now(); !got.Equal(at) {
+		t.Errorf("Now() = %v after Mono advanced to %v; want the pinned %v", got, after, at)
+	}
+}
+
+// TestWall_MonoNeverRetreats is the ordinary property, asserted because Mono is
+// stamped into every capture record and a reader at step 5 will sort on it.
+func TestWall_MonoNeverRetreats(t *testing.T) {
+	w, err := NewWall(nil)
+	if err != nil {
+		t.Fatalf("NewWall: %v", err)
+	}
+	prev := w.Mono()
+	if prev < 0 {
+		t.Fatalf("Mono() = %v immediately after NewWall; want >= 0", prev)
+	}
+	for i := range 200 {
+		got := w.Mono()
+		if got < prev {
+			t.Fatalf("read %d: Mono() went backwards: %v then %v", i, prev, got)
+		}
+		prev = got
+	}
+}
