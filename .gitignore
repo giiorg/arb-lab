@@ -15,7 +15,14 @@ coverage.*
 # a rapid version and an internal bit stream, and they go stale. A real find
 # belongs in the hand-written table as a named case, so the fail file is a
 # working artifact only.
-testdata/rapid/
+#
+# The leading **/ is load-bearing and was missing until 2026-07-29. A gitignore
+# pattern containing a mid-string slash is ANCHORED TO THE REPO ROOT, so plain
+# `testdata/rapid/` matched only a top-level directory that has never existed —
+# the rule read as enforced and excluded nothing, and ids' five fail files had
+# been tracked since the day the rule was written. `git check-ignore -v <path>`
+# is how to check that a rule here actually fires.
+**/testdata/rapid/
 
 # Local environment
 .env
