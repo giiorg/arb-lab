@@ -55,6 +55,21 @@
 // network and no venue facts, which is why neither is blocked by any of §13's
 // five verification debts.
 //
-// Not here yet: the transport, `capture run`, config, observability and verify
-// (slice C), the REST overlay (E), and `capture cat` (F).
+// Slice C's share of this package is verify (verify.go, finding.go): §32k's
+// out-of-process liveness check, and the only one of the three that is not inside
+// the process whose death it detects. It re-derives every count, digest and
+// continuity rule from the bytes rather than sharing the writer's bookkeeping,
+// because a checker that agrees with the writer because it IS the writer confirms
+// only that the code agrees with itself. Two axes, never summed: a coverage
+// verdict per (stream, window) — replayable, gapped, absent — and a finding class
+// that is §32k's two exit codes, 1 for an archive that is lying and 2 for one that
+// is honest and thin.
+//
+// It reads no payload a venue wrote, which is the same fence one layer out: verify
+// checks OUR CaptureSeq (§32d), stamped identically for all seven sources, so
+// §32c's source 4 — Binance spot partial depth, the one stream with no wire-level
+// gap check available at all — is verified exactly as strictly as the other six.
+//
+// Not here yet: `capture run`, config and observability (the rest of slice C), the
+// REST overlay (E), and `capture cat` (F).
 package capture

@@ -265,3 +265,54 @@ var (
 	// to see. §32k's verify exists to report it, and exits 1.
 	ErrArchiveCorrupt = errors.New("capture: existing archive file is corrupt, not merely truncated")
 )
+
+// Verify's refusals (§32k), slice C.
+//
+// Note what is NOT here: no sentinel reports a finding. A corrupt archive is a
+// successful Verify run with an integrity finding in its report, because verify's
+// job is to describe an archive rather than to refuse one — an error return would
+// stop at the first fault and the operator needs the whole list. These sentinels
+// are only for a request verify cannot answer at all.
+var (
+	// ErrVerifyRangeEmpty reports a [From, To] containing no COMPLETE rotation
+	// window.
+	//
+	// A refusal rather than an empty clean report, and this is the one refusal in
+	// the file that exists purely because of this repo's own history: a verify
+	// run over a range with nothing in it would report zero findings, exit zero,
+	// and be indistinguishable from an archive that verified. That is the vacuous
+	// run this codebase has now met nine times, and here it is reachable by a
+	// plausible typo in a `--from`/`--to` pair.
+	//
+	// Whole windows only, and the partial ones are excluded rather than
+	// pro-rated: the expected Alive count for a window is a constant derived from
+	// the intervals (§32k), so holding a half-elapsed hour to it would report the
+	// live hour as thin on every run. Excluding it is the operator's lever, and
+	// pro-rating it would be a coverage number computed from the data it is
+	// supposed to judge.
+	ErrVerifyRangeEmpty = errors.New("capture: verify range contains no complete rotation window")
+
+	// ErrAlivePercentRange reports a coverage threshold outside 1..100.
+	//
+	// Zero is refused for the reason every zero value in this package is: it
+	// would pass every window, including one holding a single Alive tick, and it
+	// would do so while the report looked identical to a real check.
+	ErrAlivePercentRange = errors.New("capture: alive coverage threshold must be in 1..100")
+
+	// ErrFindingClassUnspecified and ErrFindingClassUnknown report a finding
+	// class that is not a declared one. The zero class is a finding counted by
+	// neither exit path — reported and then ignored, which is the same outcome as
+	// not finding it.
+	ErrFindingClassUnspecified = errors.New("capture: finding class is unset")
+	ErrFindingClassUnknown     = errors.New("capture: finding class is not a declared class")
+
+	// ErrFindingKindUnspecified and ErrFindingKindUnknown report a finding kind
+	// that is not a declared one.
+	ErrFindingKindUnspecified = errors.New("capture: finding kind is unset")
+	ErrFindingKindUnknown     = errors.New("capture: finding kind is not a declared kind")
+
+	// ErrVerdictUnspecified and ErrVerdictUnknown report a verdict that is not a
+	// declared one.
+	ErrVerdictUnspecified = errors.New("capture: verdict is unset")
+	ErrVerdictUnknown     = errors.New("capture: verdict is not a declared verdict")
+)
