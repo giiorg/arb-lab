@@ -134,16 +134,33 @@ is allowed — because a forbid-everything predicate reads as a perfect score.
 Seven sources. BTC only, per §12.2's *"one venue / one symbol (BTC)"* scope widened to both venues
 because §12.2 says "both funding streams".
 
-| # | Venue | Product | Stream | Venue topic (⚠ = unverified, §13) | Role |
-|---|---|---|---|---|---|
-| 1 | Binance | perp | funding | ⚠ `btcusdt@markPrice@1s` | the signal |
-| 2 | Bybit | perp | funding | `tickers.BTCUSDT` | the signal |
-| 3 | Binance | perp | book | ⚠ `btcusdt@depth20@100ms` (partial book) | fill model |
-| 4 | Binance | spot | book | ⚠ `btcusdt@depth20@100ms` | fill model + spot pricing |
-| 5 | Bybit | perp | book | `orderbook.50.BTCUSDT` | fill model |
-| 6 | Bybit | spot | book | `orderbook.50.BTCUSDT` (spot host) | fill model + spot pricing |
-| 7 | Binance | perp | book | ⚠ `btcusdt@depth@100ms` (diff) | **evidence** for standing debt #1 |
-| R | Binance | perp | rest | `GET /fapi/v1/fundingInfo` | the overlay, §32h |
+**Every topic below is VERIFIED as of 2026-07-29** — the ⚠ markers are gone, and the URL each one needs
+is now recorded in `venue-profiles.md` §5. The `Connect to` column is the fact that was missing, not the
+topic string.
+
+| # | Venue | Product | Stream | Venue topic | Connect to (Profiles §5) | Role |
+|---|---|---|---|---|---|---|
+| 1 | Binance | perp | funding | `btcusdt@markPrice@1s` | `wss://fstream.binance.com/market/ws/…` | the signal |
+| 2 | Bybit | perp | funding | `tickers.BTCUSDT` | `wss://stream.bybit.com/v5/public/linear` | the signal |
+| 3 | Binance | perp | book | `btcusdt@depth20@100ms` (partial) | `wss://fstream.binance.com/public/ws/…` | fill model |
+| 4 | Binance | spot | book | `btcusdt@depth20@100ms` (partial) | `wss://stream.binance.com:9443/ws/…` | fill model + spot pricing |
+| 5 | Bybit | perp | book | `orderbook.50.BTCUSDT` | `wss://stream.bybit.com/v5/public/linear` | fill model |
+| 6 | Bybit | spot | book | `orderbook.50.BTCUSDT` | `wss://stream.bybit.com/v5/public/spot` | fill model + spot pricing |
+| 7 | Binance | perp | book | `btcusdt@depth@100ms` (diff) | `wss://fstream.binance.com/public/ws/…` | **evidence** for standing debt #1 |
+| R | Binance | perp | rest | `GET /fapi/v1/fundingInfo` | `https://fapi.binance.com` — **public**, weight 0 | the overlay, §32h |
+
+**Three sources sit on three different hosts with three different path disciplines**, and that was
+invisible while the topics were the only thing written down: Binance perp funding takes the **`/market`**
+prefix, Binance perp book takes **`/public`**, and Binance *spot* book takes **neither** — the spot host
+kept its own base on port 9443. A config that carries only a topic string cannot express this.
+
+**Source 7's role has changed, and source 4 has inherited part of it.** Standing debt #1 is now cleared
+from documentation (Profiles §5), so stream 7 no longer *measures* the Binance update-ID shape — it
+confirms it live. The open question it should now answer is **source 4's**: Binance **spot** partial depth
+carries `lastUpdateId` and nothing else — no span, no `pu`, no event time — so source 4 is the one feed in
+this set that **cannot be gap-checked from its own wire bytes**, and capture's `CaptureSeq` is its only
+ordering evidence. That is a reconstructability limit on the spot leg's fill model, and it is a fact
+about the venue rather than a defect in the tool.
 
 Sources 3 and 7 are the **same `SourceID`** under §3.5's definition — `(VenueInstrument, StreamKind)`
 does not distinguish two wire feeds for one logical stream. That collision is what §32e's key is
@@ -543,16 +560,37 @@ tools/` returns exactly those three. Rows 1 and 4 are not yet marked because no 
 Nothing goes into Profiles unverified, and **nothing built may depend on an unverified fact.** Each of
 these blocks the source that needs it, not the whole tool.
 
-1. **Binance per-symbol funding topic.** Profiles §1 records `!markPrice@arr@1s` (the all-symbol array).
-   The per-symbol form we want is **not recorded**. Blocks source 1.
-2. **Binance futures book stream host, path and available cadences** for partial-book depth. Profiles §1
-   records the stream family and the `/public` routing but not the pairing. Blocks sources 3, 4, 7.
-3. **Bybit linear public WS URL.** Profiles §1 says "single WS host" without the URL; §3 records the
-   *spot* URL only. Blocks sources 5, 6.
+> **ALL FIVE CLEARED 2026-07-29 (session 32).** The facts are in `venue-profiles.md` **§5**, dated and
+> cited; the resolution's own record is §35. **Slice C is unblocked.** One sub-item is deliberately left
+> open and is named in item 5. The original statements are kept below because three of them were
+> *mis-stated*, and the corrections are the finding.
+
+1. **Binance per-symbol funding topic.** ~~Profiles §1 records `!markPrice@arr@1s` (the all-symbol array).
+   The per-symbol form we want is **not recorded**.~~ Blocks source 1. — **CLEARED.**
+   `btcusdt@markPrice@1s` confirmed, cadence is **3 s or 1 s only**, and the payload carries two fields
+   Profiles had not recorded (`ap`, `st`). Confirmed there is **no interval field**, which is what §32h's
+   whole existence rests on.
+2. **Binance futures book stream host, path and available cadences** for partial-book depth. ~~Profiles §1
+   records the stream family and the `/public` routing but not the pairing.~~ Blocks sources 3, 4, 7. —
+   **CLEARED, and the question was under-specified**: it asked for *one* host and there are **three**.
+   Futures book is `/public`, futures funding is `/market`, and Binance **spot** book is on
+   `stream.binance.com:9443` with **no prefix and different speeds** (1000 ms / 100 ms, not 100/250/500).
+3. **Bybit linear public WS URL.** ~~Profiles §1 says "single WS host" without the URL; §3 records the
+   *spot* URL only.~~ Blocks sources 5, 6. — **CLEARED:** `wss://stream.bybit.com/v5/public/linear`. The
+   *"single WS host"* phrasing in §1 was misleading rather than wrong — the host is single, the **path**
+   is per-category, and that is the part a connector needs.
 4. **The two venues' depth update-ID shapes** — standing debt #1, owed since session 20. **Now blocking
-   for Bybit** (§32a decision 1b), because reconstructing our own archive requires it. The Binance half
-   is what evidence stream 7 measures.
-5. **Public vs authenticated** for each REST overlay endpoint (§32h).
+   for Bybit** (§32a decision 1b), because reconstructing our own archive requires it. ~~The Binance half
+   is what evidence stream 7 measures.~~ — **CLEARED, and the debt named the wrong count.** There are
+   **three** shapes, split by product and stream type rather than by venue (Profiles §5's table). The
+   consequence that matters is source **4**, not source 7: Binance spot partial depth has **no span at
+   all**.
+5. **Public vs authenticated** for each REST overlay endpoint (§32h). — **CLEARED for everything the tool
+   uses.** `GET /fapi/v1/fundingInfo` is **public** (doc-unmarked + live 200 unauthenticated), weight 0,
+   sharing 500/5 min/IP with `fundingRate`. Of the deferred overlays, `leverageBracket` is `USER_DATA`
+   and Bybit's `fee-rate` is signed — which **corroborates the deferral's first ground** rather than
+   merely coexisting with it. **`GET /fapi/v1/commissionRate` is NOT verified and is not asserted**; it is
+   deferred, so nothing depends on it, and it is left visible rather than closed with its neighbours.
 
 ---
 

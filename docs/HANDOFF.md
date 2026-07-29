@@ -77,7 +77,62 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 31, 2026-07-29 — slice B is BUILT; the next work is slice C, and it is BLOCKED)
+## START HERE (updated end of session 32, 2026-07-29 — §13's debts are CLEARED; **slice C is UNBLOCKED** and is the next work)
+
+**Branch `feat/milestone-1-foundation`. No code changed this session** — `make ci`, the six gates and
+`-race` are as session 31 left them (green). Verify rather than trust: `git status --short`,
+`git rev-list --left-right --count @{u}...HEAD`, and `grep -rn "SPEC EDIT OWED" internal/ tools/` —
+expect **exactly three**, unchanged, all on the design's §12 roster.
+
+**Session 32 did the research task that had blocked slice C for three sessions.** All five of §13's
+verification debts and the standing depth-update-ID debt are **cleared against primary venue
+documentation**. The facts are in **`docs/venue-profiles.md` §5** (new, dated 2026-07-29, fully cited);
+the record is **`docs/superpowers/specs/2026-07-29-profiles-verification.md` §35** — read that, not this
+summary. `2026-07-29-capture-tool-design.md` §13 and §32c are updated in place.
+
+### The next work: slice C (§32m), and it is now unblocked
+
+Raw WS transport, subscribe + ack + first-data assertion, reconnect-with-gap, `arblab capture run`,
+config, observability, and the **minimal `capture verify`** with its positive control. **Funding capture
+for BTC on both venues starts running here — this is the calendar moment.** §35's `RESUME HERE` lists the
+four things it must carry out of the verification; the two that change its design rather than its
+constants are:
+
+- **Config must express host, path prefix and topic separately.** The seven sources sit on **three**
+  Binance hosts with three path disciplines (`/market` for funding, `/public` for futures book, and
+  `stream.binance.com:9443` with **no prefix and different speeds** for spot book), and Bybit sources 5
+  and 6 have **byte-identical topic strings** distinguished only by URL. §32c's table now carries a
+  `Connect to` column; a config keyed on topic alone cannot express it.
+- **Source 4 (Binance *spot* partial depth) has no wire-level gap check at all** — its payload is
+  `{lastUpdateId, bids, asks}`: no span, no back-link, no event time. `capture verify`'s arm for it cannot
+  assert what the other six can, and the positive control must not be written so the asymmetry disappears.
+
+**Still open and unchanged: the live `Mono` source** (§34c). A `Mono` method on `platform/clock.Wall` or
+an adapter in `internal/app/capture`. **It must not be `Now() - start`** — that satisfies the interface
+and defeats the field.
+
+### Three findings worth carrying
+
+1. **The Binance SPA has a server-rendered twin** (§35a). `developers.binance.com/docs/…` returns an
+   empty app shell; **`/en/docs/catalog/…` returns the same docs as real text.** Every Binance fact in
+   Profiles §5 was fetched verbatim from it, no browser involved. **§4's three `⚠ browser-confirm`
+   blocks are therefore removable by re-fetch** — available work, deliberately not done here. The reason
+   this stood since 2026-07-20: §4 *already cited one catalog URL*, filed beside four shell fetches and
+   caveated with them. **A source that worked is invisible when it is listed beside four that did not.**
+2. **A debt that names a count has already answered part of the question** (§35c). Standing debt #1 asked
+   for *"the **two** venues' depth update-ID shapes"* and there are **three**, split by product and stream
+   type rather than by venue. It survived four review rounds and five sessions because re-reading it
+   re-reads the schema. Same shape as §33c's rejected alternative, one layer earlier: there an **answer**
+   arrived pre-worded and went unchecked, here a **question** did — and a debt list is the more dangerous
+   of the two, because re-reading it is what you are supposed to do with it.
+3. **A live probe contradicted the design's stated premise three times** (§35e). §32h rests on
+   *"absent ⇒ 8 h"*; **BTCUSDT is present**, not absent. **4 h is the majority interval** (442 of 742)
+   and Profiles recorded no 4 h case at all. And **`updateTime` is `null` on BTCUSDT specifically** while
+   other rows carry an integer — a type that holds for 740 rows and fails on the one symbol we trade.
+
+---
+
+## START HERE (updated end of session 31, 2026-07-29 — HISTORICAL — slice B was BUILT; slice C was BLOCKED)
 
 **Branch `feat/milestone-1-foundation`, `make ci` green, all six gates clean, `-race` clean.**
 Verify rather than trust: `git status --short`, `git rev-list --left-right --count @{u}...HEAD`, and
