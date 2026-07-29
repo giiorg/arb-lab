@@ -230,12 +230,25 @@ each with the failure it prevents.
 
 ---
 
-## RESUME HERE — updated end of session 28 (milestone 2 opened, no code)
+## RESUME HERE — **SUPERSEDED by session 29.** Historical from here down
+
+**The live statement is `docs/superpowers/specs/2026-07-29-capture-tool-design.md` `## RESUME HERE`,
+and `HANDOFF.md` `## START HERE (session 29)`.** Session 29 took both decisions this block leaves open
+— self-capture covers **funding + books** (§31d resolved), and capture runs on the dev machine — and
+designed the tool against them. The next work is **building slice A**, not designing.
+
+§31a–g above stay live as *reasoning* and are cited throughout §32; only this block is stale.
+
+---
+
+## RESUME HERE — as written at the end of session 28 (milestone 2 opened, no code)
 
 **Branch `feat/milestone-1-foundation`, tree clean apart from this session's docs, `make ci` green,
-23+ commits unpushed.** Milestone 1 closed; **milestone 2 is open and empty**.
+23+ commits unpushed** *(both figures now stale — session 29 committed and pushed; verify with
+`git status --short` and `git rev-list --left-right --count @{u}...HEAD`)*. Milestone 1 closed;
+**milestone 2 is open and empty**.
 
-### The next work: DESIGN the capture tool
+### The next work: DESIGN the capture tool *(DONE in session 29 — see the supersession note above)*
 
 The user's instruction at the end of session 28 was explicit — **design the capture tool in a fresh
 conversation.** Everything needed is in §31 above; nothing has to be re-derived.
