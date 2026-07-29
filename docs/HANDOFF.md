@@ -77,7 +77,144 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 27, 2026-07-27 — the CLOSE, v0.9.12, and milestone 1's roster is empty)
+## START HERE (updated end of session 29, 2026-07-29 — the capture tool is DESIGNED; the next work is BUILDING it, slice A)
+
+**Branch `feat/milestone-1-foundation`, `make ci` green, doc set v0.9.12, marker grep zero.**
+Verify rather than trust: `git status --short`, `git rev-list --left-right --count @{u}...HEAD`, and
+`grep -rn "SPEC EDIT OWED" internal/ tools/` (expect **zero**).
+
+**Session 29 wrote no code.** It took the two decisions session 28 left open and designed the capture
+tool against them. The design is
+**`docs/superpowers/specs/2026-07-29-capture-tool-design.md` §32** — read that, not this summary,
+before writing any of it. Session 28's reasoning (`…-milestone-2-capture-decisions.md` §31) stays live
+and is cited throughout.
+
+### The two decisions, taken (§32a)
+
+1. **Self-capture covers funding AND books** — §31d resolved. The sharpened question is *"what does the
+   parity claim cover?"*, because §8's ≥3-month scoring sample comes from Tardis either way; capture
+   buys parity + recent days. Book capture is **Binance partial-book snapshots** (each message stands
+   alone) plus **one Binance diff stream as evidence**. **Correction the venue facts forced: Bybit has
+   no self-contained snapshot feed** — `orderbook.{1|50|200}` is snapshot+delta — so the Bybit half is
+   reconstructed at read time regardless, and **standing debt #1 (the depth update-ID shapes) is now
+   BLOCKING for the Bybit book sources**, not background.
+2. **Capture runs on the dev machine for now.** So `capture verify` ships with the *first* capture, not
+   after it: on this host gaps are expected, and an archive whose gaps are expected is worthless unless
+   they are measured. The line is *a recorded gap is not an error; an unexplained silence is.*
+
+### The next work: BUILD slice A (§32m)
+
+The frame codec with its `math/big`-style oracle, a `rapid` round-trip property and a fuzz target. No
+I/O, no network, **no venue facts** — the one slice none of §13's verification debts block. Slices
+B (writer) → C (**funding capture STARTS RUNNING — the calendar moment**) → D (measure a day, then
+books) → E (REST overlay) → F (full verify + off-host copy).
+
+**Do §13's five Profiles verifications in parallel with A and B** — they block slice C, and slice C is
+where the calendar starts running. Three of them are missing venue endpoint facts we would otherwise
+have guessed.
+
+### Three findings from the design worth carrying
+
+1. **`Wall.Now()` absorbs a backwards clock step by design, and capture is where that is wrong** (§32i).
+   The clamp is right for the engine — "a timer fires late rather than a settlement evaluated twice" —
+   but on a laptop an NTP step yields a run of **identical `RecvTime`s**, §3.4's cache **accepts an
+   equal `RecvTime`** (added deliberately in session 27), and the replay proceeds over a squashed time
+   axis with every freshness and skew number wrong and nothing failing. **No caller can currently learn
+   the clamp engaged.** Chosen fix: `Wall` gains a pure `Backsteps()` accessor; capture records a
+   `ClockStep`. A `[SPEC EDIT OWED]`.
+2. **The capture key is `(SourceID, Topic)`, not `SourceID`** (§32c) — one `SourceID` has more than one
+   wire representation. The realistic accident is not the evidence stream; it is changing
+   `@depth20@100ms` to `@250ms` six weeks in, which keyed on `SourceID` alone puts two cadences in one
+   file with nothing recording the change. Departs from §3.5's literal "per-`Source`", so it is marked.
+3. **§3.5's "parity replays the persisted dispatch log, not raw capture" reads forward as a format
+   property** (§32d): the capture log has **no cross-source order and needs none**. That is what makes
+   minting no `AcceptOrdinal`/`IngressSeq` safe rather than merely disciplined.
+
+---
+
+## START HERE (updated end of session 28, 2026-07-29 — HISTORICAL — milestone 2 opened; the capture tool's DESIGN was the open work)
+
+**Branch `feat/milestone-1-foundation`, `make ci` green, doc set v0.9.12, marker grep zero.**
+Verify rather than trust: `git status --short`, `git rev-list --left-right --count @{u}...HEAD`, and
+`grep -rn "SPEC EDIT OWED" internal/ tools/` (expect **zero**).
+
+**Session 28 wrote no code.** It opened milestone 2, fixed its ordering, and settled one question that
+would otherwise be reopened every time somebody looks at the funding feed. Everything below is in
+decision record **`docs/superpowers/specs/2026-07-29-milestone-2-capture-decisions.md` §31**, with the
+rejected alternatives — read that, not this summary, before designing anything.
+
+### The next work: DESIGN the capture tool (a fresh conversation, by the user's instruction)
+
+**Milestone 2 is the KILL GATE** — if measured net carry does not clear the cost hurdle, the project
+stops. The deliverable is a number with a verdict attached. Its ordering:
+
+| # | Step | Status |
+|---|---|---|
+| 1 | **Self-capture of the venue streams** | **NEXT — design it** |
+| 2 | Parity dispatcher + persisted `DispatchSeq` (+ `outbox`'s store half, the first migration) | unbuilt |
+| 3 | `strategy` context + `cashcarry` + §2.4's money math + **a fee-fetch seam that does not exist** | unbuilt |
+| 4 | The pre-registered calibration artifact (§8) — approved **before** the sample is scored | unbuilt |
+| 5 | The research simulator → the verdict → the four §12.2 forks (a **user** decision) | unbuilt |
+
+**Capture is first because it is the only item whose cost grows while other work happens** (§31a).
+Today is the only day you can capture today; §8's *"parity + recent days"* is calendar-bound on both
+halves, and the paired our-capture-plus-vendor window can only be created going forward.
+
+### Decide this before writing the design (§31d)
+
+**Does self-capture cover BOOKS as well as funding?** §12.2 says "both funding streams"; §8's fill model
+requires *"time-synchronized spot & perp books"* and depth-walking, which funding alone cannot support —
+and Profiles §3 says spot has **no mark and no funding at all**, so the spot leg prices from its own book.
+The wider set is the safer default and is plausibly a **core §12.2 spec edit**. Getting this wrong is
+discovered at step 5, when the missing months are unrecoverable.
+
+### Do not re-open — settled in §31b, categorically
+
+**The funding rate is CONSUMED from the venue, never derived locally.** Not because deriving is hard —
+because the funding rate is **the venue's own policy computation and it is what debits the account**.
+There is no independent truth behind it to approximate better; a perfect local replication that disagreed
+would be the wrong number by construction. **Trades are not even its input** — the premium index comes
+from the *book*, and `tutorial.md` §1.6 records that the venue builds mark and funding off index + book
+precisely so trades cannot drive them. The discriminator: **reconstruct** what the venue reports lossily
+about an independent truth (the order book); **take** what the venue's computation defines (funding, mark,
+liq price, fee tier). §8's Coinglass rejection is the same call already made once.
+
+**And do not optimize the capture path for latency (§31c).** The signal path is latency-insensitive by
+construction — holds of weeks, a ~3-day EWMA half-life, ~60 settlements per hold. A *systematic* 0.001%
+per-settlement error compounds to ~0.06% of notional against a 0.34–0.38% round trip; two seconds of
+staleness moves the verdict by nothing. Latency matters in execution (§6.6) and mark-driven liq
+monitoring (§7.1) — different pipelines. **Capture's properties are losslessness and provenance.**
+
+### Four constraints the design already has (§31g)
+
+1. **Raw bytes verbatim + `RecvTime` + a per-source counter, append-only.** Parsing is redoable forever;
+   capture is not redoable at all.
+2. **Capture the REST overlay too** — Binance's `fundingInfo`, where **absent means 8h**, so without it
+   "asked and empty" and "never asked" are indistinguishable in our own archive.
+3. **Gaps recorded, never absorbed** — §3.5's capture lane marks the window non-replayable and alerts.
+4. **Its own liveness check, with a positive control.** A dead capture and a quiet market are identical
+   from outside. Kill a stream deliberately and confirm a recorded gap, not a silent hole.
+
+Two venue traps that fail silently: Binance's legacy `/ws/` path was decommissioned 2026-04-23 and
+**returns nothing rather than erroring**; Bybit's **absent field means unchanged, never null-coerce**.
+
+**The capture tool needs no dispatcher** (§31e — it performs no arbitration, so milestone 1's
+"no venue clients" objection was tested and does not apply), and **must never grow into the engine's
+ingestion path**, which is how it would become a second authority over ordering.
+
+### One correction to the line above (§31f)
+
+**§12.1's roster is empty of packages but not of its own sentence** — it also says *"Parity dispatcher …
+from day one"*, and the dispatcher is unbuilt: `IngressSeq` and `TimerSource` exist in the tree only as
+comments promising a component that will stamp them. **A recorded deferral, not drift** (it needs a
+persisted `DispatchSeq`; `migrations/` holds only a README). But it **stops being deferrable here**,
+because §8 defines the simulator as the §3.5 engine with a single total-order dispatcher, *not* a
+parallel simulator — and it is already leaking, in `engine/state`'s equal-`RecvTime` acceptance whose own
+comment says the invariant lives in a component that does not exist.
+
+---
+
+## START HERE (updated end of session 27, 2026-07-27 — HISTORICAL — the CLOSE, v0.9.12, and milestone 1's roster is empty)
 
 **Branch `feat/milestone-1-foundation`, tree clean, `make ci` green, all six gates clean, `docs` 102 pass.**
 Verify rather than trust: `git status --short`, `git rev-list --left-right --count @{u}...HEAD`, and
