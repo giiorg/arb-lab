@@ -77,7 +77,58 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 29, 2026-07-29 — the capture tool is DESIGNED; the next work is BUILDING it, slice A)
+## START HERE (updated end of session 30, 2026-07-29 — slice A is BUILT; the next work is slice B, the writer)
+
+**Branch `feat/milestone-1-foundation`, `make ci` green, all six gates clean, `-race` clean.**
+Verify rather than trust: `git status --short`, `git rev-list --left-right --count @{u}...HEAD`, and
+`grep -rn "SPEC EDIT OWED" internal/ tools/` — expect **exactly two**, both intended and both on the
+design's §12 roster.
+
+**Session 30 wrote the first code of milestone 2.** Slice A of §32m: the frame codec, its oracle, the
+`rapid` properties and the fuzz target, in `internal/engine/capture/`. Plus §32i's
+`platform/clock.Wall.Backsteps()`, which the session-29 handoff named as a companion item. The record
+is **`docs/superpowers/specs/2026-07-29-capture-slice-a-frame-codec.md` §33** — read that, not this
+summary. The design it implements is §32; neither is repeated in the other.
+
+Verification: **21 mutations, 21 kills**; **25.5 M fuzz executions, no finds**; every negative control
+bites and every positive control passes.
+
+### The next work: BUILD slice B (§32m)
+
+The writer — files, hourly rotation on UTC `RecvTime`, the exclusive `flock`, torn-tail recovery, gap
+records and `Alive` ticks, driven by a **fake** source under `TestClock`. Done when §32l's
+fixture-collapse table is satisfied and `-race` is clean. Like slice A it needs **no venue facts**.
+
+### Two things open, and both should be settled BEFORE slice C starts the calendar
+
+1. **A format question the build surfaced (§33c).** `frameLen` sits **outside its own integrity cover**
+   — §32e puts it ahead of the checksum, and the checksum covers only what follows itself. The
+   practical consequence is narrow: corruption of the **last** record's length field reports as
+   `ErrTruncated` rather than `ErrChecksum`, which matters because `ErrTruncated` is the one verdict
+   the recovery acts on **by truncating the file**. Moving the checksum ahead of the length closes it
+   in five lines and is a **format-major** change — cheap today, an archive migration once capture
+   runs. §32e's field order was kept and all three outcomes are tested; **the change is the user's
+   call.**
+2. **§13's five Profiles verifications — NOT STARTED.** They block slice C's sources and slice C is the
+   calendar moment. Three are missing venue endpoint facts. Nothing goes into Profiles unverified.
+
+### Three findings worth carrying
+
+1. **An invariant set that consulted the oracle only on the SUCCESS path let a negative control
+   through** (§33e). A decoder answering `ErrTruncated` to every refusal satisfied all four invariants,
+   because "exactly one sentinel" is satisfied by the wrong sentinel. Agreeing that an input is bad is
+   worth little; agreeing **why** is the contract.
+2. **A surviving mutant had a third meaning beside "test gap" and "wrong mutant": a guard nothing can
+   trigger** (§33e). `!lastSys.IsZero() &&` was unreachable because the zero time is year 1. Deleted
+   rather than tested — this is session 27's unreachable-sentinel finding in different clothes, and it
+   argues for running mutations over **defensive** code specifically.
+3. **`RecordKind` forced a second §3.6 rule 8 exception** (§33a), and the argument for it is §32e's own
+   NDJSON rejection one level down: *the archive is the fact; readability is a tool over it.* What the
+   integer shape buys is that a **zero-filled page cannot decode as a valid record**.
+
+---
+
+## START HERE (updated end of session 29, 2026-07-29 — HISTORICAL — the capture tool was DESIGNED; slice A was the open work)
 
 **Branch `feat/milestone-1-foundation`, `make ci` green, doc set v0.9.12, marker grep zero.**
 Verify rather than trust: `git status --short`, `git rev-list --left-right --count @{u}...HEAD`, and

@@ -529,6 +529,9 @@ it, and it cannot see a rule the code silently fails to meet.
 | 2 | core §3.5 | the capture lane's counters are per-**`(Source, Topic)`**, because one `SourceID` has more than one wire representation — §32c |
 | 3 | core §3.5 | `Clock` absorbs a backwards step and **no caller can learn it happened**; `Wall` gains `Backsteps()` and the capture lane records it — §32i |
 | 4 | core §8 | (probable) the fidelity contract's data line, if §12.2's widening needs restating where the fill model is defined |
+| 5 | core §3.6 rule 8 | **a SECOND documented integer-enum exception**: `capture.RecordKind` crosses a persistence boundary, which rule 8 says takes the `type X string` shape, and is `uint8` anyway — §33a. Found by building slice A, not by this design |
+
+**Row 3 is now marked in code**, at `platform/clock.Wall.Backsteps` (built in slice A alongside the codec, §33d). Row 5 is marked at `capture.RecordKind`. `grep -rn "SPEC EDIT OWED" internal/ tools/` returns exactly those two.
 
 ---
 
@@ -550,19 +553,25 @@ these blocks the source that needs it, not the whole tool.
 
 ---
 
-## RESUME HERE — end of session 29 (design written, no code)
+## RESUME HERE — **SUPERSEDED by session 30.** Historical from here down
 
-**Two user decisions taken:** self-capture covers **funding + books** (Binance via partial-book
-snapshots, Bybit snapshot+delta because it has no alternative, plus one Binance diff stream as
-evidence), and capture **runs on the dev machine for now** — which makes `capture verify` ship with the
-first capture rather than after it.
+**The live statement is `docs/superpowers/specs/2026-07-29-capture-slice-a-frame-codec.md`
+`## RESUME HERE`, and `HANDOFF.md` `## START HERE (session 30)`.** **Slice A is BUILT** — the frame
+codec, its oracle, the `rapid` properties and `FuzzDecodeRecord`, plus §32i's `Wall.Backsteps()`. The
+next work is **slice B, the writer**, not slice A.
 
-**The next work is slice A** (§32m): the frame codec with its oracle, round-trip property and fuzz
-target. No I/O, no network, no venue facts required — so it is the one slice none of §13's verification
-debts block.
+§32a–n above stay live as the *design* and are what slices B–F implement; §12's roster gained row 5
+and §33c raises a format question against §32e that is still open. Only this block is stale — and it
+is the second one in this document set to go stale in two sessions, which is why supersession is
+marked at the block rather than left for a reader to infer.
 
-**Do §13's verifications in parallel with slices A and B**, because they block slice C, and slice C is
-where the calendar starts running.
+**Two user decisions taken (session 29, still live):** self-capture covers **funding + books** (Binance
+via partial-book snapshots, Bybit snapshot+delta because it has no alternative, plus one Binance diff
+stream as evidence), and capture **runs on the dev machine for now** — which makes `capture verify`
+ship with the first capture rather than after it.
+
+**§13's verifications are still NOT STARTED.** They block slice C, and slice C is where the calendar
+starts running.
 
 **Three things not to re-derive:**
 - The funding rate is **consumed, never derived** (§31b, categorical).
