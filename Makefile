@@ -54,17 +54,29 @@ test-properties-deep: ## deep property run on the pinned seed (reproducible)
 	RAPID_CHECKS=$(RAPID_NIGHTLY_CHECKS) RAPID_SEED=$(RAPID_SEED) \
 		$(GO) test -count=1 -run 'TestProperty' ./...
 
-# -fuzz takes exactly one package, so this target names it rather than using
-# ./... . `-run '^$$'` suppresses the ordinary tests so the time budget goes to
-# fuzzing; the seed corpus still runs as a table under plain `make test`, which
-# is what makes this an explorer rather than a gate — the same division as
-# test / test-properties above. A find lands in testdata/fuzz/ and is committed.
+# -fuzz takes exactly one package AND one target, so each target gets its own
+# goal rather than a loop — a loop would hide which one is running and which one
+# found something. `-run '^$$'` suppresses the ordinary tests so the time budget
+# goes to fuzzing; every seed corpus still runs as a table under plain `make
+# test`, which is what makes these explorers rather than gates — the same
+# division as test / test-properties above. A find lands in testdata/fuzz/ and
+# is committed.
+#
+# FUZZTIME is per target, so `make fuzz` costs FUZZTIME x the number of targets.
 FUZZTIME ?= 60s
 
 .PHONY: fuzz
-fuzz: ## bounded fuzz run of the decimal parser (FUZZTIME=60s)
+fuzz: fuzz-decimal fuzz-capture ## bounded fuzz run of every target (FUZZTIME=60s each)
+
+.PHONY: fuzz-decimal
+fuzz-decimal: ## bounded fuzz run of the decimal parser
 	$(GO) test -run '^$$' -fuzz FuzzParseMantissa -fuzztime $(FUZZTIME) \
 		./internal/platform/fixedpoint
+
+.PHONY: fuzz-capture
+fuzz-capture: ## bounded fuzz run of the capture frame decoder
+	$(GO) test -run '^$$' -fuzz FuzzDecodeRecord -fuzztime $(FUZZTIME) \
+		./internal/engine/capture
 
 .PHONY: vet
 vet: ## go vet, both modules
