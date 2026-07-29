@@ -77,7 +77,61 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 32, 2026-07-29 — §13's debts are CLEARED; **slice C is UNBLOCKED** and is the next work)
+## START HERE (updated end of session 33, 2026-07-30 — slice C is **PARTLY BUILT**: the transport and the live `Mono` landed; **four items remain and funding capture is NOT yet running**)
+
+**Branch `feat/milestone-1-foundation`.** Verify rather than trust: `git status --short` (clean),
+`git rev-list --left-right --count @{u}...HEAD` (**8 ahead**), and
+`grep -rn "SPEC EDIT OWED" internal/ tools/` — expect **exactly four**: the three §34 left on the
+design's §12 roster, plus a new one in `internal/engine/venue/transport/doc.go`. `make ci` green, all
+six gates clean, `-race` clean, docs 102 pass.
+
+**Read `docs/superpowers/specs/2026-07-29-capture-slice-c-transport.md` (§36), not this summary.** Its
+`## RESUME HERE` lists the four remaining items in order, each with the obligations it must carry, so
+nothing has to be re-derived.
+
+### What landed, and what did not
+
+Landed: `internal/engine/venue/transport/` (the raw WS socket — three-part endpoint, both venue
+dialects, subscribe + ack, **§32k's first-data assertion**, reconnect-with-gap, stats) and
+`platform/clock.Wall.Mono()`, which resolves §34c's open decision. **7 mutations / 7 kills.**
+New dependency: `github.com/coder/websocket v1.8.15`, the engine module's first runtime third-party
+dependency, zero transitive deps, the user's call (§36a).
+
+**NOT landed — this is the rest of slice C:** `capture verify` (minimal), the `platform/config` schema,
+`internal/app/capture` (the composition root), and `cmd/arblab`. **The calendar moment has not
+happened**: nothing is capturing yet.
+
+### Four findings worth carrying
+
+1. **A pong renewing the first-data window** (§36d). Refusing to count a pong as data is NOT enough
+   for §32k: with a per-read deadline every non-data frame RESTARTS the window, so a 20 s heartbeat
+   under a 30 s timeout renews it forever and the assertion never fires. The deadline is now absolute
+   from subscription. Found by writing the test, in code written by someone who had just spent a page
+   arguing pongs must not satisfy the assertion.
+2. **Fixture collapse number TEN, and it is a new variant** (§36e). The mutation for finding 1
+   SURVIVED because the fake venue called `Conn.Ping`, which **blocks**, so exactly one pong was ever
+   sent — the test was the silent-socket test wearing a different name. The collapsing parameter was a
+   **rate**, pinned by a side effect of a library call rather than by a literal, so reading the
+   fixture's arguments could not find it. The guard is an assertion on the FIXTURE
+   (`Stats().PongFrames >= 3`). **When a test's discriminating power depends on a rate, assert the rate.**
+3. **A claim written inline can be unmutatable** (§36f). That mutation first reported `NOBUILD!!`
+   because breaking it made a neighbouring variable unused. The re-aim was not a different `sed` — it
+   was extracting `readDeadline()` so the claim had a name. **If a claim cannot be mutated without
+   breaking the build for an unrelated reason, it is entangled with its neighbours and wants a name.**
+4. **§32i's `notimenow` prediction survives, but not for the predicted reason** (§36g). Two real
+   escapes (backoff timer, venue heartbeat ticker). The predicted use — *socket read deadlines* —
+   needed **none**, because a ctx-first library routes every deadline through `context.WithTimeout`,
+   which reads no clock in our code. Taking `gorilla/websocket` instead would have needed an escape on
+   every read: the library choice changed which lines are policed. Also new: **`notimenow` polices
+   `engine/` TEST files** — four escapes went into the transport's test harness.
+
+Also resolved: **§34d's `..` traversal finding was applied to its mirror before it bit** — a topic is a
+path segment in a URL too, so the guard went in the session the second path-segment site appeared
+(§36c).
+
+---
+
+## START HERE (updated end of session 32, 2026-07-29 — HISTORICAL — §13's debts were CLEARED; slice C was UNBLOCKED and unstarted)
 
 **Branch `feat/milestone-1-foundation`. No code changed this session** — `make ci`, the six gates and
 `-race` are as session 31 left them (green). Verify rather than trust: `git status --short`,
