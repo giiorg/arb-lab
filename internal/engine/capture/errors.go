@@ -128,3 +128,140 @@ var (
 	// it is consulted exactly when RecvTime is already untrustworthy.
 	ErrMonoNegative = errors.New("capture: record Mono is negative")
 )
+
+// The archive layout's refusals (§32e), slice B.
+var (
+	// ErrTopicUnset reports a StreamKey with no venue topic.
+	//
+	// The empty topic is not merely incomplete: it encodes to an empty path
+	// segment, so two streams that differ only in topic would share a directory
+	// and interleave their CaptureSeqs into what looks like one dense log —
+	// §32f's two-writer hazard reached without a second writer.
+	ErrTopicUnset = errors.New("capture: stream topic is unset")
+
+	// ErrTopicChar reports a topic containing a separator or a control
+	// character. Percent-encoding would round-trip them faithfully, which is
+	// exactly the problem: a topic nobody could have subscribed to would be
+	// stored as a legitimate stream rather than refused at the boundary where a
+	// config file can still be fixed. Same reasoning as ids' refusal of
+	// whitespace in a venue symbol.
+	ErrTopicChar = errors.New("capture: stream topic contains a separator or control character")
+
+	// ErrPathShape reports a path that is not one this package would have
+	// written: the wrong depth, a file name that is not a rotation window, or a
+	// window whose date directories disagree with its name.
+	ErrPathShape = errors.New("capture: not an archive path")
+
+	// ErrPathEncoding reports a path segment that is not this package's
+	// percent-encoding — a lowercase hex digit, a truncated escape, or an escape
+	// of a character that needed none.
+	//
+	// Refusing the redundant escape is the one that matters: accepting "%41" for
+	// "A" would give two path spellings for one stream, and the whole reason the
+	// encoder and its inverse exist as a tested pair is that there is exactly
+	// one.
+	ErrPathEncoding = errors.New("capture: path segment is not canonically encoded")
+)
+
+// The gap taxonomy's refusals (§32g), slice B.
+var (
+	// ErrCauseUnspecified and ErrCauseUnknown report a gap cause that is not a
+	// declared one, split for the same reason ErrKindUnspecified and
+	// ErrKindUnknown are: they come from different mistakes. The zero cause is a
+	// gap record nobody classified — which claims a discontinuity and refuses to
+	// say what kind, and so stops anybody looking further while carrying no
+	// information. An unknown non-zero cause is corruption or a newer build.
+	ErrCauseUnspecified = errors.New("capture: gap cause is unset")
+	ErrCauseUnknown     = errors.New("capture: gap cause is not a declared cause")
+
+	// ErrGapRange reports a gap whose sequence range is not self-consistent, or
+	// a cause that requires a range and carries none.
+	//
+	// §32f's drop-newest is what makes a lost run contiguous, so Count ==
+	// To-From+1 is an invariant of the drop policy rather than bookkeeping. A
+	// record that violates it is evidence the queue dropped in some other
+	// pattern — which would mean the sequence holes elsewhere in the file no
+	// longer mean what §32d says they mean.
+	ErrGapRange = errors.New("capture: gap range is not self-consistent")
+)
+
+// The writer's refusals (§32e, §32f), slice B.
+var (
+	// ErrRootUnset, ErrPeriodRange and ErrIntervalRange report a WriterConfig
+	// that was not populated. The zero value is unusable on purpose: a zero
+	// rotation period would rotate on every record and a zero alive interval
+	// would write a tick per pump, and both fail as an archive that is enormous
+	// and healthy-looking rather than as a refusal naming the field.
+	ErrRootUnset     = errors.New("capture: archive root is unset")
+	ErrPeriodRange   = errors.New("capture: rotation period must be positive")
+	ErrIntervalRange = errors.New("capture: interval must be positive")
+
+	// ErrTimeSourceUnset reports a writer constructed without a clock. §3.6 rule
+	// 5's whole point is that there is no ambient fallback to reach for.
+	ErrTimeSourceUnset = errors.New("capture: time source is unset")
+
+	// ErrLockHeld reports another writer already holding this stream's exclusive
+	// lock, and the error text names the holder (§32f).
+	//
+	// Two capture processes over one root interleave CaptureSeq into something
+	// that looks exactly like a healthy dense log. This is not hypothetical: the
+	// per-stream layout makes "run a second process for the new source" an
+	// attractive way to add a source without restarting the others.
+	ErrLockHeld = errors.New("capture: another writer holds this stream's lock")
+
+	// ErrLockUnsupported reports a platform with no advisory file locking, where
+	// the single-writer invariant cannot be enforced.
+	//
+	// A refusal rather than a warning, because the failure it prevents is
+	// silent: §32f's whole argument is that two writers produce an archive that
+	// passes every check while being wrong. Running unprotected would be the
+	// choice to accept that, and it is not a choice a default should make.
+	ErrLockUnsupported = errors.New("capture: this platform has no advisory file locking")
+
+	// ErrWriterClosed reports a call on a writer that has already been closed.
+	ErrWriterClosed = errors.New("capture: writer is closed")
+
+	// ErrKindNotData reports a caller handing Data() a record of another kind.
+	// Every other kind is minted by the writer itself, from the injected clock,
+	// and accepting one from outside would put a record in the archive whose
+	// RecvTime the writer cannot vouch for.
+	ErrKindNotData = errors.New("capture: only a Data record may be written from outside")
+
+	// ErrWindowBackwards reports a record whose RecvTime falls in a rotation
+	// window earlier than the open file's.
+	//
+	// Reachable only from a caller, not from the injected clock: platform/clock's
+	// Wall clamps Now() so it never goes backwards (§32i), so a live reader's
+	// stamps are non-decreasing within a run. It is refused rather than absorbed
+	// because the alternative is a record sitting in a file whose NAME says a
+	// different hour, and the file name is what every coverage report keys on.
+	ErrWindowBackwards = errors.New("capture: record predates the open rotation window")
+
+	// ErrQueueDepth reports a non-positive bounded-queue depth. Zero is an
+	// unbuffered channel, which turns §32f's "never blocks the reader" into
+	// "drops every frame the writer is not already parked waiting for" — a
+	// capture that runs, reports drops honestly, and archives almost nothing.
+	ErrQueueDepth = errors.New("capture: queue depth must be positive")
+
+	// ErrSeqNotAscending reports a Data record whose CaptureSeq does not exceed
+	// the last one written.
+	//
+	// §32d makes CaptureSeq the READER's counter, dense per stream, so a hole in
+	// it means a dropped frame with no other evidence required. A repeat or a
+	// reversal breaks that reading: after a reader silently restarts its
+	// counter, later holes stop meaning "dropped" and start meaning nothing at
+	// all — and every check downstream still passes. Refusing also forces the
+	// counter to be 1-based, since zero is what an Open record's prev_last_seq
+	// means by "no predecessor".
+	ErrSeqNotAscending = errors.New("capture: record CaptureSeq does not ascend")
+
+	// ErrArchiveCorrupt reports an existing hour file that this writer will not
+	// append to, because recovering it would mean destroying evidence.
+	//
+	// This is the errors-above note made operational. A torn tail is truncated
+	// and recorded as a gap; anything else — a bad checksum, a reserved bit, an
+	// undeclared kind — means the bytes are present and wrong, and truncating to
+	// the last good boundary would discard a corrupt region that somebody needs
+	// to see. §32k's verify exists to report it, and exits 1.
+	ErrArchiveCorrupt = errors.New("capture: existing archive file is corrupt, not merely truncated")
+)

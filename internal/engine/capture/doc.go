@@ -41,12 +41,20 @@
 // discovery lands three months later at scoring time. See RecordKind, where each
 // member is named by the failure it prevents.
 //
-// # This slice
+// # These slices
 //
-// Slice A of §32m: the frame codec, its oracle, a rapid round-trip property and
-// a fuzz target. No I/O, no network, no venue facts — deliberately the one slice
-// none of §13's verification debts block. The writer (rotation, the exclusive
-// lock, torn-tail recovery, Alive ticks) is slice B and is not here; what is
-// here is the format those will be written in, and the refusals that make a
-// corrupt frame unreadable rather than plausible.
+// Slice A of §32m is the frame codec, its oracle, a rapid round-trip property
+// and a fuzz target — the format, and the refusals that make a corrupt frame
+// unreadable rather than plausible.
+//
+// Slice B is the writer over it: the archive layout and its inverse (path.go),
+// the gap taxonomy (gap.go), the exclusive per-stream lock (lock.go), torn-tail
+// recovery (recover.go), the bounded drop-newest queue (queue.go) and the writer
+// itself — files, hourly rotation on UTC RecvTime, unconditional Alive ticks,
+// digests at close. Both are driven by an injected clock and a fake source; no
+// network and no venue facts, which is why neither is blocked by any of §13's
+// five verification debts.
+//
+// Not here yet: the transport, `capture run`, config, observability and verify
+// (slice C), the REST overlay (E), and `capture cat` (F).
 package capture
