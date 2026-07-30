@@ -81,7 +81,32 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 39, 2026-07-30 — v0.9.15 RELEASED, slice F CLOSED, capture restarted onto the MANIFEST-WRITING build)
+## START HERE (updated end of session 40, 2026-07-30 — the PARITY DISPATCHER is DESIGNED, docs-only; next work is slice A of §39j)
+
+**Branch `feat/milestone-1-foundation`.** Session 40 wrote **no code** — it opened milestone 2's
+**step 2** (§31a's roster: the parity dispatcher + persisted `DispatchSeq`, the deferral §31f says
+"stops being deferrable at this milestone") and produced its design record. Verify rather than
+trust: `git status --short` (clean), `grep -rn "SPEC EDIT OWED" internal/ tools/` — expect **ZERO**.
+
+**Read `docs/superpowers/specs/2026-07-30-parity-dispatcher-design.md`** — §39 is the design, its
+`RESUME HERE` is the live statement. Headlines: the dispatcher is **`engine/dispatch`** (§39c); the
+persisted log is **capture-lane framing over `engine/capture`'s codec, sequences not payloads**
+(§39e); **the outbox store half does NOT come with it** — §31f's sentence saying so contradicted
+milestone 1's own item 1b and core §3.5, corrected on the record (§39d); `engine/state`'s
+equal-`RecvTime` accommodation is ratified and its check stays (§39h); build order is three slices
+(§39j), core → log → wiring, closing on the parity probe: **two sim runs over one archive produce
+byte-identical dispatch logs**. §39a records why session 39's "calibration artifact first" sketch
+was a compression of steps 4–5, not a reordering — §31a stands.
+
+**The capture rituals stay first, every session:** `pgrep -fl "arblab capture run"`, then a verify
+over the accumulated range — 0 integrity findings, always (session 40's check: COVERAGE-only, with
+hour 13–15's reconnect/restart gaps the honest ledger of a laptop afternoon). Calendar items
+unchanged: **slice D's disk figure ~09:53 UTC 2026-07-31**; the off-host destination is still the
+user's open §38f decision and the laptop is still the only copy.
+
+---
+
+## START HERE (updated end of session 39, 2026-07-30 — HISTORICAL — v0.9.15 RELEASED, slice F CLOSED, capture restarted onto the MANIFEST-WRITING build)
 
 **Branch `feat/milestone-1-foundation`.** Verify rather than trust: `git status --short` (clean),
 `grep -rn "SPEC EDIT OWED" internal/ tools/` — expect **ZERO** (slice F wrote no markers; its one
