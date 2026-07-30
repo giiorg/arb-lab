@@ -1,6 +1,6 @@
 # Venue Capability Profiles — Binance USDⓈ-M / Bybit V5
 
-**Status:** v0.9.13 (2026-07-30) — set-version alignment, no content change in this doc this release; §5's session-32 verification addition (2026-07-29) is now inside a release rather than ahead of one.
+**Status:** v0.9.14 (2026-07-30) — set-version alignment, no content change in this doc this release; the `fundingInfo` facts §5 verified on 2026-07-29 (public, host, the three live observations) are now load-bearing — capture slice E polls exactly that endpoint hourly.
 **Doc set:** normative core `build-spec.md` · venue facts `venue-profiles.md` · kernel machines `state-machines.md` · history/traceability `adr-history.md` · teaching companion `tutorial.md`.
 **Role:** per-venue facts + quirk matrices behind the core's venue-contract requirements (`build-spec.md` §4). **Citation coverage, stated honestly `[→ R1d-11]`:** every fact carries its verification *date* (2026-07-18 / 2026-07-19 / 2026-07-20); the **safety-kernel rows carry full source citations in §4 here**; the remaining §1/§3 rows' per-row citations live in the v0.6/v0.7 review records (`docs/review/`), not inline — treat any fact older than a venue API cycle as due for re-checking.
 

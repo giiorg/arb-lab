@@ -1,6 +1,6 @@
 # funding rate-ის არბიტრაჟის ბოტის შექმნა — სახელმძღვანელო
 
-**Status:** v0.9.13 (2026-07-30) — set-version alignment, no change in this doc (v0.9.13 is the **first milestone-2 release**: the capture tool closes and capture goes live; six edits land in core §3.5, §3.6 rule 8, §8, §11 and §12.2, none at this tutorial's altitude).
+**Status:** v0.9.14 (2026-07-30) — set-version alignment, no change in this doc (v0.9.14 is capture slice E: the `fundingInfo` REST overlay goes live; one edit lands in core §8/§12.2, none at this tutorial's altitude).
 **Doc set:** normative core `build-spec.md` · venue facts `venue-profiles.md` · kernel machines `state-machines.md` · history/traceability `adr-history.md` · teaching companion `tutorial.md`.
 
 **აუდიტორია.** უფროსი ინჟინრები, რომლებსაც აქვთ სისტემების ძლიერი ალღო და დერივატივების შესახებ მცირე ან ნულოვანი გამოცდილება. ეს ტექსტი ასწავლის *რატომ*-ს; ხოლო ნორმატიული *რა უნდა აშენდეს* მოცემულია [`docs/build-spec.md`](./build-spec.md)-ში, რომელზეც ეს დოკუმენტი მიუთითებს როგორც **§spec**. თუ ეს ორი ოდესმე არ დაეთანხმება ერთმანეთს, უპირატესობა ენიჭება build-spec-ს.
