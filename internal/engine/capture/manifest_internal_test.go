@@ -169,6 +169,144 @@ func TestWriterClosesLandManifestEntries(t *testing.T) {
 	}
 }
 
+// TestFailedCloseLandsNoManifestEntry is the gate in closeFile (§38a): the
+// entry is the OUTER claim, so a close that could not finish its inner writes
+// must not make it. The fixture fails the sidecar specifically — the file's
+// own directory goes read-only while `_manifest/` stays writable — because
+// that is the one conjunct whose failure leaves everything the manifest write
+// itself needs fully working.
+func TestFailedCloseLandsNoManifestEntry(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions; the fixture cannot fail the sidecar write")
+	}
+	c := newFakeClock(startInstant(t))
+	cfg := testConfig(t, perpKey(), c)
+	w, err := OpenWriter(cfg)
+	if err != nil {
+		t.Fatalf("OpenWriter: %v", err)
+	}
+	if err := w.Data(dataRecord(1, c, `{"p":1}`)); err != nil {
+		t.Fatalf("Data: %v", err)
+	}
+	path := w.Path()
+	dir := filepath.Dir(path)
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	if err := w.Close(); err == nil {
+		t.Fatal("Close succeeded with an unwritable sidecar directory")
+	}
+
+	_, window, err := ParseFilePath(cfg.Root, path)
+	if err != nil {
+		t.Fatalf("parse own path: %v", err)
+	}
+	m, err := loadManifest(cfg.Root, window.UTC().Format(manifestDayLayout))
+	if err != nil {
+		t.Fatalf("load manifest: %v", err)
+	}
+	if m != nil {
+		t.Fatalf("a failed close landed a manifest entry: %+v", m.Entries)
+	}
+}
+
+// TestReopenedFileClosesWithFullFileCounts drives §38a's counters through the
+// recovery path: a crash mid-file, a reopen that scans and truncates, more
+// records, then a clean close. The entry must describe the WHOLE file — the
+// records and gap records the scan recovered plus everything written after —
+// and the walk of the closed file is the anchor, because the writer's counters
+// and the file are only the same story when the restore actually happened.
+func TestReopenedFileClosesWithFullFileCounts(t *testing.T) {
+	c := newFakeClock(startInstant(t))
+	cfg := testConfig(t, perpKey(), c)
+	w, err := OpenWriter(cfg)
+	if err != nil {
+		t.Fatalf("OpenWriter: %v", err)
+	}
+	if err := w.Data(dataRecord(1, c, `{"p":1}`)); err != nil {
+		t.Fatalf("Data: %v", err)
+	}
+	// Two pre-crash gap records, the 0/1-collapse rule again: the mutant under
+	// aim zeroes the RESTORED count, so the retained portion must contribute a
+	// number the post-reopen writes cannot reproduce on their own.
+	if err := w.Gap(Gap{Cause: CauseOverflow, From: 2, To: 3, Count: 2}); err != nil {
+		t.Fatalf("Gap: %v", err)
+	}
+	if err := w.Gap(Gap{Cause: CauseReconnect, Detail: "dropped"}); err != nil {
+		t.Fatalf("Gap: %v", err)
+	}
+	c.Advance(time.Second)
+	if err := w.Data(dataRecord(4, c, strings.Repeat("z", 4096))); err != nil {
+		t.Fatalf("Data: %v", err)
+	}
+	path := w.Path()
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	closeFrame, err := frameLenOfLastRecord(body)
+	if err != nil {
+		t.Fatalf("measure the close record: %v", err)
+	}
+	// The crash: the Close record gone and the last Data record torn.
+	if err := os.Truncate(path, int64(len(body))-int64(closeFrame+4)); err != nil {
+		t.Fatalf("truncate: %v", err)
+	}
+
+	c2 := newFakeClock(startInstant(t))
+	c2.Advance(10 * time.Second)
+	cfg2 := testConfig(t, perpKey(), c2)
+	cfg2.Root = cfg.Root
+	w2, err := OpenWriter(cfg2)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if err := w2.Data(dataRecord(7, c2, `{"p":2}`)); err != nil {
+		t.Fatalf("Data after recovery: %v", err)
+	}
+	if err := w2.Close(); err != nil {
+		t.Fatalf("Close after recovery: %v", err)
+	}
+
+	counts, err := walkFileCounts(path)
+	if err != nil {
+		t.Fatalf("walk the closed file: %v", err)
+	}
+	// Fixture guard: the retained portion must hold both pre-crash gap records,
+	// or the mutant that zeroes the restored count has nothing to lose.
+	if counts.gaps < 3 {
+		t.Fatalf("the walk finds %d gap records — the crash cut did not retain the two pre-crash ones", counts.gaps)
+	}
+	_, window, err := ParseFilePath(cfg.Root, path)
+	if err != nil {
+		t.Fatalf("parse own path: %v", err)
+	}
+	m, err := loadManifest(cfg.Root, window.UTC().Format(manifestDayLayout))
+	if err != nil {
+		t.Fatalf("load manifest: %v", err)
+	}
+	if m == nil || len(m.Entries) != 1 {
+		t.Fatalf("manifest = %+v, want the reopened file's single entry", m)
+	}
+	e := m.Entries[0]
+	if e.Records != counts.records || e.Gaps != counts.gaps || e.LastSeq != counts.lastSeq {
+		t.Errorf("entry {records %d, gaps %d, lastSeq %d}, the file holds {%d, %d, %d}",
+			e.Records, e.Gaps, e.LastSeq, counts.records, counts.gaps, counts.lastSeq)
+	}
+	sidecar, err := readSidecarDigest(path)
+	if err != nil {
+		t.Fatalf("sidecar: %v", err)
+	}
+	if e.SHA256 != sidecar {
+		t.Errorf("entry digest %s is not the re-close's sidecar %s — the latest close is the whole-file truth", e.SHA256, sidecar)
+	}
+}
+
 // TestManifestUpsertReplacesAndBackfillDoesNot pins the two write policies to
 // their callers (§38a vs §38b): a re-close legitimately replaces its entry; a
 // repair must never displace close-time truth.
@@ -205,7 +343,10 @@ func TestManifestUpsertReplacesAndBackfillDoesNot(t *testing.T) {
 	if inserted {
 		t.Error("a backfill displaced a close-time entry")
 	}
-	other := entry("v1/b/file.arbcap", planted, ManifestSourceBackfill)
+	// The new path sorts BEFORE the close entry's but is inserted AFTER it —
+	// with "v1/b/..." here, path order and insertion order agree and the sort
+	// assertion below would hold for an implementation that never sorts.
+	other := entry("v1/0/file.arbcap", planted, ManifestSourceBackfill)
 	inserted, err = insertManifestEntryIfAbsent(root, other)
 	if err != nil {
 		t.Fatalf("insert-if-absent new path: %v", err)
@@ -217,10 +358,10 @@ func TestManifestUpsertReplacesAndBackfillDoesNot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	if len(m.Entries) != 2 || m.Entries[0].SHA256 != second.SHA256 {
+	if len(m.Entries) != 2 || m.Entries[1].SHA256 != second.SHA256 {
 		t.Fatalf("final entries %+v: the close entry must survive with its own digest", m.Entries)
 	}
-	if m.Entries[0].Path > m.Entries[1].Path {
+	if m.Entries[0].Path != other.Path || m.Entries[1].Path != first.Path {
 		t.Errorf("entries are not sorted by path: %q, %q", m.Entries[0].Path, m.Entries[1].Path)
 	}
 }
@@ -272,7 +413,7 @@ func TestManifestEntryRefusesTheZeroValue(t *testing.T) {
 // walk.
 func TestBackfillDerivesFromSidecarNotBytes(t *testing.T) {
 	root := t.TempDir()
-	w1, w2, w3 := fixtureWindow(t, 1), fixtureWindow(t, 2), fixtureWindow(t, 3)
+	w1, w2, w3, w4 := fixtureWindow(t, 1), fixtureWindow(t, 2), fixtureWindow(t, 3), fixtureWindow(t, 4)
 
 	sealed := newArchive(t, root, perpKey(), w1)
 	sealed.open(0)
@@ -297,6 +438,35 @@ func TestBackfillDerivesFromSidecarNotBytes(t *testing.T) {
 	if err := os.Remove(barePath + digestExt); err != nil {
 		t.Fatalf("remove sidecar: %v", err)
 	}
+
+	// A closed file with bytes torn onto its tail after close. Backfill never
+	// verifies the digest — the sidecar is COPIED, that is the point — so the
+	// torn-tail guard is the only thing between a damaged file and a
+	// plausible-looking entry for it.
+	torn := newArchive(t, root, perpKey(), w4)
+	torn.open(0)
+	torn.data(9)
+	torn.seal()
+	tornPath := torn.write()
+	f, err := os.OpenFile(tornPath, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("open torn: %v", err)
+	}
+	if _, err := f.Write([]byte{0xFF, 0xFF, 0xFF}); err != nil {
+		t.Fatalf("tear tail: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close torn: %v", err)
+	}
+
+	// A fully eligible file in the NEXT UTC day: without it, "walks only the
+	// requested day" and "walks the whole tree" produce the same added count.
+	nextDay := fixtureWindow(t, 11) // 2026-07-30T00:00Z against w1's 2026-07-29
+	foreign := newArchive(t, root, perpKey(), nextDay)
+	foreign.open(0)
+	foreign.data(8)
+	foreign.seal()
+	foreign.write()
 
 	// The builder manifested the sealed and bare files; strip the manifest so
 	// backfill starts from the pre-slice-F state, and plant the wrong sidecar.
@@ -336,6 +506,13 @@ func TestBackfillDerivesFromSidecarNotBytes(t *testing.T) {
 	}
 	if e.ClosedAt != now.Format(time.RFC3339Nano) {
 		t.Errorf("ClosedAt = %q, want the backfill instant — the close instant is a fact the crash destroyed", e.ClosedAt)
+	}
+	next, err := loadManifest(root, nextDay.Format(manifestDayLayout))
+	if err != nil {
+		t.Fatalf("load next day: %v", err)
+	}
+	if next != nil {
+		t.Errorf("a backfill of %s manifested the next day's file: %+v", w1.Format(manifestDayLayout), next.Entries)
 	}
 
 	again, err := BackfillManifestDay(root, w1, now.Add(time.Hour))
@@ -534,6 +711,26 @@ func TestVerifyManifestCrossChecks(t *testing.T) {
 			if slices.Contains(manifestKinds, k) {
 				t.Errorf("finding %s survives a backfill of an intact tree: %s", k, dumpFindings(rep))
 			}
+		}
+	})
+
+	t.Run("a range crossing midnight checks each day's manifest", func(t *testing.T) {
+		// Every other fixture lives inside one UTC day, where a day loop that
+		// never advanced past the first day is indistinguishable from one that
+		// visits them all. The 23:00→00:00 pair puts the fault in the SECOND
+		// day, where only the advance can find it.
+		w23, w00 := fixtureWindow(t, 10), fixtureWindow(t, 11)
+		root := build(t, w23, w00)
+		if err := os.Remove(manifestPath(root, w00.Format(manifestDayLayout))); err != nil {
+			t.Fatalf("remove second day's manifest: %v", err)
+		}
+		rep := verifyOK(t, twoWindowCfg(root, w23))
+		hits := findingsFor(rep, FindingManifestAbsent)
+		if len(hits) != 1 {
+			t.Fatalf("manifest_absent ×%d, want 1 for the second day: %s", len(hits), dumpFindings(rep))
+		}
+		if want := manifestPath(root, w00.Format(manifestDayLayout)); hits[0].Path != want {
+			t.Errorf("finding names %q, want the second day's %q", hits[0].Path, want)
 		}
 	})
 
