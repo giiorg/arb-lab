@@ -67,13 +67,15 @@ var (
 	// than left to each consuming context.
 	ErrStreamProductMismatch = errors.New("events: stream does not exist for this product")
 
-	// ErrAcceptOrdinalUnset and ErrIngressSeqUnset report an unstamped sequence
-	// number. Both are 1-based so that the zero value is unusable — §11's rule
-	// applied to a number, and it matters more here than usual: an unstamped
-	// envelope reading as "the first one" would sort ahead of everything in a
-	// replay.
-	ErrAcceptOrdinalUnset = errors.New("events: accept ordinal unstamped")
-	ErrIngressSeqUnset    = errors.New("events: ingress seq unstamped")
+	// ErrIngressSeqUnset reports an unstamped replay key. 1-based so that the
+	// zero value is unusable — §11's rule applied to a number, and it matters
+	// more here than usual: an unstamped envelope reading as "the first one"
+	// would sort ahead of everything in a replay. There is deliberately no
+	// sibling for AcceptOrdinal: zero is that field's absence-derived reading
+	// (§3.5), so Validate cannot judge it and a sentinel nothing returns would
+	// be a false branch. The producer-side refusals own the input-derived case
+	// (application's ErrNoTrigger).
+	ErrIngressSeqUnset = errors.New("events: ingress seq unstamped")
 
 	// ErrRecvTimeUnset reports an envelope with no local receive timestamp.
 	// This one is ours to stamp, so its absence is a wiring bug rather than a

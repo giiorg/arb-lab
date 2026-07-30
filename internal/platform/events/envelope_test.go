@@ -61,6 +61,20 @@ func TestEnvelopeFixtureIsValid(t *testing.T) {
 	}
 }
 
+// TestEnvelopeAcceptsAbsenceDerivedOrdinal pins the absence door: zero is
+// §3.5's one legal AcceptOrdinal spelling for an envelope derived from the
+// absence of input, so Validate — which cannot see derivation — must pass it.
+// The input-derived refusal of zero belongs to producers (application's
+// ErrNoTrigger), not here; a clause refusing zero in Validate would refuse
+// the silence re-judger's envelope at the dispatcher's post-stamp check.
+func TestEnvelopeAcceptsAbsenceDerivedOrdinal(t *testing.T) {
+	e := anEnvelope()
+	e.AcceptOrdinal = 0
+	if err := e.Validate(); err != nil {
+		t.Fatalf("Validate() with AcceptOrdinal 0 = %v, want nil — the absence-derived envelope must dispatch", err)
+	}
+}
+
 // --- SourceID ----------------------------------------------------------------
 
 // TestSourceIDIsAStreamOfAnInstrument checks the composition §3.5 asks for: a
@@ -325,14 +339,6 @@ func TestEnvelopeRejects(t *testing.T) {
 			name: "source invalid",
 			mut:  func(e *events.Envelope) { e.Source.Stream = "" },
 			want: events.ErrStreamUnset,
-		},
-		{
-			// Both sequence numbers are 1-based so that the zero value is
-			// unusable, which is the §11 rule applied to a number: an
-			// unstamped envelope must not read as "the first one".
-			name: "accept ordinal unstamped",
-			mut:  func(e *events.Envelope) { e.AcceptOrdinal = 0 },
-			want: events.ErrAcceptOrdinalUnset,
 		},
 		{
 			name: "ingress seq unstamped",

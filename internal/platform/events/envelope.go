@@ -284,7 +284,14 @@ func (p Prio) MoreUrgentThan(other Prio) bool { return p < other }
 //
 // Fields are exported for capture-lane persistence and replay hydration.
 type Envelope struct {
-	// AcceptOrdinal is the raw arrival order. 1-based; zero means unstamped.
+	// AcceptOrdinal is the raw arrival order. 1-based for every envelope derived
+	// from a raw input; zero is §3.5's absence-derived reading — the one
+	// envelope produced by a silence timer re-judging an observation nothing
+	// has superseded carries zero, because there is no raw input to inherit
+	// from. The value has exactly one legal zero, and the PRODUCER is its
+	// guard: §3.5 requires a producer to refuse a zero ordinal on an
+	// input-derived envelope rather than pass it through (the ingestion seam
+	// stamps structurally; the use-case layer refuses an unstamped trigger).
 	AcceptOrdinal uint64
 
 	// IngressSeq is the consumed order and the replay key. 1-based; zero means
@@ -323,15 +330,23 @@ type Envelope struct {
 
 // Validate reports whether the envelope is one that could have been dispatched.
 //
-// Checked in the order a reader would debug: the source, then the two stamps
-// that make it replayable, then the timestamp freshness is measured from, then
-// the payload.
+// Checked in the order a reader would debug: the source, then the stamp that
+// makes it replayable, then the timestamp freshness is measured from, then the
+// payload.
+//
+// # It does not judge AcceptOrdinal, and that is the absence door
+//
+// [SPEC EDIT OWED] core §3.5 says this check "requires both sequence fields";
+// it requires ONE. Zero is a value §3.5 itself makes meaningful — the
+// absence-derived envelope's only legal spelling — and this function cannot
+// see derivation, so a clause refusing zero here was a true rule stated
+// without its scope: right for every input-derived envelope and wrong for the
+// one §3.4's silence re-judger publishes, which the dispatcher must pass. The
+// producer obligation two sentences earlier in §3.5 is where the rule
+// belongs, and where it is enforced (see the AcceptOrdinal field comment).
 func (e Envelope) Validate() error {
 	if err := e.Source.Validate(); err != nil {
 		return err
-	}
-	if e.AcceptOrdinal == 0 {
-		return ErrAcceptOrdinalUnset
 	}
 	if e.IngressSeq == 0 {
 		return ErrIngressSeqUnset

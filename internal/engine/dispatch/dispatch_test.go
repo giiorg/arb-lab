@@ -254,19 +254,33 @@ func TestMintedIngressSeqIsRefusedAndBurnsNothing(t *testing.T) {
 	}
 }
 
-// --- invariant 4 (the refusal half): zero AcceptOrdinal on an input-derived envelope ---
+// --- invariant 4 (the absence door): zero AcceptOrdinal passes the post-stamp check ---
 
-func TestZeroAcceptOrdinalIsRefused(t *testing.T) {
+// TestZeroAcceptOrdinalDispatches pins the §39p-5 door. Zero is §3.5's
+// absence-derived reading — the silence re-judger's published envelope
+// legitimately carries it — and the dispatcher's post-stamp Validate cannot
+// see derivation, so it dispatches the envelope with an IngressSeq of its
+// own. The refusal of zero on an INPUT-derived envelope is the producer's
+// obligation (application's ErrNoTrigger), and the wiring slice's silence
+// test exercises the legitimate zero end-to-end.
+func TestZeroAcceptOrdinalDispatches(t *testing.T) {
 	r := newRig(t)
-	e := env(markSrc("AAAUSDT"), 0, events.PrioNormal) // ordinal zero: "timer-derived" claimed by a lane input
+	e := env(markSrc("AAAUSDT"), 0, events.PrioNormal) // ordinal zero: absence-derived
 	r.publish(e)
 
 	ok, err := r.d.Step()
-	if ok || !errors.Is(err, events.ErrAcceptOrdinalUnset) {
-		t.Fatalf("Step = (%v, %v), want (false, ErrAcceptOrdinalUnset)", ok, err)
+	if !ok || err != nil {
+		t.Fatalf("Step = (%v, %v), want (true, nil) — the absence-derived envelope must dispatch", ok, err)
 	}
-	if got := r.d.LastSeq(); got != 0 {
-		t.Errorf("LastSeq after refusal = %d, want 0", got)
+	if got := r.d.LastSeq(); got != 1 {
+		t.Errorf("LastSeq after dispatch = %d, want 1", got)
+	}
+	got := r.sink.entries[0].e
+	if got.AcceptOrdinal != 0 {
+		t.Errorf("dispatched AcceptOrdinal = %d, want 0 preserved — inventing one would forge a raw input", got.AcceptOrdinal)
+	}
+	if got.IngressSeq != 1 {
+		t.Errorf("dispatched IngressSeq = %d, want 1", got.IngressSeq)
 	}
 }
 

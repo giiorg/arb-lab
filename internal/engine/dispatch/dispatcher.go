@@ -179,10 +179,12 @@ func (d *Dispatcher) Step() (bool, error) {
 // release stamps e and hands it to the sink. The check order is the order a
 // reader would debug in: the second-authority refusal first (a minted
 // IngressSeq is a producer contesting this package's one job), then the
-// post-stamp Validate §3.5 places at exactly this boundary — it requires both
-// sequence fields, which is why it cannot run producer-side — then the
-// cross-envelope constancy check, judged only on an envelope that is itself
-// well-formed.
+// post-stamp Validate §3.5 places at exactly this boundary — it requires the
+// replay key, which is why it cannot run producer-side; a zero AcceptOrdinal
+// passes, because zero is §3.5's absence-derived reading and the refusal of
+// zero on an input-derived envelope is the PRODUCER's obligation (§39p-5) —
+// then the cross-envelope constancy check, judged only on an envelope that is
+// itself well-formed.
 func (d *Dispatcher) release(e events.Envelope) (bool, error) {
 	if e.IngressSeq != 0 {
 		return false, fmt.Errorf("dispatch: source %s arrived carrying IngressSeq %d: %w",

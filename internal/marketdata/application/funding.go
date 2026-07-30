@@ -100,11 +100,13 @@ func NewFundingIngest(c clock.Clock, p ports.FundingPublisher, b ports.FundingBu
 // concern inside the domain, which §3.6 rule 1 exists to prevent.
 func (f *FundingIngest) Ingest(obs domain.FundingObservation, trigger ports.AcceptOrdinal) (ports.FundingSnapshot, error) {
 	// Checked before the observation, because the two failures have different
-	// owners and this one is the caller's. A driving adapter reaches here only
-	// after events.Envelope.Validate has refused an unstamped ordinal, so a zero
-	// arriving here means a caller that built the call by hand and left the
-	// trace out — and reporting a malformed reading first would send the reader
-	// to the feed.
+	// owners and this one is the caller's. This refusal is the load-bearing
+	// half of §3.5's producer rule — "a producer MUST refuse a zero ordinal on
+	// an input-derived envelope" — since Envelope.Validate deliberately passes
+	// zero (it is the absence-derived reading, and Validate cannot see
+	// derivation; §39p-5). Every observation entering here is input-derived by
+	// definition of Ingest, so zero means the trace was left out, and
+	// reporting a malformed reading first would send the reader to the feed.
 	if trigger == 0 {
 		return ports.FundingSnapshot{}, fmt.Errorf("instrument %s: %w", obs.Instrument, ErrNoTrigger)
 	}

@@ -141,9 +141,11 @@ func (d *FundingDispatch) Deliver(env events.Envelope) (ports.FundingSnapshot, e
 
 	// The trigger comes from the envelope and is CONVERTED rather than passed,
 	// because application declares its own AcceptOrdinal — that layer does not
-	// take the transport's types, and this cast is the seam. It cannot be zero:
-	// Validate above refuses an unstamped ordinal, which is what makes
-	// ErrNoTrigger a claim about hand-built calls rather than about this path.
+	// take the transport's types, and this cast is the seam. Validate above no
+	// longer judges the ordinal (zero is §3.5's absence-derived reading, and
+	// this adapter's envelopes are input-derived by construction of the route),
+	// so Ingest's ErrNoTrigger is the load-bearing producer-side refusal §3.5
+	// assigns — no longer a backstop for hand-built calls.
 	//
 	// The use case's own refusals travel out unwrapped in meaning — a
 	// supersede is the ordinary outcome of an at-least-once transport, and a
