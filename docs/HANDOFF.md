@@ -83,7 +83,62 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 44, 2026-07-30 — v0.9.16 RELEASED, SLICE C CLOSED, §31a STEP 2 COMPLETE)
+## START HERE (updated end of session 45, 2026-07-31 — §31a STEP 3 IS DESIGNED, docs-only; nothing in it is built)
+
+**Branch `feat/milestone-1-foundation`.** Session 45 wrote **no code** — it opened milestone 2's
+**step 3** (§31a's roster: the `strategy` context + `cashcarry` + the fee seam) and produced its
+design record. Verify rather than trust: `git status --short` (clean),
+`grep -rn "SPEC EDIT OWED" internal/ tools/` — expect **ZERO** (the design pre-registers ONE marker
+that slice A will deliberately take; until slice A lands, zero stays the expectation). `make ci`
+green, docs 102 pass.
+
+**The single source of truth is
+`docs/superpowers/specs/2026-07-31-strategy-cashcarry-fee-seam-design.md`** — §40 is the design,
+its `RESUME HERE` is the live statement. It survived **four** adversarial review rounds (three
+complete, each initially NO-SHIP, each accepting the prior round's repairs and digging one level
+deeper; round 4 killed mid-run with its two formed findings recovered from its log and applied;
+the loop then deliberately closed — the provenance note at its top records the full ledger and
+the closing reason). Headlines: `cashcarry`
+is a **pure domain core over one validated `DecisionInput`** (policy projection, §2.4's two Δ
+terms, lot rules, candidate quantity and position facts included), **seven ports** at application
+incl. the split read seam (`MarketStateReader` + `SettlementHistory` — one deterministic
+accumulator over the DISPATCHED funding stream, same component live and replay, §40c), the
+`ExecutionCostModel` slippage seam (§40e), and the consolidated `ReferenceData` port (fees, lot
+rules, hurdle — three as-of faces of one dated-revision mechanism, schema types context-owned,
+kernel machinery only, §40b/§40j); the **fee seam** is dated provenance-carrying
+**revisions** read as-of through that port — fetch-writes-a-revision,
+decision-path-reads-revisions, with a two-clause §2.4 edit owed (composition rule + the
+modeled-tier VIP0 authorization for milestone 2, account-real fees before capital) (§40d); numbers
+split into **spec-defaulted params vs artifact-identified measured quantities** (exit-band width
+and the basis adverse move included) — the latter refuse to construct without step 4's artifact
+hash, one artifact identity per scored run (§40e); the production door is **`Decide → (Decision,
+[]Intent, error)`** — the errorless §3.3 adapter is a compile-check ONLY, never a path — with the
+`Decision` crossing via a **`DecisionSink` port, write-ahead AND fsync-on-write**, journal-complete
+to the recompute-from-the-record-alone property with a versioned wire DTO (`fixedpoint` has no
+JSON face — §40f/§40h); the **`HoldPlan` is durable evidence with journaled revisions**
+regenerated on interval flips, dwell counted on realized settlements (§40f); **§39l-2 and §39l-3
+are ANSWERED** (§40h: capture-container Decision journal; §40i: sim pump only, replay-driven
+paper) — do not reopen; two debts pre-registered with their constructs: the reference-revision
+repository (**step 5**, §40k-2) and the foundation loop's error-bearing door (**milestone 3**,
+§40k-5).
+
+**The capture rituals stay first, every session:** `pgrep -fl "arblab capture run"` (PID 74192 as
+of session 45), then a verify over the accumulated range — 0 integrity findings, always (session
+45's check: COVERAGE-only over 09:00–21:00, the known reconnect/restart ledger plus the open hour).
+
+**What is next, in order (the RESUME lists it):**
+1. **Slice D's one-day disk figure, ~09:53 UTC 2026-07-31** — `du -sh archive/` + a full-day
+   verify, recorded in the capture design record (§32m's row).
+2. **The off-host destination** — still the user's open §38f decision; the laptop still holds the
+   only copy.
+3. **Step 3 slice A** (§40j): context skeleton, `DecisionInput`/`Decision` + the wire DTO with
+   its round-trip battery, all seven ports, the Profiles fee/lot verification pass, the
+   context-owned revision schema with `asOf` + provenance refusal, the §40d `[SPEC EDIT OWED]`
+   marker.
+
+---
+
+## START HERE (updated end of session 44, 2026-07-30 — HISTORICAL — v0.9.16 RELEASED, SLICE C CLOSED, §31a STEP 2 COMPLETE; superseded by session 45's step 3 design)
 
 **Branch `feat/milestone-1-foundation`.** Verify rather than trust: `git status --short` (clean),
 `grep -rn "SPEC EDIT OWED" internal/ tools/` — expect **ZERO**; the newest marker reads
