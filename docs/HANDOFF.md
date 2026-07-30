@@ -77,7 +77,71 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 33, 2026-07-30 — slice C is **PARTLY BUILT**: the transport and the live `Mono` landed; **four items remain and funding capture is NOT yet running**)
+## START HERE (updated end of session 34, 2026-07-30 — slice C is **PARTLY BUILT**: transport, live `Mono` and **verify** have landed; **three items remain and funding capture is NOT yet running**)
+
+**Branch `feat/milestone-1-foundation`.** Verify rather than trust: `git status --short` (clean),
+`git rev-list --left-right --count @{u}...HEAD` (**10 ahead**, head `87bb26b`), and
+`grep -rn "SPEC EDIT OWED" internal/ tools/` — expect **exactly four**, unchanged from session 33:
+the three §34 left on the design's §12 roster, plus §36a's `nhooyr.io/websocket` rename in
+`internal/engine/venue/transport/doc.go`. `make ci` green, all six gates clean, `-race` clean on a
+**cold** cache (`go clean -testcache` first), docs 102 pass.
+
+**Read `docs/superpowers/specs/2026-07-29-capture-slice-c-transport.md` (§36), not this summary.**
+Its `## RESUME HERE` now lists **three** items, each with the obligations it carries, so nothing has
+to be re-derived. §36a–§36h are session 33's transport; **§36i–§36o are this session's verify.**
+
+### What landed
+
+`internal/engine/capture/finding.go` and `verify.go` — §32k's out-of-process liveness check, plus
+three test files. **20 mutations / 20 kills**, after two real survivors and three re-aims. No new
+spec markers.
+
+Two axes that are never summed (§36i): a **verdict** per `(stream, window)` —
+`replayable`/`gapped`/`absent`, about replay — and a **finding class**, `integrity` (exit 1, the
+archive is lying) or `coverage` (exit 2, honest and thin), about trust. `Report.ExitClass()` puts
+integrity first. **The class is a METHOD on the finding kind, not a field**, so adding a twentieth
+kind is a compile-time failure until somebody decides its exit code — probed, not assumed.
+
+### NOT landed — this is the rest of slice C
+
+The `platform/config` schema, `internal/app/capture` (the composition root), and `cmd/arblab`.
+**The calendar moment has not happened**: nothing is capturing yet.
+
+### Four findings worth carrying
+
+1. **`time.Time.Truncate` anchors at the ZERO TIME, not the Unix epoch** (§36j). `Writer.nextTick`
+   uses `Truncate`; verify's expected-tick count used `UnixNano`. The epoch sits 62135596800 s after
+   year 1 and **62135596800 mod 420 = 60**, so the two 7-minute grids sat one minute apart and one
+   boundary crossed each hour edge — one window over, the next under, for a healthy archive. **The
+   grids agree exactly when the interval divides 60 s**, so a one-minute Alive interval hides it
+   completely. §32l's coprime requirement is what exposed it. Reusable form: when a check recomputes
+   what another component computes, the two must share the **anchor**, not merely the formula.
+2. **A declared enum member nothing emits is the unreachable-sentinel defect one layer out** (§36k).
+   `FindingAliveShort` was declared, classified, documented and never produced — the shortfall was
+   computed inline to set the verdict. Verdict right, finding list silent, exit code **clean**.
+   Compiler, `exhaustiveswitch` and `Class()` coverage were all satisfied. Fix is structural: every
+   reason to be gapped is now a finding, and the verdict derives from the list alone. **Its mirror
+   was eleven lines up** — the bad-magic early return did not mark the walk aborted, so a file verify
+   declined to read was faulted for coverage it never measured.
+3. **A live slice-B defect, found by writing a fixture** (§36m). A restart into an hour the writer
+   had already opened refuses **every** `Data` record for the rest of that hour: `OpenWriter` takes
+   the recovered sequence as its floor and `Data` requires strict ascent. The composition root must
+   seed the reader's counter from `writer.Stats().LastSeq` — **item 2's first obligation**, no new
+   API needed. Review had read that line three times; writing a two-writer fixture found it.
+4. **§35's item 2 was addressed to the wrong slice** (§36l). Source 4's missing wire-level gap check
+   does not reach verify, because verify reads **no payload a venue wrote** — its continuity is over
+   our own `CaptureSeq`, stamped identically for all seven sources. Source 4's shape is in the
+   healthy fixture anyway, so "verify treats every source alike" is checked rather than assumed.
+   **A debt written against a document can outlive the reason it applied.**
+
+Also: diagnosing the two surviving mutants was the work (§36n). One was a **wrong mutant** —
+`start = i * 0` makes verify parse *more* files, not fewer, so it is not a mutant of a claim about
+doing less. The other was a **real test gap** whose diagnosis produced a sharper claim than the one
+under test: a lying Close record is **one** fault, not two.
+
+---
+
+## START HERE (updated end of session 33, 2026-07-30 — HISTORICAL — slice C's transport and the live `Mono` landed; four items remained)
 
 **Branch `feat/milestone-1-foundation`.** Verify rather than trust: `git status --short` (clean),
 `git rev-list --left-right --count @{u}...HEAD` (**8 ahead**), and

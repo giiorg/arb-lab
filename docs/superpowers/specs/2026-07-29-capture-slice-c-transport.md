@@ -1,17 +1,21 @@
-# §36 — the capture tool, slice C: the transport (2026-07-29 / 2026-07-30)
+# §36 — the capture tool, slice C: the transport and verify (2026-07-29 / 2026-07-30)
 
-**Status: PARTLY BUILT — the transport is done, three components remain.** `make
-ci` green, all six gates clean, `-race` clean, docs 102 pass. Implements the
-*first* part of §32m slice C of `2026-07-29-capture-tool-design.md`, over slice
-A's codec (§33) and slice B's writer (§34), carrying the four items §35's
-`RESUME HERE` handed forward.
+**Status: PARTLY BUILT — the transport and verify are done, three components
+remain.** `make ci` green, all six gates clean, `-race` clean on a cold cache,
+docs 102 pass. Implements the *first two* parts of §32m slice C of
+`2026-07-29-capture-tool-design.md`, over slice A's codec (§33) and slice B's
+writer (§34), carrying the four items §35's `RESUME HERE` handed forward.
 
 **Slice C is NOT closed and funding capture is NOT yet running.** §32m's slice C
 is transport + `arblab capture run` + config + observability + minimal `capture
-verify` with its positive control. What exists is the transport and the live
-`Mono` source. See `## RESUME HERE` at the foot of this record for the rest,
+verify` with its positive control. What exists is the transport, the live `Mono`
+source, and verify. See `## RESUME HERE` at the foot of this record for the rest,
 which is stated as work items rather than as prose so nothing has to be
 re-derived.
+
+**Two parts, two sessions.** §36a–§36h are the transport (session 33); §36i–§36n
+are verify (session 34). The `RESUME HERE` list is the same list, three items
+shorter.
 
 **What landed**
 
@@ -26,6 +30,11 @@ re-derived.
 | `internal/engine/venue/transport/stream.go` | `Sink`, `StreamConfig`, `Stream`: dial, subscribe, first-data assertion, read, reconnect |
 | `internal/engine/venue/transport/errors.go` | the configuration-versus-runtime split |
 | two `*_internal_test.go` | the protocol tables and the real-websocket integration suite |
+| `internal/engine/capture/finding.go` | `FindingClass`, `FindingKind` and its `Class()`, `Finding`, `Verdict` |
+| `internal/engine/capture/verify.go` | `VerifyConfig`, `Report`, `WindowReport`, `Verify` — the tree walk, the per-file walk, the continuity rules |
+| `internal/engine/capture/verify_internal_test.go` | the harness over real writers; the healthy positive control and §32k's four faults |
+| `internal/engine/capture/verifyseq_internal_test.go` | the hand-built builder, for the states the writer refuses |
+| `internal/engine/capture/finding_test.go` | the three declared-set tests and the kind-to-producing-test roster |
 
 **Dependency:** `github.com/coder/websocket v1.8.15`, the engine module's first
 runtime third-party dependency. Zero transitive dependencies — `go mod graph`
@@ -340,30 +349,282 @@ because the first encounter with it reads like a false positive.
 
 ---
 
-## RESUME HERE — slice C, the four remaining items
+## §36i — verify's shape: two axes that are never summed
 
-Ordered. Nothing below is started.
+§32k names three verdicts and two exit codes, and the structure only works if
+neither is derived from the other. So:
 
-1. **`capture verify`, minimal** (§32k) — CRC + `CaptureSeq` continuity within and
-   across files + `Alive` tick coverage, per `(source, hour)`, verdict
-   `replayable`/`gapped`/`absent`, **two exit codes** (1 = integrity failure, the
-   archive is lying; 2 = coverage below threshold, the archive is honest and
-   thin). Carry §35's item 2: **source 4 (Binance spot partial depth) has no
-   wire-level gap check at all**, so its arm cannot assert what the other six can
-   and **the positive control must not be written so the asymmetry disappears.**
-   The positive control is §32k's own: build a healthy archive and assert `verify`
-   reports clean, THEN kill a stream mid-capture, corrupt one byte, truncate
-   mid-record and delete an hour, asserting `verify` names each one specifically.
-2. **Config schema** (§32j) via `platform/config` — archive root, the source list
+- **`Verdict`** — `replayable` / `gapped` / `absent`, per `(stream, window)`. It
+  is about REPLAY: what step 5 would get if it read this hour.
+- **`FindingClass`** — `integrity` (exit 1, the archive is lying) or `coverage`
+  (exit 2, the archive is honest and thin). It is about TRUST: whether to believe
+  the report at all.
+
+A corrupt window is `gapped` **and** carries an integrity finding. Folding the two
+together was considered and is wrong in both directions: a fourth verdict would be
+a spec edit to §32k's three, and letting integrity findings pass as `gapped`
+without a class would send an operator to widen a capture window when what they
+need to do is stop trusting the file. `Report.ExitClass()` puts integrity first,
+because thinness measured over bytes that contradict themselves is not a
+measurement.
+
+**The class is a METHOD on the kind, not a field on the finding**, and that is the
+load-bearing design decision in the file. A field can disagree with its kind. A
+method with an exhaustive switch cannot — and it makes adding a twentieth finding
+kind a **compile-time failure** until somebody decides which exit code it earns.
+The gate was probed rather than assumed: removing one case from `Class()` produces
+*"switch over FindingKind does not name FindingContinuityUnknown"*, by name.
+
+**Nineteen finding kinds.** More than §32k's list, and the additions are within
+its stated purpose rather than departures from it — §32k's positive control
+requires verify to name a deleted hour and a corrupted byte *specifically*, and
+"specifically" is not expressible with a free-text detail an acceptance test has
+to match on substrings. Each kind has a test that produces it, and
+`declaredFindingKinds` in `finding_test.go` maps every kind to that test's name so
+a kind added without one fails a test that says so.
+
+**What verify refuses rather than reports:** a range holding no complete rotation
+window (`ErrVerifyRangeEmpty`), and a threshold outside 1..100. The first is the
+vacuity refusal — a verify over an empty range reports zero findings and exits
+zero, which is indistinguishable from an archive that verified, and it is
+reachable by a plausible typo in a `--from`/`--to` pair.
+
+**Whole windows only, and partial ones are dropped rather than pro-rated.** The
+expected Alive count is a constant from the config; pro-rating it for a
+half-elapsed window would compute the expectation from the quantity being judged.
+The cost is one flag: the operator excludes the live hour. This is a decision
+§32k's text does not make, and it is recorded here rather than marked, because
+§32k names no behaviour it departs from.
+
+---
+
+## §36j — `time.Time.Truncate` anchors at the ZERO TIME, not the Unix epoch
+
+The defect, found by the healthy fixture reporting one window over and the next
+one under for an archive with nothing wrong with it.
+
+`Writer.nextTick` anchors Alive ticks with `time.Time.Truncate`, which rounds down
+to a multiple of `d` **since January 1, year 1** — not since the Unix epoch. The
+epoch sits 62135596800 seconds after the zero time, and **62135596800 mod 420 =
+60**, so a 7-minute grid computed over `UnixNano` is shifted one minute from the
+writer's own, and exactly one boundary crosses each hour edge.
+
+The two grids agree **exactly when the interval divides 60 seconds.** With the
+one-minute Alive interval anybody would reach for in a fixture, this is completely
+invisible. §32l's coprime requirement — written for a different reason, that a
+tick firing only on a rotation boundary makes "wrote a tick" and "rotated"
+indistinguishable — is what exposed it.
+
+**The reusable form:** when a check recomputes what another component computes,
+the two must share the ANCHOR, not merely the formula. A grid, an epoch, a
+rounding origin and a timezone are all anchors, and a disagreement in one produces
+a result that is correct-looking, off by a small integer, and stable — which is the
+hardest kind to notice.
+
+**A second collapse in the same function, caught by the checklist rather than by a
+mutation.** `expectedAliveTicks` ends `(end.Sub(first)-1)/interval + 1`, and the
+`-1` matters only when a boundary lands exactly on the window's END. With a
+7-minute interval in a 60-minute window that never happens — 60 is not a multiple
+of 7 — so every fixture would have passed with the off-by-one in place. The unit
+test now tables five `(period, interval)` pairs, and asserts that the 20-minute row
+really does land on both window edges, because a row that did not would be a
+duplicate of the first one.
+
+---
+
+## §36k — a declared enum member nothing emits, and its mirror one branch over
+
+`FindingAliveShort` was declared, classified, documented, and **never produced**.
+The coverage shortfall was computed inline in `assignVerdicts` to set the verdict,
+so:
+
+- the verdict came out right (`gapped`),
+- the finding list said **nothing** about the only thing wrong with the window,
+- and an exit code read off that list said **clean**.
+
+Nothing could see it. The compiler was satisfied, `exhaustiveswitch` was satisfied
+(`Class()` named the member), and coverage of `Class()` was complete. It is
+`[[unreachable-sentinel-reads-as-handled]]` one layer out: there the defect is a
+sentinel no code path returns, here it is an enum member no code path emits, and
+in both cases the branch reads as handled.
+
+**The fix is structural, not a line:** every reason for a window to be gapped is
+now a FINDING, and the verdict is derived from the finding list alone. A verdict
+computed from anything the list does not mention is a verdict that can be right
+while the report is wrong.
+
+**And it had a mirror, one branch over.** `scan.aborted` was added to suppress
+coverage complaints about records past a corruption — and the *header* early
+return did not set it, so a file whose magic was wrong reported "0 Alive ticks
+against 8 expected" beside it: a coverage claim about bytes verify had declined to
+read. That is the most aborted a walk can be. **A fix applied in one place gets
+applied to its mirror** is this repo's standing rule, and the mirror here was
+eleven lines above the fix.
+
+---
+
+## §36l — §35's item 2 resolved: source 4's asymmetry does not reach verify
+
+§35's `RESUME HERE` handed this slice a constraint: source 4 (Binance **spot**
+partial depth) carries `{lastUpdateId, bids, asks}` — no span, no back-link, no
+event time — so it is the one source that **cannot be gap-checked from its own wire
+bytes**, and "the positive control must not be written so the asymmetry
+disappears."
+
+**The asymmetry does not reach verify at all**, and the reason is §32n's fence
+rather than a convenience. Verify reads **no payload a venue wrote**. Its
+continuity check is over `CaptureSeq`, which is our reader's counter (§32d),
+stamped identically for all seven sources — so source 4 is verified exactly as
+strictly as the other six. Wire-level sequence checking is assigned to
+`marketdata` at read time, which `doc.go` has said since slice A.
+
+The constraint was addressed to the wrong slice, and that is worth naming rather
+than quietly dropping: **a debt written against a document can outlive the reason
+it applied.** §35 wrote it while looking at §32k's list of what verify reports,
+where "CaptureSeq continuity" and "gap records by cause" both appear and neither
+says whose sequence.
+
+Source 4's shape (`sourceFourKey`, binance/spot/book) is in the healthy fixture
+anyway, so "verify treats every source alike" is a **checked** claim rather than an
+assumption that happens to hold.
+
+---
+
+## §36m — a live slice-B defect, found by a fixture rather than by review
+
+**A restart into an hour the writer had already opened refuses every `Data` record
+for the remainder of that hour.**
+
+`OpenWriter` recovers the last Data sequence from an existing hour file and takes
+it as its own floor — `w.lastSeq = max(w.lastSeq, scan.lastSeq)`, documented as
+"it also bounds what this run may write" — while `Writer.Data` refuses any
+sequence that does not exceed `lastSeq`. A restarted process whose reader counts
+from 1 therefore has **every frame refused**, at whatever rate the venue sends
+them, until the counter passes the old high-water mark. The archive fills with
+Alive ticks; the process emits errors it has nowhere to put.
+
+Nothing in slice B is wrong. The missing statement is about the **reader**, and it
+belongs to the composition root: the counter must be seeded from
+`writer.Stats().LastSeq` immediately after `OpenWriter`. No new API is needed —
+`Stats()` already reports the recovered value — and the verify harness does it at
+the line, with the reasoning attached, because that harness is the first code to
+open a second writer over an existing archive.
+
+**This is an obligation on item 2 of the remaining list**, and it is why verify
+found it: writing a fixture for "a restart" is what first made a second writer
+open a file the first had written. Review had read that line three times.
+
+Verify would have *caught* it in production — a window of nothing but Alive ticks
+is `FindingNoData`, which is precisely the Binance-trap signature — which is a
+small piece of evidence that the mechanism works on a fault nobody designed it for.
+
+---
+
+## §36n — verify's mutations: 20 kills, two survivors, three re-aims
+
+| Claim | Verdict |
+|---|---|
+| the Alive grid is `Truncate`'s, not the epoch's | caught (12) |
+| a boundary exactly on the window end belongs to the next window | caught (6) |
+| a boundary before the window is not counted inside it | caught (14) |
+| coverage exactly at the threshold is not below it | caught (17) |
+| short Alive coverage is a FINDING, not only a verdict | caught (1) |
+| a gap record must COVER a hole to excuse it | caught (2) |
+| a repeated `CaptureSeq` is not ascending | caught (2) |
+| a drop of exactly one is a hole | caught (3) |
+| a bad magic aborts the walk, so coverage is not measured | caught (2) |
+| a corrupt file is not also faulted past the corruption | caught (3) |
+| integrity outranks coverage in the exit class | caught (5) |
+| parsing starts one file EARLIER than the range | caught (15) |
+| a window with no file is reported absent | caught (2) |
+| a `prev_last_seq` of zero beside a predecessor is a restart | caught (2) |
+| the chain carries the Close record's claim, not the file's truth | caught (1) |
+| an Open record is compared against the path it was found at | caught (1) |
+| a crashed file is not faulted for the sidecar its crash prevented | caught (2) |
+| the sidecar digest is compared, not merely read | caught (9) |
+| an unrecognised file in the tree is reported under a class | caught (2) |
+| a recorded overflow gap registers as covering its hole | caught (3) |
+
+**Three `NOBUILD!!` verdicts, all §36f's finding repeating.** Removing
+`case integrity > 0:` left `integrity` unused; removing `start = i` left `i`
+unused; removing `if !ok {` left `ok` unused. Each re-aim was a *different
+predicate* rather than a different `sed` — `integrity > 0 && coverage == 0`,
+`start = i + 1`, `if ok && false` — and each expresses the claim more exactly than
+the deletion would have. §36f's rule holds and needs no revision: a claim that
+cannot be deleted without breaking the build for an unrelated reason is entangled
+with its neighbours, and the fix is to state it more precisely.
+
+**Two SURVIVED, and telling which is which was the work.**
+
+1. `start = i * 0` **survived, and it is a WRONG MUTANT.** It sets the chain start
+   to zero, which makes verify parse *every* file of the stream instead of only
+   the range plus one predecessor — strictly MORE work, never a worse answer. The
+   claim is "start one file earlier", and its negation is `start = i + 1`, which
+   kills with 15 failing tests. **A mutant that makes the code do more is not a
+   mutant of a claim about doing less.**
+2. `if sawClose {` on the chain hand-off **survived, and it is a REAL TEST GAP.**
+   The Close record's `last_seq` and the file's actual last Data sequence agree in
+   every fixture where the Close record tells the truth, so which one the chain
+   carries forward was unobservable. They disagree exactly when the Close record
+   **lies** — and the successor's `prev_last_seq` is written from the same value
+   the Close record carries (`writer.closeFile` sets `prevLastSeq = lastSeq`), so a
+   successor agreeing with a lying Close is the EXPECTED pairing. Carrying the true
+   value forward reports one fault twice.
+   `TestVerifyReportsALyingCloseRecordOnce` now asserts exactly one finding, in the
+   window whose Close lied. **Diagnosing the survivor produced a sharper claim than
+   the one being tested.**
+
+---
+
+## §36o — what verify deliberately does not have
+
+- **No repair, ever.** The writer's recovery truncates a torn tail (§32e); this
+  finds the same tails and touches nothing. A verify that repaired what it found
+  would destroy the evidence of the fault it was invoked to measure.
+- **No wire-level gap check** (§36l), no payload parsing of any kind. §32n.
+- **No inference of the rotation period or Alive interval from the archive.** Both
+  are supplied, so the check compares the archive against the CONFIG rather than
+  against itself.
+- **No check that a virgin stream's first `Data` is sequence 1.** A reader seeded
+  from the archive (§36m) legitimately starts above 1, and a restart into a fresh
+  file writes `prev_last_seq = 0` while the counter continues — so the check would
+  fire on every restart. Omitted deliberately.
+- **No PID-based two-writer check.** An Open record whose PID differs from the
+  previous Open's looks like evidence of two writers, and is not decidable: a
+  process that crashed exactly on a record boundary leaves no torn tail and no
+  Close record, so the next run legitimately appends a second Open with no gap
+  record between. Non-ascending `CaptureSeq` is the evidence that IS decidable, and
+  it is what §32k names.
+
+---
+
+## RESUME HERE — slice C, the three remaining items
+
+Ordered. Nothing below is started. **Verify is done (§36i–§36o); the item that was
+first on this list is gone from it.**
+
+1. **Config schema** (§32j) via `platform/config` — archive root, the source list
    (`SourceID` + **host + prefix + topic separately**, §36c), rotation period,
    queue depth, `alive_interval`, `sync_interval`, `first_data_timeout`,
    `read_timeout`, backoff schedule, `maxRecord`. **No field carries
    `config:"hot"`** — restart-required is correct for every one of them, and the
    restart's gap is recorded.
-3. **`internal/app/capture`** — the composition root: config → sources →
+   Verify needs four of these values at the same names — `RotationPeriod`,
+   `AliveInterval`, the archive root, and a **coverage threshold in whole
+   percent** (`VerifyConfig.MinAlivePercent`, 1..100, an integer because §3.6 rule
+   1 forbids `float64` and the comparison is `ticks*100 >= expected*percent`).
+   Verify takes the first two rather than inferring them, so the check compares
+   the archive against the config (§36o).
+2. **`internal/app/capture`** — the composition root: config → sources →
    `transport.Stream` → a `Sink` that stamps `CaptureSeq`/`RecvTime`/`Mono` and
-   pushes to `capture.Queue` → `capture.Writer` → observability. Three specific
+   pushes to `capture.Queue` → `capture.Writer` → observability. **Four** specific
    obligations:
+   - **seed the reader's `CaptureSeq` counter from `writer.Stats().LastSeq`
+     immediately after `OpenWriter`** — §36m. Without it, a restart into an hour
+     the process had already opened has EVERY `Data` record refused for the rest of
+     that hour, and the archive fills with Alive ticks. No new API is needed;
+     `verify_internal_test.go`'s `harness.open` does exactly this and says why at
+     the line.
    - the `DisruptionCause` → `capture.Cause` mapping as a **switch**, so
      `exhaustiveswitch` binds (dial/subscribe/read → `CauseReconnect`,
      `no_first_data` → `CauseNoFirstData`);
@@ -373,16 +634,28 @@ Ordered. Nothing below is started.
    - §32j's observability labels `venue`/`product`/`symbol`/`stream`/`topic`, each
      a **closed set declared from config at registration**, so §10's default-deny
      needs no `Unbounded` reason.
-4. **`cmd/arblab`** — `capture run` and `capture verify`, plus §32b's
+3. **`cmd/arblab`** — `capture run` and `capture verify`, plus §32b's
    **import-graph test for `internal/app/capture`** (`go list -deps`, failing on
    `internal/marketdata`, `internal/oms`, `internal/strategy`) **with its positive
    control** asserting `platform/clock` is allowed. `internal/engine/capture`
    already has its copy.
+
+   `capture verify` is a thin shell over `capture.Verify`: parse `--root`,
+   `--from`, `--to`, `--min-alive`, print the report, and map
+   `Report.ExitClass()` onto the exit code — `ClassIntegrity` → 1,
+   `ClassCoverage` → 2, `ClassUnspecified` → 0. The precedence is already in
+   `ExitClass` and must not be re-decided in `main`. **The formatting of the
+   report is the only thing this command owes that does not exist**, and the
+   operator-facing rule is §36i's: the two axes are printed separately, never
+   summed into a "problems" count.
 
 Then: the fixture-collapse checklist over the new code **before** the mutations,
 §32l's mutation targets for the parts now written, and the slice close —
 `grep -rn "SPEC EDIT OWED" internal/ tools/` plus the reading pass, which has
 out-produced the grep in three consecutive releases.
 
-**Marker count at the end of this part: FOUR.** The three §34 left on §12's
-roster, plus §36a's `nhooyr.io/websocket` rename in the transport package doc.
+**Marker count at the end of this part: FOUR, unchanged.** The three §34 left on
+§12's roster, plus §36a's `nhooyr.io/websocket` rename in the transport package
+doc. Verify added none: its additions to §32k's reporting list are within that
+section's stated purpose rather than departures from it, and the reading pass over
+what it asserts normatively found nothing owed to the core.
