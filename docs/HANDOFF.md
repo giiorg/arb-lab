@@ -81,7 +81,36 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 40, 2026-07-30 — the PARITY DISPATCHER is DESIGNED, docs-only; next work is slice A of §39j)
+## START HERE (updated end of session 41, 2026-07-30 — DISPATCHER SLICE A is BUILT and CLOSED; next work is slice B of §39j, the dispatch log)
+
+**Branch `feat/milestone-1-foundation`.** Session 41 built §39j's **slice A**: `internal/engine/dispatch`
+exists — the §3.5 total-order dispatcher core (Step, IngressSeq stamped only at dispatch, timer pump,
+Prio-constancy assertion) plus `MarketDataLane.Peek`, the kernel read-half the arbitration needed.
+Verify rather than trust: `git status --short` (clean), marker grep **ZERO**, `make ci` green.
+
+**Read `docs/superpowers/specs/2026-07-30-parity-dispatcher-design.md` → §39m** (the slice-A close)
+**and its `RESUME HERE`**. Headlines: the arbitration is a RANK — due timers, then control FIFO, then
+market by most-urgent head Prio with ties rotating over a field-wise-sorted roster (never map order;
+the sim pump must be deterministic) — and the rank shape was FORCED by the pop-only primitives, not
+preferred (§39m-1). Refusals burn no sequence; sink errors spend it (§39m-4). The absence-derived
+door (`AcceptOrdinal == 0`) is deferred to its construct: §3.4's silence re-judger (§39m-5). The
+checklist found two fixture gaps BEFORE the battery (comparator-beyond-symbol — the realistic
+accident is the actual capture set — and the control-FIFO mirror); then **24/24 aimed mutations
+caught**, with the honest non-aims named in §39m-8 (two equivalent mutants in `cmpSource`, one
+unreachable defensive branch, invariant 6 having no mutable line because it is compile-shaped).
+
+**Next: slice B — the dispatch log** (capture-lane framing over `engine/capture`'s codec, sequences
+not payloads, §39e). Its first design question is §39m-6's watch item: whether the sequence-record
+field set (timer positions included) needs a normative sentence in core §3.5.
+
+**The capture rituals stay first, every session:** `pgrep -fl "arblab capture run"`, then a verify
+over the accumulated range — 0 integrity findings, always (session 41's check: COVERAGE-only over
+09:00–18:00). Calendar items unchanged: **slice D's disk figure ~09:53 UTC 2026-07-31**; the
+off-host destination is still the user's open §38f decision and the laptop is still the only copy.
+
+---
+
+## START HERE (updated end of session 40, 2026-07-30 — HISTORICAL — the PARITY DISPATCHER is DESIGNED, docs-only; superseded by session 41's slice A build)
 
 **Branch `feat/milestone-1-foundation`.** Session 40 wrote **no code** — it opened milestone 2's
 **step 2** (§31a's roster: the parity dispatcher + persisted `DispatchSeq`, the deferral §31f says

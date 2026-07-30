@@ -231,10 +231,117 @@ that pre-answer themselves):
 
 ---
 
+### §39m — slice A is BUILT and CLOSED (session 41, 2026-07-30): the core loop, its arbitration, and what the battery proved
+
+**What landed:** `internal/platform/events.MarketDataLane.Peek` (one commit) and
+`internal/engine/dispatch` (one commit): `Config`/`New` (zero value unusable, each missing wire
+named), `Step` (at most one item per call), `release` (the stamp-and-check boundary), `pickMarket`
+(the market arbitration), `cmpSource` (the total order), `Sink` (two methods, one counter). The
+§39h and §39i comment updates rode the same commit: `engine/state`'s regression-check comment now
+cites the ratification instead of "not yet built", and `platform/events`' command-sequencer fence
+names its real trigger (the first Risk→OMS command path, milestone 4) instead of "built with the
+dispatcher".
+
+**§39m-1 — the arbitration is a RANK between kinds, and that shape was forced, not preferred.**
+Due timers first (in the queue's own `(At, Prio, ID)` order), then the control lane's FIFO head,
+then one ready market mailbox. **Rejected: cross-kind `Prio` arbitration.** It requires seeing
+every kind's head without consuming it, and `TimerSource.NextDue` and `ControlLane.TryReceive` are
+pop-only *on purpose* — arbitrating on their contents would mean popping an item and holding it
+back, which is the re-queuing the pull design exists to forbid (the clock package's own recorded
+reason). Timers outrank envelopes because a due timer is a deadline already in the past — §3.4's
+silence timer and the funding boundary are exactly the events that must not queue behind traffic —
+and control outranks market because lossless private truth (a fill) losing a race to lossy derived
+data (a book snapshot) is §3.4's lane order inverted. The starvation direction is stated rather
+than hidden: continuous due timers or nonstop control traffic starve market data, which is safety
+first; the reverse starvation (a book firehose delaying a fill) is the one that kills.
+
+**§39m-2 — market arbitration: most-urgent head `Prio` wins, ties rotate round-robin over a
+field-wise-sorted roster.** Three rejections, each with the failure it avoids: **a learned-Prio
+map as the arbitration key** (unknowable for a source before its first dispatch — the constant is
+an output of dispatching, not an input to it); **sorted-first-wins** (a firehose source at the
+lexically lowest key starves an equally urgent peer for as long as it stays ready, which for a
+book stream is always); **`Sources()` map order** (Go randomises it deliberately, and the sim
+pump's arbitration must be a pure function of lane state or the parity probe's byte-identical-logs
+claim is false on arrival). The rotation cursor is dispatch history, which the log freezes, so the
+rotation is replay-safe by construction.
+
+**§39m-3 — `Peek` is the kernel addition the arbitration needed, and its contract is advisory on
+purpose.** Choosing which ready mailbox dispatches next is a decision over the heads' priorities;
+the pop-only `Consume` would force consuming in order to look. Peek reports the oldest envelope
+without removing it, and under concurrent producers the head can change between Peek and Consume
+(overflow eviction; a depth-1 coalescing mailbox merging into its own head) — permitted, because
+§3.5 freezes arbitration *outcomes*, not deliberations. Every per-envelope check runs on what
+Consume returned. **Rejected: consume-and-holdback** (a one-slot buffer per input) — dispatcher
+state that re-queues what the lanes were handed.
+
+**§39m-4 — refusals are loud, consume the offender, and burn no sequence; a sink error spends the
+sequence.** The check order in `release`: the second-authority refusal (`ErrIngressSeqMinted` — a
+producer contesting the one job this package has), then the post-stamp `Envelope.Validate` exactly
+where §3.5 places it, then `ErrPrioInconstant` judged only on a well-formed envelope. The refused
+envelope is consumed — leaving it would jam its source forever — but nothing reached the sink and
+`LastSeq` is unmoved, so the dispatched sequence stays dense with no holes for slice B's log to
+explain. A sink error is the opposite case: the order was decided, the stamp is spent, `Step`
+reports `(true, err)`.
+
+**§39m-5 — the absence-derived door is deferred, and the deferral names its construct.** §3.5's
+one legal `AcceptOrdinal == 0` envelope derives from the *absence* of input. Its entry door must
+REQUIRE zero where every other door refuses it — and no producer of such envelopes exists (§3.4's
+silence re-judger lives in marketdata's freshness machinery, unbuilt). A door only tests would
+walk through is a check over an empty tree. **The trigger is the first producer of an
+absence-derived envelope — the §3.4 silence re-judger — and the door lands in the same slice.**
+Until then the dispatcher refuses a zero ordinal from every input (`Validate`'s existing check),
+which is §39f-4's refusal half, built and bitten.
+
+**§39m-6 — a timer firing occupies an `IngressSeq` position.** `OnTimer(seq, f)` and stamped
+envelopes share one dense counter — D4's "total order over all inputs (events *and* timers)" made
+mechanical, and the seq rides *beside* `Fired` because teaching the clock about dispatch sequences
+would put the replay key in two packages. Watch (reinforces §39k item 1): whether the core needs
+to state timer positions in the log normatively is slice B's schema question.
+
+**§39m-7 — the core is clockless, and prio constants fix at first successful dispatch.** The
+dispatcher holds `TimerSource` and no `Clock`, making §39f-6 compile-shaped (no `Advance`, no
+`SetNow`, no `Now` to call). A source's `Prio` constant is fixed by its first *dispatched*
+envelope, not its first offered one — a refusal never entered the consumed order and binds nothing.
+
+**§39m-8 — verification, full rhythm.** The checklist ran BEFORE the battery and found two gaps at
+authoring review: **every market fixture differed only in `Symbol`**, so a comparator collapsed to
+symbol-only would have passed the whole suite — and the realistic accident is the actual §32c
+capture set (BTCUSDT on two venues, spot and perp); the added fixture holds four same-symbol
+sources differing pairwise in venue, product/contract and stream. And **control FIFO through
+dispatch was untested while market FIFO was** — the mirror rule, applied. Then **24/24 aimed
+mutations caught** (M1–M24: the rank rungs, both seq advances, the stamp, the minted-seq and
+Validate refusals, constancy in both directions plus never-learned and learned-on-refusal, the
+map-order roster, the empty-mailbox candidate, the inverted urgency compare, dropped ties, cursor
+repick/ignore/wrap-to-back, comparator blind to venue/symbol/stream, Peek-returns-newest). Honest
+non-aims, named so a later reader does not mistake them for gaps: **the `Product` and `Contract`
+comparisons in `cmpSource` are mutually redundant on valid instruments** (product ↔ contract is
+bijective: spot↔``""``, linear_perp↔`linear`, inverse_perp↔`inverse`), so blinding either alone is
+an equivalent mutant — the pair stays because the comparator must remain total if `ids` ever adds
+a product whose contract collides; **the Peek-race branch in `Step`** (head evaporates between
+Peek and Consume) is deterministically unreachable from tests and deliberately defensive — its
+chosen behaviour (re-arbitrate next Step, not an error) is documented at the branch; and **a
+rank-reorder mutant** (timers checked after lanes) is not expressible as a line sed — M1/M4
+disable each rung instead, and the order tests assert the rank directly. Invariant 6 has **no
+mutable line at all**: its guarantee is the type system's, which is the strongest shape a claim
+takes here.
+
+**§39m-9 — no spec edit owed.** The kind rank and the rotation are arbitration §3.5 deliberately
+leaves to the dispatcher to decide and freeze; nothing this slice asserts contradicts or extends
+the core. Marker grep zero. The reading pass's one borderline claim — timer seq positions — is
+§39m-6's watch item, owed to slice B's schema if the log needs it stated.
+
+---
+
 ## RESUME HERE
 
-**This record is the design; nothing of it is built.** The next session builds **slice A** (§39j):
-`internal/engine/dispatch`, the core loop against fake sources under `TestClock`, no persistence.
+**Slice A is closed (§39m). The next session builds slice B** (§39j): the dispatch log —
+sequence-record schema over `engine/capture`'s framing, writer, reader, replay re-application.
+Positive control: a truncated/vandalized log is refused, not absorbed. Done when a log written by
+slice A's core replays to an identical consumer-visible order and a torn tail recovers. §39m-6's
+watch item is slice B's first design question: whether the sequence-record field set (and timer
+positions in it) needs stating normatively in core §3.5 — the §32e manifest-field-list precedent
+says a dated in-record edit at slice close is the shape.
+
 Before anything else, the standing rituals: `pgrep -fl "arblab capture run"`, then a `capture
 verify` over the accumulated range (expect 0 integrity findings, always), then `git status --short`
 and the marker grep.
@@ -245,4 +352,5 @@ not gate this work. The off-host destination remains the user's open §38f decis
 still the only copy.
 
 Do not reopen: §31a's ordering (this record is its step 2), §31b (funding consumed, never derived),
-§39c's placement, §39d's correction (the outbox store half is milestone 3's, with the journal).
+§39c's placement, §39d's correction (the outbox store half is milestone 3's, with the journal),
+§39m-1's kind rank and §39m-5's absence-door deferral (both carry their rejected alternatives).
