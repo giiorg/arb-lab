@@ -439,6 +439,68 @@ func TestMarketDataConsumeUnknownSource(t *testing.T) {
 	}
 }
 
+// TestPeekReportsTheOldestWithoutRemovingIt pins both halves of Peek's
+// contract at once, against a mailbox deep enough to make them distinct: with
+// two envelopes queued, "oldest" and "newest" are different slots (a depth-1
+// fixture would collapse that distinction — the checklist's standing lesson),
+// and "did not remove" is observable as Consume still returning the same head
+// afterwards.
+func TestPeekReportsTheOldestWithoutRemovingIt(t *testing.T) {
+	// NoCoalescing, not markLane: under markLane a book source is latest-wins,
+	// so the second publish would MERGE into the first and the mailbox would
+	// hold one envelope — the exact fixture collapse the depth-2 queue is here
+	// to avoid.
+	l, err := events.NewMarketDataLane(4, events.NoCoalescing)
+	if err != nil {
+		t.Fatalf("NewMarketDataLane: %v", err)
+	}
+	src := bookSource()
+
+	first := marketEnv(src, 1, "snapshot-1")
+	second := marketEnv(src, 2, "snapshot-2")
+	if err := l.Publish(first); err != nil {
+		t.Fatalf("publish first: %v", err)
+	}
+	if err := l.Publish(second); err != nil {
+		t.Fatalf("publish second: %v", err)
+	}
+
+	got, ok := l.Peek(src)
+	if !ok {
+		t.Fatal("Peek on a two-deep mailbox reported empty")
+	}
+	if got.AcceptOrdinal != first.AcceptOrdinal {
+		t.Errorf("Peek returned ordinal %d, want the oldest (%d)", got.AcceptOrdinal, first.AcceptOrdinal)
+	}
+	if l.Len(src) != 2 {
+		t.Errorf("Len after Peek = %d, want 2 — Peek must not remove", l.Len(src))
+	}
+	consumed, ok := l.Consume(src)
+	if !ok || consumed.AcceptOrdinal != first.AcceptOrdinal {
+		t.Errorf("Consume after Peek = (%d, %v), want the same head (%d, true)",
+			consumed.AcceptOrdinal, ok, first.AcceptOrdinal)
+	}
+}
+
+// TestPeekOnEmptyAndUnknownSources: an unused source and a drained one answer
+// the same way, and neither materialises a mailbox as a side effect.
+func TestPeekOnEmptyAndUnknownSources(t *testing.T) {
+	l := markLane(t, 2)
+
+	if _, ok := l.Peek(bookSource()); ok {
+		t.Error("Peek on an unused source reported an envelope")
+	}
+
+	src := markSource()
+	if err := l.Publish(marketEnv(src, 1, markPayload{100})); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	l.Consume(src)
+	if _, ok := l.Peek(src); ok {
+		t.Error("Peek on a drained mailbox reported an envelope")
+	}
+}
+
 // TestMarketDataConcurrentPublishIsRaceFree runs under -race (make test).
 //
 // Note what this does NOT claim: that the coalesced RESULT is deterministic

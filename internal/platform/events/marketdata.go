@@ -163,6 +163,33 @@ func (l *MarketDataLane) Consume(s SourceID) (Envelope, bool) {
 	return e, true
 }
 
+// Peek returns the oldest envelope in a source's mailbox without removing it,
+// reporting whether there was one.
+//
+// It exists for the dispatcher's arbitration: choosing WHICH ready mailbox
+// dispatches next is a decision over the heads' priorities, and the pop-only
+// Consume would force the dispatcher to consume in order to look — deciding the
+// order before arbitrating it. Peek is the read half of the same pull-based
+// contract; the lane still owns the envelope.
+//
+// What Peek reports is advisory, and the distinction matters under concurrent
+// producers: between a Peek and the Consume that follows, a publish can evict
+// this head (overflow drop-oldest) or merge into it (a coalescing mailbox at
+// depth 1, where the newest slot IS the head). §3.5 permits exactly that — live
+// arbitration may be scheduler-dependent, because the DispatchSeq log freezes
+// what it resolved to — so the authoritative envelope is always the one Consume
+// returns, and any per-envelope check belongs after the Consume, never here.
+func (l *MarketDataLane) Peek(s SourceID) (Envelope, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	box, ok := l.boxes[s]
+	if !ok || len(box.q) == 0 {
+		return Envelope{}, false
+	}
+	return box.q[0], true
+}
+
 // Dropped reports how many envelopes this source's mailbox has discarded on
 // overflow — §3.4's freshness gap counter.
 //
