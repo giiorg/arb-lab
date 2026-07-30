@@ -37,11 +37,17 @@
 // compile-shaped guarantee rather than a discipline: TimerSource has no
 // Advance, no SetNow, and no Now.
 //
+// # The persisted log
+//
+// Slice B's dispatch log (§39n) is here: LogWriter is a Sink that freezes each
+// dispatch as a sequence record — capture's frame, sequences not payloads —
+// ahead of the sink it wraps, and ReplayLog re-drives a consumer with the
+// persisted order, which is §3.5's replay authority. Payloads are re-derived
+// from the raw archive at replay; the log stores none.
+//
 // # What is deliberately NOT here
 //
-// The persisted DispatchSeq log is slice B of this step (§39j): capture-lane
-// framing over engine/capture's codec, sequences not payloads. The live pump's
-// wake signal and the sim driver are slice C's wiring. The entry door for
+// The live pump's wake signal and the sim driver are slice C's wiring. The entry door for
 // ABSENCE-derived envelopes — §3.5's silence rule, the one envelope that
 // carries AcceptOrdinal == 0 — is deferred to the slice that builds its
 // producer, §3.4's silence re-judger in marketdata: a door only tests would

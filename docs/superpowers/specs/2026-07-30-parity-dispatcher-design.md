@@ -382,8 +382,9 @@ buffered writer can crash having flushed only whole frames: `TornBytes` 0, and w
 file is byte-for-byte indistinguishable from a clean end. `RecordKindClose`'s own argument ("its
 absence is the signal") covers both: the reader reports `Closed`, and a mis-diagnosed tail always
 surfaces as a missing seal. The Close frame's `CaptureSeq` repeats the last entry's seq and its
-payload carries the entry count (`k:"close"`, `entries`) — the one deliberate duplication, because
-a seal that asserts nothing seals nothing; the reader cross-checks both. Its `RecvTime` is the last
+payload carries the entry count (`entries` alone — no `k` token, because the frame kind already
+discriminates a Close and a second discriminator could disagree with it) — the one deliberate
+duplication, because a seal that asserts nothing seals nothing; the reader cross-checks both. Its `RecvTime` is the last
 entry's instant — the only honest replay-stable time a clockless writer has. An EMPTY log gets no
 seal (no instant exists to stamp one); header-only reads as empty, torn-unknown. **No Open record:**
 its content would be provenance, and provenance + rotation + fsync policy are one bundle owed to
