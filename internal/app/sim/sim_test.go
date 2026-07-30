@@ -2,16 +2,21 @@ package sim_test
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/giiorg/arb-lab/internal/app/sim"
 	"github.com/giiorg/arb-lab/internal/engine/capture"
 	"github.com/giiorg/arb-lab/internal/engine/dispatch"
 	"github.com/giiorg/arb-lab/internal/engine/replay"
+	"github.com/giiorg/arb-lab/internal/marketdata/application"
 	"github.com/giiorg/arb-lab/internal/platform/events"
+	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
 
@@ -191,6 +196,108 @@ func TestProbeIsNotVacuous(t *testing.T) {
 	}
 	if got := tally.perVenue["bybit"]; got < 3 {
 		t.Errorf("bybit contributed %d envelope entries, want ≥ 3", got)
+	}
+}
+
+// writeCraftedStream lands hand-written frames as one archive file through
+// capture's own codec — the same real-format-by-construction rule the replay
+// battery's crafted fixture follows.
+func writeCraftedStream(t *testing.T, root string, key capture.StreamKey, recs []capture.Record) {
+	t.Helper()
+	window := capture.Window(recs[0].RecvTime, time.Hour)
+	path := key.FilePath(root, window, time.Hour)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	buf := capture.AppendFileHeader(nil)
+	var err error
+	for _, r := range recs {
+		if buf, err = capture.AppendRecord(buf, r); err != nil {
+			t.Fatalf("append record: %v", err)
+		}
+	}
+	if err := os.WriteFile(path, buf, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+}
+
+func bybitSnapFrame(ts time.Time, rate string) []byte {
+	return []byte(fmt.Sprintf(
+		`{"topic":"tickers.BTCUSDT","type":"snapshot","ts":%d,"data":{"symbol":"BTCUSDT","fundingRate":%q,"nextFundingTime":"1785513600000","fundingIntervalHour":"8","fundingCap":"0.005"}}`,
+		ts.UnixMilli(), rate))
+}
+
+func bybitDeltaFrame(ts time.Time, rate string) []byte {
+	return []byte(fmt.Sprintf(
+		`{"topic":"tickers.BTCUSDT","type":"delta","ts":%d,"data":{"symbol":"BTCUSDT","fundingRate":%q}}`,
+		ts.UnixMilli(), rate))
+}
+
+// TestEqualInstantRedeliveryIsAbsorbed pins what the wiring actually does
+// with two funding readings on ONE source at ONE recorded instant — the case
+// this test originally expected to supersede, and the seam refused the
+// expectation: §3.5's arrival-order fallback in `advances` fails only a
+// STRICT regression (equal RecvTime advances), and per-source dispatch order
+// is monotone non-decreasing by construction, so ErrSuperseded is
+// structurally unreachable in the sim's exactly-once world. Both deliveries
+// are therefore absorbed, and the terminal reading is the CaptureSeq-later
+// one — last writer wins, deterministically, by the merge tie-break. The
+// router's ordinary predicate stays defensive here; the construct that makes
+// it live is milestone 3's at-least-once transport, whose reconnect
+// redelivery CAN regress arrival order.
+func TestEqualInstantRedeliveryIsAbsorbed(t *testing.T) {
+	root := t.TempDir()
+	base := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	key := capture.StreamKey{Source: events.SourceID{Instrument: bybitPerp(), Stream: events.StreamFunding}, Topic: "tickers.BTCUSDT"}
+	writeCraftedStream(t, root, key, []capture.Record{
+		{Kind: capture.RecordKindData, CaptureSeq: 1, RecvTime: base, Payload: bybitSnapFrame(base, "0.0001")},
+		{Kind: capture.RecordKindData, CaptureSeq: 2, RecvTime: base.Add(time.Second), Payload: bybitDeltaFrame(base.Add(time.Second), "0.0002")},
+		{Kind: capture.RecordKindData, CaptureSeq: 3, RecvTime: base.Add(time.Second), Payload: bybitDeltaFrame(base.Add(time.Second), "0.0003")},
+	})
+	cfg := sim.Config{
+		Root:          root,
+		Streams:       []replay.StreamSpec{{Key: key, Decoder: replay.DecodeBybitTicker}},
+		FreshnessJSON: []byte(freshnessJSON),
+		MailboxDepth:  64,
+		LogPath:       filepath.Join(t.TempDir(), "run.dlog"),
+	}
+	r, err := sim.Generate(cfg)
+	if err != nil {
+		t.Fatalf("Generate: %v — an equal-instant redelivery must be absorbed, not refused", err)
+	}
+	if r.Report.Emitted != 3 || r.Report.Ordinary != 0 {
+		t.Errorf("report %+v, want Emitted 3 with Ordinary 0 — both equal-instant readings deliver", r.Report)
+	}
+	want, err := fixedpoint.ParseRate("0.0003")
+	if err != nil {
+		t.Fatalf("parse rate: %v", err)
+	}
+	if got := r.Funding[bybitPerp()].Observation.Rate; got != want {
+		t.Errorf("terminal rate = %v, want 0.0003 — the CaptureSeq-later reading must win the equal instant", got)
+	}
+}
+
+// TestUnbudgetedVenueIsFatal bites the policy's other direction (§39p-8:
+// every other error fatal): a roster venue the freshness config does not
+// budget surfaces at Deliver as ErrNoBudget, and the run must STOP — a sim
+// that counts a wiring hole as ordinary replays a world nobody configured.
+func TestUnbudgetedVenueIsFatal(t *testing.T) {
+	root := t.TempDir()
+	base := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	inst := ids.VenueInstrument{Venue: "okx", Product: ids.ProductLinearPerp, Symbol: "BTCUSDT", Contract: ids.ContractLinear}
+	key := capture.StreamKey{Source: events.SourceID{Instrument: inst, Stream: events.StreamFunding}, Topic: "tickers.BTCUSDT"}
+	writeCraftedStream(t, root, key, []capture.Record{
+		{Kind: capture.RecordKindData, CaptureSeq: 1, RecvTime: base, Payload: bybitSnapFrame(base, "0.0001")},
+	})
+	cfg := sim.Config{
+		Root:          root,
+		Streams:       []replay.StreamSpec{{Key: key, Decoder: replay.DecodeBybitTicker}},
+		FreshnessJSON: []byte(freshnessJSON),
+		MailboxDepth:  64,
+		LogPath:       filepath.Join(t.TempDir(), "run.dlog"),
+	}
+	if _, err := sim.Generate(cfg); !errors.Is(err, application.ErrNoBudget) {
+		t.Fatalf("err = %v, want ErrNoBudget to stop the run", err)
 	}
 }
 

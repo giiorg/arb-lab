@@ -143,6 +143,23 @@ func restFailedPayload(t *testing.T, asked time.Time) []byte {
 	return p
 }
 
+// restThrottledPayload is the venue answering WITH a status and no answer — a
+// 429 whose body is an error object, not a list. Distinct from the
+// transport-failure fixture on purpose: RestMeta's outcome-conflict rule makes
+// Error non-empty exactly when Status is 0, so a status-0 fixture alone can
+// never distinguish the status-range clause from the error clause.
+func restThrottledPayload(t *testing.T, asked time.Time) []byte {
+	t.Helper()
+	p, err := capture.EncodeRestPayload(capture.RestPayload{
+		Meta: capture.RestMeta{Method: "GET", URL: "https://fapi.binance.com/fapi/v1/fundingInfo", Status: 429, AskedAt: asked},
+		Body: []byte(`{"code":-1003,"msg":"Too many requests."}`),
+	})
+	if err != nil {
+		t.Fatalf("encode throttled rest payload: %v", err)
+	}
+	return p
+}
+
 func dataRec(seq uint64, recv time.Time, payload []byte) capture.Record {
 	return capture.Record{Kind: capture.RecordKindData, CaptureSeq: seq, RecvTime: recv, Payload: payload}
 }

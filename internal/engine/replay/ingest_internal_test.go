@@ -29,10 +29,11 @@ func TestIngesterBurnsOrdinalOnEveryRecord(t *testing.T) {
 		{"bybit chatter", tapeEntry{stream: 2, rec: dataRec(1, at(1*time.Second), bybitChatterJSON())}, false},
 		{"mark before overlay", tapeEntry{stream: 0, rec: dataRec(1, at(2*time.Second), binanceMarkJSON(at(2*time.Second), "0.0001"))}, false},
 		{"failed poll", tapeEntry{stream: 1, rec: restRec(1, at(3*time.Second), restFailedPayload(t, at(3*time.Second)))}, false},
+		{"throttled poll", tapeEntry{stream: 1, rec: restRec(2, at(3500*time.Millisecond), restThrottledPayload(t, at(3500*time.Millisecond)))}, false},
 		{"mark after failed poll", tapeEntry{stream: 0, rec: dataRec(2, at(4*time.Second), binanceMarkJSON(at(4*time.Second), "0.0001"))}, false},
-		{"answer without our symbol", tapeEntry{stream: 1, rec: restRec(2, at(5*time.Second), restOKPayload(t, at(5*time.Second), fundingInfoBodyWithoutSymbol))}, false},
+		{"answer without our symbol", tapeEntry{stream: 1, rec: restRec(3, at(5*time.Second), restOKPayload(t, at(5*time.Second), fundingInfoBodyWithoutSymbol))}, false},
 		{"mark against absent row", tapeEntry{stream: 0, rec: dataRec(3, at(6*time.Second), binanceMarkJSON(at(6*time.Second), "0.0001"))}, false},
-		{"applied poll", tapeEntry{stream: 1, rec: restRec(3, at(7*time.Second), restOKPayload(t, at(7*time.Second), fundingInfoBodyJSON))}, false},
+		{"applied poll", tapeEntry{stream: 1, rec: restRec(4, at(7*time.Second), restOKPayload(t, at(7*time.Second), fundingInfoBodyJSON))}, false},
 		{"mark composes", tapeEntry{stream: 0, rec: dataRec(4, at(8*time.Second), binanceMarkJSON(at(8*time.Second), "0.0001"))}, true},
 		{"bybit snapshot", tapeEntry{stream: 2, rec: dataRec(2, at(9*time.Second), bybitSnapJSON(at(9*time.Second), "0.0002"))}, true},
 		{"funding-silent delta", tapeEntry{stream: 2, rec: dataRec(3, at(10*time.Second), bybitQuoteDeltaJSON(at(10*time.Second)))}, false},
@@ -55,8 +56,8 @@ func TestIngesterBurnsOrdinalOnEveryRecord(t *testing.T) {
 			t.Errorf("step %d (%s): envelope ordinal %d, want %d — inheritance, not renumbering", i, s.name, env.AcceptOrdinal, wantOrdinal)
 		}
 	}
-	if got := ing.RestFailures(); got != 1 {
-		t.Errorf("RestFailures = %d, want 1", got)
+	if got := ing.RestFailures(); got != 2 {
+		t.Errorf("RestFailures = %d, want 2 (the transport failure and the 429)", got)
 	}
 }
 
