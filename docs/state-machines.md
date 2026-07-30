@@ -1,6 +1,6 @@
 # Execution & Safety-Kernel State Machines — Funding-Rate Arbitrage Platform
 
-**Status:** v0.9.15 (2026-07-30) — set-version alignment, no change in this doc (v0.9.15 is capture slice F: the manifest/full-verify layer goes live with zero core edits — none touches the safety kernel's machines).
+**Status:** v0.9.16 (2026-07-30) — set-version alignment, no change in this doc (v0.9.16 is the parity wiring slice: replay machinery plus one §3.5 envelope-validation scope narrowing — nothing touches the safety kernel's machines).
 **Doc set:** normative core `build-spec.md` · venue facts `venue-profiles.md` · kernel machines `state-machines.md` · history/traceability `adr-history.md` · teaching companion `tutorial.md`.
 **Role:** the safety kernel + execution state machines, re-expressed from converged core prose — state lists, transition tables, invariants, chaos cases; the core owns the requirements.
 **Normative status `[→ R1d-11]`:** the sections here are **incorporated by reference from the core's `[mechanism: State-Machines §N]` pointers** — each machine is the **normative mechanism** of the core requirement that points at it (never merely informative), while the requirement and its tags stay core-owned; on any conflict the core wins.

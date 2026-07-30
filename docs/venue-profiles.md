@@ -1,6 +1,6 @@
 # Venue Capability Profiles — Binance USDⓈ-M / Bybit V5
 
-**Status:** v0.9.15 (2026-07-30) — set-version alignment, no content change in this doc this release (v0.9.15 is capture slice F: archive-integrity machinery — manifests, verify cross-check, `cat` — no venue fact touched).
+**Status:** v0.9.16 (2026-07-30) — §1's Bybit cap/floor row and a new dated §5 block record the **2026-07-30 `instruments-info` live measurement**: upper/lower funding clamps `±0.005`, exactly symmetric and equal to the ticker's `fundingCap` — the ground the replay decoder's floor mirror rests on, with the live clients obligated to replace the mirror with the polled pair — and `fundingInterval: 480`, MINUTES, the units-in-the-name trap live beside the same venue's `fundingIntervalHour`.
 **Doc set:** normative core `build-spec.md` · venue facts `venue-profiles.md` · kernel machines `state-machines.md` · history/traceability `adr-history.md` · teaching companion `tutorial.md`.
 **Role:** per-venue facts + quirk matrices behind the core's venue-contract requirements (`build-spec.md` §4). **Citation coverage, stated honestly `[→ R1d-11]`:** every fact carries its verification *date* (2026-07-18 / 2026-07-19 / 2026-07-20); the **safety-kernel rows carry full source citations in §4 here**; the remaining §1/§3 rows' per-row citations live in the v0.6/v0.7 review records (`docs/review/`), not inline — treat any fact older than a venue API cycle as due for re-checking.
 
@@ -13,7 +13,7 @@
 | WS routing | Base `wss://fstream.binance.com`. **Three prefixes, split by data rate** — `/market` (regular market data: **mark price**, aggTrade, kline, tickers, liquidations, mini-tickers, composite index), `/public` (high-frequency: **depth**, bookTicker, `!bookTicker`), `/private` (user data). Raw stream `…/<prefix>/ws/<stream>`; combined `…/<prefix>/stream?streams=<a>/<b>`, or connect to `…/<prefix>/stream` and send `SUBSCRIBE`. **Legacy `wss://fstream.binance.com/ws` and `/stream` decommissioned 2026-04-23** `[→ 7.2]` *(re-verified verbatim 2026-07-29, §5)* | **`wss://stream.bybit.com/v5/public/linear`** (USDT/USDC perp + futures); also `/v5/public/spot`, `/v5/public/inverse`, `/v5/private`, `/v5/trade`; testnet is `stream-testnet.bybit.com`, same paths. Topics `tickers.<sym>`, `orderbook.50.<sym>`, private. **Client sends ping ≈ every 20 s**; ≤ 500 connections per 5 min per domain; public `args` ≤ 21 000 chars *(verified 2026-07-29, §5)* |
 | Funding estimate | **Per-symbol `<sym>@markPrice@1s`** (or `<sym>@markPrice` = 3 s) on the **`/market`** prefix; all-symbol `!markPrice@arr@1s`. Payload → `r` (funding rate), `p` (mark), `i` (index), `P` (estimated settle price, *"only useful in the last hour before the settlement starts"*), `ap` (mark price moving average), `T` (next funding time), `st` (symbol type, post-CM-migration: 1=UM, 2=CM), plus `e`/`E`/`s`. **No interval field.** *(per-symbol form + `ap`/`st` verified 2026-07-29, §5)* | `tickers.<sym>` → `fundingRate`, `nextFundingTime`, **`fundingIntervalHour`, `fundingCap`** (new Oct-2025; pin client ≥ Oct-2025) |
 | Interval source | REST `GET /fapi/v1/fundingInfo` overlay (absent ⇒ 8h default); formula scales `/(8/N)` | from ticker `fundingIntervalHour`; **dynamic 8h↔1h auto-switch on alts, no notice** `[→ C8]` |
-| Cap/floor | BTCUSDT ±0.3% (=0.75×MMR); alts ±2% default; overlay via `fundingInfo` | ticker `fundingCap` / `instruments-info.upper/lowerFundingRate`; read live |
+| Cap/floor | BTCUSDT ±0.3% (=0.75×MMR); alts ±2% default; overlay via `fundingInfo` | ticker `fundingCap` / `instruments-info.upper/lowerFundingRate`; read live. **BTCUSDT measured 2026-07-30: upper `0.005` / lower `-0.005`, exactly symmetric and equal to the ticker's `fundingCap`** (§5) |
 | Book | On the **`/public`** prefix. Partial: `<sym>@depth<5\|10\|20>@<100\|250\|500>ms`; diff: `<sym>@depth@<100\|250\|500>ms`. Omitted speed = **250 ms** default *(levels + all three speeds verified 2026-07-29, §5)* | `orderbook.<1\|50\|200\|1000>.<sym>` on the **linear** URL; **level 50 pushes at 20 ms** (1 → 10 ms, 200 → 100 ms, 1000 → 200 ms). Snapshot+delta; delete on size "0"; reset on snapshot *(level-50 cadence verified 2026-07-29, §5)* |
 | **Depth update-ID shape** `[→ standing debt #1, CLEARED 2026-07-29, §5]` | **Futures partial and diff depth carry the SAME shape** — `U` *"First update ID in event"*, `u` *"Final update ID in event"*, `pu` *"Final update Id in last stream (ie `u` in last stream)"*, plus `E` event time and `T` transaction time. A **span with a chain link**: a gap is detectable from the wire alone, because `pu` must equal the previous event's `u`. **Binance SPOT does not share this — see §3.** | **A single `u` per message** (*"Update ID … is used to identify the data version"*), plus `seq` (cross sequence) and `type` ∈ {`snapshot`, `delta`}. **No span, no previous-event link**, so continuity is `u` monotonicity alone and a `snapshot` is the reset signal. **`u` is reset to 1 on a service restart** — a decoder treating `u` as globally monotonic breaks across one |
 | Ticker deltas | full snapshot each message | snapshot then delta; **absent field = unchanged, never null-coerce** |
@@ -234,3 +234,21 @@ nothing may be built on it that a re-measurement could invalidate.)*
    listed and says 8.
 3. **`updateTime` is `null` on BTCUSDT** while other rows carry an epoch-ms integer. A decoder typing it
    as a non-nullable integer parses 740 rows and **fails on the one symbol we trade**.
+
+### Bybit `instruments-info` funding clamps, observed live (2026-07-30) — the floor the ticker never states
+
+A single unauthenticated `GET https://api.bybit.com/v5/market/instruments-info?category=linear&symbol=BTCUSDT`
+on **2026-07-30** returned `upperFundingRate: "0.005"` and `lowerFundingRate: "-0.005"` — **exactly
+symmetric, and equal to the live ticker's `fundingCap`**. *(Live observation, dated; a re-measurement
+that finds asymmetry invalidates everything resting on the mirror below.)*
+
+1. **This is the fact the replay decoder's floor mirror rests on.** The `tickers.<sym>` stream carries
+   `fundingCap` and **no floor**; the floor exists only here, and the capture set does not poll this
+   endpoint. The replay decoder therefore emits `Floor = -Cap`, justified by this measurement alone —
+   and the live venue clients (milestone 3) MUST replace the mirror with the polled pair rather than
+   inherit it.
+2. **The same response carries `fundingInterval: 480` — MINUTES.** The ticker spells its interval field
+   `fundingIntervalHour` ("8", hours); this endpoint spells the same 8-hour fact as 480 minutes with the
+   unit only in the docs. Core §4's units-in-the-name rule, observed in the wild on one venue's two
+   spellings of one number: an adapter that reads either field into a bare integer computes a carry
+   figure wrong by a factor of sixty with nothing failing.

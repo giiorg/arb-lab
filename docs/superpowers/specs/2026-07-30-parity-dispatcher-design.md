@@ -700,60 +700,122 @@ made ordinary), probe (cache comparison field-blinded).
 
 ---
 
+### §39q — slice C is CLOSED (session 44, 2026-07-30): the battery, the checklist's findings, and the two mutants that were telling the truth
+
+**§39q-1 — what closed it.** The replay-package unit battery (RESUME item 1's full roster) landed
+in-package deliberately: the tape's `CaptureSeq` tie-break arm is UNREACHABLE through `Load` over an
+honest archive — within one stream, file order IS seq order, so the stable sort never consults the
+arm — and only a test that constructs scrambled `tapeEntry` values can make dropping it fail.
+`match()` got a per-arm table the same way. The crafted canonical archive (§39p-8's fixture 2) is
+seven records over four seconds with every §39p-10 distinction present: a cross-stream equal-instant
+tie at 40.0s (merge order), a second at 42.0s where BOTH sides emit (the contention batch), a
+funding-silent record between two emitting ones (ordinal burn made visible: the last emission
+carries ordinal 7, not 6), and a timer trio strictly-between / exactly-on / strictly-beyond the
+final instant. The contention witness is measured at DELIVERY — when the first tie envelope reaches
+the sink, the other source's mailbox must still hold one — because §39p-10 warned that two publishes
+do not prove two candidates ever coexisted at `pickMarket`. The rerun battery re-drives the same
+canonical run to a byte-identical log and identical delivery observations (kind, seq, ordinal, clock
+position), and refuses four divergences end to end: an ordinal shift (one extra funding-silent
+record in the archive), an exhausted tape (final record removed), a frozen timer nothing armed, and
+a due timer with the wrong identity.
+
+**§39q-2 — the checklist pass, BEFORE the mutations, five findings.** (1) Nothing read the clock at
+envelope dispatch — `SetNow`-after-publish would have passed every count while every freshness
+verdict read a stale Now; the sink now asserts `now == RecvTime` per delivery. (2) The staged sink
+error sat on the LAST envelope, where "continue after an ordinary error" and "stop on it" produce
+identical reports — the pinned-parameter collapse in a fixture written the same session the
+checklist ran; moved mid-run with both directions pinned. (3) The Bybit snapshot reset was
+observable in NO test: every refusal fixture ran on a COLD accumulator, where reset and no-reset
+agree; a warm accumulator fed a partial resubscribe snapshot now demands the refusal (a mutant
+dropping the reset emits the previous connection's cap as current). (4) The parity probe counted
+envelopes only in total, which one venue can carry alone; per-venue floors now demand both. (5)
+Found while AIMING a mutation, before running it: no fixture distinguished the REST status-range
+clause from the error clause, because `RestMeta`'s outcome-conflict rule ties `Error` to
+`Status == 0` — the transport-failure fixture can never exercise `Status > 299`. A throttled 429
+step now does, and the `Error != ""` clause is recorded here as redundant-by-validation rather than
+deleted, because the validation lives in a different package and they move independently.
+
+**§39q-3 — mutations: 29/29 caught, three NOBUILD re-aims, two survivors diagnosed rather than
+absorbed.** The re-aims were all one shape — orphaned identifiers (an unused `ok`, an unused type-
+switch variable, an orphaned import) — re-aimed to compiling mutants per the harness's own rule, all
+then caught. The survivors are the section's finding:
+
+- **The driver's timer-tie direction is an equivalent mutant, and the reason is load-bearing.**
+  Flipping §39p-6's "timer due at or before the record" from `≤` to `<` changes nothing observable:
+  when the driver falls through to `SetNow(equal instant)` and drains, the dispatcher's rank fires
+  due timers FIRST anyway, so the timer still precedes the batch's envelopes in the log, the clock
+  sits at the same instant, and the battery's own order assertion passed under the mutant. The
+  timer-wins-equals invariant is enforced by the RANK (§39m-1); the driver's `≤` is a redundant
+  courtesy kept because it matches §39p-6's stated rule. Recorded so nobody later "fixes" either
+  spelling to disagree with the other.
+- **`ErrSuperseded` is structurally unreachable in the sim, and the test that proved it now
+  documents the behavior instead.** Both directions of the router's ordinary predicate survived —
+  the committed fixture produces zero sink errors. The fatal direction was a plain test gap:
+  `TestUnbudgetedVenueIsFatal` (a roster venue the freshness config does not budget surfaces as
+  `ErrNoBudget` at Deliver and must STOP the run) now kills it. The supersede direction is not a
+  gap: §3.5's arrival-order fallback in `advances` fails only a STRICT regression — equal `RecvTime`
+  advances — and per-source dispatch order is monotone non-decreasing by construction, so no archive
+  can drive a supersede through the directed pump. The test written to stage one instead pinned what
+  the seam actually does (`TestEqualInstantRedeliveryIsAbsorbed`): both equal-instant readings
+  deliver, and the terminal reading is the CaptureSeq-later one — last writer wins,
+  deterministically, by the merge tie-break. The predicate stays in the router as milestone-3
+  transport policy; **the construct that makes it live is the at-least-once WS client, whose
+  reconnect redelivery CAN regress arrival order.**
+
+Honest non-aims, named: the per-stream-ordinal mutant (no line implements a per-stream counter to
+break; the cross-stream ordinal sequence 1..7 interleaved over three streams is the direct
+assertion); directed-consume-replaced-by-arbitration (not line-shaped; carried by the byte-equality
+probe, the blinded-cross-check mutant, and the divergence refusals); §39p-10's "probe cache
+comparison field-blinded" row (a DETERMINISTIC field drop is invisible to a parity comparison by
+design — both runs agree on the dropped field — so field fidelity is `engine/state`'s own battery's
+claim, and the probe's claim is only that two runs agree); and the rerun's head-evaporated /
+head-already-stamped branches (unreachable through the honest single-driver seam, §39p-7's own
+argument).
+
+**§39q-4 — the close's edits and the reading pass.** Core §3.5's Validate clause narrowed to
+`IngressSeq` (the §39p-5 edit, landed; marker flipped to `[SPEC EDIT LANDED — v0.9.16]`, grep back
+to ZERO). Profiles §1 + §5 gained the dated 2026-07-30 `instruments-info` measurement (±0.005
+exactly symmetric — the floor mirror's ground; `fundingInterval: 480` MINUTES). The reading pass
+beside the grep found ONE stale unmarked claim, exactly the kind the grep cannot see:
+`driving/funding.go`'s Deliver comment still said the envelope is "validated in full, which means
+the sequence numbers too" — attributing the ordinal refusal to `Validate`, which no longer judges
+it. Corrected to name the two refusers (Validate requires `IngressSeq`; the use case refuses
+`trigger == 0`, correct because every envelope DELIVERED there is input-derived by definition of the
+adapter). Doc set bumped to v0.9.16, six status lines + the Georgian header fragment, `tutorial.ka.md`
+re-assembled, docs 102 pass.
+
+**§39q-5 — step 2 is COMPLETE.** Slices A (core), B (log), C (wiring) are all closed; §31a's step 2
+— "parity dispatcher + persisted DispatchSeq, stops being deferrable at this milestone" — is done.
+§39l's three open questions pass unchanged to step 3's designer, plus one from this close: the sim's
+ordinary predicate is defensive until the live transport exists, and the live pump (§39l-3) is still
+uncalled.
+
+---
+
 ## RESUME HERE
 
-**Slice C is BUILT and its parity probe PASSES (session 43, 2026-07-30) — the slice is NOT closed.**
-The session paused at a deliberate seam after the build, with everything committed and `make ci`
-green (commits `7338342`…`4dd2258`): §39p is the design (read it first), the wiring exists —
-`engine/venue` wire decoders (+ committed tests), `engine/replay` (tape/merge, `Ingester`,
-`Calibrate`, `Generate`, `Rerun`), `clock.NextTimerAt`, `app/sim` (router, root, probe) — and the
-committed fixture is three real production streams over `15:30:40–15:33:40Z` under
-`internal/app/sim/testdata/archive`. `TestParityProbe` and `TestProbeIsNotVacuous` pass: two
-Generate runs byte-identical and cache-equal, the Rerun rewriting a byte-identical log to the same
-terminal state, both venues cached, silence timers fired, the absence-derived zero ordinal in the
-log.
+**Slice C is CLOSED and §31a step 2 is COMPLETE (session 44, 2026-07-30) — v0.9.16 released.** The
+parity probe passes on real production data; the replay unit battery, the checklist's five findings
+(§39q-2), and 29/29 aimed mutations (§39q-3, two equivalents diagnosed into tests) all landed;
+core §3.5's Validate clause and the Profiles instruments-info measurement are in the docs; marker
+grep is ZERO. Read §39q before touching anything in `engine/replay`, `engine/dispatch`, `app/sim` or
+`engine/venue`'s funding wires.
 
-**Four build-time facts §39q must record at close** (all already in code comments, none yet in a
-close section): (1) §39p-8's zero-offset calibration DIED on first contact — Bybit's stamp runs
-~20 ms ahead of the laptop, marketdata correctly refused the negative data age as a clock
-inversion, and `replay.Calibrate` now measures `max(SourceTime − RecvTime)` per venue from the
-tape (a bound no message can beat, pure function of the tape). (2) The rerun's lazy pull violated
-Generate's ingestion invariant (no-news tail before a timer left unconsumed → time-reversal
-refusal); `OnTimerRecord` now pre-ingests every batch strictly before the firing instant. (3) The
-Bybit floor question §39p-2 left open was resolved by a LIVE measurement (2026-07-30,
-instruments-info: upper `0.005` / lower `-0.005`, exactly symmetric, equal to the ticker's
-`fundingCap`; also `fundingInterval: 480` — MINUTES, the units-in-the-name trap live): the replay
-decoder mirrors `-Cap`, the live clients replace the mirror with the polled pair. **This
-measurement is NOT yet in `venue-profiles.md` — landing it (§1 Bybit cap/floor row + a §5 dated
-note) is owed before close.** (4) `Envelope.Validate` dropped its ordinal clause (§39p-5's door),
-marked `[SPEC EDIT OWED]` in `internal/platform/events/envelope.go` — the marker grep now returns
-**ONE**, and the §3.5 edit must land before the slice closes.
+**Next, in order:**
+1. **Slice D's one-day disk figure, ~09:53 UTC 2026-07-31** — `du -sh archive/` + a full-day verify,
+   recorded in the capture design record (§32m's row).
+2. **The off-host destination** — still the user's open §38f decision; the laptop still holds the
+   ONLY copy of the archive (and now also the committed fixture's provenance).
+3. **§31a step 3: the `strategy` context + `cashcarry` + the fee seam** — a design session first, in
+   this record's style. It inherits §39l's three open questions and §39q-5's note verbatim.
 
-**What remains, in order:**
-1. **The replay-package unit battery is unwritten** (venue wire tests exist; replay has none):
-   tape merge order + tie-breaks (equal `RecvTime` cross-stream, `CaptureSeq` within), `Load`
-   refusals, `Calibrate` bounds, Generate over a CRAFTED equal-instant contention fixture (the
-   §39p-10 suspect: assert ≥2 mailboxes genuinely contend and the order is deterministic),
-   timer-vs-record tie (timer wins equals), end-of-archive pending timer stays unfired, Rerun
-   divergence refusals (mismatched log/archive, exhausted tape, each `match` field).
-2. **The fixture-collapse checklist BEFORE mutations** — §39p-10's suspects plus build-found ones:
-   the Bybit snapshot-reset is likely an equivalent mutant (snapshots always carry all four
-   fields — name it an honest non-aim or make it observable); the probe asserts no per-source
-   dispatch counts; the rerun pre-ingest needs a unit fixture (the production fixture exercises it
-   — it is what failed — but nothing pins it at unit level).
-3. **Aimed mutations** per §39p-10's roster (`MUTATE_MODULE` default; `tools/mutate.sh`).
-4. **The close:** land the §3.5 edit (Validate sentence) + the Profiles edit (instruments-info
-   measurement), marker grep back to ZERO, reading pass over the slice's normative claims
-   (§39f-4's transcription correction is already recorded in §39p-5), write **§39q**, update
-   HANDOFF + memory, bump doc version (the §3.5 edit makes it v0.9.16).
-
-Standing rituals first, every session: `pgrep -fl "arblab capture run"`, `capture verify` over the
-accumulated range (0 integrity findings, always), `git status --short`, marker grep (expect ONE —
-see above — until the close lands it). Calendar: **slice D's disk figure ~09:53 UTC 2026-07-31**;
-the off-host destination is still the user's open §38f decision; the laptop is still the only copy.
+Standing rituals first, every session: `pgrep -fl "arblab capture run"` (PID 74192 as of session
+44), `capture verify` over the accumulated range (0 integrity findings, always), `git status
+--short` (clean), marker grep (expect **ZERO** from this close on).
 
 Do not reopen: §31a's ordering, §31b, §39c's placement, §39d's correction, §39m-1's kind rank,
-§39n-1's container choice, §39n-5's fresh-files-only door, §39o-1's no-core-edit ruling, and now
-§39p-1's funding-only scope, §39p-4's merge rule, §39p-5's door placement (Validate scoped,
-producer-side guards load-bearing), and §39p-6's batch rule — each carries its rejected
-alternatives in §39p.
+§39n-1's container choice, §39n-5's fresh-files-only door, §39o-1's no-core-edit ruling, §39p-1's
+funding-only scope, §39p-4's merge rule, §39p-5's door placement (now landed in §3.5), §39p-6's
+batch rule — and from this close: §39q-3's two equivalence rulings (the rank owns timer-ties; the
+supersede is milestone-3's), each carried with its reasoning above.
+

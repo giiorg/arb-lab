@@ -67,16 +67,21 @@ func NewFundingDispatch(ingest *application.FundingIngest) (*FundingDispatch, er
 
 // Deliver translates one dispatched envelope and runs the funding use case.
 //
-// # The envelope is validated in full, which means the sequence numbers too
+// # Both sequence numbers are required here, by two different refusers
 //
 // A market-data mailbox holds PRE-dispatch envelopes — driven.LanePublisher
 // records why it leaves both sequence fields unstamped — and what reaches a
 // context handler is POST-dispatch, so both are stamped by the time it gets
-// here. Requiring them is therefore not pedantry about a struct: an observation
-// accepted with no IngressSeq is one a replay cannot address, and the damage is
-// not that it goes missing. It becomes the held reading that the NEXT
-// observation's supersede check compares against, so an envelope nobody can
-// replay silently changes what a replay accepts.
+// here. Validate requires IngressSeq; it deliberately does NOT judge
+// AcceptOrdinal (zero is §3.5's absence-derived reading and the check cannot
+// see derivation — narrowed v0.9.16), but every envelope DELIVERED here is
+// input-derived by definition of this adapter, so the zero-refusal falls to
+// this seam and the use case makes it (ErrNoTrigger). Requiring them is
+// therefore not pedantry about a struct: an observation accepted with no
+// IngressSeq is one a replay cannot address, and the damage is not that it
+// goes missing. It becomes the held reading that the NEXT observation's
+// supersede check compares against, so an envelope nobody can replay silently
+// changes what a replay accepts.
 //
 // # Which end of the message each field comes from
 //

@@ -336,8 +336,9 @@ type Envelope struct {
 //
 // # It does not judge AcceptOrdinal, and that is the absence door
 //
-// [SPEC EDIT OWED] core §3.5 says this check "requires both sequence fields";
-// it requires ONE. Zero is a value §3.5 itself makes meaningful — the
+// [SPEC EDIT LANDED — v0.9.16] core §3.5 said this check "requires both
+// sequence fields"; it requires ONE, and §3.5 now says so with the scope
+// stated. Zero is a value §3.5 itself makes meaningful — the
 // absence-derived envelope's only legal spelling — and this function cannot
 // see derivation, so a clause refusing zero here was a true rule stated
 // without its scope: right for every input-derived envelope and wrong for the

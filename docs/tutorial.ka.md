@@ -6,7 +6,7 @@
 > შეასწორებთ: შეასწორეთ ფრაგმენტი და გაუშვით `node tools/assemble.mjs`.
 
 
-**Status:** v0.9.15 (2026-07-30) — set-version alignment, no change in this doc (v0.9.15 is capture slice F: the manifest/full-verify layer goes live with zero core edits, none at this tutorial's altitude).
+**Status:** v0.9.16 (2026-07-30) — set-version alignment, no change in this doc (v0.9.16 is the parity wiring slice: replay machinery and one envelope-validation scope narrowing, below this tutorial's altitude).
 **Doc set:** normative core `build-spec.md` · venue facts `venue-profiles.md` · kernel machines `state-machines.md` · history/traceability `adr-history.md` · teaching companion `tutorial.md`.
 
 **აუდიტორია.** უფროსი ინჟინრები, რომლებსაც აქვთ სისტემების ძლიერი ალღო და დერივატივების შესახებ მცირე ან ნულოვანი გამოცდილება. ეს ტექსტი ასწავლის *რატომ*-ს; ხოლო ნორმატიული *რა უნდა აშენდეს* მოცემულია [`docs/build-spec.md`](./build-spec.md)-ში, რომელზეც ეს დოკუმენტი მიუთითებს როგორც **§spec**. თუ ეს ორი ოდესმე არ დაეთანხმება ერთმანეთს, უპირატესობა ენიჭება build-spec-ს.
