@@ -75,15 +75,21 @@ func fixtureConfig(t *testing.T, logPath string) sim.Config {
 	}
 }
 
-// logTally counts a dispatch log's entry kinds and remembers whether any
-// envelope carried the absence-derived zero ordinal.
+// logTally counts a dispatch log's entry kinds — per venue, because a total
+// alone cannot see one source going silent while the other floods — and
+// remembers whether any envelope carried the absence-derived zero ordinal.
 type logTally struct {
 	envelopes, timers int
+	perVenue          map[ids.Venue]int
 	zeroOrdinal       bool
 }
 
 func (c *logTally) OnEnvelopeRecord(r dispatch.EnvelopeRecord) error {
 	c.envelopes++
+	if c.perVenue == nil {
+		c.perVenue = map[ids.Venue]int{}
+	}
+	c.perVenue[r.Source.Instrument.Venue]++
 	if r.AcceptOrdinal == 0 {
 		c.zeroOrdinal = true
 	}
@@ -173,6 +179,18 @@ func TestProbeIsNotVacuous(t *testing.T) {
 	}
 	if tally.envelopes == 0 || r.Report.Emitted == 0 {
 		t.Errorf("log holds %d envelopes, run emitted %d — an empty world proves nothing", tally.envelopes, r.Report.Emitted)
+	}
+	// Per-source floors, not just a total: Binance ticks at 1/s over a
+	// three-minute window (≥100 even with dispatch riding both hops on one
+	// SourceID), Bybit's funding-bearing messages at ~1/min (≥3 counting the
+	// re-judged snapshots). A probe whose total was carried by one venue
+	// while the other contributed a single entry would pass every assertion
+	// above and prove one-source dispatch.
+	if got := tally.perVenue["binance"]; got < 100 {
+		t.Errorf("binance contributed %d envelope entries, want ≥ 100", got)
+	}
+	if got := tally.perVenue["bybit"]; got < 3 {
+		t.Errorf("bybit contributed %d envelope entries, want ≥ 3", got)
 	}
 }
 

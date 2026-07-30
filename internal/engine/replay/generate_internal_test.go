@@ -114,6 +114,16 @@ func TestGenerateCanonicalRun(t *testing.T) {
 		t.Errorf("first tie delivery saw %d queued peers, want 1 — the batch never contended", tieFirst.peers)
 	}
 
+	// Every envelope was delivered with the clock AT its batch's instant —
+	// §39p-10's SetNow-before-publish suspect: a driver that published first
+	// and moved time after would satisfy every count above while every
+	// freshness verdict computed in the sink chain read a stale Now.
+	for i, d := range sink.got {
+		if d.kind == "env" && !d.now.Equal(d.recv) {
+			t.Errorf("delivery %d: clock at %v while dispatching an envelope received %v", i, d.now, d.recv)
+		}
+	}
+
 	// The timer trio. "mid" fired at its own instant with the clock there;
 	// "edge" fired at exactly the final instant, BEFORE the final record's
 	// envelope; "beyond" stayed pending.
@@ -168,30 +178,31 @@ func TestGenerateIsDeterministic(t *testing.T) {
 }
 
 // TestGenerateSinkErrorSplit: the predicate decides survival (§39m-4 — the
-// stamp is spent either way). An ordinary error is counted and the run
-// continues to the end; the same error with no predicate stops the run. The
-// erroring delivery is the LAST envelope (ordinal 7), so the ordinary run's
-// completion is distinguishable from the fatal run's stop only by the
-// predicate — same world, same error, same position.
+// stamp is spent either way). The erroring delivery is MID-RUN (ordinal 3,
+// deterministically the second dispatch) rather than the last one, because on
+// the last delivery "continue after an ordinary error" and "stop on it"
+// produce the same report — the pinned-parameter collapse, avoided at design
+// time here.
 func TestGenerateSinkErrorSplit(t *testing.T) {
 	errBoom := errors.New("boom")
-	run := func(t *testing.T, ordinary func(error) bool) (Report, error) {
+	run := func(t *testing.T, ordinary func(error) bool) (Report, *recSink, error) {
 		t.Helper()
 		root := writeCanonicalArchive(t)
 		tape, ing, clk, lane := newWorld(t, root, canonicalSpecs())
 		sink := &recSink{clk: clk, lane: lane}
 		sink.errOn = func(e events.Envelope) error {
-			if e.AcceptOrdinal == 7 {
+			if e.AcceptOrdinal == 3 {
 				return errBoom
 			}
 			return nil
 		}
 		d := newDispatcher(t, lane, clk, sink)
-		return Generate(tape, ing, clk, lane, d, ordinary)
+		rep, err := Generate(tape, ing, clk, lane, d, ordinary)
+		return rep, sink, err
 	}
 
 	t.Run("ordinary continues", func(t *testing.T) {
-		rep, err := run(t, func(err error) bool { return errors.Is(err, errBoom) })
+		rep, sink, err := run(t, func(err error) bool { return errors.Is(err, errBoom) })
 		if err != nil {
 			t.Fatalf("Generate: %v", err)
 		}
@@ -200,14 +211,20 @@ func TestGenerateSinkErrorSplit(t *testing.T) {
 		if rep.Ordinary != 1 || rep.Dispatched != 5 {
 			t.Errorf("report %+v, want Ordinary 1 within Dispatched 5", rep)
 		}
+		if last := sink.got[len(sink.got)-1]; last.ordinal != 7 {
+			t.Errorf("last delivery has ordinal %d, want 7 — the run must genuinely continue past the error", last.ordinal)
+		}
 	})
 	t.Run("fatal stops", func(t *testing.T) {
-		rep, err := run(t, nil)
+		rep, sink, err := run(t, nil)
 		if !errors.Is(err, errBoom) {
 			t.Fatalf("err = %v, want errBoom", err)
 		}
-		if rep.Ordinary != 0 {
-			t.Errorf("report %+v: a fatal error must not be counted ordinary", rep)
+		if rep.Ordinary != 0 || rep.Dispatched != 1 {
+			t.Errorf("report %+v, want Dispatched 1, Ordinary 0 — the run stopped where the ordinary run went on", rep)
+		}
+		if last := sink.got[len(sink.got)-1]; last.ordinal != 3 {
+			t.Errorf("last delivery has ordinal %d, want 3 — nothing may dispatch past a fatal error", last.ordinal)
 		}
 	})
 }

@@ -264,6 +264,25 @@ func TestBybitTickerRefusals(t *testing.T) {
 	}
 }
 
+// TestBybitTickerResubscribeSnapshotResets is the one place the snapshot
+// reset is observable: on a cold accumulator, reset and no-reset agree, so
+// every refusal case above is blind to it. Warm state first, then a snapshot
+// claiming full state while missing one funding field — the reset makes that
+// a refusal; a merge would emit the PREVIOUS connection's cap as current,
+// which is the null-coerce mistake with extra steps (the wire_bybit comment's
+// own words, here as the failing test they imply).
+func TestBybitTickerResubscribeSnapshotResets(t *testing.T) {
+	s := venue.NewBybitTickerState()
+	if _, _, err := s.Apply([]byte(bybitSnapshot)); err != nil {
+		t.Fatalf("warm-up snapshot: %v", err)
+	}
+	partial := `{"topic":"tickers.BTCUSDT","type":"snapshot","data":{"symbol":"BTCUSDT","fundingRate":"0.0001","nextFundingTime":"1785427200000","fundingIntervalHour":"8"},"ts":1785405243000}`
+	_, emitted, err := s.Apply([]byte(partial))
+	if emitted || !errors.Is(err, venue.ErrWireIncomplete) {
+		t.Errorf("post-complete partial snapshot: (%v, %v), want a refusal — a stale cap emitted as current is the defect", emitted, err)
+	}
+}
+
 func TestBybitTickerOpFrameIsChatter(t *testing.T) {
 	s := venue.NewBybitTickerState()
 	ack := `{"success":true,"ret_msg":"","conn_id":"x","req_id":"tickers.BTCUSDT","op":"subscribe"}`
