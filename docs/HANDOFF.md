@@ -86,8 +86,13 @@ four markers read `[SPEC EDIT LANDED — v0.9.13]`. `make ci` green, all six gat
 clean on a cold cache, docs 102 pass.
 
 **A capture process is (or should be) RUNNING**: `bin/arblab capture run -config configs/capture.json`,
-started 2026-07-30 ~09:30 UTC, detached via nohup from the repo root, logging to `capture.log`
-(gitignored, as is `archive/`). Check it before anything else:
+started 2026-07-30 **~09:53 UTC** (measured, not the session's "~09:30" estimate: hour 09's files
+hold 6/60 Alive ticks with seq continuous from 1), detached via nohup from the repo root, logging
+to `capture.log` (gitignored, as is `archive/`). Hour 09 closed and sealed on schedule while
+detached — sidecar present, and the first verify over a **complete** hour reported 0 integrity
+findings, 7 `alive_short` coverage findings (the honest 6-minute hour). Note `verify` only judges
+hours **fully inside** `-from/-to`; to see the open hour, pass `-to` at the next hour boundary.
+Check it before anything else:
 
 ```
 pgrep -fl "arblab capture run"     # is it alive? (it does NOT survive a reboot)
@@ -111,8 +116,9 @@ more than usual** — a laptop disk holds the only copy of an unrecoverable arch
 §32m slice D says "measure one day of funding on disk, THEN add sources 3–6" — written before §32c
 pinned one config as the single spelling of the capture set. The RESUME's instruction ran all seven
 from day one; the disk figure is still measured rather than estimated, which is what §31d actually
-requires. First observation: ~0.5 MB per 10 s across all seven (Bybit books dominate) — the real
-one-day figure is slice D's to record.
+requires. Second observation (10:05 UTC): 50 MB in the first ~12 minutes across all seven, ≈6 GB/day
+pace, Bybit books dominating. The real one-day figure becomes measurable **~09:53 UTC 2026-07-31**
+(`du -sh archive/` plus a verify over the full day) and is slice D's to record.
 
 ---
 
