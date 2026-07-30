@@ -1,6 +1,6 @@
 # ADR & Review History — Funding-Rate Arbitrage Platform
 
-**Status:** v0.9.14 (2026-07-30) — capture slice E (the `fundingInfo` REST overlay): ADR §3's milestone-2 capture block gains the overlay-scope edit (§8 + §12.2, one edit in two carrying places); the tagless total is now **fifty-four**.
+**Status:** v0.9.15 (2026-07-30) — capture slice F (manifests, full verify, `cat`): **zero core edits, pre-registered as such on the slice record's own §12 and confirmed by the close's reading pass** — the one owed widening (§32e's manifest field list) landed inside the capture design record, dated in place, so ADR §3 gains no row and the tagless total **stays fifty-four**. Stated here rather than left silent, because a total that merely fails to change is indistinguishable from a total nobody checked (the v0.9.10 staleness lesson, from the other direction).
 **Doc set:** normative core `build-spec.md` · venue facts `venue-profiles.md` · kernel machines `state-machines.md` · history/traceability `adr-history.md` · teaching companion `tutorial.md`.
 **Role:** the convergence record — how the spec got here (review rounds, Codex convergence), plus the finding→resolution traceability that used to be the build-spec Appendix. Nothing here is normative on its own; the requirements live in the core.
 

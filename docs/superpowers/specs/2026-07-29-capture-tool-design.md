@@ -270,8 +270,10 @@ full.
 ### Integrity
 
 Per-record CRC32C, per-file SHA-256 at close, per-day manifest listing every file with its digest,
-record count and gap count. This is not defence against an attacker; it is defence against **the tail of
-a file after a crash and a bad byte on a laptop disk**, both of which otherwise present as a
+record count and gap count — widened by slice F (§38a, 2026-07-30) with `{window, last_seq, closed_at,
+source}`: the fields that make an entry checkable without reading the file, and honest about whether it
+was written at close or backfilled. This is not defence against an attacker; it is defence against **the
+tail of a file after a crash and a bad byte on a laptop disk**, both of which otherwise present as a
 successfully-parsed archive with a plausible hole.
 
 **On opening an existing hour file:** scan forward validating CRCs, truncate to the last good record

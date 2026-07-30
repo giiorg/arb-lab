@@ -1,6 +1,6 @@
 # Building a Funding-Rate Arbitrage Bot — A Teaching Companion
 
-**Status:** v0.9.14 (2026-07-30) — set-version alignment, no change in this doc (v0.9.14 is capture slice E: the `fundingInfo` REST overlay goes live; one edit lands in core §8/§12.2, none at this tutorial's altitude).
+**Status:** v0.9.15 (2026-07-30) — set-version alignment, no change in this doc (v0.9.15 is capture slice F: the manifest/full-verify layer goes live with zero core edits, none at this tutorial's altitude).
 **Doc set:** normative core `build-spec.md` · venue facts `venue-profiles.md` · kernel machines `state-machines.md` · history/traceability `adr-history.md` · teaching companion `tutorial.md`.
 
 **Audience.** Senior engineers with strong systems instincts and little-to-no derivatives background. This teaches the *why*; the normative *what to build* lives in [`docs/build-spec.md`](./build-spec.md), which this document cross-references as **§spec**. Where the two ever disagree, the build-spec wins.

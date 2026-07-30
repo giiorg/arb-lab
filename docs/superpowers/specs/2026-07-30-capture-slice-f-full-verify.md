@@ -1,7 +1,7 @@
 # §38 — the capture tool, slice F: full verify, `cat`, and the sync claim (2026-07-30)
 
-**Status: OPEN — implementation largely built and `make ci` green mid-slice;
-NOT closed. See `RESUME HERE` at the bottom for the exact seam.**
+**Status: CLOSED (2026-07-30, session 39) — v0.9.15. The close's findings are
+§38h at the bottom; the mid-slice seam it resumed from is preserved above it.**
 
 Implements §32m slice F of `2026-07-29-capture-tool-design.md`: full `verify`
 (manifests, digests, coverage report), `capture cat`, off-host sync of closed
@@ -217,6 +217,7 @@ positive-control test over the new machinery **is** a scope assertion, and the
 last two releases each found one the roster missed.
 
 ## RESUME HERE — mid-slice seam (session 38 paused deliberately, context limit)
+## [HISTORICAL — session 39 resumed exactly here and closed the slice; see §38h]
 
 **State: everything below is committed and `make ci` is green on it — six gates
 clean, both modules. The slice is NOT closed: no checklist pass, no mutations,
@@ -305,3 +306,101 @@ Built and tested this session:
    on pace for the ~6 GB/day estimate). The off-host DESTINATION is still the
    user's open decision (§38f — option 4 taken 2026-07-30); the machinery no
    longer waits on it.
+
+## §38h — the close (session 39, 2026-07-30)
+
+**Order held: cat tests → checklist pass → mutations → reading pass → close.**
+`make ci` green (six gates clean, both modules), marker grep
+`grep -rn "SPEC EDIT OWED" internal/ tools/` **ZERO** — as §12 predicted, this
+slice wrote no markers, and the one owed widening landed in-record.
+
+### The cat tests (`cat_internal_test.go`)
+
+The §38d roster as three tests, with the collapse discipline applied at design
+time and stated in the file header: the verbatim payload carries `<` and `&`
+(without them, `SetEscapeHTML(false)` is uncheckable), verbatim is asserted by
+raw substring (a parser accepts the escaped form too), the binary payload is
+non-empty AND invalid JSON (either collapse re-lands on a neighbouring row),
+seqs are distinct from line indexes, and the corrupt frame has a valid record
+BEHIND it — a corrupt LAST record cannot distinguish "stopped at the fault"
+from "reached the end". The render-every-kind fixture covers all eight kinds
+the writer can emit including `clock_step` (the roster's list stopped at
+seven), and the intact-bytes run inside the corrupt-frame test is the positive
+control the refusal needs.
+
+### The checklist pass — three pinned parameters found, then a fourth fixture
+
+Run as a pass over every slice-F fixture, BEFORE the mutations, per the
+nine-times rule. It found three:
+
+1. **Sorted order equal to insertion order** — the upsert test inserted
+   `v1/a/…` then `v1/b/…` and asserted "sorted", which holds with the
+   `SortFunc` deleted. The backfill path now sorts BEFORE the close path while
+   inserting AFTER it.
+2. **No eligible file outside the backfill's day** — `BackfillManifestDay`'s
+   day filter had nothing to filter, so "walks the asked day" and "walks the
+   whole tree" produced the same `added`. A sealed next-day file now sits in
+   the fixture and the next day's manifest is asserted absent.
+3. **A single-day universe** — every verify fixture lived inside one UTC day,
+   so the manifest day loop never advanced: a loop pinned to the first day
+   passed the whole suite. The new cross-midnight subtest (23:00 + 00:00
+   windows, second day's manifest deleted) is the isolating fixture.
+
+The pass also added the **torn-tail backfill fixture**: nothing exercised
+`walkFileCounts`' `tornBytes` guard, and backfill is the one caller that never
+verifies the digest it copies — the guard is all that stands between a
+damaged file and a plausible entry for it.
+
+### The mutations — 30/30 caught, after the battery found two real gaps
+
+The full battery: 6 writer (close gate, window-vs-instant day, both counters,
+both recovery restores), 1 recover (`gaps++`), 9 manifest (day derivation,
+upsert-replace, insert-if-absent, sort, day filter, invented digest, crashed
+skip, sidecar copy, torn tail), 10 verify (closedByDay gate, day-loop advance,
+`n > 0`, all four entry comparisons, suppression, empty-digest guard,
+aborted-walk guard), 4 cat (json.Valid, Rest decode, flush-before-error,
+offset origin). First run: 26 caught, one `NOBUILD!!` (a single-use variable
+sed — re-aimed as a digest rotation, then caught), and **three SURVIVED, of
+which two were real test gaps the checklist could not see**, because the
+missing fixtures were about *drivers*, not parameters:
+
+- **Nothing drove a close whose sidecar write fails.** The gate in
+  `closeFile` — entry only when mint+sync+close+sidecar ALL succeeded — had
+  never been seen to refuse. `TestFailedCloseLandsNoManifestEntry` fails the
+  sidecar specifically (file's directory read-only, `_manifest/` writable),
+  because that is the conjunct whose failure leaves the manifest write itself
+  fully able to proceed — the exact accident the ordering exists to prevent.
+- **Nothing followed a crash-recovered file to its eventual close's entry.**
+  The `w.fileRecords/fileGaps = scan.…` restores could be zeroed silently.
+  `TestReopenedFileClosesWithFullFileCounts` crashes a file mid-record,
+  reopens, writes more, closes, and anchors the entry against an independent
+  walk — with two pre-crash gap records, so the retained portion contributes
+  a number the post-reopen writes cannot reproduce.
+
+The third SURVIVED was the same gate mutation before its test existed. All
+three resolved; the re-run reports caught across the board.
+
+### The reading pass and the one spec edit
+
+Core §3.6 rule 8's sentence — "`arblab capture cat` is where a kind becomes a
+name" — is now literally `kindToken`, refused zero-kind named honestly;
+**made true, not edited**, as §12 predicted. The §32e widening landed in the
+capture design's own Integrity paragraph, dated: the manifest lists "digest,
+record count and gap count" **plus `{window, last_seq, closed_at, source}`**
+— the fields that make an entry checkable without reading the file and honest
+about its provenance. The positive-control scope check (the twice-paid
+lesson) found no third instance: the done-when test's claim is §38e's own,
+the entry-shape control is the §32e list as widened, and cat's token
+vocabulary is §38d's.
+
+### Operational close-out (the plan; the log is the evidence of the outcome)
+
+Restart the capture onto the v0.9.15 build at a recorded seam (SIGTERM, clean
+close, relaunch — same as v0.9.13→14), then `capture manifest -day 2026-07-30`
+to backfill the pre-manifest hours, then a day verify: expected shape is
+integrity ZERO, coverage findings only for the open hour, and the backfilled
+day's `manifest_absent` gone. The hour spanning the restart is closed by the
+NEW build with recovered counters — the exact path
+`TestReopenedFileClosesWithFullFileCounts` pins. Slice D's disk figure stays
+on calendar (~09:53 UTC 2026-07-31); the sync destination stays the user's
+open §38f decision, which the machinery no longer waits on.

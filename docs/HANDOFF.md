@@ -1,6 +1,8 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-07-30): **v0.9.14 — capture slice E is CLOSED and the `fundingInfo` REST OVERLAY IS LIVE: the capture runs on EIGHT streams.** Slice E was taken up ahead of slice D's one-day disk figure deliberately — the figure is a one-command calendar checkpoint (measurable ~09:53 UTC 2026-07-31), the overlay's own data is calendar-bound, and §32m's stated ordering principle cuts for starting it, not idling (record §37's preamble). One session, full rhythm: design record with rejected alternatives (§37a–§37g), implementation over the seams slices A–C left ready (`RecordKindRest`, `Writer.Rest`, the framing contract), the fixture-collapse checklist BEFORE the mutations (three fixture improvements — §37h), **14/14 aimed mutations caught** (one honest `NOBUILD!!` re-aim), and the close's reading pass finding the one owed spec edit the marker grep could not: the config test now asserts an EIGHTH capture stream while core §8/§12.2 stopped at seven — the v0.9.13 rows-1/4 lesson repeating one session later, landed as v0.9.14's single edit (§37i). A failed poll is a Rest record with the transport's words, not a Gap; verify's `no_data` now requires zero Data AND zero Rest records (§37g); the poller lives in `transport` with its own http/https scheme rule. Marker grep **ZERO**. `make ci` green on a cold cache, all six gates clean, docs 102 pass, `docs/formal/` untouched at Cx8. **Start at `## START HERE` below, not at this line.**
+## Status (2026-07-30): **v0.9.15 — capture slice F is CLOSED: the archive now testifies against its own copies.** Slice F (§38, opened session 38, paused at a recorded mid-slice seam, closed session 39) lands the full-verify layer: every clean close writes a `_manifest/<day>.json` entry (sidecar-first, day keyed to the WINDOW's UTC day — the 23:00 file belongs to its own day), verify cross-checks entries against recomputed files with five new findings (`manifest_missing_file` — the deletion evidence the layer exists for — `manifest_mismatch`, `manifest_unreadable`, `unmanifested`, `manifest_absent`) plus two paid-for guards (a changed file earns `digest_mismatch` ONCE, not a manifest echo; a header-abort's empty digest is never compared), `capture manifest -day` backfills pre-manifest days from sidecars **labeled** so a repair can never impersonate close-time truth, and `capture cat` renders NDJSON — core §3.6 rule 8's "where a kind becomes a name" sentence made TRUE, not edited. The done-when is a test: a faithful copy verifies clean, a copy missing one closed hour is caught by the entry that outlives the file — provable without asking the source (§38e; destination stays the user's open §38f decision, machinery no longer waits on it). Verification, full rhythm: checklist pass BEFORE mutations found **three pinned fixture parameters** (sorted==insertion order, no out-of-day backfill candidate, a single-day verify universe — the day loop had never been seen to advance) plus a torn-tail backfill fixture; then **30/30 aimed mutations caught**, after the battery exposed two gaps the checklist could not — nothing DROVE a failing sidecar write (the closeFile gate had never refused) and nothing followed a crash-recovered file to its close's manifest entry (both tests added, §38h). One spec edit, in-record: §32e's manifest field list widened by `{window, last_seq, closed_at, source}`, dated. Marker grep **ZERO**. `make ci` green, all six gates clean, docs 102 pass, `docs/formal/` untouched at Cx8. **Start at `## START HERE` below, not at this line.**
+
+**v0.9.14 (2026-07-30) — capture slice E is CLOSED and the `fundingInfo` REST OVERLAY IS LIVE: the capture runs on EIGHT streams.** Slice E was taken up ahead of slice D's one-day disk figure deliberately — the figure is a one-command calendar checkpoint (measurable ~09:53 UTC 2026-07-31), the overlay's own data is calendar-bound, and §32m's stated ordering principle cuts for starting it, not idling (record §37's preamble). One session, full rhythm: design record with rejected alternatives (§37a–§37g), implementation over the seams slices A–C left ready (`RecordKindRest`, `Writer.Rest`, the framing contract), the fixture-collapse checklist BEFORE the mutations (three fixture improvements — §37h), **14/14 aimed mutations caught** (one honest `NOBUILD!!` re-aim), and the close's reading pass finding the one owed spec edit the marker grep could not: the config test now asserts an EIGHTH capture stream while core §8/§12.2 stopped at seven — the v0.9.13 rows-1/4 lesson repeating one session later, landed as v0.9.14's single edit (§37i). A failed poll is a Rest record with the transport's words, not a Gap; verify's `no_data` now requires zero Data AND zero Rest records (§37g); the poller lives in `transport` with its own http/https scheme rule. Marker grep **ZERO**. `make ci` green on a cold cache, all six gates clean, docs 102 pass, `docs/formal/` untouched at Cx8. **Start at `## START HERE` below, not at this line.**
 
 **v0.9.13 (2026-07-30) — the FIRST MILESTONE-2 release: capture slice C is CLOSED and CAPTURE IS LIVE.** The calendar moment happened this session: `bin/arblab capture run -config configs/capture.json` is running detached on this machine, all SEVEN of §32c's sources connected, and the first real `capture verify` over the open hour reported **0 integrity findings** — the 14 coverage findings are the honest description of an hour not yet closed (no Close record, 1/60 Alive ticks at the time of asking). Before the close, the fixture-collapse checklist over the session-35 code confirmed **all three named suspects and found three more** (a scheduling-rate collapse, a one-source label-set collapse, two unexercised shutdown doors — six new fixtures), and **11/11 aimed mutations were caught**. The close landed **six spec edits** (five pre-registered on the capture design's §12 roster + the module rename): core §3.5 ×2 (per-`(Source, Topic)` capture counters; `Wall`'s monotonic clamp stated with its `Backsteps()` observation seam), §3.6 rule 8 (second integer-enum exception: `capture.RecordKind`), §11 (`nhooyr.io/websocket` → `github.com/coder/websocket`), and §12.2 + §8 (self-capture is funding AND books + one evidence stream). `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **ZERO**; four markers read `[SPEC EDIT LANDED — v0.9.13]`. The reading pass found a wrong rule citation (code fix) and caught roster rows 1/4's "no code asserts them yet" having silently expired. `make ci` green on a cold cache, all six gates clean, docs 102 pass, `docs/formal/` untouched at Cx8. **Start at `## START HERE` below, not at this line.**
 
@@ -79,7 +81,44 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated MID-SESSION 38, 2026-07-30 — slice F is OPEN and PAUSED at a deliberate seam)
+## START HERE (updated end of session 39, 2026-07-30 — v0.9.15 RELEASED, slice F CLOSED, capture restarted onto the MANIFEST-WRITING build)
+
+**Branch `feat/milestone-1-foundation`.** Verify rather than trust: `git status --short` (clean),
+`grep -rn "SPEC EDIT OWED" internal/ tools/` — expect **ZERO** (slice F wrote no markers; its one
+edit landed in-record, §38h). `make ci` green, docs 102 pass.
+
+**A capture process is (or should be) RUNNING on the v0.9.15 build** — restarted end of session 39
+at a recorded seam (same as v0.9.13→14), eight streams, and from this build on **every clean close
+lands a manifest entry**. Day 2026-07-30's pre-manifest hours were backfilled
+(`capture manifest -config configs/capture.json -day 2026-07-30`, labeled entries). It still does
+NOT survive a reboot. Check it before anything else:
+
+```
+pgrep -fl "arblab capture run"      # alive?
+bin/arblab capture verify -config configs/capture.json -from 2026-07-30T09:00:00Z -to <next hour boundary, RFC3339>
+```
+
+Expect **0 integrity findings, always** — and from now on that sentence covers the manifest layer
+too: `manifest_missing_file` on a copy or on this root is a file that EXISTED and is GONE. Coverage
+findings for the open hour are the honest description of an hour not yet closed. The restart seam
+itself is recorded evidence (`process_restart` gap; the restart hour's file is closed by the NEW
+build with recovered counters — the exact path `TestReopenedFileClosesWithFullFileCounts` pins).
+
+**Read `docs/superpowers/specs/2026-07-30-capture-slice-f-full-verify.md`** — §38 is the whole
+slice; §38h is the close (checklist findings, 30/30 mutations, the two driver-shaped test gaps).
+What remains, in order:
+
+1. **Slice D's one-day disk figure, ~09:53 UTC 2026-07-31** — `du -sh archive/` + a full-day
+   verify (day 1 pace: 324M by 11:27 UTC, ≈6 GB/day, Bybit books dominating).
+2. **The off-host destination** — the user's open §38f decision (option 4 taken 2026-07-30:
+   destination-agnostic). The machinery is proven (`verify -root` over a copy; the done-when
+   test); the laptop is STILL the only copy until this is decided. Loss exposure is calendar
+   time on the kill-gate measurement, not irreplaceable data (§38f's honest calculus).
+3. **§32m's next roster row** after D's figure lands.
+
+---
+
+## START HERE (updated MID-SESSION 38, 2026-07-30 — HISTORICAL — slice F was OPEN and PAUSED at a deliberate seam; session 39 resumed and closed it)
 
 **Session 38 opened slice F** (full verify: manifests + cross-check, `capture
 cat`, the sync claim — destination-agnostic by the user's recorded choice,
