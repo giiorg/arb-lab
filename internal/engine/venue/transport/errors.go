@@ -31,9 +31,23 @@ var (
 	ErrTimeoutRange    = errors.New("transport: timeout must be positive")
 	ErrBackoffUnset    = errors.New("transport: backoff schedule is empty")
 
+	// The poller's own configuration refusals. ErrRestScheme is not
+	// ErrSchemeUnknown because that sentinel's words are a claim about
+	// SOCKETS ("must be ws or wss"), and an error message that names the
+	// wrong legal set sends the operator to fix the wrong field.
+	ErrRestScheme     = errors.New("transport: poller scheme must be http or https")
+	ErrPathMalformed  = errors.New("transport: path must start with / and not end with /")
+	ErrReadLimitRange = errors.New("transport: read limit must be positive")
+
 	// Runtime — reconnect, do not stop.
 	ErrDial        = errors.New("transport: dial failed")
 	ErrSubscribe   = errors.New("transport: subscribe failed")
 	ErrRead        = errors.New("transport: read failed")
 	ErrNoFirstData = errors.New("transport: no data within the first-data timeout")
+
+	// ErrBodyTooLarge is the poller refusing a response body its caller's
+	// archive could not hold. Runtime and per-ask: the next scheduled poll
+	// is unaffected, exactly as a socket disruption leaves the next
+	// reconnect unaffected.
+	ErrBodyTooLarge = errors.New("transport: response body exceeds the read limit")
 )

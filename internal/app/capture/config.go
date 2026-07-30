@@ -80,6 +80,11 @@ type Config struct {
 
 	// Sources is the capture set — §32c's seven rows, as data.
 	Sources []SourceConfig `json:"sources"`
+
+	// RestSources is §32h's overlay set. Optional where Sources is not: a
+	// capture set with no REST overlay was slice C's shipped state, and it
+	// was not wrong — the overlay adds provenance, not coverage.
+	RestSources []RestSourceConfig `json:"rest_sources,omitempty"`
 }
 
 // SourceConfig is one capture stream: the identity half names §3.5's SourceID,
@@ -157,6 +162,78 @@ func (s SourceConfig) Validate() error {
 	return nil
 }
 
+// RestSourceConfig is one §32h overlay stream: the same identity half as
+// SourceConfig, and a wire half that is a polled GET rather than a
+// subscription. A second type rather than a `kind` discriminator on the
+// first (§37e): SourceConfig's wire half is WS-shaped — a Protocol, a topic
+// the dialect interprets, a first-data assertion about a push stream — and a
+// union would make half the fields meaningless per row while each type can
+// refuse its own zero values.
+type RestSourceConfig struct {
+	// Venue, Product, Contract, Symbol and Stream name the SourceID, exactly
+	// as on SourceConfig.
+	Venue    ids.Venue           `json:"venue"`
+	Product  ids.ProductCategory `json:"product"`
+	Contract ids.ContractType    `json:"contract,omitempty"`
+	Symbol   string              `json:"symbol"`
+	Stream   events.StreamKind   `json:"stream"`
+
+	// Scheme, Host and Path are the request; Topic is the archive directory
+	// segment (§32h: "its own (SourceID, Topic) stream"). Topic is explicit
+	// rather than derived from Path because the WS topic is the venue's own
+	// name for a stream, and Binance's name for this one is "fundingInfo",
+	// not a percent-encoded path.
+	Scheme string `json:"scheme"`
+	Host   string `json:"host"`
+	Path   string `json:"path"`
+	Topic  string `json:"topic"`
+
+	// PollInterval is the ask cadence, walked on the Truncate grid — the
+	// rotation grid's own anchor (§36j), so an hourly poll lands once per
+	// hourly file. RequestTimeout bounds one ask; Validate holds it at or
+	// under alive_interval because the poll loop owns its writer
+	// single-threaded, and the worst a slow venue may cost is one late
+	// Alive tick rather than a coverage finding (§37e).
+	PollInterval   config.Duration `json:"poll_interval"`
+	RequestTimeout config.Duration `json:"request_timeout"`
+}
+
+// Key is the (SourceID, Topic) capture key this overlay writes under.
+func (r RestSourceConfig) Key() enginecapture.StreamKey {
+	return enginecapture.StreamKey{
+		Source: events.SourceID{
+			Instrument: ids.VenueInstrument{
+				Venue:    r.Venue,
+				Product:  r.Product,
+				Symbol:   r.Symbol,
+				Contract: r.Contract,
+			},
+			Stream: r.Stream,
+		},
+		Topic: r.Topic,
+	}
+}
+
+// Validate reports whether the overlay row could be captured. The wire half
+// is validated where the wire type is BUILT — Config.Validate constructs the
+// real transport.PollerConfig, timeout and read limit included, and asks it —
+// so this method owns only what no other type can see: the identity and the
+// cadence.
+func (r RestSourceConfig) Validate() error {
+	if err := r.Key().Validate(); err != nil {
+		return err
+	}
+	if r.PollInterval.Duration() <= 0 {
+		return fmt.Errorf("rest source %s: poll_interval %s: %w",
+			r.Key(), r.PollInterval, ErrDurationRequired)
+	}
+	if r.RequestTimeout.Duration() <= 0 {
+		return fmt.Errorf("rest source %s: request_timeout %s: %w",
+			r.Key(), r.RequestTimeout, ErrDurationRequired)
+	}
+	return nil
+}
+
 // Validate reports whether the configuration could run capture. It implements
 // config.Validator, so a document that fails here never becomes a Snapshot.
 func (c Config) Validate() error {
@@ -208,7 +285,9 @@ func (c Config) Validate() error {
 	// flock refuses the second at runtime; refusing here names the row at
 	// boot instead. Note what is NOT refused: identical topics on different
 	// keys — Bybit's linear and spot books — which is §36c's whole point.
-	seen := make(map[enginecapture.StreamKey]int, len(c.Sources))
+	// ONE map across both lists (§37e), because two writers on one key is
+	// the same accident regardless of which list each row sits in.
+	seen := make(map[enginecapture.StreamKey]int, len(c.Sources)+len(c.RestSources))
 	for i, s := range c.Sources {
 		if err := s.Validate(); err != nil {
 			return fmt.Errorf("sources[%d]: %w", i, err)
@@ -220,7 +299,44 @@ func (c Config) Validate() error {
 		}
 		seen[key] = i
 	}
+	for i, r := range c.RestSources {
+		if err := r.Validate(); err != nil {
+			return fmt.Errorf("rest_sources[%d]: %w", i, err)
+		}
+		// The wire half is validated on the type that will dial it, built
+		// with the REAL timeout and read limit rather than placeholders.
+		if err := c.pollerConfig(r).Validate(); err != nil {
+			return fmt.Errorf("rest_sources[%d]: %w", i, err)
+		}
+		// The poll loop owns its writer single-threaded: a request in
+		// flight delays Tick by at most the timeout, and bounding it by the
+		// Alive interval keeps the worst case at one late tick (§37e).
+		if r.RequestTimeout.Duration() > c.AliveInterval.Duration() {
+			return fmt.Errorf("rest_sources[%d]: request_timeout %s exceeds alive_interval %s: %w",
+				i, r.RequestTimeout, c.AliveInterval, ErrRestTimeoutRange)
+		}
+		key := r.Key()
+		if j, dup := seen[key]; dup {
+			return fmt.Errorf("rest_sources[%d] and an earlier row (index %d) both name %s: %w",
+				i, j, key, ErrSourceDuplicate)
+		}
+		seen[key] = len(c.Sources) + i
+	}
 	return nil
+}
+
+// pollerConfig is the transport configuration for one overlay row. The read
+// limit is max_record for the socket's own stated reason: a body the archive
+// could not hold is refused at the transport, before it is counted as
+// captured.
+func (c Config) pollerConfig(r RestSourceConfig) transport.PollerConfig {
+	return transport.PollerConfig{
+		Scheme:    r.Scheme,
+		Host:      r.Host,
+		Path:      r.Path,
+		Timeout:   r.RequestTimeout.Duration(),
+		ReadLimit: c.MaxRecord,
+	}
 }
 
 // Verify is the capture.VerifyConfig this configuration implies for a window

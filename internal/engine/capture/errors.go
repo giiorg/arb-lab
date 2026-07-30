@@ -315,4 +315,31 @@ var (
 	// declared one.
 	ErrVerdictUnspecified = errors.New("capture: verdict is unset")
 	ErrVerdictUnknown     = errors.New("capture: verdict is not a declared verdict")
+
+	// ErrRestMethodUnset, ErrRestURLUnset and ErrRestAskedAtUnset report a Rest
+	// meta with an unpopulated request half. The zero value is unusable for the
+	// platform's standing reason, worn by this type: an unpopulated meta reads
+	// as a successful ask about nothing, archived as fact.
+	ErrRestMethodUnset  = errors.New("capture: rest method is unset")
+	ErrRestURLUnset     = errors.New("capture: rest url is unset")
+	ErrRestAskedAtUnset = errors.New("capture: rest asked_at is the zero time")
+
+	// ErrRestStatusRange reports an HTTP status outside 100..599 (0 is not in
+	// range — it is the transport-failure case, governed by the rule below).
+	ErrRestStatusRange = errors.New("capture: rest status is outside 100..599")
+
+	// ErrRestOutcomeConflict reports a meta claiming two outcomes for one ask:
+	// a status AND a transport error, or neither. Exactly one is the §37a rule
+	// — a venue that answered has a status; a transport that failed has words.
+	ErrRestOutcomeConflict = errors.New("capture: rest status and error must name exactly one outcome")
+
+	// ErrRestTruncated reports a Rest payload whose bytes end inside the frame:
+	// shorter than the length prefix, or a meta length past the payload's end.
+	// Named apart from ErrTruncated because that one means the FILE tore at a
+	// record boundary the recovery procedure owns; this one means a record that
+	// decoded whole carries a payload that is itself damaged.
+	ErrRestTruncated = errors.New("capture: rest payload is truncated")
+
+	// ErrRestMetaInvalid reports meta bytes that do not parse as RestMeta.
+	ErrRestMetaInvalid = errors.New("capture: rest meta is not valid JSON")
 )

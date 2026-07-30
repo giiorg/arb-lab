@@ -79,7 +79,7 @@ func newHarness(t *testing.T, root string, edit func(*Config)) *harness {
 	errs := make(chan error, len(cfg.Sources))
 	p, err := newPipeline(cfg, cfg.Sources[0], clk,
 		Build{Tool: "arblab-test", GitSHA: "deadbeef"}, "cfg-hash-fixture",
-		newSourceMetrics(met, clk, cfg.Sources[0]), errs)
+		newSourceMetrics(met, clk, labelValues(cfg.Sources[0])), errs)
 	if err != nil {
 		t.Fatalf("pipeline: %v", err)
 	}

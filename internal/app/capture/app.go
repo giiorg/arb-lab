@@ -51,16 +51,25 @@ func Run(ctx context.Context, snap config.Snapshot[Config], wall *clock.Wall,
 
 	// Sized so every pipeline can report one error without blocking; the
 	// first is the one Run returns, the rest are consequences of it.
-	errs := make(chan error, len(cfg.Sources))
+	errs := make(chan error, len(cfg.Sources)+len(cfg.RestSources))
 
 	pipes := make([]*pipeline, 0, len(cfg.Sources))
 	for _, src := range cfg.Sources {
 		p, err := newPipeline(cfg, src, wall, build, snap.Rev.HashString(),
-			newSourceMetrics(met, wall, src), errs)
+			newSourceMetrics(met, wall, labelValues(src)), errs)
 		if err != nil {
 			return err
 		}
 		pipes = append(pipes, p)
+	}
+	restPipes := make([]*restPipeline, 0, len(cfg.RestSources))
+	for _, src := range cfg.RestSources {
+		p, err := newRestPipeline(cfg, src, wall, build, snap.Rev.HashString(),
+			newSourceMetrics(met, wall, restLabelValues(src)), errs)
+		if err != nil {
+			return err
+		}
+		restPipes = append(restPipes, p)
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
@@ -93,6 +102,25 @@ func Run(ctx context.Context, snap config.Snapshot[Config], wall *clock.Wall,
 		go func() {
 			defer wg.Done()
 			if err := p.consume(runCtx, tick); err != nil {
+				p.fail(err)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			driveTicks(runCtx, tick, tickEvery(cfg))
+		}()
+	}
+
+	// The overlay pipelines are two goroutines each rather than four: one
+	// loop owns poll, write and Tick together (§37f), and the tick driver is
+	// the same one the WS side uses.
+	for _, p := range restPipes {
+		p := p
+		tick := make(chan struct{}, 1)
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			if err := p.run(runCtx, tick); err != nil {
 				p.fail(err)
 			}
 		}()

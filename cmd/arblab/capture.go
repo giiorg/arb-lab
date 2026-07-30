@@ -63,7 +63,7 @@ func captureRun(args []string, stderr io.Writer) int {
 
 	tool, gitSHA := buildInfo()
 	fmt.Fprintf(stderr, "capture run: %d sources under %s (config %s, build %s); interrupt to stop\n",
-		len(snap.Value.Sources), snap.Value.Root, snap.Rev.HashString()[:12], gitSHA)
+		len(snap.Value.Sources)+len(snap.Value.RestSources), snap.Value.Root, snap.Rev.HashString()[:12], gitSHA)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -179,6 +179,9 @@ func formatReport(w io.Writer, rep *enginecapture.Report, cfg enginecapture.Veri
 			wr.Window.UTC().Format(time.RFC3339),
 			wr.Stream,
 			wr.Records, wr.DataRecords, wr.AliveTicks, wr.AliveExpected)
+		if wr.RestRecords > 0 {
+			fmt.Fprintf(w, ", rest %d", wr.RestRecords)
+		}
 		if wr.DataRecords > 0 {
 			fmt.Fprintf(w, ", seq %d..%d", wr.FirstSeq, wr.LastSeq)
 		}

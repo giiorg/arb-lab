@@ -52,4 +52,11 @@ var (
 	// ErrTimeoutRequired reports a source with no first-data timeout — which
 	// would disable the only check that catches a dead feed (§32k).
 	ErrTimeoutRequired = errors.New("capture: first_data_timeout must be positive")
+
+	// ErrRestTimeoutRange reports an overlay request timeout longer than the
+	// Alive interval. The poll loop owns its writer single-threaded (§37f),
+	// so a request in flight delays Tick by at most the timeout — bounded
+	// here so the worst a slow venue may cost is one late Alive tick, never
+	// a coverage finding about our own patience.
+	ErrRestTimeoutRange = errors.New("capture: request_timeout exceeds alive_interval")
 )

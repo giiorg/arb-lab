@@ -100,5 +100,20 @@
       "topic": "btcusdt@depth@100ms",
       "first_data_timeout": "10s"
     }
+  ],
+  "rest_sources": [
+    {
+      "venue": "binance",
+      "product": "linear_perp",
+      "contract": "linear",
+      "symbol": "BTCUSDT",
+      "stream": "funding",
+      "scheme": "https",
+      "host": "fapi.binance.com",
+      "path": "/fapi/v1/fundingInfo",
+      "topic": "fundingInfo",
+      "poll_interval": "1h",
+      "request_timeout": "10s"
+    }
   ]
 }

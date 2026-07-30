@@ -496,6 +496,43 @@ func TestVerifyReportsAWindowWithNoVenueFrame(t *testing.T) {
 	}
 }
 
+// TestVerifyAcceptsARestOnlyWindow is §37g: the same idle hour as the test
+// above — that one is this one's control — except ONE Rest record was
+// archived. An overlay stream never holds Data, so without this distinction
+// every §32h hour reads as a dead feed, permanently, and the operator learns
+// to read past the finding. Any recorded ask counts, and the fixture uses the
+// least flattering one: a recorded transport FAILURE, because "we asked and
+// could not reach the venue" is still the stream doing its job.
+func TestVerifyAcceptsARestOnlyWindow(t *testing.T) {
+	h := newHarness(t, perpKey())
+	payload, err := EncodeRestPayload(RestPayload{Meta: RestMeta{
+		Method: "GET", URL: "https://fapi.binance.com/fapi/v1/fundingInfo",
+		Error: "dial tcp: connection refused", AskedAt: h.clock.Now(),
+	}})
+	if err != nil {
+		t.Fatalf("encode rest payload: %v", err)
+	}
+	if err := h.writers[perpKey().String()].Rest(payload); err != nil {
+		t.Fatalf("Rest: %v", err)
+	}
+	h.runIdle(60)
+	h.stopAll()
+
+	rep := verifyOK(t, h.cfgWindow(1))
+	if got := findingKinds(rep); len(got) != 0 {
+		t.Fatalf("findings %v, want none: %s", got, dumpFindings(rep))
+	}
+	if got := rep.Windows[0].RestRecords; got != 1 {
+		t.Errorf("RestRecords = %d, want 1", got)
+	}
+	if got := rep.Windows[0].DataRecords; got != 0 {
+		t.Errorf("DataRecords = %d, want 0 — the fixture must not carry venue frames", got)
+	}
+	if got := rep.ExitClass(); got != ClassUnspecified {
+		t.Errorf("ExitClass = %q, want %q (no findings, no class)", got, ClassUnspecified)
+	}
+}
+
 // TestVerifyReportsShortAliveCoverage drives a writer whose Tick was not called,
 // which is a stalled pump — and Writer.Tick deliberately does not backfill the
 // missed ticks, precisely so the count comes up short here.

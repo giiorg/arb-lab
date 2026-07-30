@@ -67,6 +67,26 @@ func TestRealCaptureConfigLoads(t *testing.T) {
 			t.Errorf("sources[%d] (%s) builds an invalid stream config: %v", i, src.Key(), err)
 		}
 	}
+
+	// §32h's overlay: one row, and it is the Profiles-verified target — the
+	// unauthenticated fundingInfo GET, hourly. Asserted against the real
+	// document for the same reason the seven are.
+	//
+	// [SPEC EDIT LANDED — v0.9.14] This assertion widens the capture set the
+	// core states — the v0.9.13 rows-1/4 lesson said a scope asserted in
+	// internal/ with no marker expires silently, so this one is marked at
+	// the asserting site: core §8 and §12.2 now carry the overlay.
+	if got := len(snap.Value.RestSources); got != 1 {
+		t.Fatalf("the capture set has %d rest sources, want §32h's 1", got)
+	}
+	r := snap.Value.RestSources[0]
+	if want := "https://fapi.binance.com/fapi/v1/fundingInfo"; snap.Value.pollerConfig(r).URL() != want {
+		t.Errorf("overlay URL %q, want the Profiles-verified %q",
+			snap.Value.pollerConfig(r).URL(), want)
+	}
+	if r.PollInterval.Duration() != time.Hour {
+		t.Errorf("poll_interval %s, want §32h's hourly", r.PollInterval)
+	}
 }
 
 type nopSink struct{}

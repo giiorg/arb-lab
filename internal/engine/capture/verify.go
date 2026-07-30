@@ -161,10 +161,15 @@ type WindowReport struct {
 
 	Verdict Verdict
 
-	// Records is every record in the file; the three named counts are subsets.
+	// Records is every record in the file; the named counts are subsets.
 	Records     uint64
 	DataRecords uint64
 	AliveTicks  uint64
+
+	// RestRecords counts §32h overlay records. Not coverage evidence — a
+	// Rest record is on no schedule verify knows — but it IS a venue answer,
+	// which is why a file holding one is not "a dead feed" (§37g).
+	RestRecords uint64
 
 	// AliveExpected is what the rotation period and Alive interval imply for a
 	// fully covered window — a constant from the config, never from the file.
@@ -541,6 +546,7 @@ type fileScan struct {
 	records     uint64
 	dataRecords uint64
 	aliveTicks  uint64
+	restRecords uint64
 	gaps        map[Cause]uint64
 
 	firstSeq uint64
@@ -563,6 +569,7 @@ func (s fileScan) window(cfg VerifyConfig, key StreamKey, f archiveFile) WindowR
 	return WindowReport{
 		Stream: key, Window: f.window, Path: f.path,
 		Records: s.records, DataRecords: s.dataRecords, AliveTicks: s.aliveTicks,
+		RestRecords:   s.restRecords,
 		AliveExpected: expectedAliveTicks(f.window, cfg.RotationPeriod, cfg.AliveInterval),
 		Gaps:          s.gaps,
 		FirstSeq:      s.firstSeq, LastSeq: s.lastSeq,
@@ -728,11 +735,17 @@ func verifyFile(cfg VerifyConfig, key StreamKey, f archiveFile, st chainState) (
 					"Close record says last CaptureSeq %d, the file's records end at %d",
 					cp.LastSeq, running)
 			}
-		case RecordKindRest, RecordKindClockStep:
-			// Counted in records and nothing more. A REST body and a clock-step
-			// note are provenance for a reader at step 5, not coverage evidence:
-			// neither is emitted on a schedule, so neither has an expected count
-			// to fall short of.
+		case RecordKindRest:
+			// Not coverage evidence — no expected count to fall short of —
+			// but counted apart from records, because a Rest record is a
+			// venue answer and its presence is what keeps an overlay-only
+			// file from reading as a dead feed below (§37g).
+			scan.restRecords++
+		case RecordKindClockStep:
+			// Counted in records and nothing more. A clock-step note is
+			// provenance for a reader at step 5, not coverage evidence: it
+			// is not emitted on a schedule, so it has no expected count to
+			// fall short of.
 		case RecordKindUnspecified:
 			// DecodeRecord refuses it (ErrKindUnspecified), so reaching here
 			// would mean the codec accepted a record Record.Validate rejects.
@@ -764,7 +777,11 @@ func verifyFile(cfg VerifyConfig, key StreamKey, f archiveFile, st chainState) (
 			add(FindingNoClose, -1,
 				"no Close record: the run that owned this file did not stop cleanly")
 		}
-		if scan.dataRecords == 0 {
+		// A Rest record satisfies this check (§37g): any recorded ask — rows,
+		// an empty array, a 429, even a recorded transport failure — is the
+		// stream doing its job, and an overlay stream never holds Data. What
+		// the finding means is unchanged: alive, and nothing ever answered.
+		if scan.dataRecords == 0 && scan.restRecords == 0 {
 			add(FindingNoData, -1,
 				"%d records, %d Alive ticks and not one venue frame", scan.records, scan.aliveTicks)
 		}

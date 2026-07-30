@@ -26,7 +26,7 @@ func TestEverySourcesLabelValuesAreDeclared(t *testing.T) {
 		t.Fatalf("metrics over two sources: %v", err)
 	}
 
-	sm := newSourceMetrics(m, newFakeClock(), cfg.Sources[1])
+	sm := newSourceMetrics(m, newFakeClock(), labelValues(cfg.Sources[1]))
 	sm.countGap(enginecapture.CauseReconnect)
 	sm.exportQueue(enginecapture.QueueStats{Drops: 1, HighWater: 2})
 	sm.exportWriter(enginecapture.WriterStats{Records: 2, DataRecords: 1, Bytes: 64})

@@ -97,7 +97,9 @@ func newMetrics(reg *observability.Registry, cfg Config) (*metrics, error) {
 	return m, nil
 }
 
-// closedLabels builds the five declared label dimensions from the source list.
+// closedLabels builds the five declared label dimensions from BOTH source
+// lists — an overlay row left out here is a stream whose every metric write
+// is silently refused, with Registry.Rejected as the only witness (§37e).
 func closedLabels(cfg Config) []observability.Label {
 	sets := make([]map[string]struct{}, len(sourceLabelNames))
 	for i := range sets {
@@ -105,6 +107,11 @@ func closedLabels(cfg Config) []observability.Label {
 	}
 	for _, s := range cfg.Sources {
 		for i, v := range labelValues(s) {
+			sets[i][v] = struct{}{}
+		}
+	}
+	for _, r := range cfg.RestSources {
+		for i, v := range restLabelValues(r) {
 			sets[i][v] = struct{}{}
 		}
 	}
@@ -126,6 +133,14 @@ func labelValues(s SourceConfig) []string {
 	}
 }
 
+// restLabelValues is one overlay row's tuple, same order, same dimensions —
+// the overlay is a stream like any other to the metrics.
+func restLabelValues(r RestSourceConfig) []string {
+	return []string{
+		string(r.Venue), string(r.Product), r.Symbol, string(r.Stream), r.Topic,
+	}
+}
+
 // sourceMetrics is one pipeline's view: the shared handles plus this source's
 // label tuple and the last exported snapshots, for counter deltas.
 //
@@ -141,8 +156,8 @@ type sourceMetrics struct {
 	lastData   time.Time
 }
 
-func newSourceMetrics(m *metrics, clock enginecapture.TimeSource, s SourceConfig) *sourceMetrics {
-	return &sourceMetrics{m: m, clock: clock, labels: labelValues(s)}
+func newSourceMetrics(m *metrics, clock enginecapture.TimeSource, labels []string) *sourceMetrics {
+	return &sourceMetrics{m: m, clock: clock, labels: labels}
 }
 
 // Record-time errors below are deliberately discarded: every refusal is
