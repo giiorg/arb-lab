@@ -77,7 +77,46 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 34, 2026-07-30 — slice C is **PARTLY BUILT**: transport, live `Mono` and **verify** have landed; **three items remain and funding capture is NOT yet running**)
+## START HERE (updated end of session 35, 2026-07-30 — slice C is **FULLY BUILT and NOT CLOSED**: the config schema, `internal/app/capture` and `cmd/arblab` all landed; **the checklist + mutations + close have NOT run, and the calendar moment has NOT happened**)
+
+**Branch `feat/milestone-1-foundation`.** Verify rather than trust: `git status --short` (clean),
+`git rev-list --left-right --count @{u}...HEAD` (the exact number is whatever the command says —
+recording it here cannot be right, because the commit that records it changes it),
+`grep -rn "SPEC EDIT OWED" internal/ tools/` — expect **exactly four**, unchanged through three
+sessions: the three §34 left on the design's §12 roster, plus §36a's `nhooyr.io/websocket` rename.
+`make ci` green, all six gates clean, `-race` clean on a **cold** cache (`go clean -testcache`
+first). Code is at the `feat(capture): config schema, composition root and CLI` commit.
+
+**Read `docs/superpowers/specs/2026-07-29-capture-slice-c-transport.md` (§36), not this summary.**
+Its `## RESUME HERE` now holds **verification work only**, four items: the fixture-collapse
+checklist over the session-35 code (with three named suspects), the mutations (with six named
+targets), the slice close (marker grep + the reading pass), and **the calendar moment** —
+`bin/arblab capture run -config configs/capture.json` against the live venues. §36p–§36s are this
+session's record.
+
+### What landed (session 35)
+
+`internal/app/capture` — the `platform/config` schema (no field hot-reloadable, asserted as a
+`Reload` refusal; `dial_timeout`/`subscribe_timeout` had to be ADDED to the RESUME list's roster
+because `StreamConfig.Validate` refuses zeros for all four timeouts), the composition root (writer
+opens on the run's **first `Subscribed`** so the ack reaches the Open record; the stream goroutine
+opens it and seeds the sink's counter from `Stats().LastSeq` — §36m's obligation — before handing
+the writer to the consumer through a one-shot channel; transport gaps ordered by `afterSeq`), and
+§32j's metrics under **closed label sets** with `Registry.Rejected() == 0` asserted end-to-end.
+`cmd/arblab` — `capture run` / `capture verify`; the exit map is an exhaustive switch that spells
+`Report.ExitClass` without re-deciding its precedence; the report prints the two finding axes
+separately, never summed. `configs/capture.json` — §32c's seven verified sources, loaded by the
+schema's positive-control test (one spelling of the capture set in the repo).
+
+### The trap for the next session
+
+**None of the session-35 code has been mutation-tested.** The suites pass and CI is green, and this
+repo's whole history says that is not yet evidence. Run the checklist BEFORE the mutations — in
+`boot` it changed five fixtures for free.
+
+---
+
+## START HERE (updated end of session 34, 2026-07-30 — HISTORICAL — slice C was PARTLY BUILT: transport, live `Mono` and verify had landed; three items remained)
 
 **Branch `feat/milestone-1-foundation`.** Verify rather than trust: `git status --short` (clean),
 `git rev-list --left-right --count @{u}...HEAD` (**a dozen or so ahead, nothing pushed** — the exact

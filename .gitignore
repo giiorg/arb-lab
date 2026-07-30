@@ -1,5 +1,7 @@
 # Build output
 /bin/
+# `go build ./cmd/...` drops the binary in the repo root
+/arblab
 
 # Go test/coverage artifacts
 *.test

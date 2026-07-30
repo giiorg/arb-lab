@@ -1,21 +1,22 @@
 # §36 — the capture tool, slice C: the transport and verify (2026-07-29 / 2026-07-30)
 
-**Status: PARTLY BUILT — the transport and verify are done, three components
-remain.** `make ci` green, all six gates clean, `-race` clean on a cold cache,
-docs 102 pass. Implements the *first two* parts of §32m slice C of
-`2026-07-29-capture-tool-design.md`, over slice A's codec (§33) and slice B's
-writer (§34), carrying the four items §35's `RESUME HERE` handed forward.
+**Status: FULLY BUILT, NOT CLOSED — every §32m slice C component now exists;
+the fixture-collapse checklist, the mutations over the new code, and the close
+have not run.** `make ci` green, all six gates clean, `-race` clean on a cold
+cache. Implements §32m slice C of `2026-07-29-capture-tool-design.md`, over
+slice A's codec (§33) and slice B's writer (§34), carrying the four items §35's
+`RESUME HERE` handed forward.
 
-**Slice C is NOT closed and funding capture is NOT yet running.** §32m's slice C
-is transport + `arblab capture run` + config + observability + minimal `capture
-verify` with its positive control. What exists is the transport, the live `Mono`
-source, and verify. See `## RESUME HERE` at the foot of this record for the rest,
-which is stated as work items rather than as prose so nothing has to be
-re-derived.
+**Slice C is NOT closed.** §32m's slice C is transport + `arblab capture run` +
+config + observability + minimal `capture verify` with its positive control.
+All of it exists and its suites pass; none of the new session-35 code has been
+mutation-tested, and the closing reading pass has not happened. See `## RESUME
+HERE` at the foot of this record.
 
-**Two parts, two sessions.** §36a–§36h are the transport (session 33); §36i–§36n
-are verify (session 34). The `RESUME HERE` list is the same list, three items
-shorter.
+**Three parts, three sessions.** §36a–§36h are the transport (session 33);
+§36i–§36o are verify (session 34); §36p–§36s are the config schema, the
+composition root and the CLI (session 35). The `RESUME HERE` list is the same
+list, now holding only the verification work.
 
 **What landed**
 
@@ -598,64 +599,168 @@ with its neighbours, and the fix is to state it more precisely.
 
 ---
 
-## RESUME HERE — slice C, the three remaining items
+## §36p — the config schema, and what the RESUME list undersold
 
-Ordered. Nothing below is started. **Verify is done (§36i–§36o); the item that was
-first on this list is gone from it.**
+**All three remaining items landed in session 35**: `internal/app/capture`
+(config schema + composition root, §36p–§36q), `cmd/arblab` (§36r), and
+`configs/capture.json` — §32c's seven verified sources as a checked-in
+document, which the schema's positive-control test loads through the real
+`platform/config` machinery. The tests are what keep the operator's actual
+document loadable; there is exactly one spelling of the capture set in the
+repository.
 
-1. **Config schema** (§32j) via `platform/config` — archive root, the source list
-   (`SourceID` + **host + prefix + topic separately**, §36c), rotation period,
-   queue depth, `alive_interval`, `sync_interval`, `first_data_timeout`,
-   `read_timeout`, backoff schedule, `maxRecord`. **No field carries
-   `config:"hot"`** — restart-required is correct for every one of them, and the
-   restart's gap is recorded.
-   Verify needs four of these values at the same names — `RotationPeriod`,
-   `AliveInterval`, the archive root, and a **coverage threshold in whole
-   percent** (`VerifyConfig.MinAlivePercent`, 1..100, an integer because §3.6 rule
-   1 forbids `float64` and the comparison is `ticks*100 >= expected*percent`).
-   Verify takes the first two rather than inferring them, so the check compares
-   the archive against the config (§36o).
-2. **`internal/app/capture`** — the composition root: config → sources →
-   `transport.Stream` → a `Sink` that stamps `CaptureSeq`/`RecvTime`/`Mono` and
-   pushes to `capture.Queue` → `capture.Writer` → observability. **Four** specific
-   obligations:
-   - **seed the reader's `CaptureSeq` counter from `writer.Stats().LastSeq`
-     immediately after `OpenWriter`** — §36m. Without it, a restart into an hour
-     the process had already opened has EVERY `Data` record refused for the rest of
-     that hour, and the archive fills with Alive ticks. No new API is needed;
-     `verify_internal_test.go`'s `harness.open` does exactly this and says why at
-     the line.
-   - the `DisruptionCause` → `capture.Cause` mapping as a **switch**, so
-     `exhaustiveswitch` binds (dial/subscribe/read → `CauseReconnect`,
-     `no_first_data` → `CauseNoFirstData`);
-   - `var _ capture.TimeSource = (*clock.Wall)(nil)` — the assertion §36b could
-     not write yet, and **one** `Wall` for the process, since `Mono`'s baseline is
-     per-`Wall`;
-   - §32j's observability labels `venue`/`product`/`symbol`/`stream`/`topic`, each
-     a **closed set declared from config at registration**, so §10's default-deny
-     needs no `Unbounded` reason.
-3. **`cmd/arblab`** — `capture run` and `capture verify`, plus §32b's
-   **import-graph test for `internal/app/capture`** (`go list -deps`, failing on
-   `internal/marketdata`, `internal/oms`, `internal/strategy`) **with its positive
-   control** asserting `platform/clock` is allowed. `internal/engine/capture`
-   already has its copy.
+The schema lives in `internal/app/capture`, per `platform/config`'s own rule:
+the kernel owns the mechanism, each schema belongs to the code that owns its
+meaning. **No field carries `config:"hot"`**, and the claim is asserted as
+BEHAVIOUR — `TestNoFieldIsHotReloadable` edits a top-level scalar, a nested
+source field and a backoff entry and requires `ErrNotReloadable` for each —
+because a tag added later must fail a test, not a reading pass.
 
-   `capture verify` is a thin shell over `capture.Verify`: parse `--root`,
-   `--from`, `--to`, `--min-alive`, print the report, and map
-   `Report.ExitClass()` onto the exit code — `ClassIntegrity` → 1,
-   `ClassCoverage` → 2, `ClassUnspecified` → 0. The precedence is already in
-   `ExitClass` and must not be re-decided in `main`. **The formatting of the
-   report is the only thing this command owes that does not exist**, and the
-   operator-facing rule is §36i's: the two axes are printed separately, never
-   summed into a "problems" count.
+Two facts the RESUME list's field roster did not carry:
 
-Then: the fixture-collapse checklist over the new code **before** the mutations,
-§32l's mutation targets for the parts now written, and the slice close —
-`grep -rn "SPEC EDIT OWED" internal/ tools/` plus the reading pass, which has
-out-produced the grep in three consecutive releases.
+- **`dial_timeout` and `subscribe_timeout` had to be added.** The list named
+  `first_data_timeout` and `read_timeout`; `transport.StreamConfig.Validate`
+  refuses a zero for all FOUR timeouts, so a config without the other two
+  cannot construct a stream at all. The list was written from §32j's roster,
+  which predates the transport — a debt list refreshes its assumption instead
+  of examining it, the same shape as §35's mis-stated debts.
+- **Two derived bounds are enforced at Validate, both anti-vacuity.**
+  `alive_interval` must not exceed `rotation_period`, because an expected tick
+  count of zero makes the coverage threshold pass every window vacuously; and
+  `max_record` must not exceed `capture.MaxPayload`, because a socket allowed
+  to accept a frame the archive cannot hold captures bytes the writer must
+  then refuse — after they were counted as captured. Boundary fixtures pin
+  both at equality, where `<` and `<=` collapse.
 
-**Marker count at the end of this part: FOUR, unchanged.** The three §34 left on
-§12's roster, plus §36a's `nhooyr.io/websocket` rename in the transport package
-doc. Verify added none: its additions to §32k's reporting list are within that
-section's stated purpose rather than departures from it, and the reading pass over
-what it asserts normatively found nothing owed to the core.
+## §36q — the composition root: the writer opens on the first Subscribed, and the stream goroutine is the one that opens it
+
+The one structural decision the record had left open was WHEN `OpenWriter`
+runs, and two written constraints turn out to force everything:
+
+1. §32g puts **the venue's subscribe ack** in the Open record's provenance,
+   and §36h says the run's first ack becomes provenance. An ack can only be in
+   the Open record if the writer opens AFTER the subscription is acked — so
+   the open is triggered by the first `Subscribed` callback (or the first
+   `Data`, defensively: a venue that sends data before its ack gets an Open
+   record honestly carrying the request and no ack, and the later ack does not
+   reopen — `TestDataBeforeAckOpensOnce`).
+2. §36m's obligation — seed the sink's counter from `Stats().LastSeq` BEFORE
+   any frame is stamped — means the seeding must happen synchronously inside
+   the callback, before `Data` can run again. So the STREAM goroutine opens
+   the writer, seeds the counter, and hands the writer to the consumer through
+   a one-shot channel. The Writer's single-goroutine rule holds as two
+   goroutines in SEQUENCE, with the channel send as the ownership transfer.
+
+**Rejected: eager open at boot.** It would take the flock at startup (a second
+process refused at boot rather than at first connect) and would archive dial
+failures that precede the first successful connection. The cost that decided
+it: the ack could then never reach ANY Open record without new writer API, and
+slice B is closed. Both foregone benefits are recorded as assertions, not
+findings; the flock refusal still fails the run loudly at first connect
+(`TestOpenFailureFailsTheRun`), and pre-open disruptions are parked and become
+the first records after the Open — what the run found on the way up
+(`TestPreOpenDisruptionIsTheRunsFirstFinding`).
+
+**Transport gaps ride a tagged side list, ordered by `afterSeq`.** A
+disruption cannot ride `capture.Queue` (it carries records), and writing it
+whenever the consumer happens to see it would misplace it relative to the
+frames it interrupted. Each gap is tagged with the sink's counter at the
+moment of disruption; the consumer writes it before the first record whose
+sequence exceeds that value (`TestGapSitsBetweenTheFramesItInterrupted` pins
+Open, 3×Data, Gap, 2×Data, Close, and that the gap echoes sequence 3). A gap
+whose frames were dropped rather than written flushes on the next accepted
+record, tick, or close — the same settlement rule the queue's own pending
+overflow gap follows.
+
+**The §36m fixture now exists against the root itself**:
+`TestRestartIntoAnOpenHourContinuesTheSequence` runs two pipelines into one
+hour file and requires data sequences 1..5 with an integrity-clean verify.
+
+**Metrics: the by-cause gap counter counts what the ROOT writes** (reconnect,
+no_first_data, overflow — a closed `cause` label set), not what the writer
+mints during open-time recovery (torn_tail, process_restart). Those are
+archive facts for verify; a live counter would double-report what the file
+states, and their cadence (at most one each per open) alerts nobody. All five
+§32j labels are closed sets from config; the end-to-end test asserts
+`Registry.Rejected() == 0`, which is the "no Unbounded reason needed" claim
+measured rather than declared.
+
+**A gate fact, new in kind: `exhaustiveswitch` polices TEST files.** A test
+switch over `RecordKind` naming two members was refused by `make ci` and
+gained a grouped case naming the rest. Same family as §36g's "notimenow
+polices engine/ test files" — recorded because the first encounter reads like
+a false positive.
+
+## §36r — cmd/arblab: the exit map is a renaming, and the report never sums
+
+`arblab capture run -config F` and `arblab capture verify -config F -from T
+-to T [-root D] [-min-alive P]`. Verify reads the CONFIG for the rotation
+period and Alive interval always (§36o's comparison-against-config), and takes
+`-root`/`-min-alive` as overrides — verifying a copied archive or asking a
+stricter question changes neither of the two values the writer ran with.
+
+`exitCode` is an exhaustive switch over `FindingClass` — integrity 1, coverage
+2, unspecified 0 — and its test deliberately does NOT exercise precedence:
+that decision is `Report.ExitClass`'s, and a second test of it here would be a
+second place it appears to live. `formatReport` prints "findings: N integrity,
+M coverage" and per-window verdict rows; the fixture for
+`TestFormatReportKeepsTheAxesApart` holds 1+2 findings so a summed count (3)
+is a number no honest line contains. The git SHA in provenance comes from
+`debug.ReadBuildInfo`'s `vcs.revision` rather than ldflags — a stale build
+script cannot write a wrong SHA into every Open record; "unknown" is the
+honest value for an un-stamped binary.
+
+The end-to-end test (`TestCaptureRunEndToEnd`) is the composition's positive
+control: a marshalled config through `config.New`, a real websocket server,
+`Run` under `-race`, the archive checked by the real `Verify` — data count
+exact, zero integrity findings, zero rejected observations.
+
+## §36s — what session 35 deliberately does not have
+
+- **No verification of the new code yet.** The fixture-collapse checklist and
+  the mutations have not run over internal/app/capture or cmd/arblab. That is
+  the next session's first work, and nothing here should be trusted until it
+  has survived it.
+- **No REST client** (§32h is slice E), no `capture cat`, no /metrics
+  exporter (the registry is in-process; §10's exporter remains deferred).
+- **No hot path for a second run.** A second `capture run` over the same root
+  fails at first connect on the flock, by design; there is no takeover.
+- **Reconnect acks still never reach the archive** (§36h's limit, inherited —
+  now precise: it is the RUN's first ack that becomes provenance, since hourly
+  rotations copy the provenance fixed at open).
+
+## RESUME HERE — slice C, what remains before the close
+
+**All components are BUILT (§36p–§36s) and `make ci` is green on a cold
+cache. Nothing below is verification-complete.**
+
+1. **The fixture-collapse checklist over the session-35 code, BEFORE the
+   mutations** (the standing order). Candidates worth suspicion: the
+   `afterSeq` ordering tests all use gaps that flush via the next-record path
+   — vary one to flush via tick and via close; the overflow fixture drops
+   exactly 3 — vary a drop of 1; `TestRestartIntoAnOpenHour...` restarts with
+   the SAME clock hour — the cross-hour restart is a different code path
+   (fresh file, prev_last_seq 0).
+2. **Mutations over the new code** (`tools/mutate.sh`, root module). Targets
+   aimed at claims: drop the `Stats().LastSeq` seed (§36m — the motivating
+   defect); make `takeGaps` ignore its bound; make `mapCause` collapse
+   no_first_data into reconnect; drop the `PendingGap` flush in shutdown; make
+   `exitCode` return coverage for integrity; un-close a metrics label set.
+   Remember: no lock claims (`mutate.sh` runs without `-race`), and a
+   compiler-enforced claim reports `NOBUILD!!` as its kill.
+3. **The slice close**: `grep -rn "SPEC EDIT OWED" internal/ tools/` (expect
+   FOUR, unchanged — session 35 added no markers) plus the READING PASS over
+   what the new code asserts normatively, which has out-produced the grep
+   three releases running. Then the doc-set release and §12's roster update in
+   the design record.
+4. **The calendar moment**: `go build -o bin/arblab ./cmd/arblab && bin/arblab
+   capture run -config configs/capture.json` against the live venues, and a
+   first real `capture verify` an hour later. Capture is the only work whose
+   cost grows while other work happens; nothing else in milestone 2 starts
+   before this does.
+
+**Marker count at the end of this part: FOUR, unchanged.** The three §34 left
+on §12's roster, plus §36a's `nhooyr.io/websocket` rename in the transport
+package doc. Session 35 added none: the config schema and the root compose
+what the spec already states, and the two Validate bounds in §36p are
+anti-vacuity rules over this tool's own config, not claims about the core.
