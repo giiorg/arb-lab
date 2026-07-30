@@ -3,11 +3,11 @@
 // clients in engine/venue/, and §32b makes this package the precise shape of
 // capture's fence against §31e.
 //
-// [SPEC EDIT OWED] §11's backend roster names "nhooyr.io/websocket or
-// gorilla/websocket". That module was RENAMED to github.com/coder/websocket in
-// 2024 and the old path no longer resolves, so the spec's first-named option
-// cannot be taken as written. This package takes it under its current name —
-// the user's call, recorded in slice C's record — and §11 owes the rename.
+// [SPEC EDIT LANDED — v0.9.13] §11's backend roster named "nhooyr.io/websocket
+// or gorilla/websocket". That module was RENAMED to github.com/coder/websocket
+// in 2024 and the old path no longer resolves, so the spec's first-named option
+// could not be taken as written. This package takes it under its current name —
+// the user's call, recorded in slice C's record — and §11 now carries the rename.
 //
 // Recorded rather than absorbed because the two are not the same claim: "we
 // chose differently from the spec" and "the spec names something that no longer

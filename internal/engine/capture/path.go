@@ -54,9 +54,9 @@ func versionDir() string { return "v" + strconv.Itoa(FormatMajor) }
 //
 //	The capture key is (SourceID, Topic), not SourceID.
 //
-// [SPEC EDIT OWED] Core §3.5 makes the capture lane "append-only with
-// per-`Source` sequence numbers". Ours are per-(Source, Topic) — design roster
-// row 2, and this is where it first exists in code. The departure is FINER, so
+// [SPEC EDIT LANDED — v0.9.13] Core §3.5 made the capture lane "append-only
+// with per-`Source` sequence numbers"; it now says per-(Source, Topic) — design
+// roster row 2, and this is where it first existed in code. The departure is FINER, so
 // the drop detection §3.5 asks for still holds: every hole a per-Source counter
 // would have shown is still a hole in one of these. What it adds is the ability
 // to show a hole §3.5's spelling cannot, because a per-Source counter spanning

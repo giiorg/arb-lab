@@ -548,10 +548,19 @@ it, and it cannot see a rule the code silently fails to meet.
 | 4 | core §8 | (probable) the fidelity contract's data line, if §12.2's widening needs restating where the fill model is defined |
 | 5 | core §3.6 rule 8 | **a SECOND documented integer-enum exception**: `capture.RecordKind` crosses a persistence boundary, which rule 8 says takes the `type X string` shape, and is `uint8` anyway — §33a. Found by building slice A, not by this design |
 
-**Rows 2, 3 and 5 are now marked in code.** Row 3 at `platform/clock.Wall.Backsteps` and row 5 at
-`capture.RecordKind` (both slice A, §33d and §33a); row 2 at `capture.StreamKey` (slice B, §34 — that
-is where the per-`(Source, Topic)` counter first exists in code). `grep -rn "SPEC EDIT OWED" internal/
-tools/` returns exactly those three. Rows 1 and 4 are not yet marked because no code asserts them yet.
+**ALL FIVE ROWS LANDED — v0.9.13 (2026-07-30, the slice-C close), plus §36a's module rename.** Rows
+2, 3 and 5 travelled as code markers (row 3 at `platform/clock.Wall.Backsteps`, row 5 at
+`capture.RecordKind` — both slice A, §33d and §33a; row 2 at `capture.StreamKey` — slice B, §34) and
+those markers now read `[SPEC EDIT LANDED — v0.9.13]`, alongside the §36a rename marker in the
+transport package doc. Rows 1 and 4 never got markers — "not yet marked because no code asserts them
+yet" — **and that state expired silently**: the config schema's positive-control test
+(`TestRealCaptureConfigLoads`, session 35) asserts §32c's seven-source capture set in `internal/`,
+which IS §32a's widening of §12.2, unmarked because at writing time it read as loading a config
+rather than asserting a scope. The close's reading pass is what re-derived it; the grep, by
+construction, could not — a fourth instance of the gate's stated limit, this time on the roster's own
+bookkeeping. Row 4's "(probable)" resolved to YES: §8's data bullet carried the same "both streams"
+sentence as §12.2, and one statement updated with one left behind is the v0.9.9 two-statements
+failure built by hand. `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **zero**.
 
 ---
 

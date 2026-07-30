@@ -1,6 +1,6 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-07-27): **v0.9.12 — the seventh-slice release, the one that CLOSES `engine/state`, and the one that EMPTIES §12 milestone 1's build roster.** All SEVEN slices are closed. The slice produced **four normative edits** — three in core §3.4 (with one also touching §3.5) and one in core §5.2 — plus a code fix carrying no spec edit: **a sentinel `errors.Is` could name that nothing could ever return**, documented as "the assertion that keeps that true" while no assertion existed or could be written. **Two of the four edits were found by the closing reading pass rather than by the marker grep**, which is now the third consecutive release where the pass out-produced the gate. `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **ZERO**; two code markers read `[SPEC EDIT LANDED — v0.9.12]`. `make ci` green, all six gates clean, `docs` 102 pass, `docs/formal/` untouched at Cx8. **Milestone 2's kill gate is next, and it is the project's stop/go decision.** **Start at `## START HERE` below, not at this line.**
+## Status (2026-07-30): **v0.9.13 — the FIRST MILESTONE-2 release: capture slice C is CLOSED and CAPTURE IS LIVE.** The calendar moment happened this session: `bin/arblab capture run -config configs/capture.json` is running detached on this machine, all SEVEN of §32c's sources connected, and the first real `capture verify` over the open hour reported **0 integrity findings** — the 14 coverage findings are the honest description of an hour not yet closed (no Close record, 1/60 Alive ticks at the time of asking). Before the close, the fixture-collapse checklist over the session-35 code confirmed **all three named suspects and found three more** (a scheduling-rate collapse, a one-source label-set collapse, two unexercised shutdown doors — six new fixtures), and **11/11 aimed mutations were caught**. The close landed **six spec edits** (five pre-registered on the capture design's §12 roster + the module rename): core §3.5 ×2 (per-`(Source, Topic)` capture counters; `Wall`'s monotonic clamp stated with its `Backsteps()` observation seam), §3.6 rule 8 (second integer-enum exception: `capture.RecordKind`), §11 (`nhooyr.io/websocket` → `github.com/coder/websocket`), and §12.2 + §8 (self-capture is funding AND books + one evidence stream). `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **ZERO**; four markers read `[SPEC EDIT LANDED — v0.9.13]`. The reading pass found a wrong rule citation (code fix) and caught roster rows 1/4's "no code asserts them yet" having silently expired. `make ci` green on a cold cache, all six gates clean, docs 102 pass, `docs/formal/` untouched at Cx8. **Start at `## START HERE` below, not at this line.**
 
 **v0.9.9 (2026-07-27) — the fourth-slice release, and the one that CLOSES `engine/venue`.** The slice built the normalized funding DTO that retired `marketdata`'s `driving.FundingUpdate` placeholder, and produced **three** spec edits — **all silences in the core rather than disagreements with it**, the v0.9.6 shape rather than v0.9.8's. **This is milestone 1's first close containing no code change**, which is what "the code already agreed with the spec, the spec had just never said it" looks like from outside. **Two of the three are a sharper kind of silence and the distinction is the finding worth carrying: the core does not omit them, it states them twice, incompatibly.** §3.5: the **market-data seam was declared twice** — a flat `DataSource{ Subscribe(VenueInstrument) <-chan Envelope }` here and three per-stream methods in §4, for the same pipeline position, with no type satisfying both. **§4's per-stream shape wins and the seam is `MarketDataSource` throughout**, on three grounds — one channel per instrument merges three `SourceID`s and forces the subscriber to re-derive a key the seam could have kept; the per-stream product constraints are **inexpressible** in `Subscribe(VenueInstrument)`; and §7.6's capacity ladder gets spent on a book feed a funding-only consumer never wanted. The tell that §4 was current is structural rather than a preference: **every other line of §3.5's seam block is written as a reference to §4**, while `DataSource` was the one written as an independent definition — and `venue-profiles.md` §3 was **already** writing `MarketDataSource.StreamMark`, which is cheaper evidence than any of the three arguments. §3.5 also: **a `SourceID` MUST refuse an `(instrument, stream)` pair no venue can produce** — §4 marks funding and mark perp-only per stream and §3.5 never carried it across, so a spot funding source validated cleanly, and §3.4 makes `SourceID` the mailbox key, so an impossible source is **a mailbox that exists, can be subscribed to, and never delivers**, indistinguishable downstream from a venue gone quiet. The rule states the **full table including the negative rows** (the private streams and control are *not* product-constrained), because the constraint reads like a market-data property and is not one — §4.2 makes spot a full API family with its own user-data stream, so inferring it would silently unsubscribe half a cash-and-carry trade. §4: **the units discipline that covered money now covers time.** `fixedpoint` puts a money field's dimension in its type; a duration has none, and a venue duration field's unit lives only in its **name** (Bybit's `fundingIntervalHour`) — so an adapter can multiply by `time.Minute`, satisfy the never-`float64` rule completely, and hand §2.4 a 480-minute interval that enumerates a plausible settlement count while **§12's kill-gate carry figure is wrong by a factor of sixty with nothing failing**. That is §10's own v0.9.7 argument applied one layer earlier, where the duration is *created*. A zero is **refused, never defaulted**: it arrives from three situations a fallback answers identically, two are a wiring failure wearing a correct BTC reading's clothes, and the third **absorbs §2.4's C8 flip**. Three code markers now read `[SPEC EDIT LANDED — v0.9.9]`, `grep -rn "SPEC EDIT OWED" internal/ tools/` returns **zero**, ADR §3 gains the **milestone-1 fourth-slice block** (tagless total now **thirty-three**) and the `C8` traceability row gains core §4, `docs` 102 pass, `make ci` green. **No formal-model change; `docs/formal/` is untouched and still at the Cx8 verdict.** Full reasoning with rejected alternatives: decision record **§20** (the slice) and **§21** (the close).
 
@@ -77,7 +77,46 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 35, 2026-07-30 — slice C is **FULLY BUILT and NOT CLOSED**: the config schema, `internal/app/capture` and `cmd/arblab` all landed; **the checklist + mutations + close have NOT run, and the calendar moment has NOT happened**)
+## START HERE (updated end of session 36, 2026-07-30 — v0.9.13 is RELEASED, slice C is CLOSED, and **CAPTURE IS LIVE ON THIS MACHINE**)
+
+**Branch `feat/milestone-1-foundation`.** Verify rather than trust: `git status --short` (clean),
+`git rev-list --left-right --count @{u}...HEAD` (the exact number is whatever the command says),
+`grep -rn "SPEC EDIT OWED" internal/ tools/` — expect **ZERO**, for the first time since slice A;
+four markers read `[SPEC EDIT LANDED — v0.9.13]`. `make ci` green, all six gates clean, `-race`
+clean on a cold cache, docs 102 pass.
+
+**A capture process is (or should be) RUNNING**: `bin/arblab capture run -config configs/capture.json`,
+started 2026-07-30 ~09:30 UTC, detached via nohup from the repo root, logging to `capture.log`
+(gitignored, as is `archive/`). Check it before anything else:
+
+```
+pgrep -fl "arblab capture run"     # is it alive? (it does NOT survive a reboot)
+bin/arblab capture verify -config configs/capture.json -from 2026-07-30T09:00:00Z -to <now, RFC3339>
+```
+
+Expect **0 integrity findings, always**. Coverage findings are the laptop's honest ledger — sleeps,
+reboots and network changes are recorded gaps, and §32a decision 2 priced that in. If the process
+died, restart it (same command, from the repo root); the writer recovers its own files, seeds from
+the archive, and the seam shows up as a `restart_boundary` coverage finding, which is it working.
+
+**Read `docs/superpowers/specs/2026-07-29-capture-slice-c-transport.md` §36t–§36u** for what the
+verification session found (six fixture collapses, 11/11 kills, the two reading-pass findings) and
+**its `RESUME HERE`** for what a later session owes the running capture: a verify over the
+accumulated range, slice D's one-day disk figure recorded in the design record, then §32m's slices
+E (REST overlay) and F (full verify, `capture cat`, off-host sync). **The off-host copy matters
+more than usual** — a laptop disk holds the only copy of an unrecoverable archive (§32a decision 2).
+
+### The one tension left visible (§36u)
+
+§32m slice D says "measure one day of funding on disk, THEN add sources 3–6" — written before §32c
+pinned one config as the single spelling of the capture set. The RESUME's instruction ran all seven
+from day one; the disk figure is still measured rather than estimated, which is what §31d actually
+requires. First observation: ~0.5 MB per 10 s across all seven (Bybit books dominate) — the real
+one-day figure is slice D's to record.
+
+---
+
+## START HERE (updated end of session 35, 2026-07-30 — HISTORICAL — slice C was FULLY BUILT and NOT CLOSED: the config schema, `internal/app/capture` and `cmd/arblab` all landed; **the checklist + mutations + close have NOT run, and the calendar moment has NOT happened**)
 
 **Branch `feat/milestone-1-foundation`.** Verify rather than trust: `git status --short` (clean),
 `git rev-list --left-right --count @{u}...HEAD` (the exact number is whatever the command says —

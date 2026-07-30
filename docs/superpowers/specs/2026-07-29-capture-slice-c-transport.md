@@ -1,22 +1,19 @@
 # §36 — the capture tool, slice C: the transport and verify (2026-07-29 / 2026-07-30)
 
-**Status: FULLY BUILT, NOT CLOSED — every §32m slice C component now exists;
-the fixture-collapse checklist, the mutations over the new code, and the close
-have not run.** `make ci` green, all six gates clean, `-race` clean on a cold
-cache. Implements §32m slice C of `2026-07-29-capture-tool-design.md`, over
-slice A's codec (§33) and slice B's writer (§34), carrying the four items §35's
+**Status: CLOSED at v0.9.13 (2026-07-30) — the first milestone-2 release.**
+Every §32m slice C component exists, the fixture-collapse checklist and the
+mutations ran over all of it (six new fixtures, 11/11 kills — §36t), the
+reading pass produced two findings the marker grep could not (§36u), and all
+six owed spec edits are landed (`SPEC EDIT OWED` grep: **zero**). `make ci`
+green, all six gates clean, `-race` clean on a cold cache, docs 102 pass.
+Implements §32m slice C of `2026-07-29-capture-tool-design.md`, over slice A's
+codec (§33) and slice B's writer (§34), carrying the four items §35's
 `RESUME HERE` handed forward.
 
-**Slice C is NOT closed.** §32m's slice C is transport + `arblab capture run` +
-config + observability + minimal `capture verify` with its positive control.
-All of it exists and its suites pass; none of the new session-35 code has been
-mutation-tested, and the closing reading pass has not happened. See `## RESUME
-HERE` at the foot of this record.
-
-**Three parts, three sessions.** §36a–§36h are the transport (session 33);
+**Four parts, four sessions.** §36a–§36h are the transport (session 33);
 §36i–§36o are verify (session 34); §36p–§36s are the config schema, the
-composition root and the CLI (session 35). The `RESUME HERE` list is the same
-list, now holding only the verification work.
+composition root and the CLI (session 35); §36t–§36u are the verification and
+the close (session 36, the same session as the calendar moment).
 
 **What landed**
 
@@ -729,38 +726,118 @@ exact, zero integrity findings, zero rejected observations.
   now precise: it is the RUN's first ack that becomes provenance, since hourly
   rotations copy the provenance fixed at open).
 
-## RESUME HERE — slice C, what remains before the close
+## §36t — the verification session: all three named suspects confirmed, and three the roster did not name
 
-**All components are BUILT (§36p–§36s) and `make ci` is green on a cold
-cache. Nothing below is verification-complete.**
+Session 36 ran the RESUME list's items 1 and 2 in order — checklist BEFORE
+mutations, the standing rule — and the checklist earned its position again:
+six fixtures were added before a single mutation ran, and every one of them
+became a kill that the prior suite could not have delivered.
 
-1. **The fixture-collapse checklist over the session-35 code, BEFORE the
-   mutations** (the standing order). Candidates worth suspicion: the
-   `afterSeq` ordering tests all use gaps that flush via the next-record path
-   — vary one to flush via tick and via close; the overflow fixture drops
-   exactly 3 — vary a drop of 1; `TestRestartIntoAnOpenHour...` restarts with
-   the SAME clock hour — the cross-hour restart is a different code path
-   (fresh file, prev_last_seq 0).
-2. **Mutations over the new code** (`tools/mutate.sh`, root module). Targets
-   aimed at claims: drop the `Stats().LastSeq` seed (§36m — the motivating
-   defect); make `takeGaps` ignore its bound; make `mapCause` collapse
-   no_first_data into reconnect; drop the `PendingGap` flush in shutdown; make
-   `exitCode` return coverage for integrity; un-close a metrics label set.
-   Remember: no lock claims (`mutate.sh` runs without `-race`), and a
-   compiler-enforced claim reports `NOBUILD!!` as its kill.
-3. **The slice close**: `grep -rn "SPEC EDIT OWED" internal/ tools/` (expect
-   FOUR, unchanged — session 35 added no markers) plus the READING PASS over
-   what the new code asserts normatively, which has out-produced the grep
-   three releases running. Then the doc-set release and §12's roster update in
-   the design record.
-4. **The calendar moment**: `go build -o bin/arblab ./cmd/arblab && bin/arblab
-   capture run -config configs/capture.json` against the live venues, and a
-   first real `capture verify` an hour later. Capture is the only work whose
-   cost grows while other work happens; nothing else in milestone 2 starts
-   before this does.
+**The three named suspects, all confirmed:**
 
-**Marker count at the end of this part: FOUR, unchanged.** The three §34 left
-on §12's roster, plus §36a's `nhooyr.io/websocket` rename in the transport
-package doc. Session 35 added none: the config schema and the root compose
-what the spec already states, and the two Validate bounds in §36p are
-anti-vacuity rules over this tool's own config, not claims about the core.
+1. **Every gap flushed via the next-record path.** Every `Disrupted` in every
+   fixture was followed by a `data(...)`, so the tick-arm flush and the
+   shutdown flush were both unexercised — dropping either survives the
+   session-35 suite. Two fixtures: `TestGapAsTheLastEventIsFlushedAtShutdown`
+   (a disruption nothing follows), and
+   `TestTickFlushesAParkedGapBeforeTheAliveRecord`, where the **record order
+   is the discriminator** — the tick arm flushes gaps before minting its
+   Alive, so a dropped tick-flush moves the gap after the Alive rather than
+   merely later.
+2. **The overflow hole of exactly 3.** `[3,5]` count 3 has `From == Count`,
+   so a From/Count swap survives.
+   `TestOverflowHoleOfOneSeparatesCountFromItsBounds` drops exactly one:
+   `[3,3]` count 1 is the only shape where Count is confusable with neither
+   bound.
+3. **The same-hour-only restart.** The cross-hour restart is a genuinely
+   different path — fresh file, `Stats().LastSeq` 0, `prev_last_seq` 0 — and
+   `TestRestartIntoANewHourStartsAFreshChain` pins its whole contract: data
+   restarts at 1 (not 4), verify is integrity-clean, and the seam is
+   REPORTED as a `restart_boundary` coverage finding rather than silent.
+
+**The three the roster did not name:**
+
+4. **A scheduling-rate collapse — §36e's variant one layer up.** The afterSeq
+   ordering fixtures run with a LIVE consumer, so by the time a gap parks,
+   its preceding frames are usually already written — "flush at or below the
+   bound" and "flush whenever" collapse whenever the consumer keeps pace, and
+   the collapsing parameter is the goroutine schedule, spelled in no fixture
+   argument. `TestGapOrderingHoldsWithABackedUpQueue` parks the whole
+   scenario before the consumer starts (the overflow fixture already knew the
+   trick), making the bound the only thing keeping the gap off the front of
+   the file — and making two mutations deterministic kills that were
+   previously racy at best: `takeGaps` ignoring its bound, and `write`'s
+   `CaptureSeq-1` off-by-one.
+5. **The one-source label-set collapse.** Every metrics fixture ran ONE
+   source, where "labels drawn from all sources" and "drawn from the first"
+   are the same set — the single-member collapse from `exhaustiveswitch`'s
+   own history, relocated into `closedLabels`.
+   `TestEverySourcesLabelValuesAreDeclared` records for a SECOND source and
+   requires zero rejections.
+6. **Phase 1's two shutdown doors, never opened.** No fixture stopped a run
+   before its first connection (the queue-closed door) or cancelled one (the
+   ctx door through `closeLate`). Two small fixtures assert both exit clean
+   and leave no archive.
+
+**Mutations: 11/11 caught, no survivors, no re-aims.** The six roster targets
+(the `Stats().LastSeq` seed first — §36m's motivating defect; `takeGaps`
+bound; `mapCause` collapse; `PendingGap` flush; `exitCode` integrity→coverage;
+un-closing the cause label set — the last killed 23 tests at the constructor,
+because `observability` refuses an open label set with no `Unbounded` reason)
+plus five aimed at the new fixtures' claims (shutdown flush bound, tick-arm
+flush bound, `write`'s off-by-one, `closedLabels` first-source-only, and the
+data-before-ack defensive open). Ten runs of the new fixtures under `-race`
+shook out no flake; the tick fixture's three-send synchronization trick and
+`waitForData` poll are documented in the test.
+
+## §36u — the close: v0.9.13, the first milestone-2 release
+
+`grep -rn "SPEC EDIT OWED" internal/ tools/` confirmed FOUR going in and
+returns **ZERO** coming out: all five §12 roster rows plus §36a's rename
+landed as **v0.9.13** (core §3.5 ×2, §3.6 rule 8, §8, §11, §12.2 — full text
+in the core, traceability in ADR §3's milestone-2 block, the set's first).
+The four markers read `[SPEC EDIT LANDED — v0.9.13]`.
+
+**The reading pass produced two findings the grep could not:**
+
+1. **A citation naming the wrong rule** — the config schema justified its
+   integer percent with "§3.6 rule 1 forbids float64"; rule 1 is the
+   hexagonal boundary, the float ban is rule 4. Fixed in code, no spec edit.
+   A wrong pointer survives every gate this repo has, because no analyzer
+   reads prose.
+2. **Roster rows 1/4's "no code asserts them yet" had expired silently.**
+   `TestRealCaptureConfigLoads` (session 35) asserts §32c's seven-source set
+   in `internal/` — which IS §32a's widening of §12.2 — unmarked, because at
+   writing time it read as loading a config rather than asserting a scope.
+   The rows were landed with the rest; the §12 roster now records the
+   instance.
+
+Also in passing: `./archive` (the checked-in config's root) was not
+gitignored, so the calendar moment would have put the live archive into `git
+status`; `/archive/` is now ignored with its reasoning.
+
+**One tension left visible rather than absorbed:** §32m's slice D reads
+"measure one day of funding on disk; THEN add sources 3–6 and 7", written
+before §32c pinned one config as the single spelling of the capture set. The
+RESUME's instruction — run `configs/capture.json` as checked in — starts all
+seven sources at once, so slice D's measurement measures the full set from
+day one rather than funding first. The disk figure is still measured, not
+estimated, which is what §31d actually requires; the ramp order it implied is
+overtaken.
+
+## RESUME HERE — slice C is CLOSED at v0.9.13; what remains is watching the capture run
+
+**Items 1–3 are done (§36t–§36u). Item 4 — the calendar moment — is this
+session's last act**: `go build -o bin/arblab ./cmd/arblab && bin/arblab
+capture run -config configs/capture.json`, then a first real
+`capture verify -config configs/capture.json -from <start> -to <now>` once
+the first hour closes. Capture is the only work whose cost grows while other
+work happens; nothing else in milestone 2 starts before it runs.
+
+What a later session owes the running capture: check `capture verify` over
+the accumulated range (expect coverage findings for the laptop's sleeps —
+recorded gaps are not errors; an unexplained silence is), record slice D's
+one-day disk figure in the design record, and only then take up §32m's
+remaining slices (E: the REST overlay; F: full verify + `capture cat` +
+off-host sync). Marker count: **ZERO**, and it should stay zero until the
+next deliberate deviation.

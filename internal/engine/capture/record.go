@@ -11,7 +11,7 @@ import (
 //
 // # It is an integer enum, which is a SECOND documented exception to §3.6 rule 8
 //
-// [SPEC EDIT OWED] Rule 8 makes enum-likes `type X string` + constants +
+// [SPEC EDIT LANDED — v0.9.13] Rule 8 makes enum-likes `type X string` + constants +
 // Validate(), with one documented exception (fixedpoint.RoundingMode), and it is
 // explicit that the exception does not cover this case: "The `type X string`
 // shape exists for enums crossing a persistence or wire boundary, where a

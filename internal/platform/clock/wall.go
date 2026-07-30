@@ -110,8 +110,10 @@ func (w *Wall) nowLocked() time.Time {
 // system clock moved backwards, and by how much in total. It is a pure
 // accessor; nothing here changes Now's contract.
 //
-// [SPEC EDIT OWED] §3.5's Clock block states neither the clamp's existence nor
-// its observability. Capture's design record §32i is where this is argued.
+// [SPEC EDIT LANDED — v0.9.13] §3.5's Clock block stated neither the clamp's
+// existence nor its observability; it now states both, and that an archival
+// consumer must record an engaged clamp as data. Capture's design record §32i
+// is where this was argued.
 //
 // # Why a clock needs an observability seam at all
 //
