@@ -118,6 +118,27 @@ func (c *TestClock) SetNow(at time.Time) error {
 	return nil
 }
 
+// NextTimerAt reports the earliest scheduled timer's instant without moving
+// time or delivering anything. It reports false when no timers are armed.
+//
+// The sim driver's arbitration needs it (§39p-6): "does the earliest timer
+// fire at or before the next archive record" is a comparison, and the only
+// prior way to learn the instant — AdvanceToNextTimer — moves time as a side
+// effect, which is unrecoverable when the answer turns out to be "no, the
+// record comes first" (SetNow refuses to go back, correctly). Advisory in the
+// same sense as MarketDataLane.Peek, slice A's twin addition on the lane
+// side: a concurrent SetTimer can change the answer, and the sim's
+// single-driver discipline is what makes the read stable there.
+func (c *TestClock) NextTimerAt() (time.Time, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	next, found := c.queue.earliestScheduled()
+	if !found {
+		return time.Time{}, false
+	}
+	return next.At, true
+}
+
 // AdvanceToNextTimer moves time to the earliest scheduled timer and reports the
 // instant it moved to. It reports false when no timers are armed.
 //
