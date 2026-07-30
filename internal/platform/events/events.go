@@ -28,15 +28,17 @@
 //
 // The DISPATCHER is not. §3.5 gives it the job of assigning IngressSeq, of
 // arbitrating between sources that become ready at once, and of waking a live
-// consumer — and it needs a persisted DispatchSeq log, which does not exist yet.
-// The lanes here are the primitives it will compose; they carry envelopes and
-// enforce their own delivery contract, and none of them assigns a sequence
-// number or decides an order between two different sources.
+// consumer — and that is engine/dispatch, which composes these lanes from the
+// outside. The lanes are its primitives: they carry envelopes and enforce their
+// own delivery contract, and none of them assigns a sequence number or decides
+// an order between two different sources. (The persisted DispatchSeq log the
+// dispatcher replays from is its own slice, in the capture lane — never here.)
 //
 // The COMMAND SEQUENCER of §3.4's fourth bullet is not here either. It orders
-// Risk→OMS commands, and neither a Risk context nor an OMS exists to order
-// anything between — the same reasoning that defers the singlewriter gate. Built
-// with the dispatcher.
+// Risk→OMS commands, and it is NOT built with the dispatcher, because neither a
+// Risk context nor an OMS exists to order anything between — a sequencer over
+// an empty tree is indistinguishable from a broken one. Its trigger is the
+// construct it reads: the first Risk→OMS command path, milestone 4.
 //
 // # This package holds no clock
 //

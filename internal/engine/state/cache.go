@@ -159,11 +159,12 @@ func NewCache() *Cache {
 // explained it — the newer reading — has been overwritten by the older one.
 //
 // §3.4's per-SourceID mailboxes are FIFO, so within one source this should not
-// arise. "Should not" is the load-bearing part: §3.5's dispatcher is explicitly
-// "not yet built", and the ordering guarantee this cache would be relying on
-// lives inside it. A consumer that depends on an unbuilt component's invariant
-// without checking is the shape that fails silently the day that component lands
-// with a different one, and the check is a single comparison.
+// arise. The dispatcher (engine/dispatch) is now built and preserves per-source
+// FIFO through dispatch — and this check STAYS, ratified by the dispatcher's
+// own design record (§39h): a consumer that verifies an invariant with a single
+// comparison is strictly better than one that trusts it, the comparison is
+// already bite-checked, and removing it would convert a documented defence into
+// a documented regression for zero saved work.
 //
 // # EQUAL is accepted, and refusing it would break the backtester
 //
