@@ -254,6 +254,46 @@ const (
 	// the predecessor, which is already reported against that file — this row
 	// only records that a second check was lost to it.
 	FindingContinuityUnknown FindingKind = "continuity_unknown"
+
+	// FindingManifestMissingFile is a manifest entry whose file is GONE, and it
+	// is the finding the whole manifest layer exists to make possible (§38a): a
+	// deleted archive file takes its sidecar with it, so without the entry that
+	// outlives it, nothing on disk contradicts anything and the loss verifies
+	// clean. Integrity, emphatically — a file the manifest vouches for is
+	// missing, which on a copy means the copy is incomplete and on the source
+	// means the unrecoverable thing happened.
+	FindingManifestMissingFile FindingKind = "manifest_missing_file"
+
+	// FindingManifestMismatch is a manifest entry that disagrees with the file
+	// it describes — digest, record count, gap count or last sequence. Integrity:
+	// two close-time claims about the same bytes cannot both be true, so either
+	// the file changed after its entry was written or the entry never described
+	// this file.
+	FindingManifestMismatch FindingKind = "manifest_mismatch"
+
+	// FindingManifestUnreadable is a day manifest that exists and cannot be
+	// read: unparseable JSON, an unknown format token, a day disagreeing with
+	// the file's own name. Integrity for DigestMissing's reason, one level up:
+	// nothing proves the day's files wrong, but the completeness check for that
+	// whole day silently did not run, and a report that read through it would
+	// present the absence of a check as the absence of a problem.
+	FindingManifestUnreadable FindingKind = "manifest_unreadable"
+
+	// FindingUnmanifested is a cleanly closed file absent from a day manifest
+	// that EXISTS. Coverage: this is §38a's one-sided crash-window artifact —
+	// the process died between the sidecar write and the manifest write — and
+	// the file itself is intact and fully checkable. The repair is the labeled
+	// backfill (§38b), which is what keeps this from being a permanent finding
+	// an operator learns to read past.
+	FindingUnmanifested FindingKind = "unmanifested"
+
+	// FindingManifestAbsent is a day in range with closed files and no manifest
+	// file at all — one finding per day rather than one per file, because the
+	// operator's action is per-day (run the backfill), and two hundred rows
+	// naming the same absence teach exactly the read-past habit §37g warns
+	// about. Coverage: the expected case is an archive written before the
+	// manifest layer existed.
+	FindingManifestAbsent FindingKind = "manifest_absent"
 )
 
 // Class maps a kind onto the exit code it earns.
@@ -268,11 +308,14 @@ func (k FindingKind) Class() FindingClass {
 	case FindingChecksum, FindingMalformed, FindingFileHeader,
 		FindingDigestMismatch, FindingDigestMissing, FindingRecordCount,
 		FindingSeqNotAscending, FindingSeqHoleUnexplained,
-		FindingCrossFileBreak, FindingStrayFile:
+		FindingCrossFileBreak, FindingStrayFile,
+		FindingManifestMissingFile, FindingManifestMismatch,
+		FindingManifestUnreadable:
 		return ClassIntegrity
 	case FindingWindowAbsent, FindingTornTail, FindingNoClose, FindingNoData,
 		FindingAliveShort, FindingGapRecord, FindingSeqHole,
-		FindingRestartBoundary, FindingContinuityUnknown:
+		FindingRestartBoundary, FindingContinuityUnknown,
+		FindingUnmanifested, FindingManifestAbsent:
 		return ClassCoverage
 	case FindingUnspecified:
 		return ClassUnspecified

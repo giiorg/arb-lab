@@ -38,6 +38,8 @@ type archiveBuilder struct {
 	at      time.Time
 	records uint64
 	lastSeq uint64
+	gaps    uint64
+	closed  bool
 }
 
 func newArchive(t *testing.T, root string, key StreamKey, window time.Time) *archiveBuilder {
@@ -107,6 +109,7 @@ func (b *archiveBuilder) gap(g Gap) {
 		b.t.Fatalf("marshal gap: %v", err)
 	}
 	b.emit(RecordKindGap, b.lastSeq, payload)
+	b.gaps++
 }
 
 // fillAlive appends exactly the number of ticks a fully covered window should
@@ -126,6 +129,7 @@ func (b *archiveBuilder) closeWith(lastSeq, count uint64, sha string) {
 	b.emit(RecordKindClose, b.lastSeq, b.marshal(closePayload{
 		LastSeq: lastSeq, RecordCount: count, SHA256: sha,
 	}))
+	b.closed = true
 }
 
 // seal writes a truthful Close record: the digest of everything before it and the
@@ -136,7 +140,11 @@ func (b *archiveBuilder) seal() {
 	b.closeWith(b.lastSeq, b.records, hex.EncodeToString(sum[:]))
 }
 
-// write flushes the file and its sidecar, and returns the path.
+// write flushes the file and its sidecar, and returns the path. A CLOSED
+// fixture also lands a truthful manifest entry, mirroring writer.closeFile —
+// truthful even when the Close record itself lies, because the writer's entry
+// comes from its own counters and not from the payload it minted. A test that
+// wants the manifest wrong edits it afterwards, the way one truncates the file.
 func (b *archiveBuilder) write() string {
 	b.t.Helper()
 	path := b.key.FilePath(b.root, b.window, verifyPeriod)
@@ -150,6 +158,24 @@ func (b *archiveBuilder) write() string {
 	body := fmt.Sprintf("%s  %s\n", hex.EncodeToString(sum[:]), filepath.Base(path))
 	if err := os.WriteFile(path+digestExt, []byte(body), 0o644); err != nil {
 		b.t.Fatalf("write sidecar: %v", err)
+	}
+	if b.closed {
+		rel, err := filepath.Rel(b.root, path)
+		if err != nil {
+			b.t.Fatalf("rel %s: %v", path, err)
+		}
+		if err := upsertManifestEntry(b.root, ManifestEntry{
+			Path:     filepath.ToSlash(rel),
+			Window:   b.window.Format(time.RFC3339),
+			SHA256:   hex.EncodeToString(sum[:]),
+			Records:  b.records,
+			Gaps:     b.gaps,
+			LastSeq:  b.lastSeq,
+			ClosedAt: b.at.UTC().Format(time.RFC3339Nano),
+			Source:   ManifestSourceClose,
+		}); err != nil {
+			b.t.Fatalf("manifest entry for %s: %v", path, err)
+		}
 	}
 	return path
 }

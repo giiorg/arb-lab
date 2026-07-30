@@ -32,6 +32,17 @@ func flockExclusive(f *os.File) error {
 	}
 }
 
+// flockExclusiveBlocking waits for the lock, and blocking is the right
+// direction exactly where flockExclusive's refusal is: that one meets a
+// long-lived rival writer, where waiting is the silent start-up hang §31g rule
+// 4 forbids; this one serializes the manifest's milliseconds-long
+// read-modify-write (manifest.go), where eight writers rotating at the same
+// hour boundary make transient contention the NORMAL case and a refusal would
+// drop an entry to avoid a wait nobody would notice.
+func flockExclusiveBlocking(f *os.File) error {
+	return syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
+}
+
 func funlockFile(f *os.File) error {
 	return syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 }

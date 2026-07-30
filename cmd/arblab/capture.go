@@ -141,6 +141,70 @@ func captureVerify(args []string, stdout, stderr io.Writer) int {
 	return exitCode(rep.ExitClass())
 }
 
+// captureCat is `arblab capture cat <file>...`: render archive records as
+// NDJSON. No config — the file is self-contained, which is the point of §32e's
+// Open records. It stops at the first invalid frame with a non-zero exit
+// (§38d): diagnosing a file cat refuses is verify's job.
+func captureCat(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "capture cat: at least one archive file is required")
+		return 64
+	}
+	for _, path := range args {
+		if err := enginecapture.Cat(stdout, path); err != nil {
+			fmt.Fprintln(stderr, "capture cat:", err)
+			return 1
+		}
+	}
+	return 0
+}
+
+// captureManifest is `arblab capture manifest -config <file> -day <day>`:
+// backfill the day's manifest from sidecars, labeled (§38b). Idempotent — a
+// second run adds nothing — and it never overwrites a close-time entry.
+func captureManifest(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("capture manifest", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	cfgPath := fs.String("config", "", "capture configuration file (required)")
+	dayArg := fs.String("day", "", "UTC day to backfill, YYYY-MM-DD (required)")
+	rootArg := fs.String("root", "", "archive root (default: the config's root)")
+	if err := fs.Parse(args); err != nil {
+		return 64
+	}
+	if *cfgPath == "" || *dayArg == "" {
+		fmt.Fprintln(stderr, "capture manifest: -config and -day are required")
+		return 64
+	}
+	day, err := time.ParseInLocation("2006-01-02", *dayArg, time.UTC)
+	if err != nil {
+		fmt.Fprintln(stderr, "capture manifest: -day:", err)
+		return 64
+	}
+
+	wall, err := clock.NewWall(nil)
+	if err != nil {
+		fmt.Fprintln(stderr, "capture manifest:", err)
+		return 1
+	}
+	snap, err := loadConfig(*cfgPath, wall)
+	if err != nil {
+		fmt.Fprintln(stderr, "capture manifest:", err)
+		return 1
+	}
+	root := snap.Value.Root
+	if *rootArg != "" {
+		root = *rootArg
+	}
+
+	added, err := enginecapture.BackfillManifestDay(root, day, wall.Now())
+	if err != nil {
+		fmt.Fprintln(stderr, "capture manifest:", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "capture manifest: %s under %s: %d entries backfilled\n", *dayArg, root, added)
+	return 0
+}
+
 // exitCode spells a FindingClass as a process exit code. A renaming, not a
 // decision: the integrity-over-coverage precedence is Report.ExitClass's and
 // must not be re-decided here. The switch is exhaustive (§3.6 rule 10), so a

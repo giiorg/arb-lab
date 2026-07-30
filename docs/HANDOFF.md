@@ -79,7 +79,25 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 37, 2026-07-30 — v0.9.14 is RELEASED, slice E is CLOSED, and **THE CAPTURE RUNS ON EIGHT STREAMS**)
+## START HERE (updated MID-SESSION 38, 2026-07-30 — slice F is OPEN and PAUSED at a deliberate seam)
+
+**Session 38 opened slice F** (full verify: manifests + cross-check, `capture
+cat`, the sync claim — destination-agnostic by the user's recorded choice,
+§38f) and paused mid-slice at a context limit with **everything built so far
+committed and `make ci` green**. The single source of truth for what exists
+and what is owed is **`docs/superpowers/specs/2026-07-30-capture-slice-f-full-verify.md`
+→ `RESUME HERE`** — read it before touching anything. Headlines: the writer
+now lands a `_manifest/<day>.json` entry on every clean close; verify has five
+new manifest findings with two paid-for guards; backfill is
+`capture manifest -day`; cat is built but **its tests are not written**; the
+checklist pass, mutations, reading pass and close have **not** run; and the
+live capture still runs the PRE-manifest v0.9.14 build — restart + backfill is
+step 5 of the resume list, `pgrep -fl "arblab capture run"` first, always.
+Slice D's disk figure is due ~09:53 UTC 2026-07-31.
+
+---
+
+## START HERE (updated end of session 37, 2026-07-30 — HISTORICAL — v0.9.14 is RELEASED, slice E is CLOSED, and **THE CAPTURE RUNS ON EIGHT STREAMS**)
 
 **Branch `feat/milestone-1-foundation`.** Verify rather than trust: `git status --short` (clean),
 `git rev-list --left-right --count @{u}...HEAD` (the exact number is whatever the command says),

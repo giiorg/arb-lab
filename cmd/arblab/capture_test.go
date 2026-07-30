@@ -101,7 +101,7 @@ func TestDispatchRefusesMalformedInvocations(t *testing.T) {
 	cases := [][]string{
 		nil,
 		{"capture"},
-		{"capture", "cat"}, // not built yet; must refuse, not misroute
+		{"capture", "replay"}, // not built yet; must refuse, not misroute
 		{"verify"},
 	}
 	for _, args := range cases {

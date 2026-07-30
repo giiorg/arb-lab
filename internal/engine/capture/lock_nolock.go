@@ -15,4 +15,9 @@ import "os"
 // where somebody can decide; the alternative names nothing, ever.
 func flockExclusive(*os.File) error { return ErrLockUnsupported }
 
+// flockExclusiveBlocking refuses for the same reason: an unserialized manifest
+// read-modify-write loses entries silently, which is the manifest lying about
+// the archive — worse than the refusal that names the platform.
+func flockExclusiveBlocking(*os.File) error { return ErrLockUnsupported }
+
 func funlockFile(*os.File) error { return nil }

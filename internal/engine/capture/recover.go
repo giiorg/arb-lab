@@ -62,8 +62,12 @@ type scanResult struct {
 	// lastSeq is the last Data record's CaptureSeq, and records is how many
 	// records the file already holds — both needed so the Close record this run
 	// eventually writes describes the whole file rather than this run's share.
+	// gaps counts the Gap records among them, for the same reason one level up:
+	// the manifest entry (§38a) describes the whole file, and a count of this
+	// run's gaps would claim a continued file recorded fewer than it did.
 	lastSeq uint64
 	records uint64
+	gaps    uint64
 
 	// digest is SHA-256 over [0, goodEnd), so the rolling digest continues where
 	// the previous run left off rather than starting over. A digest that covered
@@ -123,6 +127,9 @@ func scanArchive(f *os.File) (scanResult, error) {
 		res.hadClose = rec.Kind == RecordKindClose
 		if rec.Kind == RecordKindData {
 			res.lastSeq = rec.CaptureSeq
+		}
+		if rec.Kind == RecordKindGap {
+			res.gaps++
 		}
 		s.lo += n
 	}

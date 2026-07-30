@@ -230,8 +230,11 @@ type Writer struct {
 	// recovered rather than wrote, while stats.Records is the writer's lifetime
 	// total. The Close record's record_count describes the file — a reader
 	// checking it against a walk of that file's records would otherwise find
-	// every file after the first claiming the whole run's total.
+	// every file after the first claiming the whole run's total. fileGaps is
+	// the same distinction for Gap records, carried by the manifest entry
+	// (§38a), which likewise describes the file and not this run's share of it.
 	fileRecords uint64
+	fileGaps    uint64
 
 	aliveDue  time.Time
 	syncDue   time.Time
@@ -488,6 +491,7 @@ func (w *Writer) openFile(window time.Time, at time.Time) error {
 
 	w.f, w.path, w.window, w.digest = f, path, window, scan.digest
 	w.fileRecords = scan.records
+	w.fileGaps = scan.gaps
 	w.dirty = scan.tornBytes > 0
 	if scan.lastSeq > 0 {
 		// Continuing a file this stream already wrote: its last sequence is the
@@ -577,9 +581,33 @@ func (w *Writer) closeFile(at time.Time) error {
 	sidecarErr := os.WriteFile(w.path+digestExt,
 		[]byte(fmt.Sprintf("%s  %s\n", full, filepath.Base(w.path))), 0o644)
 
+	// The manifest entry (§38a) is written after the sidecar and only on a
+	// fully clean close. The ordering makes the crash-window artifact
+	// one-sided — sidecar present + entry absent is the repairable shape; the
+	// reverse would be an outer claim about an inner one that never existed.
+	// The gate on mintErr is the same fact one layer down: a file without a
+	// Close record is not a closed file, and verify's no_close finding owns it.
+	var manifestErr error
+	if mintErr == nil && syncErr == nil && closeErr == nil && sidecarErr == nil {
+		if rel, err := filepath.Rel(w.cfg.Root, w.path); err != nil {
+			manifestErr = err
+		} else {
+			manifestErr = upsertManifestEntry(w.cfg.Root, ManifestEntry{
+				Path:     filepath.ToSlash(rel),
+				Window:   w.window.Format(time.RFC3339),
+				SHA256:   full,
+				Records:  w.fileRecords,
+				Gaps:     w.fileGaps,
+				LastSeq:  w.lastSeq,
+				ClosedAt: at.UTC().Format(time.RFC3339Nano),
+				Source:   ManifestSourceClose,
+			})
+		}
+	}
+
 	w.prevLastSeq = w.lastSeq
 	w.dirty = false
-	return errors.Join(mintErr, syncErr, closeErr, sidecarErr)
+	return errors.Join(mintErr, syncErr, closeErr, sidecarErr, manifestErr)
 }
 
 // mint encodes a JSON payload and writes it as a writer-owned record.
@@ -630,6 +658,7 @@ func (w *Writer) emit(r Record) error {
 	w.stats.Bytes += int64(len(buf))
 	if r.Kind == RecordKindGap {
 		w.stats.Gaps++
+		w.fileGaps++
 	}
 	w.dirty = true
 	return nil

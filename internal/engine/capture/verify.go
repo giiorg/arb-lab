@@ -244,6 +244,10 @@ func Verify(cfg VerifyConfig) (*Report, error) {
 	windows := cfg.windows()
 	first, last := windows[0], windows[len(windows)-1]
 
+	// facts is what the manifest pass (§38c) compares entries against, keyed
+	// the way entries key themselves: root-relative slash paths.
+	facts := make(map[string]manifestFact)
+
 	keys := make([]StreamKey, 0, len(streams))
 	for k := range streams {
 		keys = append(keys, k)
@@ -278,6 +282,11 @@ func Verify(cfg VerifyConfig) (*Report, error) {
 				return nil, err
 			}
 			if inRange {
+				if rel, err := filepath.Rel(cfg.Root, f.path); err == nil {
+					facts[filepath.ToSlash(rel)] = manifestFact{
+						stream: key, window: f.window, path: f.path, scan: scan,
+					}
+				}
 				row := scan.window(cfg, key, f)
 				// Suppressed on an aborted walk for the reason NoClose and NoData
 				// are: the tick count is a count of the records the walk reached,
@@ -326,10 +335,167 @@ func Verify(cfg VerifyConfig) (*Report, error) {
 		}
 	}
 
+	manifestFindings, err := checkManifestDays(cfg, first, last, facts)
+	if err != nil {
+		return nil, err
+	}
+	rep.Findings = append(rep.Findings, manifestFindings...)
+
 	// The verdict per window is decided last, because a hole reconciled at the
 	// stream level can turn a window that looked clean into a gapped one.
 	assignVerdicts(rep)
 	return rep, nil
+}
+
+// manifestFact is one in-range file's recomputed truth, for the manifest pass.
+type manifestFact struct {
+	stream StreamKey
+	window time.Time
+	path   string
+	scan   fileScan
+}
+
+// checkManifestDays holds every day manifest in range against the files, and
+// the files against it — §38c. Both directions matter and they catch different
+// events: an entry with no file is the deletion this layer exists to see; a
+// closed file with no entry is §38a's crash window, or a day from before the
+// layer existed.
+func checkManifestDays(
+	cfg VerifyConfig, first, last time.Time, facts map[string]manifestFact,
+) ([]Finding, error) {
+	var out []Finding
+
+	// closedByDay is which in-range files a manifest OUGHT to list: the cleanly
+	// closed ones, grouped by their window's UTC day.
+	closedByDay := make(map[string][]string)
+	for rel, fact := range facts {
+		if fact.scan.sawClose && !fact.scan.aborted {
+			day := fact.window.UTC().Format(manifestDayLayout)
+			closedByDay[day] = append(closedByDay[day], rel)
+		}
+	}
+
+	for day := Window(first, 24*time.Hour); !day.After(last); day = day.AddDate(0, 0, 1) {
+		dayStr := day.Format(manifestDayLayout)
+		m, err := loadManifest(cfg.Root, dayStr)
+		if errors.Is(err, ErrManifestCorrupt) {
+			out = append(out, Finding{
+				Kind: FindingManifestUnreadable, Path: manifestPath(cfg.Root, dayStr),
+				Offset: -1, Detail: err.Error(),
+			})
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if m == nil {
+			// One finding per day, not per file (§38c) — and only for a day
+			// that HAS something a manifest should be listing, because a day
+			// with no closed files in range makes no claim to check.
+			if n := len(closedByDay[dayStr]); n > 0 {
+				out = append(out, Finding{
+					Kind: FindingManifestAbsent, Path: manifestPath(cfg.Root, dayStr),
+					Offset: -1,
+					Detail: fmt.Sprintf(
+						"no manifest for a day holding %d closed files — run the backfill", n),
+				})
+			}
+			continue
+		}
+
+		listed := make(map[string]bool, len(m.Entries))
+		for _, e := range m.Entries {
+			w, err := time.Parse(time.RFC3339, e.Window)
+			if err != nil {
+				out = append(out, Finding{
+					Kind: FindingManifestUnreadable, Path: manifestPath(cfg.Root, dayStr),
+					Offset: -1,
+					Detail: fmt.Sprintf("entry %s: window %q does not parse", e.Path, e.Window),
+				})
+				continue
+			}
+			listed[e.Path] = true
+			if w.Before(first) || w.After(last) {
+				continue
+			}
+			out = append(out, checkManifestEntry(cfg, e, w, facts)...)
+		}
+
+		days := closedByDay[dayStr]
+		slices.Sort(days)
+		for _, rel := range days {
+			if listed[rel] {
+				continue
+			}
+			fact := facts[rel]
+			out = append(out, Finding{
+				Kind: FindingUnmanifested, Stream: fact.stream, Window: fact.window,
+				Path: fact.path, Offset: -1,
+				Detail: "closed file absent from the day's manifest — " +
+					"the §38a crash window, repairable by the labeled backfill",
+			})
+		}
+	}
+	return out, nil
+}
+
+// checkManifestEntry compares one in-range entry against the file's recomputed
+// truth.
+//
+// The digest is compared whenever the file was READ — fullDigest covers the
+// complete file past an aborted walk — while the counts are compared only for
+// a cleanly closed, cleanly read file: an aborted walk's counts describe the
+// records before the corruption, and a file the writer re-opened has moved on
+// from the entry legitimately, with no_close or the next close's upsert owning
+// that story.
+func checkManifestEntry(
+	cfg VerifyConfig, e ManifestEntry, w time.Time, facts map[string]manifestFact,
+) []Finding {
+	fact, ok := facts[e.Path]
+	if !ok {
+		var key StreamKey
+		if k, _, err := ParseFilePath(cfg.Root, filepath.Join(cfg.Root, filepath.FromSlash(e.Path))); err == nil {
+			key = k
+		}
+		return []Finding{{
+			Kind: FindingManifestMissingFile, Stream: key, Window: w,
+			Path: filepath.Join(cfg.Root, filepath.FromSlash(e.Path)), Offset: -1,
+			Detail: fmt.Sprintf("manifest (%s entry, closed %s) lists a file that is gone",
+				e.Source, e.ClosedAt),
+		}}
+	}
+	var out []Finding
+	mismatch := func(format string, args ...any) {
+		out = append(out, Finding{
+			Kind: FindingManifestMismatch, Stream: fact.stream, Window: fact.window,
+			Path: fact.path, Offset: -1, Detail: fmt.Sprintf(format, args...),
+		})
+	}
+	// Suppressed when the sidecar already reported the bytes changed: the
+	// manifest and the sidecar carry the same close-time digest, so a file
+	// modified after close would otherwise earn two findings for one event.
+	// What this row is FOR is the case where the sidecar cannot testify — it
+	// was deleted, or it is the manifest entry itself that went stale (§38a's
+	// crash window on a re-close). The empty-digest guard is the header-abort
+	// path, where the walk hashed nothing: comparing a real claim against an
+	// empty hash would re-report file_header as a mismatch with no digest in it.
+	if fact.scan.fullDigest != "" && e.SHA256 != fact.scan.fullDigest && !fact.scan.sidecarMismatch {
+		mismatch("manifest says %s, the file hashes to %s", e.SHA256, fact.scan.fullDigest)
+	}
+	if fact.scan.aborted || !fact.scan.sawClose {
+		return out
+	}
+	if e.Records != fact.scan.records {
+		mismatch("manifest counts %d records, the file holds %d", e.Records, fact.scan.records)
+	}
+	if e.Gaps != fact.scan.gapRecords {
+		mismatch("manifest counts %d gap records, the file holds %d", e.Gaps, fact.scan.gapRecords)
+	}
+	if e.LastSeq != fact.scan.lastSeq {
+		mismatch("manifest says last CaptureSeq %d, the file's Data ends at %d",
+			e.LastSeq, fact.scan.lastSeq)
+	}
+	return out
 }
 
 // assignVerdicts fills each window's verdict from the findings attached to it.
@@ -392,6 +558,13 @@ func discover(root string) (map[StreamKey][]archiveFile, []Finding, error) {
 			return err
 		}
 		if d.IsDir() {
+			// The manifest subtree is part of the format, not a stray (§38a).
+			// Skipped WHOLESALE — its files are read by the manifest pass, which
+			// classifies an unreadable one precisely (manifest_unreadable) where
+			// this walk could only call it a stray.
+			if p == manifestDir(root) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		base := filepath.Base(p)
@@ -562,6 +735,19 @@ type fileScan struct {
 	// wrong, so every count below is a count of the records BEFORE that point
 	// rather than of the file.
 	aborted bool
+
+	// sawClose, fullDigest and gapRecords are what the manifest pass (§38c)
+	// compares an entry against. fullDigest covers the COMPLETE file — it is
+	// computed past an aborted walk, like the sidecar check — so the digest
+	// comparison survives corruption that the count comparisons do not.
+	// gapRecords counts Gap records by KIND, parsed or not, because that is
+	// what the writer's own per-file counter counted. sidecarMismatch reports
+	// that checkDigests already found the bytes disagreeing with the sidecar,
+	// which is what keeps one changed file from being reported twice.
+	sawClose        bool
+	fullDigest      string
+	gapRecords      uint64
+	sidecarMismatch bool
 }
 
 // window renders a scan as the report row for its (stream, window).
@@ -698,6 +884,7 @@ func verifyFile(cfg VerifyConfig, key StreamKey, f archiveFile, st chainState) (
 		case RecordKindAlive:
 			scan.aliveTicks++
 		case RecordKindGap:
+			scan.gapRecords++
 			var g Gap
 			if err := json.Unmarshal(rec.Payload, &g); err != nil {
 				add(FindingMalformed, offset, "Gap payload does not parse: %v", err)
@@ -763,8 +950,15 @@ func verifyFile(cfg VerifyConfig, key StreamKey, f archiveFile, st chainState) (
 	if _, err := io.Copy(digest, fh); err != nil {
 		return scan, nil, fmt.Errorf("capture: read %s: %w", f.path, err)
 	}
-	findings = append(findings, checkDigests(key, f, sawClose,
-		hex.EncodeToString(digest.Sum(nil)))...)
+	scan.sawClose = sawClose
+	scan.fullDigest = hex.EncodeToString(digest.Sum(nil))
+	digestFindings := checkDigests(key, f, sawClose, scan.fullDigest)
+	for _, df := range digestFindings {
+		if df.Kind == FindingDigestMismatch {
+			scan.sidecarMismatch = true
+		}
+	}
+	findings = append(findings, digestFindings...)
 
 	// Both are skipped when the walk aborted, because both are statements about
 	// records past the corruption — a Close may well be sitting there. Reporting

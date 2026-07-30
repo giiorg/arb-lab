@@ -24,6 +24,10 @@ func dispatch(args []string, stdout, stderr io.Writer) int {
 			return captureRun(args[2:], stderr)
 		case "verify":
 			return captureVerify(args[2:], stdout, stderr)
+		case "cat":
+			return captureCat(args[2:], stdout, stderr)
+		case "manifest":
+			return captureManifest(args[2:], stdout, stderr)
 		}
 	}
 	fmt.Fprint(stderr, usage)
@@ -33,12 +37,20 @@ func dispatch(args []string, stdout, stderr io.Writer) int {
 const usage = `arblab — funding-rate arbitrage ops CLI
 
 usage:
-  arblab capture run    -config <file>
-  arblab capture verify -config <file> -from <RFC3339> -to <RFC3339> [-root <dir>] [-min-alive <pct>]
+  arblab capture run      -config <file>
+  arblab capture verify   -config <file> -from <RFC3339> -to <RFC3339> [-root <dir>] [-min-alive <pct>]
+  arblab capture cat      <file.arbcap> [...]
+  arblab capture manifest -config <file> -day <YYYY-MM-DD> [-root <dir>]
 
 capture verify exit codes: 0 clean, 1 integrity (the archive is lying),
 2 coverage (the archive is honest and thin). Integrity decides when both
 are present.
+
+capture cat renders archive records as NDJSON; it stops at the first
+invalid frame — diagnosing a file cat refuses is verify's job.
+
+capture manifest backfills the day's manifest from sidecars, labeled
+"backfill"; it never overwrites a close-time entry.
 `
 
 // buildInfo names this binary for the archive's provenance records.

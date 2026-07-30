@@ -343,3 +343,49 @@ var (
 	// ErrRestMetaInvalid reports meta bytes that do not parse as RestMeta.
 	ErrRestMetaInvalid = errors.New("capture: rest meta is not valid JSON")
 )
+
+// The manifest's refusals (§38a), slice F.
+var (
+	// ErrManifestSourceUnspecified and ErrManifestSourceUnknown report an entry
+	// provenance that is not a declared one, split on the standing two-mistakes
+	// reasoning. The zero source is the one worth refusing loudly: an entry
+	// whose provenance nobody recorded would circulate as close-time truth by
+	// default, which is exactly the impersonation the label exists to prevent.
+	ErrManifestSourceUnspecified = errors.New("capture: manifest entry source is unset")
+	ErrManifestSourceUnknown     = errors.New("capture: manifest entry source is not a declared source")
+
+	// ErrManifestPathUnset and ErrManifestPathShape report an entry path that is
+	// missing, absolute, or backslash-separated. The manifest travels with every
+	// copy of the archive (§38e), so an absolute path is a fact about one host
+	// stored where every other host will read it.
+	ErrManifestPathUnset = errors.New("capture: manifest entry path is unset")
+	ErrManifestPathShape = errors.New("capture: manifest entry path must be relative with forward slashes")
+
+	// ErrManifestDigestShape reports a sha256 field that is not 64 hex digits.
+	// Refused at write time because a manifest is a list of claims, and a claim
+	// that cannot be checked is worse than no claim — a checker comparing
+	// against a malformed digest reports a mismatch for a healthy file.
+	ErrManifestDigestShape = errors.New("capture: manifest entry sha256 is not 64 hex digits")
+
+	// ErrManifestRecordsZero reports an entry claiming zero records. A cleanly
+	// closed file holds at least its Open and Close records, so zero is an
+	// unpopulated field wearing the shape of a small file.
+	ErrManifestRecordsZero = errors.New("capture: manifest entry record count is zero")
+
+	// ErrManifestClosedAtUnset and ErrManifestTimeShape report time fields that
+	// are missing or do not parse. The zero-value rule, worn by this type: an
+	// entry with no closed_at reads as a file closed at no particular time,
+	// which defeats the one question the field answers — was this entry there
+	// when the file closed, or repaired in later?
+	ErrManifestClosedAtUnset = errors.New("capture: manifest entry closed_at is unset")
+	ErrManifestTimeShape     = errors.New("capture: manifest entry time field does not parse")
+
+	// ErrManifestCorrupt reports a manifest file that exists and cannot be
+	// read: unparseable JSON, an unknown format token, or a day that disagrees
+	// with its own file name. Nothing repairs it in place — overwriting would
+	// destroy the evidence verify exists to report (§38c) — so the writer's
+	// close path refuses to update through it and the repair is the operator's:
+	// remove the file, re-run the backfill, and accept the provenance downgrade
+	// the labels make visible.
+	ErrManifestCorrupt = errors.New("capture: manifest file is corrupt")
+)
