@@ -135,6 +135,15 @@ func pumpMixedRun(r *rig) {
 	r.publish(env(bybitPerpSrc("BTCUSDT"), 4, events.PrioNormal))
 }
 
+// pumpSecondRound continues a drained run so a timer lands at a MID-sequence
+// position. Without it every timer entry precedes every envelope entry (the
+// rank drains due timers first), and "timer firings occupy arbitrary log
+// positions" would be a claim no fixture contains.
+func pumpSecondRound(r *rig) {
+	r.clk.SetTimer("late-boundary", t0, 2)
+	r.publish(env(markSrc("BTCUSDT"), 5, events.PrioNormal))
+}
+
 // writeRawLog builds a file from hand-assembled frames — the tests' second,
 // independent spelling of the format, so a silent field rename in the payload
 // schema fails here rather than round-tripping invisibly.
@@ -174,9 +183,19 @@ const envEntryJSON = `{"k":"env","venue":"binance","product":"linear_perp",` +
 func TestReplayReDrivesTheConsumedOrderExactly(t *testing.T) {
 	r, w, path := newLogRig(t)
 	pumpMixedRun(r)
+	if got := len(r.drain()); got != 6 {
+		t.Fatalf("first round dispatched %d items, want 6", got)
+	}
+	pumpSecondRound(r)
 	live := r.drain()
-	if len(live) != 6 {
-		t.Fatalf("live run dispatched %d items, want 6", len(live))
+	if len(live) != 8 {
+		t.Fatalf("live run dispatched %d items, want 8", len(live))
+	}
+	// The checklist's reason for the second round: a timer at a mid-sequence
+	// position. Verify the fixture actually contains it before trusting what
+	// it proves.
+	if live[6].f == nil || live[5].e == nil {
+		t.Fatalf("fixture lost its shape: entry 7 must be a timer following an envelope, got %+v", live[6])
 	}
 	if err := w.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -190,11 +209,11 @@ func TestReplayReDrivesTheConsumedOrderExactly(t *testing.T) {
 	if !rep.Closed || rep.TornBytes != 0 {
 		t.Errorf("report = %+v, want Closed with nothing torn", rep)
 	}
-	if rep.Entries != 6 || rep.LastSeq != 6 {
-		t.Errorf("report = %+v, want 6 entries ending at seq 6", rep)
+	if rep.Entries != 8 || rep.LastSeq != 8 {
+		t.Errorf("report = %+v, want 8 entries ending at seq 8", rep)
 	}
-	if len(rec.seqs) != 6 {
-		t.Fatalf("consumer saw %d entries, want 6", len(rec.seqs))
+	if len(rec.seqs) != 8 {
+		t.Fatalf("consumer saw %d entries, want 8", len(rec.seqs))
 	}
 
 	// The replayed stream must match the live sink's view item by item — that
@@ -238,6 +257,8 @@ func TestTwoIdenticalRunsProduceByteIdenticalLogs(t *testing.T) {
 		r, w, path := newLogRig(t)
 		pumpMixedRun(r)
 		r.drain()
+		pumpSecondRound(r)
+		r.drain()
 		if err := w.Close(); err != nil {
 			t.Fatalf("Close: %v", err)
 		}
@@ -251,6 +272,28 @@ func TestTwoIdenticalRunsProduceByteIdenticalLogs(t *testing.T) {
 	if !bytes.Equal(first, second) {
 		t.Fatalf("two identical runs wrote different bytes (%d vs %d) — the parity probe's "+
 			"precondition is already false at the writer", len(first), len(second))
+	}
+
+	// §39n-2's Mono claim, asserted directly: byte-identity alone cannot see a
+	// DETERMINISTIC nonzero Mono (both runs would agree on the wrong value),
+	// so the constant is checked frame by frame.
+	path := filepath.Join(t.TempDir(), "mono.log")
+	if err := os.WriteFile(path, first, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := capture.WalkRecords(f, func(rec capture.Record, _ []byte) error {
+		if rec.Mono != 0 {
+			t.Errorf("record seq %d carries Mono %v — the log's Mono is the constant zero",
+				rec.CaptureSeq, rec.Mono)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -294,6 +337,12 @@ func TestWriterAssertsDensityInBothMethods(t *testing.T) {
 	}
 	if err := w.OnEnvelope(stamped(5)); !errors.Is(err, dispatch.ErrLogSeqNotDense) {
 		t.Errorf("a log starting at 5 = %v, want ErrLogSeqNotDense — a log that starts mid-run lies about where the order began", err)
+	}
+	// Zero is its own boundary: an UNSTAMPED envelope reaching the writer.
+	// The dispatcher cannot hand one over (it stamps before the sink), so this
+	// is the writer's own guard against being wired somewhere else.
+	if err := w.OnEnvelope(stamped(0)); !errors.Is(err, dispatch.ErrLogSeqNotDense) {
+		t.Errorf("an unstamped envelope = %v, want ErrLogSeqNotDense", err)
 	}
 	if err := w.OnEnvelope(stamped(1)); err != nil {
 		t.Fatalf("seq 1: %v", err)
