@@ -81,7 +81,45 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 41, 2026-07-30 — DISPATCHER SLICE A is BUILT and CLOSED; next work is slice B of §39j, the dispatch log)
+## START HERE (updated end of session 42, 2026-07-30 — DISPATCHER SLICE B is BUILT and CLOSED: the dispatch log exists; next work is slice C of §39j, the wiring and the parity probe)
+
+**Branch `feat/milestone-1-foundation`.** Session 42 built §39j's **slice B**: the persisted
+dispatch log — `capture.WalkRecords` (the torn-tail scanner's one public door, `scanArchive`
+rebuilt on it), and in `engine/dispatch`: the sequence-record schema (JSON payloads,
+`k`-discriminated, no version integer — the token IS the version surface), `LogWriter` (a `Sink`
+write-ahead of the sink it wraps, density asserted, fresh files only, a Close seal whose ABSENCE is
+the crash signal), and `ReplayLog` (torn tail recovered + reported, everything else refused with
+capture's truncated-versus-wrong split). Container is §32e's frame VERBATIM — `Data` entries,
+`Close` seal, `CaptureSeq` IS the `IngressSeq`, `Mono` the constant 0 — new `RecordKind`s rejected
+because a `FormatMinor` bump would orphan the live v1.0 production archive (§39n-1). Verify rather
+than trust: `git status --short` (clean), marker grep **ZERO**, `make ci` green on a cold cache.
+
+**Read `docs/superpowers/specs/2026-07-30-parity-dispatcher-design.md` → §39n** (the design, with
+rejected alternatives) **and §39o** (the close) **and its `RESUME HERE`**. Headlines: the
+§39m-6/§39k-1 watch item closed **without a core edit** — §3.5 already entails timer positions in
+the log by composition, and the derivation plus the refuted counter-reading are §39o-1; do not
+re-litigate it into an edit. The checklist changed fixtures twice BEFORE the battery (a timer at a
+mid-sequence position; the seq-0 boundary), `exhaustiveswitch` caught the reader's kind switch
+naming 2 of 8 members on the first `make ci` (a live rule-10 positive control), then **37/37 aimed
+mutations caught** (one honest `NOBUILD!!` re-aim). The Mono gap was found while WRITING the close
+— nothing decoded Mono, so byte-identity alone could not see a deterministic-nonzero mutant; the
+frame-by-frame `Mono == 0` walk now exists (§39o-3).
+
+**Next: slice C — the wiring and the parity probe** (§39j): replayed archive → ingestion
+(`AcceptOrdinal` at the seam) → `marketdata` → mailboxes → dispatcher+`LogWriter` →
+`engine/state`, under `TestClock`; done when two sim runs over one archive produce byte-identical
+dispatch logs and the replayed log re-drives `engine/state` to the same terminal state. Fixture is
+a small COMMITTED archive; the production tree is a manual soak.
+
+**The capture rituals stay first, every session:** `pgrep -fl "arblab capture run"`, then a verify
+over the accumulated range — 0 integrity findings, always (session 42's check: COVERAGE-only over
+09:00–18:00, the known reconnect/restart ledger plus the open hour). Calendar items unchanged:
+**slice D's disk figure ~09:53 UTC 2026-07-31** (`du -sh archive/` + full-day verify); the
+off-host destination is still the user's open §38f decision and the laptop is still the only copy.
+
+---
+
+## START HERE (updated end of session 41, 2026-07-30 — HISTORICAL — DISPATCHER SLICE A BUILT and CLOSED; superseded by session 42's slice B close)
 
 **Branch `feat/milestone-1-foundation`.** Session 41 built §39j's **slice A**: `internal/engine/dispatch`
 exists — the §3.5 total-order dispatcher core (Step, IngressSeq stamped only at dispatch, timer pump,

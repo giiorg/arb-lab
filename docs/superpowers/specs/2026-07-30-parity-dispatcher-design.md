@@ -448,15 +448,82 @@ absence round-trip, and `Mono`/`RecvTime` byte-identity (two identical runs, one
 
 ---
 
+### §39o — slice B is BUILT and CLOSED (session 42, 2026-07-30): the log exists, and the watch item closes without a core edit
+
+**What landed** (four commits): `capture.WalkRecords` + `scanArchive` rebuilt on it (§39n-7; the
+recovery battery unchanged and still biting the shared machinery), then `engine/dispatch`'s
+`log.go`/`logwriter.go`/`logreader.go` — the payload schema and its consumer types, `LogWriter` (a
+`Sink`, write-ahead of the sink it wraps, density asserted, fresh files only, Close seals),
+`ReplayLog` (torn tail recovered and reported, everything-else refused with capture's exact
+truncated-versus-wrong split, density from 1, the closed kind roster, the seal cross-checked twice,
+sources re-validated). The slice's done-when holds as tests: a log written by the slice-A core
+replays to the identical consumer-visible order (asserted item-by-item against the live sink's own
+record), a torn tail recovers, and two identical runs produce byte-identical files — the parity
+probe's writer-side precondition, proved before slice C needs it.
+
+**§39o-1 — the §39m-6/§39k-1 watch item closes: NO core edit, and the reasoning is the record.**
+The question was whether core §3.5 must state the sequence-record field set and timer positions
+normatively. It already entails the timer half by a two-sentence composition: D4 makes the total
+order cover "all inputs (events *and* timers)", and §3.5 defines the persisted log as *that order
+persisted* — so a log without timer positions persists a projection, not the order. The one
+counter-reading (a replay re-deriving timer interleave from the schedule, since a scheduled `At` is
+replay-identical) is refuted by §3.5's own words: "parity is defined as replaying that persisted
+dispatch log, **not regenerating dispatch order**" — whether a timer fired before or after a
+concurrently-ready envelope is live timing, which is exactly what the log freezes. The field set's
+normative home is §39n, matching the §32e precedent the roster predicted (v0.9.15's owed widening
+landed in the capture design record while the core recorded zero edits). Docs stay v0.9.15; marker
+grep zero, confirmed at close.
+
+**§39o-2 — two format decisions sharpened during the build, in-record:** the Close payload carries
+NO `k` token (the frame kind already discriminates a Close; a second discriminator is a second
+thing to disagree — §39n-2's rule applied to §39n-4's record, text amended in place), and the
+reader's kind switch names all eight `RecordKind`s in a grouped case — **`exhaustiveswitch` caught
+it naming two of eight on the first `make ci`**, a live positive control for rule 10: a ninth kind
+added to the container lands as a build failure on the switch where somebody must decide whether
+the log adopts it.
+
+**§39o-3 — verification, full rhythm.** The checklist ran before the battery and changed the
+fixtures twice: **every timer entry preceded every envelope entry** in every fixture (the rank
+drains due timers first, so "timer firings occupy arbitrary log positions" was a claim no fixture
+contained — a second pump round put a firing mid-sequence), and the density fixture never offered
+**seq 0**, the unstamped-envelope boundary distinct from "starts at 1". Then **37/37 aimed
+mutations caught** across all four surfaces: the writer (density deleted and off-by-one, both
+failed-write-still-reaches-sink orders, seal skipped/miscounted/misnumbered, `lastAt` dropped, the
+frame instant shifted, encode failure swallowed), the schema codec (each envelope field blinded,
+source-time presence inverted on both sides, the range check deleted, timer id/At corrupted,
+unknown token swallowed, the timer case unrecognized, re-validation deleted), the reader (each of
+the three seal clauses blinded in isolation, after-seal and density and foreign-kind refusals
+deleted, counters frozen, the seal and the tear undisclosed), and the exported walker
+(fresh/torn/offset/callback-error). One honest `NOBUILD!!` re-aim (a mutation that orphaned `sum`
+— Go's unused-variable refusal, not a kill). **The Mono claim's gap was found while writing this
+close, not by the checklist:** nothing decoded Mono, so a deterministic-nonzero mutant would have
+survived both the round trip and byte-identity — the §38h pattern again (a gap the battery's
+summary exposes because summarizing forces the question "what would this NOT catch"). The
+frame-by-frame `Mono == 0` walk now exists and its mutation kills.
+
+**§39o-4 — honest non-aims:** the WAL statement reorder itself (log-write and sink-call swapped
+whole) is not expressible as a line sed — the §39m-8 rank-reorder precedent; W3/W4 kill the
+nearest line-shaped defects (a FAILED write still reaching the sink, both methods) and the
+failing-sink fixture asserts the order claim directly. The `scratch` buffer reuse has no
+behavioural surface (allocation only). And `capture cat` renders a dispatch log as opaque base64
+Data payloads — readable enough to identify a misfiled log, not a rendering of entries; a
+dispatch-side `cat` is deliberately absent until someone needs one, and the `k` tokens are already
+self-describing text in the bytes.
+
+---
+
 ## RESUME HERE
 
-**Slice A is closed (§39m). The next session builds slice B** (§39j): the dispatch log —
-sequence-record schema over `engine/capture`'s framing, writer, reader, replay re-application.
-Positive control: a truncated/vandalized log is refused, not absorbed. Done when a log written by
-slice A's core replays to an identical consumer-visible order and a torn tail recovers. §39m-6's
-watch item is slice B's first design question: whether the sequence-record field set (and timer
-positions in it) needs stating normatively in core §3.5 — the §32e manifest-field-list precedent
-says a dated in-record edit at slice close is the shape.
+**Slices A and B are closed (§39m, §39o). The next session builds slice C** (§39j): the wiring — a
+replayed capture archive → ingestion (`AcceptOrdinal` stamped at the seam) → `marketdata` →
+mailboxes → dispatcher (with `LogWriter` wrapping the sink) → `engine/state`, under `TestClock`.
+Done when **the parity probe passes**: two sim runs over the same archive produce byte-identical
+dispatch logs, and the replayed log re-drives `engine/state` to the same terminal cache state. The
+fixture is a *small committed archive*, not the production tree (§39j); the production archive is a
+manual soak. Slice C's design questions on arrival: the sim driver's advance rule (§39f-6's "advance
+`TestClock` to the next due timer only when no envelope is dispatchable"), where the
+`AcceptOrdinal`-stamping ingestion seam lives, and §39l-3 (whether milestone 2 exercises the live
+pump at all) if the wiring forces the question.
 
 Before anything else, the standing rituals: `pgrep -fl "arblab capture run"`, then a `capture
 verify` over the accumulated range (expect 0 integrity findings, always), then `git status --short`
@@ -469,4 +536,7 @@ still the only copy.
 
 Do not reopen: §31a's ordering (this record is its step 2), §31b (funding consumed, never derived),
 §39c's placement, §39d's correction (the outbox store half is milestone 3's, with the journal),
-§39m-1's kind rank and §39m-5's absence-door deferral (both carry their rejected alternatives).
+§39m-1's kind rank, §39m-5's absence-door deferral, §39n-1's container choice (new `RecordKind`s
+rejected on the minor-bump argument), §39n-5's fresh-files-only door (append is the journal's,
+milestone 3), and §39o-1's no-core-edit ruling (the derivation is recorded; do not re-litigate it
+into an edit).
