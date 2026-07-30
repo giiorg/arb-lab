@@ -459,3 +459,34 @@ sidecar side, `tornTail` pinned false, and both dropped conjuncts on the
 manifest side. Live proof on the real archive mid-hour, 15:56 UTC: **0
 integrity findings, verdict COVERAGE**, the eight `unmanifested` T15 rows the
 honest transitional state that the next close heals.
+
+### §38i postscript — the rotation race, same hour, and the rule that owns both
+
+The confirming verify then found the finding's sibling: run as the 16:00
+rotation fired (venue `RecvTime` runs ~35s ahead of this laptop's clock, so
+the boundary arrived "early"), it scanned the binance T15 files MID-APPEND,
+finished walking the archive, and only then loaded the manifest — by which
+time the rotation's fresh close-time entries had landed. Stale scan against
+fresh entries: eleven `manifest_mismatch` findings whose tell was the
+DIRECTION — entries counting MORE than the file held. `capture cat` and
+`shasum` acquitted the archive completely: file, sidecar and entry agree
+exactly. Bybit read clean only because streams scan alphabetically and its
+files were walked after the boundary.
+
+Both production cases — the reopened hour and the rotation race — are one
+predicate: **the file as scanned did not end at a Close record.** An entry
+can never be convicted by comparison against a moving file, and the next
+close's upsert replaces it regardless. So the manifest side's `digestAtClose`
+guard is REPLACED by the `endsClosed` gate (scan's final decoded record is a
+Close), which subsumes it, subsumes the empty-digest guard (a header-abort
+decodes no Close), and is one stated rule instead of three overlapping ones.
+The sidecar side keeps the §38i digest rule unchanged — the sidecar is read
+at scan time, beside the bytes, so it cannot race the way the manifest does;
+its own residual race (a close landing between the walk and the sidecar
+read) is milliseconds wide, self-healing on any re-run, and not worth the
+read-ordering machinery it would cost. Consequence pinned in the fixture: a
+WRONG entry on a still-moving file earns no finding — the planted sidecar
+beside it still reports, the claims fail independently. 4/4 aimed mutations
+on the gate caught (both directions and the tracking line; two NOBUILD
+re-aims on the single-read variable). Live verify after the boundary is the
+close-out evidence below.

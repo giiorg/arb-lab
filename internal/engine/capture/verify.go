@@ -440,14 +440,12 @@ func checkManifestDays(
 }
 
 // checkManifestEntry compares one in-range entry against the file's recomputed
-// truth.
-//
-// The digest is compared whenever the file was READ — fullDigest covers the
-// complete file past an aborted walk — while the counts are compared only for
-// a cleanly closed, cleanly read file: an aborted walk's counts describe the
-// records before the corruption, and a file the writer re-opened has moved on
-// from the entry legitimately, with no_close or the next close's upsert owning
-// that story.
+// truth — but only when the file as scanned was FINISHED (ends at a Close);
+// an entry can describe a moment of a moving file no comparison can reach.
+// Within a finished file, the digest is compared even past an aborted walk —
+// fullDigest covers the complete file — while the counts are compared only
+// for a cleanly read one, because an aborted walk's counts describe the
+// records before the corruption.
 func checkManifestEntry(
 	cfg VerifyConfig, e ManifestEntry, w time.Time, facts map[string]manifestFact,
 ) []Finding {
@@ -471,18 +469,19 @@ func checkManifestEntry(
 			Path: fact.path, Offset: -1, Detail: fmt.Sprintf(format, args...),
 		})
 	}
-	// checkDigests' continued-hour rule, at its mirror (§38i): an entry whose
-	// digest is the file's digest AT its close describes a prefix the file
-	// has grown past. Every field of the entry — digest and counts alike —
-	// is about that prefix, so there is nothing to compare against the whole
-	// file; the next close's upsert owns the rest of the story. The digest
-	// inequality keeps the ordinary closed file (all three digests equal) on
-	// the comparing path below. Unlike the sidecar side, NO clean-tail demand:
-	// whether the growth is a continuation or appended garbage, the entry is
-	// provably prefix-truth, and the garbage case already earned its one
-	// integrity finding from checkDigests — comparing prefix counts against a
-	// vandalized length would report the same event a second and third time.
-	if e.SHA256 == fact.scan.digestAtClose && e.SHA256 != fact.scan.fullDigest {
+	// An entry is comparable only against a FINISHED file (§38i, both of its
+	// production cases): a scan that did not end at a Close record read a
+	// file that was open — a restart's continued hour, or the rotation race,
+	// where the writer's fresh close landed its entry while verify held bytes
+	// from seconds earlier. Either way the entry describes some other moment
+	// of a moving file, no comparison can convict it, and the next close's
+	// upsert replaces it regardless. Vandalism is not lost by returning here:
+	// garbage after a close leaves the sidecar side to report it, and a file
+	// whose PREFIX changed fails CRC and aborts, which the guard below
+	// already excludes from count comparisons. This gate also owns what the
+	// empty-digest guard used to: a header-abort scan decoded no Close, so
+	// the digest comparison below can no longer meet an empty fullDigest.
+	if !fact.scan.endsClosed {
 		return nil
 	}
 	// Suppressed when the sidecar already reported the bytes changed: the
@@ -493,7 +492,7 @@ func checkManifestEntry(
 	// crash window on a re-close). The empty-digest guard is the header-abort
 	// path, where the walk hashed nothing: comparing a real claim against an
 	// empty hash would re-report file_header as a mismatch with no digest in it.
-	if fact.scan.fullDigest != "" && e.SHA256 != fact.scan.fullDigest && !fact.scan.sidecarMismatch {
+	if e.SHA256 != fact.scan.fullDigest && !fact.scan.sidecarMismatch {
 		mismatch("manifest says %s, the file hashes to %s", e.SHA256, fact.scan.fullDigest)
 	}
 	if fact.scan.aborted || !fact.scan.sawClose {
@@ -762,7 +761,12 @@ type fileScan struct {
 	// appended after a close ALSO leaves the prefix digest intact, and what
 	// separates a continuation from vandalism is that the continuation's tail
 	// decodes — so the suppression demands a walk that reached EOF with no
-	// torn or undecodable byte. gapRecords counts Gap records by KIND, parsed or
+	// torn or undecodable byte. endsClosed reports that the walk's FINAL
+	// decoded record was a Close: the file as read was a finished file, which
+	// is what makes a manifest entry comparable at all (§38i's postscript —
+	// a scan that raced the writer read a moving file, and fresh entries
+	// landed at rotation compared against stale mid-append bytes read as
+	// integrity findings for a correct archive). gapRecords counts Gap records by KIND, parsed or
 	// not, because that is what the writer's own per-file counter counted.
 	// sidecarMismatch reports that checkDigests already found the bytes
 	// disagreeing with the sidecar, which is what keeps one changed file from
@@ -771,6 +775,7 @@ type fileScan struct {
 	fullDigest      string
 	digestAtClose   string
 	tornTail        bool
+	endsClosed      bool
 	gapRecords      uint64
 	sidecarMismatch bool
 }
@@ -843,6 +848,7 @@ func verifyFile(cfg VerifyConfig, key StreamKey, f archiveFile, st chainState) (
 	var opens int
 	var aborted, sawClose bool
 	var closeSeq uint64
+	var lastKind RecordKind
 	preClose := ""
 
 	for {
@@ -875,6 +881,7 @@ func verifyFile(cfg VerifyConfig, key StreamKey, f archiveFile, st chainState) (
 		}
 		digest.Write(s.pending()[:used])
 		scan.records++
+		lastKind = rec.Kind
 
 		switch rec.Kind {
 		case RecordKindOpen:
@@ -978,6 +985,7 @@ func verifyFile(cfg VerifyConfig, key StreamKey, f archiveFile, st chainState) (
 	// decoding, which is why it survives an aborted walk while the Close
 	// record's own digest does not.
 	scan.tornTail = len(s.pending()) > 0
+	scan.endsClosed = lastKind == RecordKindClose
 	digest.Write(s.pending())
 	if _, err := io.Copy(digest, fh); err != nil {
 		return scan, nil, fmt.Errorf("capture: read %s: %w", f.path, err)

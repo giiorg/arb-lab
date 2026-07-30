@@ -907,11 +907,13 @@ func TestVerifyAcceptsAReopenedHour(t *testing.T) {
 		if n := len(findingsFor(rep, FindingDigestMismatch)); n != 1 {
 			t.Errorf("digest_mismatch ×%d, want 1: %s", n, dumpFindings(rep))
 		}
-		// A planted entry digest proves NOTHING about the prefix, so its
-		// counts are compared — the suppression keys on equality with the
-		// digest at the close, not on a mid-file Close record existing.
-		if n := len(findingsFor(rep, FindingManifestMismatch)); n == 0 {
-			t.Errorf("no manifest_mismatch for an entry whose digest matches nothing: %s", dumpFindings(rep))
+		// The wrong ENTRY earns no finding while the file is still moving —
+		// no comparison against an unfinished file can convict it, and the
+		// next close's upsert replaces it regardless (§38i's ends-closed
+		// gate). The planted SIDECAR still reports above, which is what
+		// keeps the range integrity: the two claims fail independently.
+		if n := len(findingsFor(rep, FindingManifestMismatch)); n != 0 {
+			t.Errorf("manifest_mismatch ×%d against a file still being written: %s", n, dumpFindings(rep))
 		}
 		if got := rep.ExitClass(); got != ClassIntegrity {
 			t.Errorf("ExitClass = %q, want integrity", got)
