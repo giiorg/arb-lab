@@ -471,6 +471,20 @@ func checkManifestEntry(
 			Path: fact.path, Offset: -1, Detail: fmt.Sprintf(format, args...),
 		})
 	}
+	// checkDigests' continued-hour rule, at its mirror (§38i): an entry whose
+	// digest is the file's digest AT its close describes a prefix the file
+	// has grown past. Every field of the entry — digest and counts alike —
+	// is about that prefix, so there is nothing to compare against the whole
+	// file; the next close's upsert owns the rest of the story. The digest
+	// inequality keeps the ordinary closed file (all three digests equal) on
+	// the comparing path below. Unlike the sidecar side, NO clean-tail demand:
+	// whether the growth is a continuation or appended garbage, the entry is
+	// provably prefix-truth, and the garbage case already earned its one
+	// integrity finding from checkDigests — comparing prefix counts against a
+	// vandalized length would report the same event a second and third time.
+	if e.SHA256 == fact.scan.digestAtClose && e.SHA256 != fact.scan.fullDigest {
+		return nil
+	}
 	// Suppressed when the sidecar already reported the bytes changed: the
 	// manifest and the sidecar carry the same close-time digest, so a file
 	// modified after close would otherwise earn two findings for one event.
@@ -740,12 +754,23 @@ type fileScan struct {
 	// compares an entry against. fullDigest covers the COMPLETE file — it is
 	// computed past an aborted walk, like the sidecar check — so the digest
 	// comparison survives corruption that the count comparisons do not.
-	// gapRecords counts Gap records by KIND, parsed or not, because that is
-	// what the writer's own per-file counter counted. sidecarMismatch reports
-	// that checkDigests already found the bytes disagreeing with the sidecar,
-	// which is what keeps one changed file from being reported twice.
+	// digestAtClose is the digest of the file up to and INCLUDING its last
+	// Close record — for a file a restart reopened and appended to (§38i),
+	// that is the exact claim the sidecar and the manifest entry still make,
+	// which is how a legitimately continued hour is told apart from a file
+	// changed after close. The distinction needs tornTail beside it: garbage
+	// appended after a close ALSO leaves the prefix digest intact, and what
+	// separates a continuation from vandalism is that the continuation's tail
+	// decodes — so the suppression demands a walk that reached EOF with no
+	// torn or undecodable byte. gapRecords counts Gap records by KIND, parsed or
+	// not, because that is what the writer's own per-file counter counted.
+	// sidecarMismatch reports that checkDigests already found the bytes
+	// disagreeing with the sidecar, which is what keeps one changed file from
+	// being reported twice.
 	sawClose        bool
 	fullDigest      string
+	digestAtClose   string
+	tornTail        bool
 	gapRecords      uint64
 	sidecarMismatch bool
 }
@@ -902,6 +927,12 @@ func verifyFile(cfg VerifyConfig, key StreamKey, f archiveFile, st chainState) (
 			}
 		case RecordKindClose:
 			sawClose = true
+			// The mirror of preClose one line up: the rolling digest now
+			// covers this Close record too, which is exactly the span the
+			// sidecar and the manifest entry hashed at close time. A later
+			// Close overwrites it — the newest close is the one whose sidecar
+			// exists.
+			scan.digestAtClose = hex.EncodeToString(digest.Sum(nil))
 			var cp closePayload
 			if err := json.Unmarshal(rec.Payload, &cp); err != nil {
 				add(FindingMalformed, offset, "Close payload does not parse: %v", err)
@@ -946,13 +977,15 @@ func verifyFile(cfg VerifyConfig, key StreamKey, f archiveFile, st chainState) (
 	// check is a comparison against the COMPLETE file. That check needs no
 	// decoding, which is why it survives an aborted walk while the Close
 	// record's own digest does not.
+	scan.tornTail = len(s.pending()) > 0
 	digest.Write(s.pending())
 	if _, err := io.Copy(digest, fh); err != nil {
 		return scan, nil, fmt.Errorf("capture: read %s: %w", f.path, err)
 	}
 	scan.sawClose = sawClose
 	scan.fullDigest = hex.EncodeToString(digest.Sum(nil))
-	digestFindings := checkDigests(key, f, sawClose, scan.fullDigest)
+	digestFindings := checkDigests(key, f, sawClose, scan.fullDigest, scan.digestAtClose,
+		!aborted && !scan.tornTail)
 	for _, df := range digestFindings {
 		if df.Kind == FindingDigestMismatch {
 			scan.sidecarMismatch = true
@@ -1094,7 +1127,7 @@ func checkOpenContinuity(
 // because the writer writes the two together. Nothing is wrong with that file
 // beyond the crash, and FindingNoClose is that crash — so a missing sidecar is
 // only reported where one should exist.
-func checkDigests(key StreamKey, f archiveFile, sawClose bool, full string) []Finding {
+func checkDigests(key StreamKey, f archiveFile, sawClose bool, full, atClose string, tailClean bool) []Finding {
 	finding := func(kind FindingKind, detail string) []Finding {
 		return []Finding{{
 			Kind: kind, Stream: key, Window: f.window, Path: f.path, Offset: -1, Detail: detail,
@@ -1118,6 +1151,21 @@ func checkDigests(key StreamKey, f archiveFile, sawClose bool, full string) []Fi
 				filepath.Base(f.path)))
 	}
 	if fields[0] != full {
+		// A continued hour, not a corruption (§38i): the sidecar's claim is
+		// the digest of the file up to and including its Close record, and
+		// when a restart reopens the hour and appends, that claim stays TRUE
+		// of the bytes it covers while the full file has legitimately moved
+		// on. The event already has its record — the process_restart gap the
+		// reopening writer wrote — and the next close rewrites the sidecar.
+		// tailClean is what separates that from vandalism: a continuation's
+		// tail DECODES, while garbage appended after a close leaves the same
+		// intact prefix with an undecodable tail. A file whose prefix was
+		// changed matches neither digest and is still the mismatch it always
+		// was; a truncated one lost its Close record and with it the atClose
+		// digest, so the doc comment's motivating case above stays caught.
+		if tailClean && fields[0] == atClose {
+			return nil
+		}
 		return finding(FindingDigestMismatch,
 			fmt.Sprintf("sidecar says %s, the file hashes to %s", fields[0], full))
 	}

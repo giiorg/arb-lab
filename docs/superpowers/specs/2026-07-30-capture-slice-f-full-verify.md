@@ -404,3 +404,58 @@ NEW build with recovered counters — the exact path
 `TestReopenedFileClosesWithFullFileCounts` pins. Slice D's disk figure stays
 on calendar (~09:53 UTC 2026-07-31); the sync destination stays the user's
 open §38f decision, which the machinery no longer waits on.
+
+## §38i — the reopened hour: production's first finding, fixed the same hour
+
+**Found by the close-out's own verify, 3 minutes after the restart.** The
+restart closed every file mid-hour (sidecar + entry = that close's truth) and
+the new run reopened and appended, so the whole-file digest disagreed with
+both — and verify read that correct, already-recorded state as
+`digest_mismatch`, verdict INTEGRITY. `capture cat`'s first forensic job
+confirmed the shape: old Close at record 62872, a second Open, a
+`process_restart` gap saying in its own words "was closed cleanly and is
+being appended to by a new run", then live data. Only the busiest stream
+(Bybit books) showed it — the other seven reopened files had not yet flushed
+appended bytes to disk. Left unfixed it worsens: now that closes write
+manifest entries, the next restart's mid-hour verify would add THREE
+`manifest_mismatch` count findings per reopened file. "Expect 0 integrity
+findings, always" false for up to an hour after every routine restart is
+§37g's operator-training hazard verbatim.
+
+**The rule:** the scan snapshots the rolling digest at each Close record —
+`digestAtClose`, the exact span the sidecar and the entry hashed at close
+time (the mirror of `preClose` one line up, and the anchor matters: taken
+BEFORE the Close frame it never matches anything — the recomputed-check
+anchor lesson, made mechanical by a caught mutant). A sidecar that equals it
+describes an intact prefix; with a tail that DECODES, that is a continuation
+and the gap record is its story — no finding. The two controls that keep the
+integrity signal: garbage appended after a close leaves the same intact
+prefix with an undecodable tail (`tornTail`/`aborted` block the suppression —
+without the clean-tail conjunct the vandalism fixture and the continuation
+fixture are one fixture), and a claim matching NEITHER digest stays the
+mismatch it always was (truncation loses the Close record and with it
+`digestAtClose`, so checkDigests' own motivating case stays caught).
+
+**The manifest mirror differs deliberately in one conjunct:** an entry whose
+digest equals `digestAtClose` is provably prefix-truth whatever the tail
+holds, so its count comparisons are suppressed even over a vandalized tail —
+the vandalism already earned its one `digest_mismatch`, and prefix counts
+against a vandalized length would report the same event a second and third
+time (§38c's one-event-one-finding rule). An entry matching neither digest
+proves nothing and its counts ARE compared.
+
+**Rejected: document-only** ("run verify only against closed hours") — an
+operator instruction carrying what the tool should know, and the mid-hour
+window after a restart is precisely when an anxious operator verifies.
+**Rejected: rewriting the sidecar at reopen** — the sidecar is close-time
+truth; rewriting it pre-close manufactures a claim no close ever made.
+
+**Verification:** three-subtest fixture (continuation clean; garbage still
+integrity, no manifest echo; planted claim still integrity, counts compared),
+anti-vacuity guard asserting every compared field differs between prefix and
+whole-file truth, then **6/6 aimed mutations caught** — the wrong-anchor
+mutant (`preClose` for `digestAtClose`), both dropped conjuncts on the
+sidecar side, `tornTail` pinned false, and both dropped conjuncts on the
+manifest side. Live proof on the real archive mid-hour, 15:56 UTC: **0
+integrity findings, verdict COVERAGE**, the eight `unmanifested` T15 rows the
+honest transitional state that the next close heals.

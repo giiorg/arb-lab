@@ -103,6 +103,11 @@ too: `manifest_missing_file` on a copy or on this root is a file that EXISTED an
 findings for the open hour are the honest description of an hour not yet closed. The restart seam
 itself is recorded evidence (`process_restart` gap; the restart hour's file is closed by the NEW
 build with recovered counters — the exact path `TestReopenedFileClosesWithFullFileCounts` pins).
+**"Always" includes the hour a restart reopened (§38i):** production's first verify, run 3 minutes
+after the restart, read the legitimately continued hour as `digest_mismatch`/INTEGRITY — fixed the
+same hour with the `digestAtClose` rule (a sidecar or entry equal to the digest AT the file's close
+describes an intact prefix; a decoding tail makes it a continuation, the gap record its story;
+vandalized or truncated files still report). 6/6 mutations caught; live re-verify: 0 integrity.
 
 **Read `docs/superpowers/specs/2026-07-30-capture-slice-f-full-verify.md`** — §38 is the whole
 slice; §38h is the close (checklist findings, 30/30 mutations, the two driver-shaped test gaps).

@@ -1,6 +1,8 @@
 package capture
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io/fs"
 	"os"
@@ -770,6 +772,149 @@ func TestVerifyManifestCrossChecks(t *testing.T) {
 					t.Errorf("ExitClass = %q, want integrity — the completeness check for the day did not run", got)
 				}
 			})
+		}
+	})
+}
+
+// TestVerifyAcceptsAReopenedHour is §38i, from production's first hour: a
+// restart mid-window closes the file (sidecar + manifest entry = that close's
+// truth) and the new run reopens and appends, so until the next close the
+// whole-file digest disagrees with BOTH — and the first live verify read that
+// correct, already-recorded state as INTEGRITY. The rule: a sidecar or entry
+// that equals the digest AT the file's close describes an intact prefix; with
+// a tail that decodes cleanly, that is a continuation, and the process_restart
+// gap record is its story. Anti-vacuity: every compared field of the entry
+// differs from the whole-file value by construction, so "the comparison was
+// suppressed" cannot collapse into "the comparison passed".
+func TestVerifyAcceptsAReopenedHour(t *testing.T) {
+	w1 := fixtureWindow(t, 1)
+
+	// build lays down the continued shape and returns the file path plus the
+	// old close's truth, which the sidecar and manifest entry carry.
+	build := func(t *testing.T, root string) (path string, prefix ManifestEntry) {
+		t.Helper()
+		cfg := builtCfg(root, w1)
+		b := newArchive(t, root, perpKey(), w1)
+		b.open(0)
+		b.data(1)
+		b.data(2)
+		b.fillAlive(cfg)
+		b.seal()
+		sum := sha256.Sum256(b.buf)
+		path = perpKey().FilePath(root, w1, verifyPeriod)
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			t.Fatalf("rel: %v", err)
+		}
+		prefix = ManifestEntry{
+			Path: filepath.ToSlash(rel), Window: w1.Format(time.RFC3339),
+			SHA256: hex.EncodeToString(sum[:]), Records: b.records, Gaps: b.gaps,
+			LastSeq: b.lastSeq, ClosedAt: b.at.UTC().Format(time.RFC3339Nano),
+			Source: ManifestSourceClose,
+		}
+
+		// The new run: second Open chaining the old last seq, the restart gap
+		// the real writer records, more data — every compared field moves.
+		b.openAs(perpKey(), w1, b.lastSeq)
+		b.gap(Gap{Cause: CauseProcessRestart, Detail: "closed cleanly, appended by a new run"})
+		b.data(3)
+		if b.records == prefix.Records || b.gaps == prefix.Gaps || b.lastSeq == prefix.LastSeq {
+			t.Fatalf("whole-file truth {%d,%d,%d} must differ from the prefix {%d,%d,%d} in every compared field",
+				b.records, b.gaps, b.lastSeq, prefix.Records, prefix.Gaps, prefix.LastSeq)
+		}
+
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(path, b.buf, 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		body := prefix.SHA256 + "  " + filepath.Base(path) + "\n"
+		if err := os.WriteFile(path+digestExt, []byte(body), 0o644); err != nil {
+			t.Fatalf("write sidecar: %v", err)
+		}
+		if err := upsertManifestEntry(root, prefix); err != nil {
+			t.Fatalf("manifest entry: %v", err)
+		}
+		return path, prefix
+	}
+
+	t.Run("a cleanly continued hour is not an integrity finding", func(t *testing.T) {
+		root := t.TempDir()
+		build(t, root)
+		rep := verifyOK(t, builtCfg(root, w1))
+		for _, k := range []FindingKind{FindingDigestMismatch, FindingManifestMismatch} {
+			if n := len(findingsFor(rep, k)); n != 0 {
+				t.Errorf("%s ×%d on a continued hour: %s", k, n, dumpFindings(rep))
+			}
+		}
+		if n := len(findingsFor(rep, FindingGapRecord)); n != 1 {
+			t.Errorf("gap_record ×%d, want the restart's own story told once: %s", n, dumpFindings(rep))
+		}
+		if got := rep.ExitClass(); got == ClassIntegrity {
+			t.Errorf("ExitClass = %q — a routine restart must not read as corruption: %s",
+				got, dumpFindings(rep))
+		}
+	})
+
+	t.Run("garbage after the close is still a mismatch", func(t *testing.T) {
+		// The vandalism control: the SAME intact prefix, an undecodable tail.
+		// Without the clean-tail conjunct these two fixtures are one fixture.
+		root := t.TempDir()
+		path, _ := build(t, root)
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		if _, err := f.Write([]byte{0xFF, 0xFF}); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("close: %v", err)
+		}
+		rep := verifyOK(t, builtCfg(root, w1))
+		if n := len(findingsFor(rep, FindingDigestMismatch)); n != 1 {
+			t.Errorf("digest_mismatch ×%d, want 1 — an undecodable tail is not a continuation: %s",
+				n, dumpFindings(rep))
+		}
+		// The entry still equals the digest at the close, so it is provably
+		// prefix-truth: one event, one finding — no count-mismatch echoes.
+		if n := len(findingsFor(rep, FindingManifestMismatch)); n != 0 {
+			t.Errorf("manifest_mismatch ×%d beside digest_mismatch: one vandalized tail, several findings: %s",
+				n, dumpFindings(rep))
+		}
+		if got := rep.ExitClass(); got != ClassIntegrity {
+			t.Errorf("ExitClass = %q, want integrity", got)
+		}
+	})
+
+	t.Run("a stale prefix claim matches neither digest and stays caught", func(t *testing.T) {
+		// The third corner: a continued hour whose sidecar and entry carry a
+		// WRONG digest. Suppression must key on equality with the digest at
+		// the close, not on the mere existence of a mid-file Close record.
+		root := t.TempDir()
+		path, prefix := build(t, root)
+		body := planted + "  " + filepath.Base(path) + "\n"
+		if err := os.WriteFile(path+digestExt, []byte(body), 0o644); err != nil {
+			t.Fatalf("plant sidecar: %v", err)
+		}
+		day, err := prefix.day()
+		if err != nil {
+			t.Fatalf("day: %v", err)
+		}
+		editManifest(t, root, day, func(m *Manifest) { m.Entries[0].SHA256 = planted })
+		rep := verifyOK(t, builtCfg(root, w1))
+		if n := len(findingsFor(rep, FindingDigestMismatch)); n != 1 {
+			t.Errorf("digest_mismatch ×%d, want 1: %s", n, dumpFindings(rep))
+		}
+		// A planted entry digest proves NOTHING about the prefix, so its
+		// counts are compared — the suppression keys on equality with the
+		// digest at the close, not on a mid-file Close record existing.
+		if n := len(findingsFor(rep, FindingManifestMismatch)); n == 0 {
+			t.Errorf("no manifest_mismatch for an entry whose digest matches nothing: %s", dumpFindings(rep))
+		}
+		if got := rep.ExitClass(); got != ClassIntegrity {
+			t.Errorf("ExitClass = %q, want integrity", got)
 		}
 	})
 }
