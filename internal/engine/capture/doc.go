@@ -70,6 +70,13 @@
 // §32c's source 4 — Binance spot partial depth, the one stream with no wire-level
 // gap check available at all — is verified exactly as strictly as the other six.
 //
-// Not here yet: `capture run`, config and observability (the rest of slice C), the
-// REST overlay (E), and `capture cat` (F).
+// Slices C–F have since landed: `capture run`'s config and composition root live
+// in internal/app/capture and cmd/arblab, the REST overlay is rest.go (E), and
+// slice F added the manifest (manifest.go) and `capture cat` (cat.go).
+//
+// The frame is also reused OUTSIDE the archive: engine/dispatch's sequence log
+// (§39n) writes this container through AppendRecord and walks it through
+// WalkRecords. That does not move the fence — it is unidirectional on purpose:
+// dispatch may import capture, capture never imports the dispatcher, and this
+// package learns nothing about what a CaptureSeq means to that caller.
 package capture

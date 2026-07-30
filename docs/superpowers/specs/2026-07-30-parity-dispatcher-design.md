@@ -332,6 +332,121 @@ the core. Marker grep zero. The reading pass's one borderline claim — timer se
 
 ---
 
+### §39n — slice B design (session 42, 2026-07-30): the dispatch log's format, decided before building
+
+§39e fixed the discipline (capture framing, sequences not payloads, codec reuse); this section fixes
+the remaining shape. Each decision carries its rejected alternative.
+
+**§39n-1 — the container is §32e's frame VERBATIM, and the kinds are reused with their capture
+meanings.** A dispatch log file is `ARBCAP` v1.0: file header, then `RecordKindData` frames whose
+payloads are sequence records, closed by one `RecordKindClose` seal. **Rejected: new `RecordKind`s
+(`DispatchEnvelope`/`DispatchTimer`).** Adding a kind bumps `FormatMinor` (the codec's own
+versioning sentence), and `ParseFileHeader` refuses an exact mismatch in BOTH directions — so the
+bumped build refuses the v1.0 production archive it is mid-way through capturing, or the refusal
+semantics get relaxed mid-production for the benefit of a file that is not the archive. §32e's kind
+roster is also normative core text, so the two kinds would be a core edit spent on container
+plumbing. **Rejected: a dispatch-owned magic/version.** That is the second framing §39e already
+refused, wearing one field's clothes. The kinds transfer with their meanings intact: `Data` is "a
+payload this container did not construct", `Close` is "the absence of me is the crash signal" —
+both exactly what the log needs them to say. The capture PACKAGE stays ignorant of all of this
+(§32n's fence: the import is dispatch → capture; capture never learns what a `CaptureSeq` means to
+its caller).
+
+**§39n-2 — frame field mapping: nothing is stored twice.** `CaptureSeq` **is** the
+`IngressSeq`/`DispatchSeq` — the frame already has a dense-per-stream sequence field, and a payload
+copy would be a second thing to disagree (the `Sink` doc's own rule, applied to the file).
+`RecvTime` is the input's own replay-stable instant: the envelope's `RecvTime`, the timer's
+scheduled `At` — never a delivery-time reading, because the parity probe's byte-identity claim
+makes any per-run stamp a defect by construction. `Mono` is the constant 0 for the same reason,
+stated rather than left as an accident: Mono is per-run process timing, the log's authority is
+order, and a real reading here would break byte-identity while measuring nothing the log answers
+for. (A timer scheduled for the zero time is refused by the codec's own `RecvTime` check — an
+honest refusal, since such a timer cannot exist under §11's zero-value rule.)
+
+**§39n-3 — the payload is JSON, discriminated by a `k` token, with no version integer.** Precedent
+is gap.go's header/payload boundary: fixed-width lives in the frame header, self-describing tokens
+live in the payload where they cost bytes only on records that carry them. An envelope entry
+(`k:"env"`) holds the five `SourceID` fields flat, `accept`, `venue_seq`, `source_time_ns` (omitted
+when the venue sent none — absence is the semantic, so absence is the encoding) and `prio`; a timer
+entry (`k:"timer"`) holds `id` and `prio` (`At` rides in the frame). **Rejected: a payload-schema
+version field.** Nothing would ever bump it and the reader would compare it against a constant — a
+door only tests walk through, §39m-5's argument one layer down. The `k` token IS the refusal
+surface: an unknown token is refused, a shape change is a new token, an additive field is
+compatible (readers ignore unknown JSON fields, stated as the evolution contract), and a frame-
+layout change belongs to the container's version, not ours.
+
+**§39n-4 — one `Close` record seals the log, and it is what bounds the frameLen residual.**
+`errors.go`'s documented residual — a corrupt final frame length mis-reads as a torn tail — is
+WIDER here than in the archive until a seal exists, because the log has no digest layer. Worse, a
+buffered writer can crash having flushed only whole frames: `TornBytes` 0, and without a seal that
+file is byte-for-byte indistinguishable from a clean end. `RecordKindClose`'s own argument ("its
+absence is the signal") covers both: the reader reports `Closed`, and a mis-diagnosed tail always
+surfaces as a missing seal. The Close frame's `CaptureSeq` repeats the last entry's seq and its
+payload carries the entry count (`k:"close"`, `entries`) — the one deliberate duplication, because
+a seal that asserts nothing seals nothing; the reader cross-checks both. Its `RecvTime` is the last
+entry's instant — the only honest replay-stable time a clockless writer has. An EMPTY log gets no
+seal (no instant exists to stamp one); header-only reads as empty, torn-unknown. **No Open record:**
+its content would be provenance, and provenance + rotation + fsync policy are one bundle owed to
+the live pump's design — the deferral names its construct, the composition root that first holds a
+`TimeSource` for this log (§39l-3's question decides when that exists).
+
+**§39n-5 — the writer is a `Sink`, write-ahead of the sink it wraps.** `LogWriter` freezes the
+entry to the file BEFORE the wrapped sink sees the item: a log missing an entry the state applied
+un-freezes the arbitration §3.5 persists (replay would re-derive an order live already decided),
+while the reverse — a logged entry the state never applied because the process died between the
+two — replays harmlessly, since replay re-applies from the log into a fresh state. Density is
+ASSERTED, not trusted (`seq == last+1` from 1): §39h's argument verbatim — a writer that verifies
+the dispatcher's one guarantee with one comparison is strictly better than one that trusts it, and
+the refusal also catches a `LogWriter` joined to a dispatcher that has already dispatched (a log
+that starts mid-run is a lie about where the order began). **Fresh files only** (`O_EXCL`): an
+append door would be walked only by tests, because no dispatcher counter survives a crash in this
+milestone — resuming a dispatch sequence is the journal's business (milestone 3), and the deferral
+names that construct. **Rejected: `capture.Writer` wholesale.** `StreamKey` cannot name a
+non-venue stream (its `SourceID` validates against real venues); rotation, alive ticks, the
+advisory lock and the manifest are archive-tool policy on the far side of §31e's fence; and the
+writer's clock requirement would put a `TimeSource` in a package whose clocklessness is
+compile-shaped (§39m-7).
+
+**§39n-6 — the reader recovers exactly what capture recovers, and refuses exactly what capture
+refuses.** `ReplayLog(path, consumer)` walks the file with the container's own scanner: a torn tail
+is the good prefix plus a reported `TornBytes` — recovered, never silent, never truncated on disk
+(the reader owns recovery here; there is no appending writer to hand a clean file to) — and
+everything else (`ErrChecksum`, a reserved bit, an undeclared kind, a zero-filled region) is a
+refusal naming the offset, capture's `ErrTruncated`-versus-everything-else split inherited whole.
+On top of the container's checks, the log's own: `CaptureSeq` dense from 1 (a hole in an
+in-process-written log is not a drop, it is a wrong file), frame kinds outside {`Data`, `Close`}
+refused, a record after the seal refused, the seal's count cross-checked against entries seen, and
+the decoded `SourceID` re-validated (the writer trusted the dispatcher's post-stamp check; the
+reader re-deriving it is the two-independent-sides discipline, cheap). The consumer mirrors `Sink`'s
+shape — `OnEnvelopeRecord`/`OnTimerRecord` — because replay's job is re-driving, and a consumer
+shaped like the write side composes with slice C's wiring without an adapter.
+
+**§39n-7 — capture exports `WalkRecords`, and the recovery stays proved once.** The sliding-window
+scanner (`ensure()`'s decode-only-on-exhausted-buffer property, the one whose loss truncates a
+healthy file to its first 64 KiB) is the part §39e's "two torn-tail recoveries to prove" rejection
+protects. It gets ONE public door — `WalkRecords(f, fn(Record, raw []byte)) (WalkSummary, error)` —
+and `scanArchive` is rebuilt on it, so the existing recovery battery keeps biting the shared
+machinery and the export cannot drift from the recovery it claims to be. (The raw-bytes argument
+exists because scanArchive's digest needs the exact frame bytes; the file header's contribution is
+the constant `AppendFileHeader(nil)`.)
+
+**§39n-8 — checklist suspects and mutation roster, named at design time.** Suspects, before any
+battery runs: a fixture log holding only ONE entry kind (collapses the `k` discriminator and the
+timer-positions claim — the realistic log interleaves timers among envelopes); truncation pinned to
+a record boundary (collapses `TornBytes` math — the tear must land mid-record, and separately AT a
+boundary to prove the seal catches what `TornBytes` cannot); every envelope fixture carrying a
+`SourceTime` (collapses the absent-vs-present encoding — the §32c reality is that some streams
+never send one); vandalism only in CRC-covered bytes (the frameLen field is outside the checksum —
+§39n-4's residual needs its own fixture); a single-entry log (collapses "dense" against "starts at
+1" — two rules, one fixture value); and the WAL-order claim needs a FAILING wrapped sink, or
+log-before-next and next-before-log are indistinguishable (the §38h driver lesson: nothing had ever
+driven the refusing branch). Mutation targets: the density comparison (`==` vs `>=`), start-at-1,
+the WAL order swap, seq advance on Close, the kind-roster refusal, the `k`-token dispatch swap, the
+seal's count cross-check, the after-Close refusal, `TornBytes` reporting, the `source_time_ns`
+absence round-trip, and `Mono`/`RecvTime` byte-identity (two identical runs, one comparison).
+
+---
+
 ## RESUME HERE
 
 **Slice A is closed (§39m). The next session builds slice B** (§39j): the dispatch log —

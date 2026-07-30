@@ -40,6 +40,95 @@ const maxFrame = MaxRecord + 4
 // record rather than by every open.
 const scanBufInit = 64 << 10
 
+// WalkSummary is what a walk over an existing framed file turned out to be —
+// the container-level half of scanResult, exported for callers that reuse the
+// frame outside the archive (the dispatch log, §39n-7). The archive-specific
+// aggregates (lastSeq, hadClose, the digest) stay in scanResult, built in its
+// callback, because they are claims about the ARCHIVE's kinds and a caller with
+// different kind semantics would inherit them as wrong answers.
+type WalkSummary struct {
+	// Fresh reports a file with no bytes at all — it needs a header, not a
+	// recovery. Distinct from "a header and no records", which reports
+	// GoodEnd == FileHeaderLen with zero calls to the callback.
+	Fresh bool
+
+	// GoodEnd is the offset one past the last record that decoded cleanly:
+	// where an appender may resume, and where a torn tail would be truncated to.
+	GoodEnd int64
+
+	// TornBytes is how many trailing bytes end inside a record. Zero for a file
+	// that ended on a record boundary — which is why a torn tail is not the only
+	// crash signal a format can have; see §39n-4's seal argument.
+	TornBytes int64
+}
+
+// WalkRecords walks an existing framed file from the start, calling fn for each
+// record that decodes cleanly. raw is the record's exact frame bytes, valid only
+// for the duration of the call — a caller that keeps them must copy.
+//
+// The refusal split is the package's standing one: a tail that ends INSIDE a
+// record is recovery (reported via TornBytes, no error), while bytes that are
+// present and wrong — a checksum, a reserved bit, an undeclared kind, a
+// zero-filled region — are ErrArchiveCorrupt naming the offset. An error from fn
+// stops the walk and is returned wrapped with the record's offset.
+//
+// This is the ONE public door over the sliding-window scanner below, and
+// scanArchive is rebuilt on it deliberately (§39n-7): the recovery's tricky
+// property — decode only on an exhausted buffer, or every record straddling a
+// read boundary reports as a torn tail — stays proved by one battery for every
+// caller.
+func WalkRecords(f *os.File, fn func(rec Record, raw []byte) error) (WalkSummary, error) {
+	var sum WalkSummary
+	st, err := f.Stat()
+	if err != nil {
+		return sum, fmt.Errorf("stat: %w", err)
+	}
+	if st.Size() == 0 {
+		sum.Fresh = true
+		return sum, nil
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return sum, fmt.Errorf("seek: %w", err)
+	}
+	s := &scanner{f: f, backing: make([]byte, scanBufInit)}
+
+	if err := s.ensure(); err != nil {
+		return sum, err
+	}
+	headerLen, err := ParseFileHeader(s.pending())
+	if err != nil {
+		// Not recoverable and deliberately not truncated. A file whose first
+		// eight bytes are wrong is not a torn tail — ParseFileHeader says so in
+		// its own comment — and truncating it to zero would report a gap that
+		// never happened while destroying whatever is actually there.
+		return sum, fmt.Errorf("%w: %w", ErrArchiveCorrupt, err)
+	}
+	sum.GoodEnd = int64(headerLen)
+	s.lo += headerLen
+
+	for {
+		if err := s.ensure(); err != nil {
+			return sum, err
+		}
+		rec, n, err := DecodeRecord(s.pending())
+		if err != nil {
+			if !errors.Is(err, ErrTruncated) {
+				return sum, fmt.Errorf("at offset %d: %w: %w", sum.GoodEnd, ErrArchiveCorrupt, err)
+			}
+			// ensure() has already read everything the file will give, so a
+			// truncation here is final: either the file ended exactly on a
+			// record boundary (nothing pending) or it ended inside one.
+			sum.TornBytes = int64(len(s.pending()))
+			return sum, nil
+		}
+		if err := fn(rec, s.pending()[:n]); err != nil {
+			return sum, fmt.Errorf("at offset %d: %w", sum.GoodEnd, err)
+		}
+		sum.GoodEnd += int64(n)
+		s.lo += n
+	}
+}
+
 // scanResult is what an existing archive file turned out to be.
 type scanResult struct {
 	// fresh reports a file with no bytes at all, which needs a header rather
@@ -76,53 +165,20 @@ type scanResult struct {
 }
 
 // scanArchive walks an existing archive file and reports what may be appended to.
+//
+// Built on WalkRecords (§39n-7), with the archive's own aggregates in the
+// callback. The digest is seeded with the file header BEFORE the walk, because
+// the callback digests frames as they stream past and a hash is sequential —
+// and the header bytes a validated file carries are exactly the constant
+// AppendFileHeader produces, or WalkRecords would have refused it. A fresh file
+// hands back an empty digest, because the caller writes (and digests) the
+// header itself in that branch.
 func scanArchive(f *os.File) (scanResult, error) {
 	res := scanResult{digest: sha256.New()}
-	st, err := f.Stat()
-	if err != nil {
-		return res, fmt.Errorf("stat: %w", err)
-	}
-	if st.Size() == 0 {
-		res.fresh = true
-		return res, nil
-	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return res, fmt.Errorf("seek: %w", err)
-	}
-	s := &scanner{f: f, backing: make([]byte, scanBufInit)}
+	res.digest.Write(AppendFileHeader(nil))
 
-	if err := s.ensure(); err != nil {
-		return res, err
-	}
-	headerLen, err := ParseFileHeader(s.pending())
-	if err != nil {
-		// Not recoverable and deliberately not truncated. A file whose first
-		// eight bytes are wrong is not a torn tail — ParseFileHeader says so in
-		// its own comment — and truncating it to zero would report a gap that
-		// never happened while destroying whatever is actually there.
-		return res, fmt.Errorf("%w: %w", ErrArchiveCorrupt, err)
-	}
-	res.digest.Write(s.pending()[:headerLen])
-	res.goodEnd = int64(headerLen)
-	s.lo += headerLen
-
-	for {
-		if err := s.ensure(); err != nil {
-			return res, err
-		}
-		rec, n, err := DecodeRecord(s.pending())
-		if err != nil {
-			if !errors.Is(err, ErrTruncated) {
-				return res, fmt.Errorf("at offset %d: %w: %w", res.goodEnd, ErrArchiveCorrupt, err)
-			}
-			// ensure() has already read everything the file will give, so a
-			// truncation here is final: either the file ended exactly on a
-			// record boundary (nothing pending) or it ended inside one.
-			res.tornBytes = int64(len(s.pending()))
-			return res, nil
-		}
-		res.digest.Write(s.pending()[:n])
-		res.goodEnd += int64(n)
+	sum, err := WalkRecords(f, func(rec Record, raw []byte) error {
+		res.digest.Write(raw)
 		res.records++
 		res.hadClose = rec.Kind == RecordKindClose
 		if rec.Kind == RecordKindData {
@@ -131,8 +187,15 @@ func scanArchive(f *os.File) (scanResult, error) {
 		if rec.Kind == RecordKindGap {
 			res.gaps++
 		}
-		s.lo += n
+		return nil
+	})
+	res.fresh = sum.Fresh
+	res.goodEnd = sum.GoodEnd
+	res.tornBytes = sum.TornBytes
+	if res.fresh {
+		res.digest = sha256.New()
 	}
+	return res, err
 }
 
 // scanner is a sliding window over a file, big enough to hold one whole record.
