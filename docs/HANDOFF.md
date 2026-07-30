@@ -80,7 +80,7 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 ## START HERE (updated end of session 34, 2026-07-30 — slice C is **PARTLY BUILT**: transport, live `Mono` and **verify** have landed; **three items remain and funding capture is NOT yet running**)
 
 **Branch `feat/milestone-1-foundation`.** Verify rather than trust: `git status --short` (clean),
-`git rev-list --left-right --count @{u}...HEAD` (**10 ahead**, head `87bb26b`), and
+`git rev-list --left-right --count @{u}...HEAD` (**11 ahead**, head `45f127e`), and
 `grep -rn "SPEC EDIT OWED" internal/ tools/` — expect **exactly four**, unchanged from session 33:
 the three §34 left on the design's §12 roster, plus §36a's `nhooyr.io/websocket` rename in
 `internal/engine/venue/transport/doc.go`. `make ci` green, all six gates clean, `-race` clean on a
