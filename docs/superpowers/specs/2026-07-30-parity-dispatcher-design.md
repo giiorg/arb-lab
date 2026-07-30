@@ -512,31 +512,248 @@ self-describing text in the bytes.
 
 ---
 
+### §39p — slice C design (session 43, 2026-07-30): the wiring, decided before building
+
+Slice C wires the pipeline §39j names and closes on the parity probe. The design questions the
+RESUME block listed on arrival are answered here, plus three the survey surfaced that no earlier
+section anticipated: the scope of the venue decoding the wiring cannot exist without (§39p-2), the
+raw-arrival **merge rule** an archive of per-stream files forces (§39p-4), and the §39m-5 absence
+door, which the wiring FORCES open (§39p-5).
+
+**§39p-1 — scope: the funding path, both venues, and no books.** The wiring replays Binance
+`markPrice` + `fundingInfo` and Bybit `tickers` into `marketdata`'s funding use case and
+`engine/state`'s funding cache. The book path is NOT wired in this slice, though `marketdata`'s
+book side exists and is proven at the normalized level. Grounds: the probe's subject is the
+wiring's determinism, which is stream-agnostic; the funding path is §31b's kill-gate path, so its
+decoders are step-5 work brought forward, not speculation; and the book decoders (three wire
+formats, snapshot/delta discrimination, price-level parsing into `fixedpoint`) are a build with
+its own oracle-and-battery needs that would double this slice. **Rejected: books too** — it makes
+the parity probe no stronger (same dispatcher, same lanes) and couples this close to a decoder
+battery nobody has designed. **The debt is named with its construct:** the book wiring lands with
+the book decoders, and §39j's "mailbox depth pinned to 1 collapses coalescing-lineage recording"
+checklist suspect transfers to that slice — funding mailboxes use `NoCoalescing`, because §3.5
+scopes coalescing to reconstructed snapshots and a funding reading is not one.
+
+**§39p-2 — the venue decoders live in `engine/venue`, beside the DTOs they produce.** New in this
+slice: a Binance `markPrice` frame decoder, a Bybit `tickers` accumulator, and a Binance
+`fundingInfo` overlay — wire JSON in, `venue.Funding` (or overlay state) out. `engine/venue`
+already owns the DTO and the driving adapter's doc names it the one file a venue shape-change
+breaks; decoders anywhere else would split that property. The live WS clients (milestone 3) reuse
+them unchanged. Verified facts they encode (Profiles §1 + the archive itself, which is the ground
+truth the fixture is cut from): Bybit's ticker is a **delta stream** — full state only on the
+post-subscribe `type:"snapshot"` message, funding fields on a delta only when they change (~1/min
+for `fundingRate`, possibly never in a window for interval/cap), `fundingIntervalHour` is a JSON
+**string**, `nextFundingTime` a string of epoch-ms, and the ticker carries `fundingCap` but **no
+floor**. Binance's `markPrice` carries `r`/`T`/`E` and **no interval, cap or floor** — those come
+only from the `fundingInfo` REST overlay, where BTCUSDT is **present** (±0.00300, 8h, measured
+2026-07-29) and `updateTime` is null for exactly our symbol.
+
+Three decoding decisions, each with its rejected twin:
+- **Emit `venue.Funding` only when a message carries at least one funding field** (snapshot
+  always does). Rejected: emit on every delta — ~10/s identical readings whose only news is
+  bid/ask, which is not funding news (§31b: the reading is the venue's policy computation), and
+  every one would round-trip the full two-hop dispatch for nothing.
+- **`VenueSeq` is 0 for both funding streams (`SeqAvailable` false).** Rejected: Bybit's `cs` —
+  it counts matching-engine events we mostly do not see, so `advances()` would report a sequence
+  gap on virtually every funding-bearing message, and `GapDetected` would become noise that
+  drowns the real signal. Arrival order is the fallback `advances()` documents as ordinary.
+- **Bybit's floor is NOT synthesized as `-fundingCap`.** The symmetric assumption is unverified
+  (Profiles routes the floor through `instruments-info`, which the capture set does not poll).
+  Instead the accumulator holds cap and floor as the ticker gives them — cap live, floor from the
+  snapshot's... the snapshot carries no floor either, so the honest encoding is: **floor :=
+  -cap is refused; the reading is emitted with `Floor = -Cap` ONLY if Profiles verifies
+  symmetry, else the slice records the fact it needs and polls nothing.** Resolution recorded at
+  build time in §39q after checking Profiles §5's Bybit verification notes; if unverifiable from
+  the doc set, `Floor` mirrors `-Cap` with a `[SPEC EDIT OWED]` marker against Profiles §1
+  demanding the verification, because an unstated floor read as zero would invert the clamp
+  check (`ErrClampInverted`) on every negative-cap regime.
+- **A `fundingInfo` response missing the requested symbol emits nothing** (state incomplete, like
+  Bybit before its snapshot) rather than applying "absent ⇒ 8h". The 8h default needs cap/floor
+  companions that are per-symbol-class (±0.3% BTC, ±2% alts), our symbol is present in measured
+  fact, and a default table built now would be built for no caller. Construct named: the
+  multi-symbol capture config is where the default table becomes buildable.
+
+**§39p-3 — the ingestion seam is `internal/engine/replay`, and `AcceptOrdinal` burns per record.**
+New package: the archive walker/merger, the ordinal counter, and both sim pumps (§39p-6/7). It is
+`engine/` machinery — imports `capture`, `venue`, `dispatch`, `platform/*`, is imported by
+`app/`, and no context layer ever sees it. **The stamping rule is §3.5 verbatim:** every consumed
+Data/Rest record advances the process-wide ordinal — including records that emit no envelope (a
+non-funding Bybit delta is a raw input that produced no dispatched envelope, §3.5's own
+coalescing case) — and the emitted envelope inherits the ordinal of the record that triggered it.
+Rejected: stamping only emitting records — it re-derives the compressed ordinal §3.5 explicitly
+refuses ("forcing it would require skipping ordinals" is the argument in reverse: renumbering
+makes the ordinal a function of the decoder's emission policy, so adding a decoder renumbers the
+audit trail of every other stream). Records with kinds Open/Alive/Gap/Close/ClockStep are capture
+metadata, skipped without burning ordinals: they are evidence about the archive, not inputs the
+live pipeline ever dispatched — and replay does NOT re-verify integrity (`capture verify` is that
+authority, already proven; a second verdict here would be a second authority §31b-style).
+
+**§39p-4 — the merge rule: `(RecvTime, stream key, CaptureSeq)`, and why it is honest.** The
+archive is per-stream files; raw arrival order across streams must be reconstructed. Order by the
+record's `RecvTime` (the injected clock's own arrival stamp), ties broken by the stream's sort key
+(the `cmpSource` shape: field-wise, total, meaning-free), then `CaptureSeq`. A cross-stream tie is
+two frames the recorded clock could not order — live arrival would have resolved it by scheduler
+accident, and §3.5's own doctrine (freeze outcomes, not deliberations) says any stable resolution
+is as honest as the accident. **Rejected: `SourceTime`** — §3.5 forbids it as a reorder key in
+exactly these words. **Rejected: interleaving by `Mono`** — meaningful only within one process
+run, and the fixture's window straddles a restart on purpose.
+
+**§39p-5 — the absence door opens, and it opens in `Envelope.Validate`'s scope, not in the
+dispatcher.** Wiring `FundingIngest` arms real silence timers; a firing runs `OnSilence`, which
+publishes the one envelope §3.5 derives from the absence of input, `Trigger` — and therefore
+`AcceptOrdinal` — zero. Today `Envelope.Validate` refuses `AcceptOrdinal == 0` unconditionally,
+so the dispatcher's post-stamp check would refuse the exact envelope §3.5 says is legal. This is
+the §39m-5 deferral's construct arriving, and the resolution follows the core's own sentence
+structure: §3.5 makes the **producer** the refuser of zero on input-derived envelopes ("a
+producer MUST refuse a zero ordinal on an input-derived envelope"), and makes zero the
+absence-derived envelope's one legal reading. `Validate` cannot see derivation, so its ordinal
+clause is a true rule stated without its scope — the v0.9.8 mechanism exactly. **The change:
+`Envelope.Validate` drops the `AcceptOrdinal` clause; the producer-side guards carry the rule**
+(the ingestion seam stamps structurally; `FundingIngest.Ingest` already refuses `trigger == 0`
+as `ErrNoTrigger`, and the book path mirrors it), and the dispatcher keeps calling `Validate`
+unchanged — §3.5's "Validate is the dispatcher's post-stamp check" stays true in code. **This is
+a spec edit, marked `[SPEC EDIT OWED]` at the change:** §3.5's clause "it requires both sequence
+fields" narrows to `IngressSeq`, with the ordinal's zero governed by the producer rule two
+sentences earlier. §39f-4's "the dispatcher refuses a zero ordinal" was a transcription shift of
+that producer-subject sentence — recorded here as corrected, not carried forward. **Rejected:
+the dispatcher branches on `errors.Is(err, ErrAcceptOrdinalUnset)`** — it makes "Validate is the
+dispatcher's check" false in code while keeping it true in prose, which is drift wearing
+compliance's clothes. **Rejected: a first-class absence bit on the envelope** — §3.5 made zero
+the encoding; a second copy can disagree. Consequence accepted and recorded: an ingestion that
+forgets to stamp now surfaces at the use-case seam as a SINK error (stamp spent, entry logged,
+replays into the same refusal deterministically) rather than as a pre-dispatch refusal — one
+layer later, equally loud, and the logged refusal is honest history rather than a hole.
+
+**§39p-6 — the generate pump: same-instant batches, timers by due instant, drain between.** The
+driver owns `TestClock` (§39f-6). Loop: (1) if the dispatcher can `Step`, step — the rank drains
+due timers first by construction; (2) when nothing is dispatchable, compare the earliest pending
+timer against the next record: if the timer is due at or before the record's `RecvTime`,
+`AdvanceToNextTimer` and resume stepping; (3) otherwise `SetNow(record.RecvTime)` and ingest the
+record **together with every following record sharing its exact `RecvTime`** (a same-instant
+batch), then resume stepping. **The batch clause is what keeps the arbitration from collapsing:**
+ingest-one-drain-fully never has two mailboxes ready at once, so `pickMarket` would run its whole
+life with one candidate — §39j's named suspect. Same-instant records are genuinely concurrent per
+the recorded clock, so contending them is fidelity, not fabrication. At ns resolution production
+batches are singletons; the crafted fixture (§39p-8) forces multi-source batches. **The sim's
+time domain is the archive's:** after the last record, dispatch drains, due timers at or before
+the final instant fire, and the run stops — pending timers beyond the archive stay unfired,
+because beyond the archive there is no world to re-judge. End-of-run assertions: `Dropped() == 0`
+for every source (a drop in the sim means the driver's rule is wrong; live drops are legitimate
+and recorded), and the mailboxes empty.
+
+**§39p-7 — the replay pump follows the log; it never arbitrates.** §3.5: replay re-applies the
+persisted log, *not regenerating dispatch order*. The replay driver runs the same merge and
+ingestion (payload re-derivation — the log stores sequences, the archive stays the content
+authority, §39n), but consumption is **directed**: each log entry names what must dispatch next —
+an envelope entry names its `SourceID` and the pump consumes that mailbox's head, cross-checking
+`AcceptOrdinal`, `VenueSeq`, `RecvTime` and `Prio` against the entry before stamping the entry's
+own `IngressSeq`; a timer entry advances the clock to the entry's instant and demands the
+`TimerSource` yield the matching firing. Any disagreement — wrong head, missing timer, dry
+mailbox — is a refusal naming the sequence position: archive and log have diverged and neither
+may be repaired from the other. The replay pump wraps the same sink chain in its own `LogWriter`,
+so the probe's strongest form is free: **the re-driven log must byte-equal the log it followed.**
+
+**§39p-8 — the wiring and probe live in `internal/app/sim`; two fixtures, both real-format.** The
+composition root: `module.New` over a sim `FreshnessConfig` store, the router sink (payload
+type-switch: `venue.Funding` → `FundingDispatch.Deliver`, `ports.FundingSnapshot` →
+`state.Cache.PutFunding`, unknown → refusal; `OnTimer` → `FundingDispatch.Timer`, with
+`ErrSuperseded` counted as ordinary and every other error fatal), `LogWriter` wrapping it, and
+the probe tests. Budgets are the probe's lever: Bybit funding-bearing messages arrive ~60s apart,
+so `MaxAge 30s / Blind 90s` fires real silence timers *between* real messages — the absence door
+exercised on production data; Binance at 1/s never goes stale under the same budget, which is the
+mirror that proves the timers are per-instrument. `TestClock` calibrations are zero-offset for
+both venues (skew modelling is not this slice's claim). **Fixture 1 (committed production slice):
+the three funding streams over 2026-07-30T15:30:40Z–15:33:40Z** — the session-43 survey found the
+15:30:40 restart seam delivers, inside one second, the `fundingInfo` poll (…40.415Z) and the
+Bybit post-resubscribe snapshot (…40.947Z), so a cold sim acquires complete state from real
+frames immediately; the window's own `Open` records carry the original provenance (git SHA,
+endpoint, subscribe bytes) verbatim. Extraction: `WalkRecords` over the hour-15 files, raw frames
+in-window re-emitted byte-verbatim behind a fresh file header; the extractor is a one-off (the
+production archive exists only on this laptop, so a committed extractor would be dead code
+pretending to be reproducibility — the fixture's verbatim frames are their own provenance).
+~400 KB committed. **Fixture 2 (crafted contention):** hand-written minimal valid venue JSON
+wrapped via `capture.AppendRecord`, with cross-stream equal-`RecvTime` records to force
+multi-source batches, a Bybit delta that omits funding fields entirely, one that changes them,
+and an overlay response missing the symbol — every distinction §39p-2's decoders claim to make,
+present in a fixture small enough to read.
+
+**§39p-9 — §39l-3 is NOT forced.** The sim pumps are drivers of `Step`; the live select-loop pump
+still has no caller and acquires none here. Step 3's record inherits the question unchanged.
+
+**§39p-10 — checklist suspects and mutation roster, named at design time.** Suspects: the
+production fixture alone never contends sources (fixture 2 exists for it — but verify the crafted
+batch actually reaches `pickMarket` with ≥2 candidates, not just ≥2 publishes); the merge
+tie-break is unexercised by ns-real data (fixture 2's equal instants); the overlay's
+present-row/absent-row split needs both sides fixtured; the Bybit accumulator needs a
+funding-silent delta *between* snapshot and first funding delta (or removing the merge is
+invisible); silence firing needs a timer *between* two real messages, not only trailing;
+`SetNow`-before-publish vs after is invisible if no test reads freshness at dispatch time;
+end-of-archive timer cutoff needs a pending timer strictly beyond the final instant. Mutations,
+by surface: merge (tie-break field dropped/reordered, `CaptureSeq` tie ignored), ordinal
+(skip-non-emitting-records, off-by-one, per-stream instead of global), decoders (funding-field
+gate inverted, string-vs-number type confusion, ms-vs-ns epoch, accumulator merge dropped,
+overlay row match loosened), door (`Validate` ordinal clause restored — must fail the silence
+test), driver (batch clause removed, timer-vs-record precedence flipped, end-of-archive drain
+removed, `SetNow` dropped), replay pump (each cross-check field blinded, directed-consume
+replaced by arbitration), router (type-switch arms swapped, `ErrSuperseded` made fatal, fatal
+made ordinary), probe (cache comparison field-blinded).
+
+---
+
 ## RESUME HERE
 
-**Slices A and B are closed (§39m, §39o). The next session builds slice C** (§39j): the wiring — a
-replayed capture archive → ingestion (`AcceptOrdinal` stamped at the seam) → `marketdata` →
-mailboxes → dispatcher (with `LogWriter` wrapping the sink) → `engine/state`, under `TestClock`.
-Done when **the parity probe passes**: two sim runs over the same archive produce byte-identical
-dispatch logs, and the replayed log re-drives `engine/state` to the same terminal cache state. The
-fixture is a *small committed archive*, not the production tree (§39j); the production archive is a
-manual soak. Slice C's design questions on arrival: the sim driver's advance rule (§39f-6's "advance
-`TestClock` to the next due timer only when no envelope is dispatchable"), where the
-`AcceptOrdinal`-stamping ingestion seam lives, and §39l-3 (whether milestone 2 exercises the live
-pump at all) if the wiring forces the question.
+**Slice C is BUILT and its parity probe PASSES (session 43, 2026-07-30) — the slice is NOT closed.**
+The session paused at a deliberate seam after the build, with everything committed and `make ci`
+green (commits `7338342`…`4dd2258`): §39p is the design (read it first), the wiring exists —
+`engine/venue` wire decoders (+ committed tests), `engine/replay` (tape/merge, `Ingester`,
+`Calibrate`, `Generate`, `Rerun`), `clock.NextTimerAt`, `app/sim` (router, root, probe) — and the
+committed fixture is three real production streams over `15:30:40–15:33:40Z` under
+`internal/app/sim/testdata/archive`. `TestParityProbe` and `TestProbeIsNotVacuous` pass: two
+Generate runs byte-identical and cache-equal, the Rerun rewriting a byte-identical log to the same
+terminal state, both venues cached, silence timers fired, the absence-derived zero ordinal in the
+log.
 
-Before anything else, the standing rituals: `pgrep -fl "arblab capture run"`, then a `capture
-verify` over the accumulated range (expect 0 integrity findings, always), then `git status --short`
-and the marker grep.
+**Four build-time facts §39q must record at close** (all already in code comments, none yet in a
+close section): (1) §39p-8's zero-offset calibration DIED on first contact — Bybit's stamp runs
+~20 ms ahead of the laptop, marketdata correctly refused the negative data age as a clock
+inversion, and `replay.Calibrate` now measures `max(SourceTime − RecvTime)` per venue from the
+tape (a bound no message can beat, pure function of the tape). (2) The rerun's lazy pull violated
+Generate's ingestion invariant (no-news tail before a timer left unconsumed → time-reversal
+refusal); `OnTimerRecord` now pre-ingests every batch strictly before the firing instant. (3) The
+Bybit floor question §39p-2 left open was resolved by a LIVE measurement (2026-07-30,
+instruments-info: upper `0.005` / lower `-0.005`, exactly symmetric, equal to the ticker's
+`fundingCap`; also `fundingInterval: 480` — MINUTES, the units-in-the-name trap live): the replay
+decoder mirrors `-Cap`, the live clients replace the mirror with the polled pair. **This
+measurement is NOT yet in `venue-profiles.md` — landing it (§1 Bybit cap/floor row + a §5 dated
+note) is owed before close.** (4) `Envelope.Validate` dropped its ordinal clause (§39p-5's door),
+marked `[SPEC EDIT OWED]` in `internal/platform/events/envelope.go` — the marker grep now returns
+**ONE**, and the §3.5 edit must land before the slice closes.
 
-Standing calendar item unchanged: **slice D's one-day disk figure ~09:53 UTC 2026-07-31**
-(`du -sh archive/` + full-day verify) — one command, records into the capture design record, does
-not gate this work. The off-host destination remains the user's open §38f decision; the laptop is
-still the only copy.
+**What remains, in order:**
+1. **The replay-package unit battery is unwritten** (venue wire tests exist; replay has none):
+   tape merge order + tie-breaks (equal `RecvTime` cross-stream, `CaptureSeq` within), `Load`
+   refusals, `Calibrate` bounds, Generate over a CRAFTED equal-instant contention fixture (the
+   §39p-10 suspect: assert ≥2 mailboxes genuinely contend and the order is deterministic),
+   timer-vs-record tie (timer wins equals), end-of-archive pending timer stays unfired, Rerun
+   divergence refusals (mismatched log/archive, exhausted tape, each `match` field).
+2. **The fixture-collapse checklist BEFORE mutations** — §39p-10's suspects plus build-found ones:
+   the Bybit snapshot-reset is likely an equivalent mutant (snapshots always carry all four
+   fields — name it an honest non-aim or make it observable); the probe asserts no per-source
+   dispatch counts; the rerun pre-ingest needs a unit fixture (the production fixture exercises it
+   — it is what failed — but nothing pins it at unit level).
+3. **Aimed mutations** per §39p-10's roster (`MUTATE_MODULE` default; `tools/mutate.sh`).
+4. **The close:** land the §3.5 edit (Validate sentence) + the Profiles edit (instruments-info
+   measurement), marker grep back to ZERO, reading pass over the slice's normative claims
+   (§39f-4's transcription correction is already recorded in §39p-5), write **§39q**, update
+   HANDOFF + memory, bump doc version (the §3.5 edit makes it v0.9.16).
 
-Do not reopen: §31a's ordering (this record is its step 2), §31b (funding consumed, never derived),
-§39c's placement, §39d's correction (the outbox store half is milestone 3's, with the journal),
-§39m-1's kind rank, §39m-5's absence-door deferral, §39n-1's container choice (new `RecordKind`s
-rejected on the minor-bump argument), §39n-5's fresh-files-only door (append is the journal's,
-milestone 3), and §39o-1's no-core-edit ruling (the derivation is recorded; do not re-litigate it
-into an edit).
+Standing rituals first, every session: `pgrep -fl "arblab capture run"`, `capture verify` over the
+accumulated range (0 integrity findings, always), `git status --short`, marker grep (expect ONE —
+see above — until the close lands it). Calendar: **slice D's disk figure ~09:53 UTC 2026-07-31**;
+the off-host destination is still the user's open §38f decision; the laptop is still the only copy.
+
+Do not reopen: §31a's ordering, §31b, §39c's placement, §39d's correction, §39m-1's kind rank,
+§39n-1's container choice, §39n-5's fresh-files-only door, §39o-1's no-core-edit ruling, and now
+§39p-1's funding-only scope, §39p-4's merge rule, §39p-5's door placement (Validate scoped,
+producer-side guards load-bearing), and §39p-6's batch rule — each carries its rejected
+alternatives in §39p.

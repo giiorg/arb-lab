@@ -81,7 +81,41 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 42, 2026-07-30 — DISPATCHER SLICE B is BUILT and CLOSED: the dispatch log exists; next work is slice C of §39j, the wiring and the parity probe)
+## START HERE (updated MID-SESSION 43, 2026-07-30 — SLICE C is BUILT and the PARITY PROBE PASSES; the slice is OPEN: checklist, mutations and close have NOT run)
+
+**Branch `feat/milestone-1-foundation`.** Session 43 built §39j's **slice C** — the wiring — and
+**the parity probe passes on real production data**: two sim runs over the committed fixture
+produce byte-identical dispatch logs and equal terminal cache states, and the directed rerun
+following that log rewrites a byte-identical log to the same terminal state. Everything is
+committed (`7338342`…`4dd2258` + the docs commit), `make ci` green, all six gates clean.
+
+**The single source of truth is
+`docs/superpowers/specs/2026-07-30-parity-dispatcher-design.md` → §39p (the slice design, with
+rejected alternatives) and its `RESUME HERE` (the mid-slice seam)** — read both before touching
+anything. Headlines: the funding path only, both venues (§39p-1); wire decoders in `engine/venue`
+(Bybit delta accumulator, Binance markPrice+fundingInfo overlay join); the ingestion seam and both
+pumps in `engine/replay`; the root, router and probe in `app/sim` over a committed 532 KB fixture
+cut at the 15:30:40Z restart seam. **The §39m-5 absence door is OPEN**: `Envelope.Validate` no
+longer judges `AcceptOrdinal` (zero is §3.5's absence-derived reading; producer-side guards are
+load-bearing), marked `[SPEC EDIT OWED]` — **the marker grep returns ONE by design until the close
+lands the §3.5 edit.** A live instruments-info measurement (Bybit floor symmetry, 2026-07-30) is
+owed to `venue-profiles.md` at close.
+
+**What remains before the slice closes** (the RESUME lists it in order): the replay-package unit
+battery + the crafted contention fixture, the fixture-collapse checklist BEFORE mutations, the
+aimed battery (§39p-10's roster), then the close — land both doc edits, marker grep to ZERO,
+reading pass, §39q, HANDOFF, version bump to v0.9.16.
+
+**The capture rituals stay first, every session:** `pgrep -fl "arblab capture run"` (PID 74192 as
+of session 43), then a verify over the accumulated range — 0 integrity findings, always (session
+43's check: COVERAGE-only over 09:00–19:00, the known reconnect/restart ledger plus the open
+hour). Calendar items unchanged: **slice D's disk figure ~09:53 UTC 2026-07-31** (`du -sh
+archive/` + full-day verify); the off-host destination is still the user's open §38f decision and
+the laptop is still the only copy.
+
+---
+
+## START HERE (updated end of session 42, 2026-07-30 — HISTORICAL — DISPATCHER SLICE B BUILT and CLOSED; superseded by session 43's slice C build)
 
 **Branch `feat/milestone-1-foundation`.** Session 42 built §39j's **slice B**: the persisted
 dispatch log — `capture.WalkRecords` (the torn-tail scanner's one public door, `scanArchive`
