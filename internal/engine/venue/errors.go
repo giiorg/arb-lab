@@ -60,6 +60,23 @@ var (
 	// book stays plausible and drifts.
 	ErrChangeQuantityNegative = errors.New("venue: level change quantity is negative")
 
+	// ErrWireUndecodable, ErrWireForeign and ErrWireIncomplete are the wire
+	// decoders' three refusal families, split by where they send the reader.
+	//
+	// Undecodable is bytes that are not the format at all — the reader goes to
+	// the file (corruption, wrong stream family). Foreign is well-formed bytes
+	// from a stream this decoder does not own — a markPrice decoder handed a
+	// kline, a ticker frame that is neither snapshot nor delta nor op — and the
+	// reader goes to the wiring that routed it. Incomplete is the right stream
+	// missing a field the venue always states — the reader goes to the
+	// Profiles entry, because either the venue changed its wire or the entry
+	// was wrong. Transport chatter (a Bybit op acknowledgement) is NONE of
+	// these: it is consumed without news, because it genuinely rides the
+	// stream.
+	ErrWireUndecodable = errors.New("venue: wire bytes are not the expected format")
+	ErrWireForeign     = errors.New("venue: wire frame from a stream this decoder does not own")
+	ErrWireIncomplete  = errors.New("venue: wire frame missing a field the venue always states")
+
 	// ErrDeltaFirstSeqUnset reports a depth message with no first sequence.
 	//
 	// It is the one half of the span this payload holds — BookDelta records why
