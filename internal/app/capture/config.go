@@ -62,7 +62,7 @@ type Config struct {
 	MaxRecord int64 `json:"max_record"`
 
 	// MinAlivePercent is verify's coverage threshold, in whole percent of the
-	// expected Alive count, 1..100. An integer because §3.6 rule 1 forbids
+	// expected Alive count, 1..100. An integer because §3.6 rule 4 forbids
 	// float64 and the comparison is ticks*100 >= expected*percent.
 	MinAlivePercent uint `json:"min_alive_percent"`
 

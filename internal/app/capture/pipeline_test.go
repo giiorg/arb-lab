@@ -486,6 +486,284 @@ func TestOverflowHoleIsRecordedAtShutdown(t *testing.T) {
 	}
 }
 
+// waitForData polls the archive until it holds at least one Data record — the
+// synchronization point that proves the consumer is past its first write. A
+// concurrent read can catch a torn tail mid-append; that parses as an error
+// here and simply means "not yet".
+func waitForData(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if b, err := os.ReadFile(path); err == nil {
+			if off, err := enginecapture.ParseFileHeader(b); err == nil {
+				for off < len(b) {
+					r, n, err := enginecapture.DecodeRecord(b[off:])
+					if err != nil {
+						break
+					}
+					if r.Kind == enginecapture.RecordKindData {
+						return
+					}
+					off += n
+				}
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("no Data record reached the archive within the bound")
+}
+
+// TestGapAsTheLastEventIsFlushedAtShutdown: a disruption nothing follows — the
+// socket drops and the operator stops the run — must still reach the archive.
+// Every other gap fixture flushes via the next accepted record, so this is the
+// shutdown flush's own test: drop it and only this fixture notices.
+func TestGapAsTheLastEventIsFlushedAtShutdown(t *testing.T) {
+	h := newHarness(t, t.TempDir(), nil)
+	h.start()
+	h.sink().Subscribed(nil, nil)
+	h.data("f1")
+	h.sink().Disrupted(transport.Disruption{Cause: transport.DisruptionRead, Detail: "died at the end"})
+	if err := h.stop(); err != nil {
+		t.Fatal(err)
+	}
+
+	got := kinds(readRecords(t, h.archivePath()))
+	want := []enginecapture.RecordKind{
+		enginecapture.RecordKindOpen, enginecapture.RecordKindData,
+		enginecapture.RecordKindGap, enginecapture.RecordKindClose,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("record kinds %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("record kinds %v, want %v — a trailing gap did not survive shutdown", got, want)
+		}
+	}
+}
+
+// TestTickFlushesAParkedGapBeforeTheAliveRecord: a gap whose preceding frames
+// are all settled must not wait for the next venue frame — on a quiet feed
+// that could be an hour away — but flush on the writer's own tick, BEFORE the
+// Alive record the tick mints. The order is the discriminator: without the
+// tick-arm flush the gap settles at shutdown and lands after the Alive.
+func TestTickFlushesAParkedGapBeforeTheAliveRecord(t *testing.T) {
+	h := newHarness(t, t.TempDir(), nil)
+	h.start()
+	h.sink().Subscribed(nil, nil)
+	h.data("f1")
+	waitForData(t, h.archivePath()) // the consumer is provably past its first write
+	h.sink().Disrupted(transport.Disruption{Cause: transport.DisruptionRead, Detail: "quiet feed dropped"})
+	h.clk.advance(61 * time.Second) // past the 12:31:00 alive boundary
+
+	// Three sends into the one-slot buffer: the third send can only complete
+	// after the second has left the buffer, which the consumer only does after
+	// finishing the first — so when this loop returns, tick one has been fully
+	// processed. The extras mint nothing; the alive boundary is already paid.
+	for range 3 {
+		h.tick <- struct{}{}
+	}
+	if err := h.stop(); err != nil {
+		t.Fatal(err)
+	}
+
+	got := kinds(readRecords(t, h.archivePath()))
+	want := []enginecapture.RecordKind{
+		enginecapture.RecordKindOpen, enginecapture.RecordKindData,
+		enginecapture.RecordKindGap, enginecapture.RecordKindAlive,
+		enginecapture.RecordKindClose,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("record kinds %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("record kinds %v, want %v — the tick did not flush the parked gap "+
+				"before minting its Alive", got, want)
+		}
+	}
+}
+
+// TestGapOrderingHoldsWithABackedUpQueue: the live-consumer ordering fixture
+// can pass by pace rather than by bound — when the consumer keeps up, every
+// gap is parked after its preceding frames are already written, and "flush at
+// or below the bound" is indistinguishable from "flush whenever". Parking the
+// whole scenario before the consumer starts makes the bound the only thing
+// keeping the gap off the front of the file. (§36e's collapse one layer up:
+// the collapsing parameter is the consumer's pace, which no fixture argument
+// spells.)
+func TestGapOrderingHoldsWithABackedUpQueue(t *testing.T) {
+	h := newHarness(t, t.TempDir(), nil)
+	// The consumer is deliberately not running yet: everything below is parked.
+	h.sink().Subscribed(nil, nil)
+	h.data("f1")
+	h.data("f2")
+	h.data("f3")
+	h.sink().Disrupted(transport.Disruption{Cause: transport.DisruptionRead, Detail: "socket died"})
+	h.data("f4")
+	h.data("f5")
+	h.start()
+	if err := h.stop(); err != nil {
+		t.Fatal(err)
+	}
+
+	recs := readRecords(t, h.archivePath())
+	got := kinds(recs)
+	want := []enginecapture.RecordKind{
+		enginecapture.RecordKindOpen,
+		enginecapture.RecordKindData, enginecapture.RecordKindData, enginecapture.RecordKindData,
+		enginecapture.RecordKindGap,
+		enginecapture.RecordKindData, enginecapture.RecordKindData,
+		enginecapture.RecordKindClose,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("record kinds %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("record kinds %v, want %v — with the queue backed up, the gap "+
+				"was not held to its bound", got, want)
+		}
+	}
+	if gapRec := recs[4]; gapRec.CaptureSeq != 3 {
+		t.Errorf("the gap echoes sequence %d, want 3", gapRec.CaptureSeq)
+	}
+}
+
+// TestOverflowHoleOfOneSeparatesCountFromItsBounds: the shutdown-overflow
+// fixture drops exactly three frames, where the hole's From and Count are the
+// same number — a swap of the two survives it. A hole of ONE has From==To==3
+// and Count==1, the only shape in which Count is confusable with neither bound.
+func TestOverflowHoleOfOneSeparatesCountFromItsBounds(t *testing.T) {
+	h := newHarness(t, t.TempDir(), func(c *Config) { c.QueueDepth = 2 })
+	// The consumer is deliberately NOT running: the queue must fill.
+	h.sink().Subscribed(nil, nil)
+	for _, f := range []string{"f1", "f2", "f3"} {
+		h.data(f)
+	}
+	h.start()
+	if err := h.stop(); err != nil {
+		t.Fatal(err)
+	}
+
+	var gaps []enginecapture.Gap
+	for _, r := range readRecords(t, h.archivePath()) {
+		if r.Kind == enginecapture.RecordKindGap {
+			gaps = append(gaps, decodeGap(t, r))
+		}
+	}
+	if len(gaps) != 1 {
+		t.Fatalf("archive holds %d gap records, want 1", len(gaps))
+	}
+	g := gaps[0]
+	if g.Cause != enginecapture.CauseOverflow || g.From != 3 || g.To != 3 || g.Count != 1 {
+		t.Fatalf("overflow gap %+v, want cause=overflow [3,3] count 1", g)
+	}
+}
+
+// TestRestartIntoANewHourStartsAFreshChain varies §36m's one pinned parameter:
+// the same-hour restart appends to a file that already holds the sequence
+// floor, while the cross-hour restart opens a FRESH file — Stats().LastSeq is
+// 0 and the chain honestly restarts. Data from 1, an Open record claiming no
+// predecessor, and verify reporting the seam as restart_boundary COVERAGE —
+// never integrity.
+func TestRestartIntoANewHourStartsAFreshChain(t *testing.T) {
+	root := t.TempDir()
+
+	h1 := newHarness(t, root, nil)
+	h1.start()
+	h1.sink().Subscribed(nil, nil)
+	h1.data("f1")
+	h1.data("f2")
+	h1.data("f3")
+	if err := h1.stop(); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	firstWindow := enginecapture.Window(h1.clk.Now(), time.Hour)
+
+	// The restart, into the NEXT hour: 12:30 + 45m = 13:15.
+	h2 := newHarness(t, root, nil)
+	h2.clk.advance(45 * time.Minute)
+	h2.start()
+	h2.sink().Subscribed(nil, nil)
+	h2.data("f4")
+	h2.data("f5")
+	if err := h2.stop(); err != nil {
+		t.Fatalf("restarted run: %v", err)
+	}
+
+	var seqs []uint64
+	for _, r := range readRecords(t, h2.archivePath()) {
+		if r.Kind == enginecapture.RecordKindData {
+			seqs = append(seqs, r.CaptureSeq)
+		}
+	}
+	want := []uint64{1, 2}
+	if len(seqs) != len(want) || seqs[0] != want[0] || seqs[1] != want[1] {
+		t.Fatalf("the fresh hour holds data sequences %v, want %v — a cross-hour "+
+			"restart starts a fresh chain, it does not continue the old one", seqs, want)
+	}
+
+	// Both hours together: honest, and never integrity. The seam between the
+	// two runs is a restart_boundary — a coverage fact, present, not silent.
+	rep, err := enginecapture.Verify(h2.cfg.Verify(firstWindow, firstWindow.Add(2*time.Hour)))
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if got := rep.ExitClass(); got == enginecapture.ClassIntegrity {
+		t.Fatalf("verify reports integrity findings over a cross-hour restart: %v", rep.Findings)
+	}
+	sawBoundary := false
+	for _, f := range rep.Findings {
+		if f.Kind == enginecapture.FindingRestartBoundary {
+			sawBoundary = true
+		}
+	}
+	if !sawBoundary {
+		t.Fatalf("no restart_boundary finding — the seam between the two runs went "+
+			"unreported: %v", rep.Findings)
+	}
+}
+
+// TestShutdownBeforeAnyConnection: stopping a run whose venue never came up
+// exits clean with no archive — phase 1's queue-closed door, which no other
+// fixture reaches because every one subscribes first.
+func TestShutdownBeforeAnyConnection(t *testing.T) {
+	root := t.TempDir()
+	h := newHarness(t, root, nil)
+	h.start()
+	if err := h.stop(); err != nil {
+		t.Fatalf("stop before any connection: %v", err)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("a run that never connected left %d entries in the root", len(entries))
+	}
+}
+
+// TestCancelBeforeAnyConnection: the same seam through the ctx door — a
+// cancellation before any successful open goes through closeLate, which must
+// wait the pipeline out and return clean.
+func TestCancelBeforeAnyConnection(t *testing.T) {
+	root := t.TempDir()
+	h := newHarness(t, root, nil)
+	h.start()
+	h.cancel()
+	if err := h.stop(); err != nil {
+		t.Fatalf("cancel before any connection: %v", err)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("a cancelled run that never connected left %d entries in the root", len(entries))
+	}
+}
+
 // TestOpenFailureFailsTheRun: a stream that cannot open its archive (here:
 // the flock is already held) reports the error and captures nothing, rather
 // than reading a venue feed into nowhere.

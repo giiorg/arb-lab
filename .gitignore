@@ -26,6 +26,13 @@ coverage.*
 # is how to check that a rule here actually fires.
 **/testdata/rapid/
 
+# The live capture archive (configs/capture.json roots it at ./archive).
+# Unrecoverable-by-construction data, never source: tracking it would put an
+# ever-growing binary tree in git status, and an accidental commit of a partial
+# hour would create a second, diverging copy of a file whose whole value is
+# being the only honest one.
+/archive/
+
 # Local environment
 .env
 .env.*
@@ -39,3 +46,4 @@ go.work.sum
 
 # Stray tooling artifact
 logger.log
+/capture.log
