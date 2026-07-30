@@ -473,6 +473,63 @@ func TestEqualPrioSourcesRotate(t *testing.T) {
 	}
 }
 
+// TestRotationDistinguishesSourcesBeyondSymbol is the checklist's find, added
+// BEFORE the mutation battery: every other market fixture differs only in
+// Symbol, so a comparator collapsed to symbol-only would pass all of them —
+// and symbol collision across venues is not hypothetical, it is the actual
+// §32c capture set (BTCUSDT on binance and bybit, spot and perp). Four sources
+// sharing one symbol, differing pairwise in Venue, Product/Contract and
+// Stream; a comparator that merges any pair makes the rotation skip or repeat
+// a source, which the exact interleave sees.
+func TestRotationDistinguishesSourcesBeyondSymbol(t *testing.T) {
+	r := newRig(t)
+	binancePerpBook := events.SourceID{Instrument: perp("BTCUSDT"), Stream: events.StreamBook}
+	binancePerpMark := events.SourceID{Instrument: perp("BTCUSDT"), Stream: events.StreamMark}
+	binanceSpotBook := events.SourceID{
+		Instrument: ids.VenueInstrument{Venue: "binance", Product: ids.ProductSpot, Symbol: "BTCUSDT"},
+		Stream:     events.StreamBook,
+	}
+	bybitPerpBook := events.SourceID{
+		Instrument: ids.VenueInstrument{
+			Venue: "bybit", Product: ids.ProductLinearPerp,
+			Symbol: "BTCUSDT", Contract: ids.ContractLinear,
+		},
+		Stream: events.StreamBook,
+	}
+
+	// Sorted order under the five-field compare: venue first (binance < bybit),
+	// then product ("linear_perp" < "spot"), then stream ("book" < "mark").
+	inSortedOrder := []events.SourceID{binancePerpBook, binancePerpMark, binanceSpotBook, bybitPerpBook}
+	for i, s := range inSortedOrder {
+		r.publish(env(s, uint64(10*i+1), events.PrioNormal))
+		r.publish(env(s, uint64(10*i+2), events.PrioNormal))
+	}
+
+	got := ordinals(r.drain())
+	want := []uint64{1, 11, 21, 31, 2, 12, 22, 32}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("dispatch order %v, want %v — four same-symbol sources must stay four sources", got, want)
+	}
+}
+
+// TestControlFIFOThroughDispatch is the mirror of the market FIFO test — the
+// standing rule that a claim tested on one side gets tested on its symmetric
+// side immediately. The control lane is ONE queue, so its order through
+// dispatch is global send order, across sources.
+func TestControlFIFOThroughDispatch(t *testing.T) {
+	r := newRig(t)
+	a, b := ctrlSrc("AAAUSDT"), ctrlSrc("BBBUSDT")
+	r.sendControl(env(a, 1, events.PrioNormal))
+	r.sendControl(env(b, 2, events.PrioNormal))
+	r.sendControl(env(a, 3, events.PrioNormal))
+
+	got := ordinals(r.drain())
+	want := []uint64{1, 2, 3}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("control dispatch order %v, want %v — send order, across sources", got, want)
+	}
+}
+
 // --- invariant 6: the dispatcher never advances time ---
 
 func TestStepNeverAdvancesTime(t *testing.T) {
