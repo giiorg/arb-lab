@@ -252,3 +252,53 @@ that finds asymmetry invalidates everything resting on the mirror below.)*
    unit only in the docs. Core §4's units-in-the-name rule, observed in the wild on one venue's two
    spellings of one number: an adapter that reads either field into a bare integer computes a carry
    figure wrong by a factor of sixty with nothing failing.
+
+### BTCUSDT lot/notional filters, observed live (2026-07-31) — the four `(venue, product)` cells `[→ design §40g, step 3 slice A]`
+
+Four unauthenticated probes on **2026-07-31 ~05:09 UTC** (Bybit response `time` 1785474562995), one per
+cell of the milestone-2 universe. *(Live observations, dated; these are the rows the committed
+milestone-2 reference revision cites, and step 5's period-correct archive replaces them the day a
+re-measurement disagrees.)*
+
+| Cell | Endpoint | Step / min qty | Max qty | Min notional |
+|---|---|---|---|---|
+| Binance SPOT | `GET /api/v3/exchangeInfo?symbol=BTCUSDT` | `LOT_SIZE` stepSize **0.00001**, minQty **0.00001** | 9000 | `NOTIONAL` minNotional **5** (USDT, `applyMinToMarket: true`) |
+| Binance USDⓈ-M perp | `GET /fapi/v1/exchangeInfo` → BTCUSDT | `LOT_SIZE` stepSize **0.001**, minQty **0.001** | 1000 (market: 120) | `MIN_NOTIONAL` **50** |
+| Bybit SPOT | `GET /v5/market/instruments-info?category=spot&symbol=BTCUSDT` | basePrecision **0.000001**, minOrderQty **0.000001** | 230 (market: 120) | minOrderAmt **5** (USDT) |
+| Bybit linear perp | `GET /v5/market/instruments-info?category=linear&symbol=BTCUSDT` | qtyStep **0.001**, minOrderQty **0.001** | 1500 (market: 150) | minNotionalValue **5** |
+
+1. **The two perps agree on 0.001 BTC steps; the two spots do not agree with each other** (10⁻⁵ vs
+   10⁻⁶). §2.4's intersection rule therefore binds at the PERP step for either venue's package — a
+   quantization that used the spot step would emit perp-unroutable quantities a thousandth of a BTC at
+   a time.
+2. **Min-notional is the binding floor on Binance's perp** (50 USDT ≈ 0.0008 BTC at ~65k, above the
+   0.001 lot floor's ~65 USDT — close enough to flip as price moves; the sizing must check both).
+3. **Bybit spot's `quotePrecision` (0.0000001) is finer than fixedpoint's scale-9 tick only in
+   appearance** — it is a PRECISION, not a step; the order-quantity constraint is `basePrecision`, and
+   nothing here requires sub-scale-9 arithmetic.
+
+### Base-tier fee tables, observed live (2026-07-31, rendered pages) — the four fee cells `[→ design §40d, step 3 slice A]`
+
+Read from the two venues' official fee pages **rendered in a real browser on 2026-07-31** (both are
+client-rendered SPAs; a plain fetcher gets an empty shell or times out — the §40d rejection of a
+programmatic fee-page importer, observed while verifying). Undiscounted base columns quoted; each page
+also shows a token-discount column (BNB −25%/−10%, MNT −25%/−10%) which is NOT the base rate and is
+recorded here only so a later reader knows which column the numbers came from.
+
+| Cell | Tier row | Maker | Taker | Source |
+|---|---|---|---|---|
+| Binance SPOT (USDT pairs) | Regular User | **0.100%** | **0.100%** | https://www.binance.com/en/fee/trading — "Spot & Margin" tab |
+| Binance USDⓈ-M perp (USDT pairs) | Regular User | **0.0200%** | **0.0500%** | https://www.binance.com/en/fee/futureFee — "USDⓈ-M Futures" tab |
+| Bybit SPOT (crypto-crypto) | Non-VIP | **0.1000%** | **0.1000%** | https://www.bybit.com/en/announcement-info/fee-rate/ — "Spot" tab |
+| Bybit linear perp | Non-VIP | **0.0200%** | **0.0550%** | same page — "Perpetual & Futures" tab |
+
+1. **§2.4's spot-vs-perp premise holds at both venues**: spot taker is 2× (Bybit ~1.8×) the perp
+   taker, so reusing the perp round-trip figure for cash-and-carry understates cost by roughly half —
+   the exact trap the sentence names.
+2. **These are the modeled-tier (VIP0/non-VIP) PUBLISHED rows, not any account's fees.** §40d's
+   two-clause §2.4 edit authorizes scoring the pre-capital gate on them, labeled; account-real
+   authenticated revisions (`/v5/account/fee-rate`, auth — §4 above) remain a precondition of any
+   live order. VIP0 is the worst published tier, so the proxy errs against the gate.
+3. **Bybit's page states a caveat worth carrying**: "Actual fees charged depend on the displayed fee
+   rates applicable to your account after login" — one more reason the provenance class of these rows
+   is `hand_recorded`, never `fetched`.

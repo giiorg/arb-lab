@@ -2,6 +2,7 @@ package driven_test
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -245,5 +246,60 @@ func TestDocumentRefusals(t *testing.T) {
 				t.Fatalf("want %v, got %v", tc.want, err)
 			}
 		})
+	}
+}
+
+// TestCommittedMilestone2RevisionLoads guards the real committed document —
+// configs/reference.btcusdt.json, the §40d milestone-2 revision citing the
+// Profiles rows — not a fixture. Every cell of the BTC universe must answer,
+// and the two takers must differ across products at both venues (the spot
+// figure being materially higher is §2.4's own premise; a document where
+// they collapsed would be a mis-transcription).
+func TestCommittedMilestone2RevisionLoads(t *testing.T) {
+	data, err := os.ReadFile("../../../../configs/reference.btcusdt.json")
+	if err != nil {
+		t.Fatalf("read committed revision: %v", err)
+	}
+	store, err := config.New[driven.Document]("configs/reference.btcusdt.json", loadAt, data)
+	if err != nil {
+		t.Fatalf("committed revision does not load: %v", err)
+	}
+	ref, err := driven.NewReferenceStore(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	asOf := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	for _, venue := range []ids.Venue{"binance", "bybit"} {
+		spot := ids.VenueInstrument{Venue: venue, Product: ids.ProductSpot, Symbol: "BTCUSDT"}
+		perp := ids.VenueInstrument{Venue: venue, Product: ids.ProductLinearPerp, Symbol: "BTCUSDT", Contract: ids.ContractLinear}
+
+		sf, err := ref.Fees(spot, asOf)
+		if err != nil {
+			t.Fatalf("%s spot fees: %v", venue, err)
+		}
+		pf, err := ref.Fees(perp, asOf)
+		if err != nil {
+			t.Fatalf("%s perp fees: %v", venue, err)
+		}
+		c, err := sf.Taker.Cmp(pf.Taker)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c <= 0 {
+			t.Fatalf("%s: spot taker %s not above perp taker %s", venue, sf.Taker, pf.Taker)
+		}
+		if sf.Provenance.Class != "hand_recorded" {
+			t.Fatalf("%s spot fee class %q — a committed row may never claim fetched", venue, sf.Provenance.Class)
+		}
+		if _, err := ref.LotRules(spot, asOf); err != nil {
+			t.Fatalf("%s spot lots: %v", venue, err)
+		}
+		if _, err := ref.LotRules(perp, asOf); err != nil {
+			t.Fatalf("%s perp lots: %v", venue, err)
+		}
+	}
+	if _, err := ref.Hurdle(asOf); err != nil {
+		t.Fatalf("hurdle: %v", err)
 	}
 }
