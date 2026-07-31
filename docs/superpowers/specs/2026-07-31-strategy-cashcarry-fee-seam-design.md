@@ -652,16 +652,100 @@ line, which is the verdict-vs-outcome inversion the harness table documents.
 COVERAGE, **0 integrity findings**); the stream self-recovered and the current-hour file was
 growing at session start. The one-day disk figure (~09:53 UTC) will include this gap.
 
+### §40m — slice B BUILT (session 47, 2026-07-31)
+
+**What landed, in three commits** (after the session's slice D row): `fixedpoint.Rate.Div`
+(Money.Div's mechanics for dimensionless ratios — the EWMA's normalization needed it; unset/zero/
+overflow/mode battery mirroring Mul's, and Div added to the unset-discipline map per the mirror
+rule), `strategy/domain`'s four model files (`dispersion.go`, `ewma.go`, `estimator.go`,
+`aggregate.go` + sentinels), and `strategy/infrastructure/driven`'s three adapters (`forecast.go`
+the assertion-only wiring of the pure-domain estimator, `basis.go`, `cost.go` + `model_errors.go`).
+`make ci` green, all six gates clean, marker grep still exactly §40d's ONE.
+
+**In-slice decisions, each recorded where it lives (none reopens §40; the stated readings go on
+slice C's reading-pass docket beside §40e's and §40f's):**
+
+- **The EWMA's decay is TIME-based** — weight `2^(-Δt/halfLife)`, Δt back from the NEWEST
+  settlement — because §2.4 states the half-life in days and time-decay stays honest across an
+  interval flip (a settlement's weight is how old it IS, not how many rows back it sits). Computed
+  entirely in fixedpoint: the exponent quantizes to 1/4096ths of a half-life
+  (`decaySteps`), the per-step factor is the scale-9 constant `0.999830789` =
+  round(10⁹·2^(-1/4096)) — **derived by exact integer arithmetic and re-derived from the
+  definition by an internal test**, so a mistyped digit fails loudly — and the power is
+  pow-by-squaring under `Rate.Mul` half-even. A print older than 31 half-lives is skipped: its
+  scale-9 weight is exactly zero, and the claim TESTED is the equivalence itself (a rate-1 print
+  at 31 half-lives cannot move the answer; one at 29 visibly must). Two near-equivalences
+  documented rather than pinned: the 30-vs-31 boundary (a single-ulp weight, sub-observable for
+  every realistic rate) and floor-vs-round of the quantized exponent (sub-tolerance against the
+  oracle).
+- **Quantile selection rounds OUTWARD from the median** — a q between measured points takes the
+  lower point below the median, the upper at or above it: both directions overstate adversity,
+  and the asymmetry is what makes p25 and p75 draws distinguishable in a test. A q OUTSIDE the
+  measured span is refused (`ErrQuantileUnsupported`) — the edge point would understate a tail
+  the artifact never reached. Interpolation was rejected: it invents a value no artifact measured,
+  and it needs a division the selection rule doesn't.
+- **The dispersion draw applies to the imminent settlement too** — the live estimate is §2.4's
+  "evolving estimate", still drifting until it settles; exempting it would model the nearest
+  lump, where most of a short hold's carry sits, as certain.
+- **The imminent rule keys on the INSTANT (`t.Equal(NextSettle)`), never the index** — an exit
+  horizon legitimately starts past the imminent settlement, and every entry then takes the EWMA.
+- **Forecast rates clamp to the live cap/floor on BOTH passes** (expected, then adverse after the
+  shift): no rate outside the venue's clamps can settle, so clamping an adverse draw UP to the
+  floor is accuracy, not flattery — the floor is where the venue itself stops the bleeding.
+- **`Aggregate` refuses a mixed draw**: one quantile (`ErrQuantileMixed`) and one dispersion
+  artifact (`ErrArtifactMixed` — hash-only difference included, the re-measured-artifact case)
+  per aggregate — §40e's one-artifact rule made checkable here because the identity rides every
+  forecast. The undeclared-rule refusal is the switch's own trailing return, not a pre-validate —
+  one spelling of the set, and the refusal path is testable.
+- **The conservative cost bound prices the WORSE SIDE of each leg's book** — the request names no
+  direction (slice A's port shape), and a bound priced for a decision must cover the entry and
+  the exit it implies. Both §8 branches per side (depth-walk premium + measured adverse move vs
+  p90-conditional-on-size), worse branch, worse side, every rounding away from zero.
+- **The latency rule refuses ONLY an assumption LONGER than calibrated** — the artifact has no
+  number for a longer window; a shorter one is admissible because the calibrated charge then
+  overstates, the conservative direction. Same shape for size: past the last bucket is
+  `ErrSizeOutsideCalibration`, never extrapolation; depth too thin is a refusal, never a large
+  number.
+- **The basis charge does not scale with the plan's length** — the adverse move is a level-shift
+  risk, not an accruing flow; the full measured magnitude is charged regardless of remaining
+  horizon (overstates short holds, never understates long ones).
+
+**The checklist, before the battery, found three collapses** — the standing item's eleventh,
+twelfth and thirteenth instances: every estimator fixture's `horizon[0]` EQUALED `NextSettle`,
+collapsing "the instant equals NextSettle" into "the first horizon entry" (an index-keyed imminent
+rule passed everything until the exit-shaped fixture landed); the median constant was pinned from
+ONE side only (a `half` drifted to 0.45 was indistinguishable — now pinned at ulp distance from
+both sides, 0.499999999 → lower and 0.5-between-points → upper); and **every product in the cost
+fixtures was EXACT at scale 9** (2-dp prices × round quantities), so no assertion could see a
+rounding mode — a manufactured 12-decimal product on a flat market made the away-from-zero digit
+visible. Each fix became the lone killer of a battery mutant.
+
+**The oracle, in the fixedpoint tradition:** the EWMA is recomputed in 256-bit `big.Float` with no
+scale-9 rounding anywhere (the decay base from twelve square roots of 1/2), tolerance 2e-6 with
+the error budget stated in the test; the quantile selection is judged against exact `big.Rat`
+interpolation (outward = on or beyond the interpolated value, tail-appropriately). Both
+properties carry inline broken-implementation controls per the property_test.go discipline, and
+both pass 500 rapid iterations.
+
+**The battery: 27 aimed mutations, 27 caught.** One honest `NOBUILD!!` re-aim (a sed that
+orphaned `lower`; re-aimed at the destructuring line and killed with 7 failing tests). Kills
+include the λ constant off by one ulp (the internal derivation test), the decay resolution
+diverging from λ (the oracle), the anchor at the oldest settlement, the inverted normalization,
+the index-keyed imminent rule, both clamp arms, the adverse-sums-expected swap, the
+mixed-artifact silent pass, bid-priced basis notional, both worse-of inversions (side and
+branch), the inclusive bucket bound, the latency boundary, three rounding-mode flips, and
+`Rate.Div` with swapped operands.
+
 ---
 
 ## RESUME HERE
 
-**Step 3 is DESIGNED (session 45) and SLICE A IS BUILT (session 46, both 2026-07-31)** — §40 is
-the design, §40j the build order, §40l the slice A build record. The design survived four
-adversarial review rounds (provenance note at top). §39l-2 and §39l-3 are ANSWERED here (§40h,
-§40i) — do not reopen them; §39l-1 passes to step 4/5, and two debts stay pre-registered with
-their constructs (§40k-2 the revision repository — step 5; §40k-5 the foundation loop's error
-door — milestone 3).
+**Step 3 is DESIGNED (session 45), SLICE A IS BUILT (session 46) and SLICE B IS BUILT (session
+47, all 2026-07-31)** — §40 is the design, §40j the build order, §40l and §40m the build records.
+The design survived four adversarial review rounds (provenance note at top). §39l-2 and §39l-3
+are ANSWERED here (§40h, §40i) — do not reopen them; §39l-1 passes to step 4/5, and two debts
+stay pre-registered with their constructs (§40k-2 the revision repository — step 5; §40k-5 the
+foundation loop's error door — milestone 3).
 
 **Next, in order:**
 1. ~~Slice D's one-day disk figure~~ — **TAKEN, session 47 (2026-07-31 11:00 UTC): 3.0G/day
@@ -670,15 +754,19 @@ door — milestone 3).
    a healthy day (the honest ~23:00–04:15 absent window is inside it).
 2. **The off-host destination** — still the user's open §38f decision; the laptop still holds the
    ONLY copy, and §32m-D's arithmetic (weeks, not months, of disk) now puts a clock on it.
-3. **Step 3 slice B** (§40j): the default EWMA estimator on the explicit-materials signature, the
-   conservative `BasisForecast` adapter, the milestone-2 `ExecutionCostModel` conservative-bound
-   structure, Dispersion/quantile machinery with class-2 refusal, the joint aggregation rule, the
-   `math/big` oracle. §40j names the checklist's standing suspects for it — read them before
-   writing fixtures.
-4. Then **slice C** (the cashcarry core), whose close lands the §2.4 edit (the marker taken at the
-   `ReferenceData` port in slice A), runs the reading pass — §40e's signature reading, §40f's
-   `HoldPlan` reading, and slice A's exit-forecast strict-after boundary (§40l) are its docket —
-   and bumps the doc set.
+3. ~~Step 3 slice B~~ — **BUILT, session 47 (§40m): the time-decay EWMA estimator + Dispersion
+   with outward-from-median selection + the conservative BasisForecast + the §8 conservative cost
+   bound + the joint rule + the math/big oracle + `Rate.Div`. Checklist found three collapses
+   BEFORE the battery; 27/27 aimed mutations caught (one NOBUILD re-aim).**
+4. **Slice C** (the cashcarry core) — the open code work: entry inequality, exit incremental
+   score with the fed-back dwell, the `HoldPlanRevision` regeneration rule (interval-flip
+   fixtures in BOTH directions), quantization over port-resolved lot rules, the write-ahead
+   `Decide` semantics, the tutorial §3.9 pinned-ledger test, refusal Decisions. Its close lands
+   the §2.4 edit (the ONE standing marker, at the `ReferenceData` port), runs the reading pass —
+   docket now: §40e's signature reading, §40f's `HoldPlan` reading, slice A's exit-forecast
+   strict-after boundary (§40l), and slice B's stated readings (§40m: time-based decay, outward
+   selection, dispersion-on-imminent, worse-side pricing, the latency direction, the
+   plan-independent basis charge) — and bumps the doc set.
 
 Standing rituals first, every session: `pgrep -fl "arblab capture run"` (PID 74192 as of session
 46), `capture verify` over the accumulated range (0 integrity findings, always — coverage gaps are
