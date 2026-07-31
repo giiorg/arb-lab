@@ -95,4 +95,43 @@ var (
 	// ErrRefusalMisplaced reports a refusing rule on a Decision whose verdict
 	// is not a refusal — evidence of a refusal the verdict contradicts.
 	ErrRefusalMisplaced = fmt.Errorf("strategy: refusing rule on a non-refusal verdict")
+
+	// ErrWindowEmpty reports a realized-settlement window with no entries
+	// where the estimator needs one — a horizon reaching past the imminent
+	// settlement with no history to average. The imminent settlement alone is
+	// served by the live estimate; anything later has no basis, and answering
+	// it anyway would be a forecast made of nothing.
+	ErrWindowEmpty = fmt.Errorf("strategy: realized window empty")
+
+	// ErrHorizonBehind reports a horizon instant before the venue's next
+	// settlement. Such an instant is either already settled (forecasting it is
+	// lookahead) or on a schedule the venue does not hold — §40l's boundary:
+	// a settlement at or before the evaluation instant is settling, not
+	// forecastable.
+	ErrHorizonBehind = fmt.Errorf("strategy: horizon instant before next settlement")
+
+	// ErrQuantileUnsupported reports a quantile outside the span the
+	// dispersion artifact measured. Answering it from the nearest measured
+	// point would understate the tail — the artifact cannot support the draw,
+	// so the draw is refused, naming the input (§40e's class-2 rule).
+	ErrQuantileUnsupported = fmt.Errorf("strategy: quantile outside the dispersion's measured span")
+
+	// ErrDispersionShape reports quantile points that do not describe a
+	// distribution: quantiles not strictly ascending, or shifts that decrease
+	// as the quantile rises — a quantile function is monotone, and points
+	// violating that are two distributions interleaved or a transcription
+	// error.
+	ErrDispersionShape = fmt.Errorf("strategy: quantile points out of shape")
+
+	// ErrQuantileMixed reports forecasts drawn at different quantiles inside
+	// one aggregate. §2.4's joint rule is one adverse scenario at THE
+	// decision quantile; a sum mixing p25 and p10 draws is a scenario nobody
+	// stated.
+	ErrQuantileMixed = fmt.Errorf("strategy: forecasts drawn at different quantiles")
+
+	// ErrArtifactMixed reports class-2 identities citing different
+	// calibration artifacts inside one aggregate. §40e: a scored verdict
+	// resolving from two artifacts is a version the governance never
+	// approved — refused, not warned.
+	ErrArtifactMixed = fmt.Errorf("strategy: measured inputs cite different calibration artifacts")
 )

@@ -34,6 +34,7 @@ func TestZeroValuesAreUnusable(t *testing.T) {
 		{"CalibrationRef", domain.CalibrationRef{}},
 		{"MeasuredRate", domain.MeasuredRate{}},
 		{"MeasuredMoney", domain.MeasuredMoney{}},
+		{"Dispersion", domain.Dispersion{}},
 		{"SettlementForecast", domain.SettlementForecast{}},
 		{"Aggregation", domain.Aggregation("")},
 		{"StrategyParams", domain.StrategyParams{}},
