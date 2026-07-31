@@ -16,17 +16,40 @@ import (
 // by the spec — which is what makes the port's seam real, §40e).
 const costModelName = "conservative_bound"
 
-// CostBucket is one row of the artifact's p90-slippage table: for order
-// quantities up to MaxQty, the measured p90 slippage as a fraction of
-// notional. §8 conditions the measured slippage on order size; the buckets
-// are that conditioning.
-type CostBucket struct {
-	// MaxQty is the bucket's inclusive upper bound.
+// CostCell is one cell of the artifact's p90-slippage table. §8's letter is
+// "p90 slippage conditional on order size AND book state", and the key
+// names the population the number was measured from: the LEG it prices
+// (instrument), the book side the counterfactual walk consumed, the frozen
+// book-state stratum, and the quantity bucket. A pooled table is dominated
+// by the liquid population exactly where the illiquid leg — or the stressed
+// stratum — needs its own answer (§41b-ii).
+type CostCell struct {
+	// Instrument is the leg this cell prices.
+	Instrument ids.VenueInstrument
+
+	// Side is the book side the observation walked.
+	Side mdomain.BookSide
+
+	// Stratum names the frozen classifier stratum the observed books were
+	// in. It must name a rule the calibration's own classifier declares.
+	Stratum string
+
+	// MaxQty is the quantity bucket's inclusive upper bound.
 	MaxQty fixedpoint.Quantity
 
 	// P90 is the measured p90 slippage per unit of notional for orders in
-	// this bucket.
+	// this cell.
 	P90 fixedpoint.Rate
+
+	// Observations counts the measured instants behind the number. A cell
+	// below the calibration's MinEvidence is ABSENT by §41b-ii-iii — its
+	// presence here is a contradiction, refused at Validate.
+	Observations uint64
+
+	// Method identifies the committed observation procedure that produced
+	// this cell (§41b-ii-i: with no order path, "measured slippage" is
+	// otherwise whatever the implementer meant).
+	Method string
 }
 
 // CostCalibration is the artifact-owned number set behind the conservative
@@ -48,11 +71,42 @@ type CostCalibration struct {
 	// is a sign error.
 	AdverseMove fixedpoint.Rate
 
-	// Latency is the decision-to-arrival latency the artifact measured at.
+	// Latency is the artifact's ASSUMED decision-to-arrival upper bound —
+	// declared, not measured: no order path exists before milestone 3's
+	// OMS, so no decision-to-arrival latency was ever observable (§41b
+	// family 3). The declaration is informed by the archive's transport
+	// statistics with a stated multiplier, and the adapter's refusal of any
+	// LONGER assumption at decision time is what keeps it honest: a live
+	// system slower than the assumption refuses rather than flatters.
+	//
+	// [SPEC EDIT OWED] §8 demands MEASURED decision-to-arrival latency;
+	// this field is a declared upper-bound assumption. The owed clause (the
+	// §40d modeled-tier shape) authorizes the declared bound for milestone
+	// 2's $1K gate and requires a measured order-path latency before
+	// capital — lands at slice C's close (§41b family 3, §41j).
 	Latency time.Duration
 
-	// Buckets is the p90 table, strictly ascending in MaxQty.
-	Buckets []CostBucket
+	// Classifier is the frozen book-state classifier (§41b-ii-b): its code
+	// is domain code under the procedure commit, its parameters — these —
+	// live in the hashed artifact. Calibration and runtime run the same
+	// one.
+	Classifier domain.StratumClassifier
+
+	// MinEvidence is the declared minimum observation count below which a
+	// cell may not exist. It must be positive: a zero minimum readmits
+	// every thin-sample number the rule exists to refuse.
+	MinEvidence uint64
+
+	// Cells is the p90 table. Within one (instrument, side, stratum) group,
+	// MaxQty is strictly ascending in document order.
+	Cells []CostCell
+}
+
+// costKey is the cell-group key the lookup joins on.
+type costKey struct {
+	inst    ids.VenueInstrument
+	side    mdomain.BookSide
+	stratum string
 }
 
 // Validate reports whether the set is a complete calibration.
@@ -73,41 +127,73 @@ func (c CostCalibration) Validate() error {
 	if c.Latency <= 0 {
 		return fmt.Errorf("cost calibration latency %v: %w", c.Latency, domain.ErrUnset)
 	}
-	if len(c.Buckets) == 0 {
-		return fmt.Errorf("cost calibration buckets: %w", domain.ErrUnset)
+	if err := c.Classifier.Validate(); err != nil {
+		return fmt.Errorf("cost calibration classifier: %w", err)
 	}
-	for n, b := range c.Buckets {
-		if err := b.MaxQty.Validate(); err != nil {
-			return fmt.Errorf("cost calibration bucket %d max qty: %w", n, err)
+	if c.MinEvidence == 0 {
+		return fmt.Errorf("cost calibration min evidence: %w", domain.ErrUnset)
+	}
+	if len(c.Cells) == 0 {
+		return fmt.Errorf("cost calibration cells: %w", domain.ErrUnset)
+	}
+	strata := map[string]bool{}
+	for _, r := range c.Classifier.Rules {
+		strata[r.Name] = true
+	}
+	lastInGroup := map[costKey]fixedpoint.Quantity{}
+	for n, cell := range c.Cells {
+		if err := cell.Instrument.Validate(); err != nil {
+			return fmt.Errorf("cost calibration cell %d instrument: %w", n, err)
 		}
-		qsign, err := b.MaxQty.Sign()
+		if err := cell.Side.Validate(); err != nil {
+			return fmt.Errorf("cost calibration cell %d side: %w", n, err)
+		}
+		if cell.Stratum == "" {
+			return fmt.Errorf("cost calibration cell %d stratum: %w", n, domain.ErrUnset)
+		}
+		if !strata[cell.Stratum] {
+			return fmt.Errorf("cost calibration cell %d stratum %q: %w",
+				n, cell.Stratum, ErrCellStratumUnknown)
+		}
+		if err := cell.MaxQty.Validate(); err != nil {
+			return fmt.Errorf("cost calibration cell %d max qty: %w", n, err)
+		}
+		qsign, err := cell.MaxQty.Sign()
 		if err != nil {
-			return fmt.Errorf("cost calibration bucket %d max qty: %w", n, err)
+			return fmt.Errorf("cost calibration cell %d max qty: %w", n, err)
 		}
 		if qsign <= 0 {
-			return fmt.Errorf("cost calibration bucket %d max qty %s: %w", n, b.MaxQty, domain.ErrUnset)
+			return fmt.Errorf("cost calibration cell %d max qty %s: %w", n, cell.MaxQty, domain.ErrUnset)
 		}
-		if err := b.P90.Validate(); err != nil {
-			return fmt.Errorf("cost calibration bucket %d p90: %w", n, err)
+		if err := cell.P90.Validate(); err != nil {
+			return fmt.Errorf("cost calibration cell %d p90: %w", n, err)
 		}
-		psign, err := b.P90.Sign()
+		psign, err := cell.P90.Sign()
 		if err != nil {
-			return fmt.Errorf("cost calibration bucket %d p90: %w", n, err)
+			return fmt.Errorf("cost calibration cell %d p90: %w", n, err)
 		}
 		if psign < 0 {
-			return fmt.Errorf("cost calibration bucket %d p90 %s: %w", n, b.P90, ErrChargeNegative)
+			return fmt.Errorf("cost calibration cell %d p90 %s: %w", n, cell.P90, ErrChargeNegative)
 		}
-		if n == 0 {
-			continue
+		if cell.Observations < c.MinEvidence {
+			return fmt.Errorf("cost calibration cell %d observations %d below minimum %d: %w",
+				n, cell.Observations, c.MinEvidence, ErrCellThin)
 		}
-		c2, err := c.Buckets[n-1].MaxQty.Cmp(b.MaxQty)
-		if err != nil {
-			return fmt.Errorf("cost calibration buckets %d,%d: %w", n-1, n, err)
+		if cell.Method == "" {
+			return fmt.Errorf("cost calibration cell %d method: %w", n, domain.ErrUnset)
 		}
-		if c2 >= 0 {
-			return fmt.Errorf("cost calibration bucket %d max %s, %d max %s: %w",
-				n-1, c.Buckets[n-1].MaxQty, n, b.MaxQty, ErrBucketOrder)
+		key := costKey{inst: cell.Instrument, side: cell.Side, stratum: cell.Stratum}
+		if prev, ok := lastInGroup[key]; ok {
+			c2, err := prev.Cmp(cell.MaxQty)
+			if err != nil {
+				return fmt.Errorf("cost calibration cell %d: %w", n, err)
+			}
+			if c2 >= 0 {
+				return fmt.Errorf("cost calibration cell %d max %s after %s in the same group: %w",
+					n, cell.MaxQty, prev, ErrBucketOrder)
+			}
 		}
+		lastInGroup[key] = cell.MaxQty
 	}
 	return nil
 }
@@ -193,16 +279,11 @@ func (m *ConservativeCostModel) EstimateCost(req domain.ExecutionCostRequest) (d
 		return domain.ExecutionCostEstimate{}, fmt.Errorf("estimate cost qty %s: %w", req.Qty, ErrQtyNotPositive)
 	}
 
-	p90, err := m.p90For(req.Qty)
+	spotCost, err := m.legCost("spot", req.Spot, req.Qty)
 	if err != nil {
 		return domain.ExecutionCostEstimate{}, err
 	}
-
-	spotCost, err := m.legCost("spot", req.Spot, req.Qty, p90)
-	if err != nil {
-		return domain.ExecutionCostEstimate{}, err
-	}
-	perpCost, err := m.legCost("perp", req.Perp, req.Qty, p90)
+	perpCost, err := m.legCost("perp", req.Perp, req.Qty)
 	if err != nil {
 		return domain.ExecutionCostEstimate{}, err
 	}
@@ -221,26 +302,123 @@ func (m *ConservativeCostModel) EstimateCost(req domain.ExecutionCostRequest) (d
 	return est, nil
 }
 
-// p90For selects the bucket for qty: the first whose MaxQty is at or above
-// it (the bound is inclusive). A quantity past the last bucket is a size the
-// artifact never measured — refused, never extrapolated.
-func (m *ConservativeCostModel) p90For(qty fixedpoint.Quantity) (fixedpoint.Rate, error) {
-	for _, b := range m.cal.Buckets {
-		c, err := qty.Cmp(b.MaxQty)
-		if err != nil {
-			return fixedpoint.Rate{}, fmt.Errorf("estimate cost bucket: %w", err)
+// BookFeaturesFor measures the classifier's features on one side of a book:
+// the relative top-of-book spread (side-less) and the side's total displayed
+// base quantity. It is EXPORTED because it is the one implementation of the
+// observation both consumers must share (§41b-ii-b): the runtime pricing
+// here and the calibration derivation over archived books — two feature
+// extractors would let one book land in two strata.
+//
+// Roundings lean toward the wider-spread reading: the mid rounds toward
+// zero and the ratio away from zero, so a boundary-straddling book falls in
+// the more-stressed stratum of a monotone ladder — overstating stress
+// overstates the charge, which is the conservative direction.
+func BookFeaturesFor(book mdomain.BookSnapshot, side mdomain.BookSide) (domain.BookFeatures, error) {
+	if len(book.Bids) == 0 {
+		return domain.BookFeatures{}, fmt.Errorf("bid side empty: %w", ErrDepthInsufficient)
+	}
+	if len(book.Asks) == 0 {
+		return domain.BookFeatures{}, fmt.Errorf("ask side empty: %w", ErrDepthInsufficient)
+	}
+	bestBid, bestAsk := book.Bids[0].Price, book.Asks[0].Price
+
+	unit, err := fixedpoint.ParseQuantity(bestBid.Base(), "1")
+	if err != nil {
+		return domain.BookFeatures{}, fmt.Errorf("spread unit: %w", err)
+	}
+	// Price × 1 is exact by construction; RoundExact states that instead of
+	// silently absorbing a future scale change.
+	bidN, err := fixedpoint.Notional(bestBid, unit, fixedpoint.RoundExact)
+	if err != nil {
+		return domain.BookFeatures{}, fmt.Errorf("spread bid: %w", err)
+	}
+	askN, err := fixedpoint.Notional(bestAsk, unit, fixedpoint.RoundExact)
+	if err != nil {
+		return domain.BookFeatures{}, fmt.Errorf("spread ask: %w", err)
+	}
+	spreadM, err := askN.Sub(bidN)
+	if err != nil {
+		return domain.BookFeatures{}, fmt.Errorf("spread width: %w", err)
+	}
+	sum, err := askN.Add(bidN)
+	if err != nil {
+		return domain.BookFeatures{}, fmt.Errorf("spread mid: %w", err)
+	}
+	half, err := fixedpoint.ParseRate("0.5")
+	if err != nil {
+		return domain.BookFeatures{}, fmt.Errorf("spread mid: %w", err)
+	}
+	mid, err := sum.Mul(half, fixedpoint.RoundTowardZero)
+	if err != nil {
+		return domain.BookFeatures{}, fmt.Errorf("spread mid: %w", err)
+	}
+	spread, err := spreadM.Div(mid, fixedpoint.RoundAwayFromZero)
+	if err != nil {
+		return domain.BookFeatures{}, fmt.Errorf("spread ratio: %w", err)
+	}
+
+	var levels []mdomain.BookLevel
+	switch side {
+	case mdomain.SideBid:
+		levels = book.Bids
+	case mdomain.SideAsk:
+		levels = book.Asks
+	default:
+		return domain.BookFeatures{}, fmt.Errorf("side %q: %w", string(side), domain.ErrSideInvalid)
+	}
+	depth := fixedpoint.Quantity{}
+	for n, l := range levels {
+		if n == 0 {
+			depth = l.Quantity
+			continue
 		}
-		if c <= 0 {
-			return b.P90, nil
+		if depth, err = depth.Add(l.Quantity); err != nil {
+			return domain.BookFeatures{}, fmt.Errorf("depth: %w", err)
 		}
 	}
-	last := m.cal.Buckets[len(m.cal.Buckets)-1].MaxQty
-	return fixedpoint.Rate{}, fmt.Errorf("estimate cost qty %s past calibrated max %s: %w",
-		qty, last, ErrSizeOutsideCalibration)
+
+	f := domain.BookFeatures{Spread: spread, Depth: depth}
+	if err := f.Validate(); err != nil {
+		return domain.BookFeatures{}, err
+	}
+	return f, nil
 }
 
-// legCost prices one leg: the worse side's worse branch.
-func (m *ConservativeCostModel) legCost(leg string, inst ids.VenueInstrument, qty fixedpoint.Quantity, p90 fixedpoint.Rate) (fixedpoint.Money, error) {
+// p90For selects the cell for (instrument, side, stratum, qty): within the
+// key's group, the first cell whose MaxQty is at or above the quantity (the
+// bound is inclusive). A key with no cells at all is a population the
+// artifact never measured (ErrStratumUncalibrated — never a nearest-cell
+// guess); a quantity past the group's last bucket is a size it never
+// measured (ErrSizeOutsideCalibration) — refused, never extrapolated.
+func (m *ConservativeCostModel) p90For(inst ids.VenueInstrument, side mdomain.BookSide, stratum string, qty fixedpoint.Quantity) (fixedpoint.Rate, error) {
+	key := costKey{inst: inst, side: side, stratum: stratum}
+	found := false
+	var last fixedpoint.Quantity
+	for _, cell := range m.cal.Cells {
+		if (costKey{inst: cell.Instrument, side: cell.Side, stratum: cell.Stratum}) != key {
+			continue
+		}
+		found = true
+		last = cell.MaxQty
+		c, err := qty.Cmp(cell.MaxQty)
+		if err != nil {
+			return fixedpoint.Rate{}, fmt.Errorf("estimate cost cell: %w", err)
+		}
+		if c <= 0 {
+			return cell.P90, nil
+		}
+	}
+	if !found {
+		return fixedpoint.Rate{}, fmt.Errorf("estimate cost %s %s stratum %q: %w",
+			inst, side, stratum, ErrStratumUncalibrated)
+	}
+	return fixedpoint.Rate{}, fmt.Errorf("estimate cost %s %s stratum %q qty %s past calibrated max %s: %w",
+		inst, side, stratum, qty, last, ErrSizeOutsideCalibration)
+}
+
+// legCost prices one leg: the worse side's worse branch, each side priced
+// against the cell its own classified book state selects.
+func (m *ConservativeCostModel) legCost(leg string, inst ids.VenueInstrument, qty fixedpoint.Quantity) (fixedpoint.Money, error) {
 	book, ok := m.books.Snapshot(inst)
 	if !ok {
 		return fixedpoint.Money{}, fmt.Errorf("%s leg %s: %w", leg, inst, ErrBookUnavailable)
@@ -253,11 +431,11 @@ func (m *ConservativeCostModel) legCost(leg string, inst ids.VenueInstrument, qt
 			leg, inst, book.Instrument, domain.ErrLegsMismatch)
 	}
 
-	askCost, err := m.sideCost(leg, "ask", book.Asks, qty, p90)
+	askCost, err := m.sideCost(leg, book, mdomain.SideAsk, qty)
 	if err != nil {
 		return fixedpoint.Money{}, err
 	}
-	bidCost, err := m.sideCost(leg, "bid", book.Bids, qty, p90)
+	bidCost, err := m.sideCost(leg, book, mdomain.SideBid, qty)
 	if err != nil {
 		return fixedpoint.Money{}, err
 	}
@@ -272,16 +450,37 @@ func (m *ConservativeCostModel) legCost(leg string, inst ids.VenueInstrument, qt
 }
 
 // sideCost prices one side of one leg: max(walk premium + adverse charge,
-// p90 charge), both against the side's best-level notional.
+// p90 charge), both against the side's best-level notional, with the p90
+// drawn from the cell this side's CLASSIFIED book state selects — the same
+// classifier the calibration ran, on the same features (§41b-ii-b).
 //
 // The walk premium is |Σ level fills − best·qty| with the roundings chosen
 // so the premium can only be overstated: fills round away from zero on the
 // way through the ladder, the best-price reference rounds toward zero for
 // the aggressing comparison. levels[0] is the side's best by BookSnapshot's
 // ordering invariant, whichever side this is.
-func (m *ConservativeCostModel) sideCost(leg, side string, levels []mdomain.BookLevel, qty fixedpoint.Quantity, p90 fixedpoint.Rate) (fixedpoint.Money, error) {
-	if len(levels) == 0 {
-		return fixedpoint.Money{}, fmt.Errorf("%s leg %s side empty: %w", leg, side, ErrDepthInsufficient)
+func (m *ConservativeCostModel) sideCost(leg string, book mdomain.BookSnapshot, side mdomain.BookSide, qty fixedpoint.Quantity) (fixedpoint.Money, error) {
+	feat, err := BookFeaturesFor(book, side)
+	if err != nil {
+		return fixedpoint.Money{}, fmt.Errorf("%s leg %s: %w", leg, side, err)
+	}
+	stratum, err := m.cal.Classifier.Classify(feat)
+	if err != nil {
+		return fixedpoint.Money{}, fmt.Errorf("%s leg %s: %w", leg, side, err)
+	}
+	p90, err := m.p90For(book.Instrument, side, stratum, qty)
+	if err != nil {
+		return fixedpoint.Money{}, err
+	}
+
+	var levels []mdomain.BookLevel
+	switch side {
+	case mdomain.SideBid:
+		levels = book.Bids
+	case mdomain.SideAsk:
+		levels = book.Asks
+	default:
+		return fixedpoint.Money{}, fmt.Errorf("%s leg side %q: %w", leg, string(side), domain.ErrSideInvalid)
 	}
 	best := levels[0].Price
 
