@@ -89,7 +89,45 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 48, 2026-07-31 — STEP 3 CLOSED at v0.9.17; step 4 is the open work)
+## START HERE (updated end of session 49, 2026-07-31 — STEP 4 IS DESIGNED, docs-only; slice A is the open work)
+
+**Branch `feat/milestone-1-foundation`.** Session 49 wrote **no code** — it opened milestone 2's
+**step 4** (§31a's row: the pre-registered calibration artifact) and produced its design record.
+**The single source of truth is
+`docs/superpowers/specs/2026-07-31-calibration-artifact-design.md`** — §41 is the design, its
+`RESUME HERE` is the live statement. It survived **three complete adversarial review rounds**
+(Codex; each initially NO-SHIP, each digging one level deeper — structure → observation
+definitions/execution binding → contract pinning; 17 findings total, all valid, all applied; the
+loop then deliberately closed — the provenance note at its top records the full ledger). Headlines:
+the frozen quantities split into **three provenance families** (free REST history / our captured
+books / declared-with-rationale — the dispersion measured in two parts, merged pointwise-adverse);
+the holdout protocol is **three mechanical rules** (H1 boundary 2026-02-01, H2 freeze-instant, H3
+closed identities + everything-eligible); approval is a **committed detached attestation** the
+step-5 runner consumes (write-once, its own hash in run evidence); the derivation procedure is
+**execution-bound** (dirty-tree refusal, embedded revision, executable digest); placement is
+domain math + a `driving` adapter (rule 3's shape); **ONE pre-registered core marker** (§8's
+latency clause, the §40d modeled-tier shape) lands at slice C's close. **Two user decisions were
+taken and SEALED in-session (§41h): the step-5 fork is HYBRID and the gate venue is BINANCE —
+dated 2026-07-31, before any holdout fetch; do not reopen.** §38f stays deferred by the user's
+same-session choice (the disk clock still runs).
+
+Verify rather than trust: `git status --short` (clean), `make ci` (green, all six gates),
+`grep -rn "SPEC EDIT OWED" internal/ tools/` — expect **ZERO** (the design pre-registers ONE
+marker that slice A will deliberately take; until slice A lands, zero stays the expectation).
+
+**The capture rituals stay first, every session:** `pgrep -fl "arblab capture run"` (PID 74192),
+then a verify over the accumulated range **in the background** — 0 integrity findings, always
+(session 49's check: COVERAGE-only, the known Bybit-spot ledger).
+
+**What is next, in order (the RESUME lists it):**
+1. **Step 4 slice A** (§41j): the artifact schema (stratified per-leg p90 + frozen classifier
+   params + `EntryDrift`) + loader + attestation contract + H1/H2/H3 refusal frame +
+   `datasets/` layout + the §8 latency marker taken.
+2. **Slices B and C** (§41j), then **step 5** with the sealed identity.
+
+---
+
+## START HERE (updated end of session 48, 2026-07-31 — HISTORICAL — STEP 3 CLOSED at v0.9.17; superseded by session 49's step-4 design)
 
 **Branch `feat/milestone-1-foundation`.** Session 48 built §40j's slice C and closed step 3: the
 `strategy/domain/cashcarry` core (entry inequality, incremental exit, quantization, plan

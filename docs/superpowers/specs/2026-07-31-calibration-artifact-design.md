@@ -1,0 +1,623 @@
+# Milestone 2 step 4 — the pre-registered calibration artifact: design (2026-07-31)
+
+**Status:** design only — **nothing in this step is built.** Session 49. Implements §31a's step 4 row
+(*"The pre-registered calibration artifact — §8: approved before the promotion sample is scored"*)
+toward §12.2's milestone-2 deliverable: the `$1K` economic gate *"whose thresholds are the
+pre-registered, independently-approved calibration artifact produced first in this milestone, before
+the promotion sample is scored"*. It answers **§39l-1's step-4 half** (what data backs the numbers
+the artifact freezes) and sharpens the step-5 half rather than pre-answering it (§41h). §40k-4's
+rescue-margin registration is honored here (§41b family 3).
+
+**Provenance note:** round 1 (Codex, session 49) — verdict NO-SHIP, two blockers + five majors,
+**all seven valid**, all applied: the approval was prose the runner never reads (→ the committed
+detached attestation, §41e — reversing this record's own first rejection of a committed approval
+file, with the runner now its consumer); H1/H2 left both samples selectable after inspection
+(→ H3's closed identities + outcome-independent promotion rule, §41c); the declared latency
+contradicted §8's "measured" (→ the pre-registered `[SPEC EDIT OWED]` marker on the §40d
+modeled-tier shape, §41b); the quantity-only p90 table dropped §8's book-state conditioning
+(→ pre-registered strata with per-cell minimum evidence, §41b); the dispersion's imminent
+residuals were underivable from settled history — §8's own "funding OHLC ≠ live estimate" one
+step earlier (→ the two-part measurement over the archive's `markPrice@1s` stream + the
+pointwise-more-adverse merge, §41b); `EntryDrift` was missing from a roster the loader must
+satisfy, and the minimum-utilization threshold was named but never frozen (→ both added, §41b);
+and the derivation's placement violated §3.6 rule 3's permitted-children letter (→ domain math +
+driving adapter, §41f). One further defect was caught before the round: the approval block sat
+inside its own hash preimage (§41d). Round 2 (Codex, fresh thread) — verdict NO-SHIP, two
+blockers + five majors, **all seven valid**, all applied, digging one level deeper than round 1's
+structural findings into observation definitions and execution binding: the promotion sample was
+still selectable post-approval through the deferred fork/venue/end choices (→ the closed
+promotion identity frozen inside the artifact + the fork decision moved to slice C's first act,
+§41c/§41h); the negative-regime absence had an "accept a stated limitation" escape §8 never
+grants (→ hard refusal; waiver only via a marked §8 edit + new version + rerun, §41c); the
+passive p90 had no defined observation, making conforming implementations divergent (→ the
+committed counterfactual — classify at *t*, walk at *t*+λ, reference best-at-*t* — with method
+identity per cell, §41b); the utilization proxy measured eligibility, not §2.4's time-in-position
+(→ the Enter/Continue occupancy replay over the closed sample, §41b); the p90 pooled both legs
+under one key (→ the (venue, product, side, stratum, bucket) cell key, §41b); the attestation was
+replaceable without changing the journaled identity (→ write-once attestation + its SHA-256 in
+the run evidence, §41e); and the procedure commit named code without proving it executed (→
+dirty-tree/revision-mismatch refusals + the executable digest in artifact and attestation,
+§41e/§41f). Round 3 (Codex, fresh thread; a first attempt died at 6 minutes with only
+evidence-gathering in its log — nothing formed, nothing recovered, retried clean) — verdict
+NO-SHIP, one blocker + two majors, **all three valid**, all applied: sealing the fork/venue at
+slice C still allowed inspecting the *public* holdout era across candidate identities first (→
+H3's both-conditions rule — sealed before any holdout fetch AND before derivation — plus the
+honesty declaration; dissolved at the strongest point by the user sealing **hybrid + Binance**
+in this session, §41h); the occupancy replay demanded execution costs over a bookless
+calibration era (→ the pre-registered constant-cost surrogate at a declared quantity and
+stratum, conservative direction argued, the same frozen definition for the band's
+entry-clearing level, §41b); and the p90 strata had no frozen classifier (→ classifier code
+under the procedure commit, parameters in the hashed artifact, same classifier at calibration
+and runtime, unplaceable book = refusal, §41b). **The review loop closed here, deliberately:**
+three complete rounds descended from structure (r1) through observation definitions and
+execution binding (r2) to contract pinning (r3); every §8 term now has a declared carrier — a
+schema field, a refusal, or the dated seal — and the next verifier of these contracts is
+slice A itself: the compiler, the six gates, and the battery are stronger checks of a frozen
+interface than a fourth prose round. The findings are folded in below rather than appended,
+because a record is what a later session resumes from, not a changelog.
+
+**Doc set:** v0.9.17. The live statement of what to do next is at **`## RESUME HERE`** at the bottom.
+
+---
+
+## §41 — step 4's design
+
+### Preamble — what step 4 is, and the one sentence that bounds it
+
+Step 4 produces the **record of frozen numbers** that step 5's scored run is judged against: §8's
+*"pre-registered, versioned calibration artifact"* — frozen dataset + holdout identifiers, schema +
+content hash, per-number rationale, approval record — **produced and approved before the promotion
+sample is scored**, so that step 5 cannot tune thresholds against the sample it is grading. It does
+**not** run the scored gate (step 5), and it does **not** re-derive any structure step 3 built —
+every seam it fills was built expecting it (`CalibrationRef` + hash on every class-2 value, the
+`fixture:` marker discipline, §40e's one-artifact rule, `CostCalibration`'s field set). The boundary
+discipline: **step 3 built structure, step 4 freezes numbers into it, step 5 drives it with replayed
+data.** §8's own argument bounds the governance: two implementations agreeing on the same artifact
+proves *determinism, not independence* — the governance (pre-registered procedure, frozen holdout,
+approval before scoring) is what prevents tuning-until-it-passes.
+
+### §41a — scope
+
+**In:** the artifact's **schema** (context-owned, beside its loader — slice A's reference-schema
+pattern) and **content-hash rule** (§41d); the **roster of frozen quantities in three provenance
+families** (§41b) — the load-bearing decision; the **dataset freeze + holdout declaration
+protocol**, declared before any derivation runs (§41c); the **governance**: mechanically-derived
+thresholds under a pre-registered procedure, solo-honest approval (§41e); the **derivation tooling**
+(`arblab calibrate`, §41f); the **runtime loader** that turns the committed artifact into the
+class-2 values step 3 defined (§41g); and the **committed funding-history datasets** the
+family-1 derivations read (§41c/§41f).
+
+**Out, with the reason each stays out:** the scored run and its runner (step 5 — §40h/§40i/§40k-2);
+the reference-**revision** repository (step 5, pre-registered §40k-2 — revisions are fee/reference
+facts, not calibration numbers; the two mechanisms stay distinct because their change cadences and
+authorities differ); the rescue margin's **real** derivation (§7.1's milestone-4 protocol — this
+step freezes §40k-4's interim number with rationale, nothing more); the `$10K+` full
+adverse-selection model (§8 tiers it out of milestone 2); and any change to the six §3.6 gates
+(nothing here adds an importable surface the existing gates do not already police).
+
+### §41b — the roster: every frozen quantity, in three provenance families
+
+**Decision: the artifact freezes §8's threshold roster plus §40e's class-2 roster, and every
+quantity is assigned to exactly one of three provenance families — a family names what must exist
+before the number can be honest, which is what turns §39l-1's "what data backs the window" from one
+blocking question into three answerable ones.** One quantity — the dispersion — is measured in
+**two parts from two families** and frozen as one distribution by a committed merge rule; it is
+the recorded exception, stated below rather than absorbed into the one-family claim.
+
+**Family 1 — measured from refetchable venue REST history.** Both venues serve funding-rate history
+and kline history over public REST (§38f's finding: funding is re-fetchable; the venue's published
+funding/mark **is** the definition, per the venue-published-vs-locally-derived rule). ≥3 months —
+years, in fact — is available today, negative regimes included. Quantities:
+
+- **The dispersion distribution (C3) — the EWMA part.** The deployed estimator uses **two
+  forecast sources** (the live per-settlement estimate for the imminent settlement; the trailing
+  EWMA for later ones) and applies **one** dispersion shift to both, so an honest dispersion needs
+  residuals from both sources. The EWMA part is family 1: the domain estimator's trailing forecast
+  is run causally over the calibration era's settlement history and the residuals
+  (realized − forecast) collected — causal trailing forecasts make every residual out-of-sample by
+  construction. **Settled-rate history cannot back the imminent part** — §8's own line ("funding
+  OHLC ≠ live estimate") is the same fact one step earlier — so the imminent residuals come from
+  family 2 (below), and the frozen `Dispersion.Points` are the **pointwise more-adverse** of the
+  two measured quantile sets — a committed merge rule, conservative at every quantile, requiring
+  no change to the domain's one-distribution shape.
+- **The `EntryDrift` margin** (§5.2's `entry_drift_pct` — the C3 adverse-drift margin the entry
+  must clear, a required `MeasuredRate` the core already charges) — frozen from the dispersion
+  distribution's adverse tail by a committed rule, with its own field, derivation identity and
+  rationale in the artifact. It was absent from the first draft's roster while `StrategyParams`
+  refuses to validate without it — the review round's catch; a roster the loader cannot satisfy is
+  a loader that invents a number.
+- **The exit band's width** — from measured regime persistence (§2.4's own words): the committed
+  derivation rule reads calibration-era settlement excursions (dips below the entry-clearing level
+  and whether they recovered within the dwell) and emits the width.
+- **The adverse basis move** (the `BasisForecast` default's charge) — from venue-published mark and
+  spot kline history: basis-proxy series at kline granularity, adverse-direction move over
+  hold-length horizons, high quantile frozen. This is the **hold-scale** basis quantity — distinct
+  from family 2's execution-scale adverse move, despite the colliding names (§41b-note below).
+- **The expected-utilization figure** — **occupancy, not eligibility**: §2.4's utilization is
+  expected time *in position*, and the first draft's proxy (the fraction of entry-clearing
+  windows) measures a different thing — a few clearing windows can start multi-week holds, and
+  many isolated ones can produce almost no occupancy, so the proxy is not even conservative
+  (round 2's catch). The derivation **replays the actual `Enter`/`Continue` state machine** —
+  step 3 built it as a pure function precisely so history can be driven through it — over the
+  closed calibration sample, and freezes occupied duration ÷ deployable duration, rounded
+  **down**. Round 3's catch: the calibration era has **no books**, and `Enter` demands an
+  execution cost, so a naive "actual replay" either refuses every entry or invents book states.
+  The replay therefore runs on a **pre-registered constant-cost surrogate**: execution cost held
+  at the artifact's own frozen conservative numbers, evaluated at a **declared candidate
+  quantity and declared stratum** — with the conservative direction argued in the rationale
+  (holding historical costs at the frozen bound overstates them, which suppresses entries and
+  understates occupancy — the direction that hardens the gate). The **exit band's
+  entry-clearing level uses the same frozen definition** (same candidate quantity, same
+  surrogate cost), or its derivation would move with an undeclared choice. Derivation order
+  within the run: costs, dispersion and band freeze first; the occupancy replay consumes them.
+  The
+  scored run's *measured* utilization is step 5's output; this number is the pre-registered
+  expectation §8 names, and §8's minimum-utilization threshold is what catches a scored run that
+  idles far below it.
+
+**Family 2 — measured from our captured books.** The archive (capture design §32) holds
+time-synchronized spot and perp books from 2026-07-30 on — days, not months, and §41c's freeze rule
+bounds which days derivation may read. Quantities:
+
+- **The execution-scale adverse move** (`CostCalibration.AdverseMove`) — price move against the
+  order side over the latency window, measured across archived book instants, adverse-side high
+  quantile.
+- **The p90 slippage table — a defined counterfactual observation, keyed to the leg it prices,
+  stratified by book state as well as size.** §8's letter is *"p90 slippage conditional on order
+  size **and book state**"*, and the step-3 seam's `CostBucket` carries only `MaxQty` — a
+  quantity-only table pooled across book states understates the p90 exactly in the stressed state
+  being scored, and the depth-walk branch does not repair it (the walk sees displayed depth;
+  adverse selection is the depth that vanishes on contact, which is the p90 branch's whole job).
+  Three commitments, each a round-2 catch:
+  (i) **The observation is defined, because with no order path "measured slippage" is otherwise
+  whatever the implementer meant**: classify the book at instant *t*, walk the candidate quantity
+  through the book at *t + assumed latency* on the same side, and measure against the best price
+  at *t* — the passive counterfactual for depth that vanished over the latency window. Sampling
+  cadence, gap handling, insufficient-depth handling and archive-discontinuity treatment are all
+  part of the committed procedure, and the artifact records the method per cell; real-fill
+  recalibration arrives with milestone 3's order path, the same account-real-before-capital shape
+  as the latency clause.
+  (ii) **The cell key names the population**: (venue, product, side, book-state stratum, quantity
+  bucket) — the current adapter applies one quantity-keyed p90 to **both legs**, and a pooled
+  table is dominated by the liquid population precisely where the illiquid leg needs its own
+  answer.
+  (ii-b) **The stratum classifier is itself frozen in the artifact, not named and left to the
+  implementer** (round 3's catch: "classify the book at *t*" without frozen features, cut
+  points, boundary inclusivity, precedence and an out-of-range refusal lets two conforming
+  implementations put the same book in different strata and draw different charges from the same
+  approved artifact). The classifier's *code* is domain code under the procedure commit; its
+  *parameters* live in the hashed artifact; calibration and runtime use the same classifier, and
+  the runtime lookup keys on (instrument, side, **classified** stratum, quantity bucket) with a
+  book the classifier cannot place being a refusal, never a nearest-cell guess.
+  (iii) **A cell below a declared minimum evidence count is absent, and absent is a refusal** —
+  never a thin-sample number with a rationale attached.
+  The `CostCalibration`/`CostBucket` schema widens accordingly in step 4's slice A: a deliberate,
+  recorded extension of a seam that was built expecting this artifact, driven by §8's letter —
+  not a re-derivation of step 3's structure.
+- **The dispersion's imminent part** — residuals of the **live per-settlement estimate** (the
+  `markPrice@1s` stream's funding estimate, which the archive carries from day one) against the
+  realized settlement, collected over the capture window; merged with family 1's EWMA residuals
+  by the §41b merge rule above.
+- **Transport-latency statistics** — not frozen directly, but measured (RecvTime vs SourceTime
+  across the archive) to *inform* family 3's latency declaration.
+
+A short measurement window is the honest current state, and the family answer is versioning, not
+waiting: the v1 artifact freezes what the archive can support **with the window's shortness stated
+in the rationale**, and a longer-windowed v2 (more capture, or a purchased-history backfill) is a
+new version that §8's own rule prices correctly — a complete rerun.
+
+**Family 3 — declared with rationale, not measured.** Each is a scoring-protocol choice or a
+quantity milestone 2 structurally cannot measure; the artifact carries the value, the rationale,
+and what informed it:
+
+- **The decision-to-arrival latency** — no OMS exists until milestone 3, so no order was ever
+  sent, and §8's letter says **measured** decision-to-arrival latency. Declaring it is therefore a
+  **deviation, not a reading**, and it takes the §40d modeled-tier shape: a **pre-registered
+  `[SPEC EDIT OWED]` marker**, taken at the schema in slice A and landed at slice C's close as a
+  §8 clause authorizing a **declared upper-bound assumption for milestone 2's `$1K` gate** —
+  informed by family 2's transport statistics with a stated multiplier for the unmeasured order
+  path — **with a measured order-path latency required before capital** (milestone 3's OMS is
+  what makes it measurable; the testnet integration §9 already schedules is the probe). The
+  schema names the field an *assumed bound*, never "measured at" — and `CostCalibration.Latency`'s
+  comment currently says "measured at", so slice A owes that comment the same correction. The
+  driven adapter already refuses a longer-than-calibrated latency at decision time, which is what
+  keeps the declaration honest later: a live system slower than the assumption refuses rather
+  than flatters.
+- **The rescue-margin figure** — §40k-4's interim number, rationale owed, real derivation
+  milestone 4.
+- **The rolling-window length + the regime segmentation rule** — what classifies a sub-window as
+  negative; a written rule, applied mechanically by step 5.
+- **The standby benchmark** — §8's "idle/deployable capital, not the hurdle"; the declared figure
+  the negative-regime criterion compares against.
+- **The max-drawdown ceiling** and **the confidence level + method** for the LCB — declared,
+  with rationale.
+- **The minimum-utilization threshold** — §8 makes it part of pass eligibility (a rolling window
+  below it is not held to the hurdle), and it is a **distinct number from family 1's
+  expected-utilization figure**: expected utilization is the pre-registered forecast the
+  utilization-adjusted LCB uses; the minimum is the eligibility cutoff. Both are frozen; the
+  artifact states the mechanical relation it chooses between them (the cutoff as a declared
+  fraction of the expectation, or an independent figure — either way written, never implied), so
+  neither the loader nor the runner ever synthesizes a verdict-affecting number outside the
+  one-artifact governance.
+
+**This record deliberately names no values.** A number written here would be a threshold chosen
+outside the governance — the values exist only in the approved artifact (§41e), and committed
+numbers outside it live only in `fixture:`-marked test helpers (§40e, unchanged).
+
+**§41b-note — two "adverse moves", named apart.** The execution-scale move (family 2, seconds,
+prices a fill) and the hold-scale basis move (family 1, days, prices a position) share an adjective
+and nothing else. The schema names them `adverse_fill_move` and `adverse_basis_move`; a reviewer
+finding one where the other belongs is finding a real defect.
+
+**Rejected: one family (buy Tardis, measure everything from months of books).** It is the
+maximal-fidelity answer and it makes the artifact hostage to a purchase decision plus an ingest
+project, while family 1's quantities never needed books at all. The purchase stays live as the
+step-5 fork (§41h) and as the v2 upgrade path — rejected as a *precondition*, not as an option.
+
+**Rejected: declare everything (family 3 for all).** Fastest to freeze and it abandons §8's
+"mechanically-derived thresholds are the default" for the quantities where measurement is free
+(family 1) or already captured (family 2). Declaration is reserved for quantities where measurement
+is structurally impossible this milestone, and each such declaration must say so in its rationale.
+
+### §41c — the dataset freeze and the holdout split, declared before looking
+
+**Decision: two mechanical disjointness rules, one per data direction, both enforced by refusals in
+the derivation tool — declared here, before any dataset is fetched or read.** §31a's constraint is
+that the calibration/holdout split precede looking at either; a split chosen after inspection is
+the tuning door §8's governance exists to close.
+
+**Rule H1 — fetched history splits at a declared boundary.** The derivation tool **refuses any
+historical input dated on or after 2026-02-01T00:00:00Z**. Everything before is calibration era;
+everything on/after is holdout era, reserved for scoring. The boundary is chosen by calendar
+arithmetic, not by inspection: it leaves the most recent ~6 months as the promotion sample —
+recent-regime scoring is the honest promotion test — and years of history behind it for
+calibration. Whether the holdout era contains the negative regime §8 requires is **discovered, not
+chosen**; if it turns out not to, the response is a **hard refusal — the gate cannot report a
+verdict at all**, because §8's negative-regime requirement is unconditional and a "stated
+limitation" would be a nonconforming green gate wearing a footnote (round 2's catch: the
+full-sample LCB could pass while the strategy's principal failure regime — stand-down correctness
+and negative-regime drawdown — was never scored, the exact aggregate-metric masking §8 was
+written to prevent). The permitted resolutions are **wait** (a negative regime occurs in the
+holdout era), **extend the sample by purchase** (still entirely post-boundary), or an **explicit
+marked §8 edit** followed by a new artifact version and a complete rerun — never prose.
+**Extending scoring backward into the calibration era is forbidden.**
+
+**Rule H2 — forward capture splits at the freeze instant.** Derivation reads only archive days
+whose manifest entries exist when the derivation runs; the artifact **enumerates the manifest
+digests it read** in its dataset block; step 5's runner **refuses to score any window whose day
+appears in that enumeration**. Freeze-then-score gives disjointness by construction — every scored
+forward byte postdates the artifact.
+
+**Rule H3 — both samples are closed identities, not eligibility floors.** H1 and H2 alone leave a
+selection door open on each side, and the review round's second blocker named both. Calibration
+side: an input set defined only by "nothing after the boundary" lets derivation *omit* adverse
+calibration rows and still verify — so the artifact's dataset block declares the calibration
+identity **closed**: venue, symbol, series, start **and end** instants, and a completeness rule
+(every settlement/kline the venue serves inside the range, pagination exhausted; the tool refuses
+a dataset with a missing **or extra** row, naming the gap). Promotion side: an operator free to
+choose *which* eligible holdout window, venue, or fork gets scored after seeing the artifact can
+score until one passes — so the promotion identity is **frozen inside the hashed artifact
+itself, closed on every axis**: venue, data source (§41h's fork), instruments, sample start, a
+**deterministic end rule** (for forward data: the first complete three-month interval after the
+freeze — a closed rule, never an operator-declared run date, which permits outcome-dependent
+stopping), and the missing-data policy. Round 2's catch on the first H3: recording the fork
+"before holdout bytes are read" still let three verdict-affecting choices (venue, fork, sample
+end) happen *after the thresholds were known* — a selection made after approval is a tuning door
+whatever it is keyed on. Round 3 then caught the repair's own gap: "before the artifact freezes"
+alone permits **inspecting the public holdout-era history across candidate identities and then
+choosing the favorable one** — leakage at the population-selection layer, which no deterministic
+end rule repairs afterward. So the ordering constraint is **both conditions, not either**:
+§41h's fork and §40k-3's venue are sealed — dated, in this record — **before any holdout-era
+byte is fetched or read by our tooling AND before any threshold derivation runs**; the fetchers
+consume the sealed identity (a holdout-era fetch before the seal is a refusal); and the seal
+carries an **honesty declaration**, because holdout-era funding is public data a solo operator
+cannot un-see: if holdout-era history was examined across candidate identities before sealing,
+the seal must say so and a fresh prospective holdout must be declared in its place. The scored
+sample is **everything eligible** under the sealed identity, never a chosen subset; any
+different fork, venue, or boundary afterward is a v2 plus a complete rerun, §8's own price.
+
+**The dataset block is the identifier set §8 names.** For family 1: fetched history is written once
+to committed dataset files — the venue's words, verbatim, dated, one file per venue per series —
+under `datasets/` (top-level, sibling of `configs/`; funding and kline history at settlement/kline
+granularity is small enough to commit, and committing it is what makes the derivation reproducible
+byte-for-byte). Each file's SHA-256 is enumerated in the artifact. For family 2: book data is never
+committed (that is the archive's job); the manifest digests are the identifiers, per rule H2.
+
+**Rejected: split by the freeze instant alone (no H1).** Clean for forward capture, meaningless for
+fetched history — all history predates any freeze, so derivation could read the very windows
+scoring will replay, and the negative-regime sub-windows §8 scores would be windows the band width
+and dispersion were fitted on.
+
+**Rejected: choose the holdout after fetching, placing it around a verified negative regime.**
+Guarantees §8's regime requirement is satisfiable — by inspecting the data before declaring the
+split, which is the exact move pre-registration forbids. The refusal-and-user-decision path costs
+calendar honesty instead of governance.
+
+### §41d — the artifact's form: one committed file, append-only versions, hash over exact bytes
+
+**Decision: the artifact is one committed JSON document, `configs/calibration.btcusdt.v1.json`,
+with `CalibrationRef.ID` = the file's basename (`calibration.btcusdt.v1`) and `CalibrationRef.Hash`
+= lowercase-hex SHA-256 over the file's exact bytes. Versions are append-only: any change is a new
+file `v2`, never an edit — §8: any change forces a new version and a complete rerun.**
+
+The schema is **context-owned, declared beside its loader** in `strategy/infrastructure/driven`
+(slice A's rule: the kernel owns mechanisms, never a context's schema). Numbers ride
+**mantissa-as-string at declared scale** — `fixedpoint` has no JSON face (§40f), and the wire DTO
+battery already proved the encoding. The document carries, per §8's list: the schema version; the
+quantity values with **per-quantity provenance** (family, dataset citation by digest, derivation
+procedure identity, rationale — family 3's rationale states why the quantity is declared rather
+than measured); the **dataset block** (§41c's enumerations); and the **procedure identity** (§41e). The **approval
+record is deliberately NOT inside the file**: the approval names the content hash (§41e), so an
+in-file approval block would either sit inside its own preimage or force a re-hash after the
+24-hour delay — the frozen bytes and the approval of those bytes are two facts with two homes.
+§8's "carrying … an approval record" is satisfied by composition: the artifact identity (ID +
+hash) is what the attestation (§41e) approves, and the pair is complete only with both.
+
+Hashing the exact bytes rather than a canonicalized parse is deliberate: the file is
+**write-once**, so canonicalization buys nothing and adds a codec between the digest and the bytes
+— the same argument that kept compression out of the archive (§38g). The hash lives **outside the
+file** (in the attestation §41e defines, in every journaled `Decision`'s `CalibrationRef`), so
+there is no self-reference to canonicalize around.
+
+**Rejected: store the artifact in the reference-revision repository (§40k-2).** Both are dated,
+hashed, append-only facts, and merging them is one mechanism instead of two. Rejected because their
+authorities differ — a fee revision records what a venue said and updates at the venue's cadence; a
+calibration version records what the governance approved and updates only through a rerun — and
+§40e's one-artifact rule needs the artifact to be **one** identity, not a bundle of per-quantity
+revisions whose mixture the rule exists to refuse.
+
+**Rejected: per-quantity files (one hash each).** It would let a scored run cite five hashes, which
+is exactly the mixed-provenance verdict §40e forbids; one file makes the one-artifact rule the
+natural reading instead of a cross-file constraint.
+
+### §41e — governance: pre-registered procedure, mechanical derivation, solo-honest approval
+
+**Decision: the derivation *procedure* is pre-registered the same way the numbers are — the
+`calibrate` tool and its committed parameters land in a commit whose hash is recorded inside the
+artifact, before the tool runs against the calibration set — and the recorded commit is bound to
+the code that actually executed, not merely named.** Number-tuning has an obvious door (edit the
+number) and the governance closes it; **rule-tuning** (edit the derivation until the number comes
+out right) is the same door one level up. A commit *string* alone does not close it — a
+modified-working-tree build can emit thresholds while naming the last clean commit (round 2's
+catch) — so the binding is mechanical: the tool reads its own build info (the stdlib's embedded
+VCS revision and dirty flag — standard library only, `kernelpurity`-compatible), **refuses to run
+from a dirty tree or when the embedded revision disagrees with the commit it is about to
+record**, and writes both the revision and its own **executable digest** into the artifact; the
+attestation binds the same executable digest. A changed procedure is then a visibly different
+artifact, which is a new version, which is a complete rerun.
+
+**Approval, solo-honest (§8's own default), machine-verifiable:** mechanically-derived thresholds
+are the governance — a named independent authority only if the operation is staffed. The approval
+is a **committed detached attestation file**, `configs/calibration.btcusdt.v1.approval.json`,
+carrying the artifact ID + content hash, the procedure commit, the dataset ledger (files read,
+digests, refusals hit), the approval instant, and the sign-off — created only after §9's
+solo-honest posture: a **time-delayed self-sign-off** (declared here as 24 hours between
+derivation and approval — long enough to reread cold, short enough not to idle the milestone)
+plus an **out-of-band confirmation**, both named in the file. **Step 5's runner consumes the
+attestation, not a naked expected hash**: it verifies the attestation binds to the artifact it
+loaded (ID + recomputed hash match) and refuses to score without one — because a runner keyed on
+a caller-supplied hash makes an unapproved artifact mechanically indistinguishable from an
+approved one (the operator hashes anything and pins that hash; every check passes; every
+journaled `Decision` cites the pinned hash consistently — internally tamper-evident evidence that
+proves only that *an* artifact was used). The first draft kept approval as prose in this record
+and was rightly NO-SHIPped for it: prose the runner never reads is governance the run cannot
+enforce. A dated entry in this record still accompanies the attestation — the record is where
+reasons live — but the attestation is what the machinery consumes. **The honest solo limit,
+stated:** a solo operator can forge any file; what the attestation buys is that approval is a
+dated, committed, git-historied fact the runner refuses without — tamper-*evident* under the same
+version control as everything else, which is the strongest property a solo posture offers and
+exactly the one §8's "mechanically-derived by default" acknowledges. Two hardenings from round 2:
+the attestation is **write-once like the artifact** — replacing its approval instant, sign-off or
+confirmation claim while the artifact hash stands still would leave every journaled
+`CalibrationRef` pointing at the same two fields, so an approval-record replacement is a **new
+artifact version**, never an edit; and the **runner records the attestation's own SHA-256 in the
+scored run's evidence**, so the run identity names *which* approval authorized it, not merely
+which numbers it used.
+
+### §41f — the derivation tooling: `arblab calibrate`, placed where fetch-writes-a-revision lives
+
+**Decision: the derivation splits along the context's existing shape — pure derivation math in
+`strategy/domain` (a `calibrate` subpackage: residual collection, excursion statistics, the
+depth-walk measurement, the merge rule — beside the estimator whose residuals it collects), and
+the `calibrate` CLI command as a driving adapter in `strategy/infrastructure/driving`, which
+reads the datasets and the archive, runs the domain math, and writes the artifact.** The §40d
+pattern (`fetch-writes-a-revision`) one level up: *derive-writes-an-artifact*. The first draft
+placed the whole thing at `internal/strategy/infrastructure/calibrate`, which **violates §3.6
+rule 3's own letter** — `infrastructure/` contains only `driven/` and `driving/`, a
+permitted-children rule precisely so the adapter *direction* stays visible in the path — the
+review round's catch, and the fix is the shape the rule wanted anyway: a CLI that drives the
+context is a driving adapter. It is context work, not engine machinery: it consumes
+`strategy/domain`'s own estimator (the dispersion residuals **are** the deployed model's
+residuals — measuring a different model's residuals would calibrate a stranger), and it emits the
+context's schema. Under `internal/`, so `nofloat` polices every computation; all quantile,
+excursion and depth-walk arithmetic is `fixedpoint`, and each new derivation computation gets an
+**independent oracle** per the standing rule (slice B's `math/big` oracle pattern; the depth-walk
+measurement can additionally be cross-checked against the driven adapter's walk on shared
+fixtures — two implementations, one claim).
+
+The tool's honesty features are refusals, same as everywhere: refuse a historical input on/after
+H1's boundary **naming the record's date**; refuse an archive day absent from the manifest; refuse
+to overwrite an existing artifact version; refuse to emit if any family-1 dataset file's digest
+disagrees with a re-hash; refuse to run from a **dirty tree** or when the **embedded build
+revision disagrees** with the commit about to be recorded (§41e's execution binding). Determinism
+is a tested claim: two runs over the same inputs emit byte-identical artifacts (no wall-clock in
+the output path — the freeze date is an argument, per the injected-time rule).
+
+**Rejected: place derivation in `engine/` beside capture.** Capture is context-free machinery;
+derivation consumes a context's domain model and produces a context's schema. Putting it in
+`engine/` would also put a `strategy/domain` import into `engine/`, inverting the direction every
+other edge in the repo respects.
+
+**Rejected: derive in an external notebook/script and commit only the output.** The procedure
+would be unregisterable (no commit hash inside the repo's gates), `nofloat` could not police it,
+and reproducibility would rest on an environment no test pins. The whole point of §41e dies there.
+
+### §41g — the runtime loader: bytes → class-2 values, refusing everything the schema promises
+
+**Decision: a driven-side loader (`strategy/infrastructure/driven`) reads the committed artifact
+file and constructs the class-2 values step 3 defined — `Dispersion`, `CostCalibration`, the
+`MeasuredRate`/`MeasuredMoney` fields — each carrying `CalibrationRef{ID, Hash}` with the hash
+recomputed from the file's bytes at load.** Refusals by name: hash mismatch against the caller's
+pinned expectation; a `fixture:`-prefixed ID arriving through the production loader (the marker is
+for test helpers; a committed artifact wearing it is an impersonation); a missing quantity (the
+zero value is unusable, as everywhere); a mantissa that does not parse at its declared scale.
+Validation is the types' own `Validate()` — the loader adds no second authority over rules the
+domain already states.
+
+### §41h — §39l-1: the step-4 half answered, the step-5 half sharpened
+
+**Answered here (step 4's half): the artifact's own data needs require no purchase.** Family 1 is
+free REST history, family 2 is our archive, family 3 is declared. The v1 artifact can freeze on
+data that exists or is fetchable today, under §41c's split.
+
+**Sharpened for step 5 (not pre-answered): what the scored ≥3-month window replays.** The honest
+fork, stated with its costs:
+
+1. **Wait** — score forward capture only; ≥3 months lands late October, negative regime not
+   guaranteed by any calendar. Cost: calendar; the §38f clock keeps running.
+2. **Buy** — Tardis books for the holdout era; full §8 letter (time-synchronized books across the
+   sample), historical negative regimes included. Cost: money + an ingest path for vendor format.
+3. **Hybrid** — historical funding (free, holdout-era) backs the negative-regime sub-windows,
+   where the correct behavior is stand-down and the criterion is bounded loss vs standby (§8's own
+   criterion — a standing-down strategy fills nothing, so book fidelity is doing no work there);
+   forward captured books back the fill-bearing positive windows. Cost: **a §8 reading** — the
+   letter says books across the sample; the hybrid reads books-where-fills-occur. If step 5 takes
+   it, it is a stated reading confirmed by that close's reading pass or a marked §8 edit — never
+   silent.
+
+Which fork is the user's decision, money and calendar both being theirs to spend.
+
+**SEALED — 2026-07-31, session 49, by the user, in this design session:** the fork is **hybrid**
+(option 3) and the scored gate's venue is **Binance** (§40k-3 closed — chosen on archive
+cleanliness: the known absent windows and reconnect churn sit on the Bybit spot book, and
+Binance's `markPrice@1s` stream is what the imminent-residual derivation reads). The seal
+predates any holdout-era fetch, any derivation run, and every slice of this step — the earliest
+instant H3's both-conditions rule admits. **Honesty declaration, per H3:** holdout-era history
+has not been systematically examined across candidate identities; both choices were taken on
+structural grounds (cost/calendar for the fork, archive cleanliness for the venue) stated before
+any holdout byte was fetched by any tooling of ours. The hybrid's pre-registered duty stands:
+its books-where-fills-occur reading of §8 is confirmed by a close's reading pass or lands as a
+marked §8 edit at step 5 — never silent.
+
+### §41i — verification plan: the checklist suspects, named before the fixtures exist
+
+The standing rhythm (checklist **before** battery, aimed mutations, oracles, positive controls)
+applies to every slice. Named in advance, per the nine-instance lesson — the fixture parameter
+pinned to the value that collapses the distinction:
+
+- A residual fixture **symmetric about zero** — adverse-side selection and sign conventions
+  collapse; make the distribution skewed.
+- A **single-bucket** p90 table — bucket selection, ordering, and the boundary rule are all
+  invisible; and no fixture quantity exactly **at** a bucket's `MaxQty` (inclusive-vs-exclusive
+  collapses).
+- **No input dated exactly at H1's boundary** — `<` and `<=` are the same predicate on strictly
+  inside/outside fixtures; the boundary instant must appear and be refused.
+- An excursion fixture whose dips **all** exceed the dwell — the recovered-within-dwell branch is
+  never taken; both branches need instances.
+- A utilization fixture where the clearing fraction divides **exactly** — round-down and round-up
+  agree; make it inexact.
+- An artifact fixture in which **every quantity cites the same dataset digest** — per-quantity
+  citation is untestable; use distinct digests.
+- A hash fixture already **lowercase** end-to-end — the case rule is invisible; one uppercase
+  input must appear.
+- The determinism test run **twice in the same process** — hidden ordering from map iteration can
+  agree within one process and differ across runs; the claim needs two invocations of the binary,
+  or an explicit ordering assertion on every emitted collection.
+- An attestation fixture that binds **correctly in every case** — the runner's refusal needs a
+  fixture whose attestation names a *different* hash than the artifact it sits beside, and one
+  with no attestation at all; a suite of only-valid attestations tests the parse, not the binding.
+- A p90 fixture with a **single stratum** — stratum selection collapses to the quantity-only
+  table the strata exist to replace; and no observation count exactly **at** the minimum-evidence
+  threshold (at-vs-above collapses).
+- A completeness fixture whose gap is **only a missing row** — the "or extra" half of H3's
+  refusal needs a dataset with an inserted row the venue never served.
+- An occupancy fixture where **eligibility and occupancy agree** (every clearing window's hold
+  ends before the next window) — the replay-vs-proxy distinction collapses; the fixture needs one
+  short clearing window that starts a hold spanning many non-clearing ones.
+- A p90 fixture where **both legs' books are identical** — the per-(venue, product, side) keying
+  is invisible; the legs must differ enough that pooling would move the answer.
+- A counterfactual fixture whose book is **unchanged between *t* and *t + latency*** — the
+  walk-at-*t*+λ observation collapses into the plain depth walk; the fixture needs depth that
+  vanishes inside the window.
+- An execution-binding fixture that only exercises the **clean** tree — the dirty-tree and
+  revision-mismatch refusals need their own failing instances, and the positive control beside
+  them.
+
+### §41j — build order: three slices, the standing rhythm
+
+- **Slice A — the doors.** Schema + loader (§41d/§41g) including the **`CostBucket` book-state
+  strata widening and the `EntryDrift` field** (§41b), hash discipline, the attestation schema +
+  the runner-side binding check's contract (§41e), every refusal named; the H1/H2/H3 refusal
+  frame in the driving adapter's skeleton; `datasets/` layout; **the §8 latency marker taken**
+  (`[SPEC EDIT OWED]` at the schema field, §41b family 3) and `CostCalibration.Latency`'s
+  "measured at" comment corrected. The gates already police everything here; no new deferral is
+  created (the deferral rule's construct check: every analyzer input this slice creates —
+  imports, enums, floats — is a kind the six gates already read).
+- **Slice B — family 1.** The history fetchers (venue's words → committed dataset files, dated,
+  digested, H3-complete), EWMA-residual/band/basis/utilization/`EntryDrift` derivations + their
+  oracles.
+- **Slice C — family 2 + freeze + close.** **First act: verify the §41h seal stands** (the fork
+  and venue were sealed in this design session — slice C re-checks that no holdout-era fetch
+  predates the seal and that the sealed identity is what the artifact enumerates). Then the
+  book-derived measurements over the archive (stratified per-leg p90 cells with observation
+  counts and method identities, adverse fill move, imminent residuals + the merge rule), the
+  transport-latency statistics, the family-3 declarations with rationale, the derivation run from
+  a clean checkout (§41e's execution binding), the 24-hour approval delay, the attestation + the
+  dated approval entry in this record, and the close: reading pass, **the §8 latency clause
+  landed** (this record's one expected core edit — everything else §8 already states; the reading
+  pass holds the veto per the standing lesson), marker grep back to zero, doc-set bump.
+
+### §41k — open questions passed on, sharpened not pre-answered
+
+1. ~~The step-5 window fork~~ — **SEALED 2026-07-31 (§41h): hybrid.** What passes to step 5 is
+   the fork's pre-registered §8-reading duty, not the choice.
+2. ~~Which venue hosts the scored gate~~ — **SEALED 2026-07-31 (§41h): Binance.** §40k-3 is
+   closed; both venues' datasets and fee rows remain committed either way (the calibration side
+   still reads both venues' history — the seal fixes the *scored* population, not the measured
+   one).
+3. **The reference-revision repository + replay applicator** — §40k-2 unchanged, step 5.
+4. **The rescue margin's real derivation** — §7.1's milestone-4 protocol; v1 freezes the interim
+   figure with rationale (§41b family 3).
+
+### §41l — deliberate absences
+
+- **No values in this record** (§41b) — a number here would be a threshold chosen outside the
+  governance.
+- **No recalibration schedule.** Recalibration is a new version + rerun by §8's rule; a schedule
+  is a decision for after the kill gate, over data whose value is then known (§38g's shape).
+- **No artifact hot-reload.** A calibration change mid-run is a different run by definition;
+  restart-required is §5.2's default direction and it is correct here.
+- **No committed book data.** The archive owns book bytes; the artifact cites manifest digests
+  (§41c H2).
+- **No independent approval authority.** §8's solo-honest default, revisited only if the
+  operation is staffed.
+- **No `$10K+` model numbers.** The full adverse-selection model is milestone 5's; freezing
+  placeholder numbers for an unbuilt model would be family 3 without a consumer.
+
+---
+
+## RESUME HERE
+
+**STEP 4 IS DESIGNED (session 49, 2026-07-31): this record is the design; nothing is built.**
+The record survived three complete adversarial review rounds (provenance note at the top — read
+it; the loop is closed, deliberately). **The promotion identity is SEALED (§41h): hybrid fork +
+Binance gate venue, by the user, 2026-07-31 — do not reopen.** Next, in order:
+
+1. **Slice A** (§41j): schema (per-leg stratified p90 cells + frozen classifier parameters +
+   `EntryDrift` widening) + loader + attestation contract + hash/refusal machinery + the
+   H1/H2/H3 refusal frame (incl. the pre-seal holdout-fetch refusal and the execution-binding
+   refusals) + `datasets/` layout + the §8 latency marker taken (the record's ONE pre-registered
+   marker).
+2. **Slice B**: family-1 fetchers (both venues, calibration era only) + derivations (EWMA
+   residuals, band, basis, occupancy-with-surrogate, `EntryDrift`) + oracles.
+3. **Slice C**: seal verification first, then family-2 measurements over the archive, family-3
+   declarations, the derivation run from a clean checkout, the 24-hour approval delay, the
+   attestation + approval entry, the close (lands the §8 latency clause; marker grep back to
+   zero; doc-set bump).
+4. Then **step 5** (§31a): the scored replay runner — carrying the hybrid's pre-registered §8
+   reading duty, §40k-2's revision repository, and the sealed identity's everything-eligible
+   rule.
+
+Standing rituals first, every session: `pgrep -fl "arblab capture run"`, backgrounded
+`capture verify` over the accumulated range (0 integrity findings, always), `git status --short`,
+marker grep (**ZERO**).
