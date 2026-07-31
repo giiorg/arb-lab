@@ -85,20 +85,18 @@
 // that place. See skew.go for which clock the measurement uses and why the
 // spec's silence on that question is load-bearing.
 //
-// # What is DEFERRED, and the construct that makes it buildable
+// # The read-port deferral RESOLVED the session its trigger landed
 //
-// The read port and the MarketView translation are not here. §3.3 makes
-// MarketView "strategy-owned", §3.6 rule 1 makes the ports "consumer-owned", and
-// the strategy context does not exist — so implementing the translation now
-// means inventing both ends of a contract whose only real consumer arrives with
-// §12 milestone 2's cashcarry.
-//
-// The deferral names the construct this package would READ rather than the
-// feature that motivates it, which is §3.6's own rule about deferrals and the
-// one rule 10's deferral got wrong: the trigger is the first CONSUMER-OWNED READ
-// PORT — strategy's MarketView reader or §6 step 8's OMS-owned mark-risk port,
-// whichever lands first — and not "the strategy context exists". A port is what
-// this package implements; a context is merely where one tends to live.
+// The deferral this section carried named its construct as the first
+// CONSUMER-OWNED READ PORT — strategy's MarketView reader or §6 step 8's
+// OMS-owned mark-risk port, whichever landed first — and not "the strategy
+// context exists". Step 3 slice A landed strategy's
+// application/ports.MarketStateReader, and readport.go is the translation
+// the same session, per the standing rule that a deferral lands with its
+// named construct. What the translation deliberately does NOT do — collapse
+// a mid, carry a freshness verdict, assemble the MarketView — is recorded on
+// StrategyReader; the VIEW assembly is the strategy application's job
+// (§40c), so this package still never sees the view's shape.
 //
 // The mark data class is absent for the plainer reason marketdata's module.go
 // already gives from the other side: there is no venue.Mark and no use case, so
