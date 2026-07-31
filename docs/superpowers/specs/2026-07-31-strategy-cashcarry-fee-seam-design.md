@@ -605,33 +605,85 @@ close.
    decidable is the foundation loop itself; until it exists, the errorless §3.3 adapter is a
    compile-check and nothing more.
 
+### §40l — slice A BUILT (session 46, 2026-07-31, same day as the design)
+
+**What landed, in six commits:** `strategy/domain` (the full §40b roster as validated value types +
+the versioned wire DTO with its byte-level battery), `strategy/application` (§3.3 `Strategy`
+verbatim, the seven ports, the `Decide` door refusing loudly via `ErrCoreUnbuilt` until slice C, the
+compile-checked `Adapter`), `strategy/infrastructure/driven` (the reference document schema beside
+its `ReferenceStore` adapter — provenance refusal, `ErrNotPeriodCorrect` for pre-observation asOf),
+the Profiles verification pass (four lot cells from the venues' public APIs; four fee cells from the
+official fee pages **rendered in a real browser** — both venues' pages time out a plain fetcher,
+§40d's scraper rejection observed while verifying), the committed milestone-2 revision
+(`configs/reference.btcusdt.json`, load-tested as the real file), and **the engine/state
+`StrategyReader`** — its doc's deferral named "the first consumer-owned read port" as its trigger,
+slice A landed that port, so the translation landed the same session per the standing rule.
+`make ci` green; marker grep = exactly §40d's one marker at the `ReferenceData` port.
+
+**In-flight decisions, each recorded where it lives (none reopens §40):**
+`Tier` is a `LegFees` field, not `Provenance`'s (lot filters and the hurdle have no tier);
+`Decision` **embeds the whole `DecisionInput`** — §40f states completeness as a property, and
+embedding satisfies it by construction where a curated identity roster satisfies it by curation;
+`Side` is strategy-owned with oms's exact spelling (context autonomy; the milestone-3
+Intent→Order translation is a rename, never a mapping table); the exit-forecast horizon boundary is
+**strictly-after the evaluation instant** (a settlement AT the instant is settling, not
+forecastable) — a stated reading on slice C's reading-pass docket beside §40e's and §40f's; the
+committed hurdle row reads treasury.gov's 13-week close (**3.69%**, 2026-07-30 — the spec's 4.6% was
+illustrative and the live figure is lower, which is §2.1's never-hardcode rule earning its keep)
+with haircuts as declared zeros — the un-haircut benchmark is the HIGHER hurdle, the adverse
+direction, same logic as VIP0.
+
+**The checklist, before the battery, found four collapses** — three in the reference suite
+(maker/taker orientation invisible where spot's two rates are equal; step/min-qty invisible where
+Binance perp's are both 0.001; the hurdle's four members never individually pinned) and one found
+BY the battery's single survivor: the wire's case-strictness test patched the hash in a way that
+changed its LENGTH, and the fixture hash bytes `{1,2,3,n}` hex-encode to digits only — **no
+lowercase letter existed to uppercase**, so the case rule was untestable while looking covered.
+Tenth instance of the standing checklist item; the fixture now leads `0xab 0xcd`.
+
+**The battery: 24 aimed mutations, 24 caught.** One `SURVIVED` (the hex-case above) diagnosed into
+the fixture fix and re-run to a kill; two `NOBUILD!!` re-aims (a sed that orphaned `err`, one that
+orphaned `bid`); one **deliberate `NOBUILD`-as-caught** — breaking `Adapter`'s `Name` produced
+*"Adapter does not implement Strategy (missing method Name)"*, the rule-2 assertion naming its own
+line, which is the verdict-vs-outcome inversion the harness table documents.
+
+**Capture health, noted for slice D's row:** the Bybit spot book stream was absent ~23:00–04:15 UTC
+(30→31 Jul) — recorded honestly as reconnect/absent-window coverage findings (verify verdict
+COVERAGE, **0 integrity findings**); the stream self-recovered and the current-hour file was
+growing at session start. The one-day disk figure (~09:53 UTC) will include this gap.
+
 ---
 
 ## RESUME HERE
 
-**Step 3 is DESIGNED (session 45, 2026-07-31) — nothing is built.** §40 above is the design; §40j
-is the build order. It survived four adversarial review rounds (three complete, each initially
-NO-SHIP; round 4 killed mid-run with its two formed findings recovered and applied; all valid
-findings applied and the loop deliberately closed — provenance note at top). §39l-2 and §39l-3 are ANSWERED here (§40h:
-capture-container Decision journal via the `DecisionSink` port, fsync-on-write; §40i: sim pump
-only, replay-driven paper) — do not reopen them; §39l-1 passes to step 4/5, and two new debts are
-pre-registered with their constructs (§40k-2 the revision repository — step 5; §40k-5 the
-foundation loop's error door — milestone 3).
+**Step 3 is DESIGNED (session 45) and SLICE A IS BUILT (session 46, both 2026-07-31)** — §40 is
+the design, §40j the build order, §40l the slice A build record. The design survived four
+adversarial review rounds (provenance note at top). §39l-2 and §39l-3 are ANSWERED here (§40h,
+§40i) — do not reopen them; §39l-1 passes to step 4/5, and two debts stay pre-registered with
+their constructs (§40k-2 the revision repository — step 5; §40k-5 the foundation loop's error
+door — milestone 3).
 
 **Next, in order:**
 1. **Slice D's one-day disk figure, ~09:53 UTC 2026-07-31** — `du -sh archive/` + a full-day
-   verify, recorded in the capture design record (§32m's row). This is a calendar item and lands
-   whenever its boundary passes, independent of step 3's slices.
+   verify, recorded in the capture design record (§32m's row). Session 46 ran a 16-hour verify
+   (verdict COVERAGE, 0 integrity findings) and found the Bybit spot book absent ~23:00–04:15 UTC,
+   honestly recorded — expect that gap in the full-day row.
 2. **The off-host destination** — still the user's open §38f decision; the laptop still holds the
    ONLY copy.
-3. **Step 3 slice A** (§40j): context skeleton, `DecisionInput`/`Decision` + the wire DTO with
-   its round-trip battery, all seven ports, the Profiles fee/lot verification pass, the
-   context-owned revision schema with `asOf` + provenance refusal, the §40d `[SPEC EDIT OWED]`
-   marker (two clauses).
+3. **Step 3 slice B** (§40j): the default EWMA estimator on the explicit-materials signature, the
+   conservative `BasisForecast` adapter, the milestone-2 `ExecutionCostModel` conservative-bound
+   structure, Dispersion/quantile machinery with class-2 refusal, the joint aggregation rule, the
+   `math/big` oracle. §40j names the checklist's standing suspects for it — read them before
+   writing fixtures.
+4. Then **slice C** (the cashcarry core), whose close lands the §2.4 edit (the marker taken at the
+   `ReferenceData` port in slice A), runs the reading pass — §40e's signature reading, §40f's
+   `HoldPlan` reading, and slice A's exit-forecast strict-after boundary (§40l) are its docket —
+   and bumps the doc set.
 
 Standing rituals first, every session: `pgrep -fl "arblab capture run"` (PID 74192 as of session
-45), `capture verify` over the accumulated range (0 integrity findings, always), `git status
---short` (clean), marker grep (**ZERO** until slice A deliberately takes §40d's marker).
+46), `capture verify` over the accumulated range (0 integrity findings, always — coverage gaps are
+information, not failures), `git status --short` (clean), marker grep (**exactly one**: §40d's, at
+`strategy/application/ports` — until slice C's close lands the edit and removes it).
 
 Do not reopen from this record: §40b's placement and the one-`DecisionInput` shape (policy
 projection and Δ terms included), §40c's split read seam and the dispatched-stream accumulator,
