@@ -594,30 +594,84 @@ pinned to the value that collapses the distinction:
 - **No `$10K+` model numbers.** The full adverse-selection model is milestone 5's; freezing
   placeholder numbers for an unbuilt model would be family 3 without a consumer.
 
+### §41m — slice A build record (session 50, 2026-08-01)
+
+**Slice A is BUILT: the doors exist and refuse.** Four commits (`5281dfa`, `70a9529`, `9333f7a`,
+`4642879`), landing:
+
+- **`strategy/domain/stratum.go`** — the frozen classifier (§41b-ii-b): explicit three-member
+  `BoundKind` (a forgotten interval end REFUSES rather than silently meaning unbounded — the
+  default-deny direction applied to the classifier's own parameters), ordered rules with declared
+  first-match precedence, `ErrStratumUnclassifiable` for a book no stratum admits. Features are
+  `(relative spread, side depth)`; the one shared extractor is `driven.BookFeaturesFor` (runtime
+  pricing and the slice-C derivation both call it — two extractors would put one book in two
+  strata).
+- **`driven/cost.go` widened** — `CostCell` keyed `(instrument, side, stratum, MaxQty)` with
+  `Observations` + `Method`; `MinEvidence` (a thin cell is a construction refusal, §41b-ii-iii);
+  per-group strictly-ascending buckets (cross-group interleave legal — the positive control a
+  globally-comparing mutant refuses); the lookup classifies each side's book and refuses an
+  uncalibrated population (`ErrStratumUncalibrated`) — never nearest-cell. **The §8 latency
+  marker is TAKEN** at `CostCalibration.Latency` (comment corrected from "measured at" to
+  assumed-bound); marker grep now expects **EXACTLY ONE** until slice C's close.
+- **`driven/calibration.go`** — the artifact schema + loader (§41d/§41g): hash = lowercase-hex
+  SHA-256 over exact bytes, recomputed at load; §41b's family assignment ENFORCED per quantity
+  (measured-claiming-declared and declared-wearing-a-derivation both refuse — the roster as
+  machinery); `EntryDrift` present (the round-1 catch honored); closed dataset identities; the
+  promotion identity typed and fork-checked; `fixture:` IDs refused through the production door.
+- **`driven/attestation.go`** — the detached attestation (§41e): binds ID + content hash +
+  procedure commit + executable digest; `ApprovalDelay` 24h **inclusive at the boundary** (the
+  golden fixture sits exactly AT it); own SHA-256 exposed for run evidence.
+- **`driving/calibrate.go`** — the refusal frame: H1 (`GuardCalibrationInput`, boundary instant
+  itself refused), H2 (`GuardArchiveDay`), H3 (`CheckComplete` — missing AND extra, including
+  count-preserving substitutions in BOTH directions), the §41h seal guard (`GuardHoldoutFetch`:
+  fetch-before-seal + unsealed-identity), execution binding (`CheckExecutionBinding` pure +
+  `ReadBuildRevision` thin), `GuardNewVersion`, `CheckDatasetDigest`. `Calibrator.Run` refuses
+  `ErrDerivationUnbuilt` — the step-3 door pattern.
+- **`datasets/README.md`** — the family-1 layout, rules restated with their §41c anchors.
+
+**Verification ledger.** Checklist BEFORE battery, per the standing rule — the §41i suspects
+applicable to slice A are all embodied in fixtures (at-bound candidates, two strata, per-leg
+differing cells, at-MinEvidence observations, uppercase digests, wrong-hash + absent
+attestations, H1 boundary instant, dirty-tree + clean control). One live catch during the build:
+the first uppercase-digest fixture used seed `0x14`, which hexes to DIGITS ONLY — `ToUpper` was
+the identity and the case rule untestable (the tenth-instance hex-case collapse, caught by the
+failing test, fixed to `0xab`). **19 aimed mutations: 18 caught on first aim, one NOBUILD
+re-aimed (caught), one SURVIVED diagnosed into a real fixture gap** — `CheckComplete`'s
+positional extra-row check was masked by the count backstop (an inserted row also changes the
+count), so a count-preserving SUBSTITUTION validated clean under the mutant; the fixture was
+added and its MIRROR (late-shifted rows masking the gap arm) immediately after, both killers
+now. The spread ratio's away-from-zero rounding is pinned by a boundary-straddling book whose
+stratum — and printed charge — flips with the direction. `make ci` green on a COLD cache, all
+six gates clean.
+
+**Deliberately not done:** no committed artifact or attestation file (values exist only after
+slice C's governed derivation run); no CLI wiring of `calibrate` into `cmd/arblab` (lands with a
+runnable derivation, slice B/C); no fetchers (slice B).
+
 ---
 
 ## RESUME HERE
 
-**STEP 4 IS DESIGNED (session 49, 2026-07-31): this record is the design; nothing is built.**
-The record survived three complete adversarial review rounds (provenance note at the top — read
-it; the loop is closed, deliberately). **The promotion identity is SEALED (§41h): hybrid fork +
-Binance gate venue, by the user, 2026-07-31 — do not reopen.** Next, in order:
+**SLICE A IS BUILT (session 50, 2026-08-01, §41m): the schema, loader, attestation contract,
+classifier, H1/H2/H3 refusal frame and `datasets/` layout are real; the §8 latency marker is
+TAKEN (marker grep expects EXACTLY ONE until slice C's close).** The promotion identity stays
+SEALED (§41h): hybrid + Binance, 2026-07-31 — do not reopen. Next, in order:
 
-1. **Slice A** (§41j): schema (per-leg stratified p90 cells + frozen classifier parameters +
-   `EntryDrift` widening) + loader + attestation contract + hash/refusal machinery + the
-   H1/H2/H3 refusal frame (incl. the pre-seal holdout-fetch refusal and the execution-binding
-   refusals) + `datasets/` layout + the §8 latency marker taken (the record's ONE pre-registered
-   marker).
-2. **Slice B**: family-1 fetchers (both venues, calibration era only) + derivations (EWMA
-   residuals, band, basis, occupancy-with-surrogate, `EntryDrift`) + oracles.
-3. **Slice C**: seal verification first, then family-2 measurements over the archive, family-3
-   declarations, the derivation run from a clean checkout, the 24-hour approval delay, the
-   attestation + approval entry, the close (lands the §8 latency clause; marker grep back to
-   zero; doc-set bump).
-4. Then **step 5** (§31a): the scored replay runner — carrying the hybrid's pre-registered §8
-   reading duty, §40k-2's revision repository, and the sealed identity's everything-eligible
-   rule.
+1. **Slice B** (§41j): the family-1 fetchers (both venues' funding/kline history → committed
+   `datasets/` files, calibration era only, H1-guarded, H3-complete against the venue's grid) +
+   the derivations (EWMA residuals via the domain's own estimator, exit band from excursions,
+   adverse basis move, occupancy-with-surrogate utilization, `EntryDrift` from the dispersion
+   tail) + their `math/big` oracles. §41i's slice-B suspects are named in advance: a residual
+   fixture symmetric about zero, excursion dips all exceeding the dwell, a utilization fixture
+   dividing exactly. Wire `calibrate` into `cmd/arblab` when Run stops refusing.
+2. **Slice C**: seal verification first, then family-2 measurements over the archive, family-3
+   declarations, the derivation run from a clean checkout (the §41i two-invocation determinism
+   claim lives here), the 24-hour delay, the attestation + approval entry, the close (lands the
+   §8 latency clause; marker grep back to ZERO; doc-set bump).
+3. Then **step 5** (§31a): the scored replay runner — the hybrid's pre-registered §8 reading
+   duty, §40k-2's revision repository, the sealed identity's everything-eligible rule.
 
 Standing rituals first, every session: `pgrep -fl "arblab capture run"`, backgrounded
-`capture verify` over the accumulated range (0 integrity findings, always), `git status --short`,
-marker grep (**ZERO**).
+`capture verify` over the accumulated range (0 integrity findings, always — COVERAGE verdicts
+over the known Bybit-spot absent windows are the honest ledger), `git status --short`,
+marker grep (**EXACTLY ONE**, §8's, at `driven/cost.go`).

@@ -89,7 +89,47 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 49, 2026-07-31 — STEP 4 IS DESIGNED, docs-only; slice A is the open work)
+## START HERE (updated end of session 50, 2026-08-01 — STEP 4 SLICE A IS BUILT; slice B is the open work)
+
+**Branch `feat/milestone-1-foundation`.** Session 50 built §41j's slice A in four commits
+(`5281dfa`…`4642879`): the frozen stratum classifier (`strategy/domain/stratum.go`), the
+stratified per-leg `CostCell` widening with `MinEvidence` and the classifier-keyed lookup, the
+artifact schema + loader (`driven/calibration.go` — hash over exact bytes, §41b's family
+pinning ENFORCED), the detached attestation + binding check (`driven/attestation.go`, 24h delay
+inclusive at the boundary), the `strategy/infrastructure/driving` refusal frame (H1/H2/H3, the
+§41h seal guard, the §41e execution binding, `Calibrator.Run` refusing `ErrDerivationUnbuilt`),
+and the `datasets/` layout. **§41m in the calibration design record is the build record; that
+record's `RESUME HERE` is the live statement — read both before anything.**
+
+Verify rather than trust: `git status --short` (clean), `make ci` (green cold, all six gates),
+`grep -rn "SPEC EDIT OWED" internal/ tools/` — expect **EXACTLY ONE** (§8's latency marker at
+`strategy/infrastructure/driven/cost.go`, taken deliberately this slice; it stays until slice
+C's close lands the §8 clause).
+
+**The capture rituals stay first, every session:** `pgrep -fl "arblab capture run"` (PID 74192),
+then a verify over the accumulated range **in the background** (`capture verify` needs
+`-config`, `-from` AND `-to`, RFC3339) — 0 integrity findings, always; session 50's check:
+COVERAGE-only, the known Bybit-spot absent-window ledger.
+
+**Verification shape this slice:** 19 aimed mutations — 18 first-aim kills, one NOBUILD
+re-aimed, one SURVIVED **diagnosed into a real gap** (CheckComplete's positional extra-row
+claim was masked by the count backstop; the count-preserving substitution fixture and its
+late-shifted MIRROR both landed). One live fixture collapse caught mid-build: an
+uppercase-digest fixture seeded `0x14` hexes to digits only, so `ToUpper` was the identity —
+the hex-case lesson's eleventh instance, now in the §41m ledger.
+
+**What is next, in order (the RESUME lists it):**
+1. **Step 4 slice B** (§41j): family-1 fetchers (calibration era only, H1-guarded,
+   H3-complete) + derivations (EWMA residuals, band, basis, occupancy-with-surrogate,
+   `EntryDrift`) + `math/big` oracles; wire `calibrate` into `cmd/arblab` when Run stops
+   refusing. §41i's slice-B suspects are pre-named in the RESUME.
+2. **Slice C**: seal verification, family-2/3 freeze, clean-checkout derivation, 24h delay,
+   attestation, close (lands §8's latency clause, marker back to ZERO, doc-set bump).
+3. **Step 5**: the scored replay runner under the sealed identity.
+
+---
+
+## START HERE (updated end of session 49, 2026-07-31 — HISTORICAL — STEP 4 DESIGNED, docs-only; superseded by session 50's slice A build)
 
 **Branch `feat/milestone-1-foundation`.** Session 49 wrote **no code** — it opened milestone 2's
 **step 4** (§31a's row: the pre-registered calibration artifact) and produced its design record.
