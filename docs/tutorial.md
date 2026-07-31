@@ -1,6 +1,6 @@
 # Building a Funding-Rate Arbitrage Bot — A Teaching Companion
 
-**Status:** v0.9.16 (2026-07-30) — set-version alignment, no change in this doc (v0.9.16 is the parity wiring slice: replay machinery and one envelope-validation scope narrowing, below this tutorial's altitude).
+**Status:** v0.9.17 (2026-07-31) — set-version alignment, no change in this doc (v0.9.17 is the cashcarry decision core; its pinned-ledger test now reproduces §3.9's worked figures in Go, so this tutorial's ledger is load-bearing for a third implementation — a change in the *status* of these numbers, not in their values).
 **Doc set:** normative core `build-spec.md` · venue facts `venue-profiles.md` · kernel machines `state-machines.md` · history/traceability `adr-history.md` · teaching companion `tutorial.md`.
 
 **Audience.** Senior engineers with strong systems instincts and little-to-no derivatives background. This teaches the *why*; the normative *what to build* lives in [`docs/build-spec.md`](./build-spec.md), which this document cross-references as **§spec**. Where the two ever disagree, the build-spec wins.

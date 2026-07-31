@@ -36,7 +36,7 @@ and the battery are stronger checks of a frozen interface than a fifth prose rou
 are folded in below rather than appended, because a record is what a later session resumes from,
 not a changelog.
 
-**Doc set:** v0.9.16. The live statement of what to do next is at **`## RESUME HERE`** at the bottom.
+**Doc set:** v0.9.17. The live statement of what to do next is at **`## RESUME HERE`** at the bottom.
 
 ---
 
@@ -736,42 +736,134 @@ mixed-artifact silent pass, bid-priced basis notional, both worse-of inversions 
 branch), the inclusive bucket bound, the latency boundary, three rounding-mode flips, and
 `Rate.Div` with swapped operands.
 
+### §40n — slice C BUILT and CLOSED (session 48, 2026-07-31); step 3 is code-complete, doc set v0.9.17
+
+**What landed, in four commits** (three code + this docs close): the `strategy/domain` additions
+(`DecisionTerms.EntryMargin` — §2.2's "clears (cost + hurdle) WITH MARGIN [→ C3]" finally has a
+consumer, carried in the ledger exactly as the exit `Band` is, entry-required/exit-refused, one
+optional wire member; two exit-input coherence rules with named sentinels — `ErrTerminalMoved` and
+`ErrCandidateNotHeld`), the **`strategy/domain/cashcarry` core** (`Enter`, `Continue`,
+`TargetQty`, `ProposeHoldPlan`, `RegeneratePlan`, the refusal-rule vocabulary, the conservative
+ledger helpers), and the **application `Decide` door** (`ErrCoreUnbuilt` retired; the write-ahead
+contract real; `Deps` gains the injected `ids.Generator`; `Settings` carries the run-policy wiring
+zero-refused by name, §5.2's zero-skew-limit trap included; the exit's fed-back state is an
+explicit `Continuation`, and forgetting it is a journaled refusal, never a silently restarted
+dwell). The §40d marker flipped to `[SPEC EDIT LANDED — v0.9.17]` with §2.4's two clauses in the
+core. `make ci` green cold, all six gates clean, marker grep **ZERO**.
+
+**In-slice decisions, each an explicitly stated reading on this close's docket (none reopens §40):**
+
+- **The entry proposal is the MINIMUM policy-admissible hold** — exactly `min_hold_settlements`
+  settlements, terminal at the last of them. §5.2 declares no hold-length param and inventing one
+  would be a knob the spec never asked for; the near settlements are the ones the live estimate
+  and the EWMA know most about (the conservative horizon); and the exit path re-scores
+  continuously, so a hold whose carry stays good outlives its plan through repeated Continue
+  verdicts and a successor entry that must clear the round trip honestly again — which is exactly
+  how §2.4's utilization economics are supposed to surface.
+- **`EntryDrift` scales like the hurdle**: the entry score must clear
+  `EntryDrift · C_allocated · holdFraction`. §2.4's decision-bullet inequality is its margin-zero
+  form; the margin's home is §2.2's C3-tagged "with margin". Without a consumer, `EntryDrift` was
+  a declared param nothing read — the declared-member-nothing-emits defect one layer up.
+- **The exit band shares the same dimension** — an annualized rate scaled by `C_allocated` × the
+  REMAINING hold fraction. One convention for all three thresholds (hurdle, margin, band); the
+  stand-down floor is `−band·C·f`, hysteresis on one scale.
+- **The dwell advances at most ONE per evaluation that observes an uncounted realized settlement**
+  — an unobserved settlement carries no evidence about the score at its instant, and crediting it
+  would flatter the exit. Above the band the dwell RESETS ("stays below" means consecutively);
+  regeneration and calls never move it.
+- **A hold whose remaining schedule is empty closes as complete** — the dwell prevents whipsaw
+  exits mid-plan; it does not hold a finished plan open.
+- **Fee cells price at the leg's ASK** (overstating, the slice B direction), the entry spot cell
+  follows the priced tactic's column (§2.4's maker-entry opt-in reroutes exactly that one cell),
+  and the exit cells are charged at entry time as part of the round trip.
+- **Round-trip slippage = 2× the entry estimate** — the only book the entry decision holds is
+  today's; understated only if exiting costs more than entering, which the exit band's width
+  absorbs.
+- **The effective hurdle nets the recorded adjustments** (annual − access − haircuts) — the
+  committed revision's own stated direction, where declared zeros leave the full paper yield.
+- **The §2.4 exit "opportunity-cost" line is the hurdle scaled over the remaining hold**, computed
+  by the core in `Terms.ScaledHurdle` for both directions; the input's `Opportunity` member stays
+  the extra reserve term (a declared zero in milestone 2, since the hurdle already charges the
+  whole `C_allocated` — a separate reserve-opportunity line would double-count it).
+
+**The checklist, BEFORE the battery — EIGHT collapses found and fixed** (the standing item's
+next instances): the service's exit candidate and entry candidate were pinned EQUAL (0.1 == 0.1
+— a mutant closing at the config candidate was invisible; the held quantity is now 0.2); every
+fixture's funding interval was the 8h a mutant would hardcode (a 7h variant makes the
+live-interval annualization visible); no fixture evaluated exactly AT a settlement instant
+(strictly-after vs at-or-after collapsed — three new at-instant tests: service horizon,
+regeneration retention, live-grid back-fill); every plan's terminal EQUALED its last settlement
+(§40f's "unchanged terminal" was indistinguishable from "regenerate to the last settlement" —
+the regen fixture's terminal now sits between settlements); the exec-cost legs were pinned equal
+(2/2 — a spot/perp swap in the round-trip chain was invisible; an asymmetric 3.30/1.10 variant
+pins 8.80); the skew test exercised ONE direction (the standing mirror rule; the mirrored case
+added); the freshness/skew budgets were tested only from the violating side (at-budget passes
+now pinned); and the exit forecasts' Expected EQUALED Adverse (an exit-side expected-path mutant
+was invisible; they now differ).
+
+**The battery: 52 aimed mutations, 52 caught.** One `NO-OP!!` re-aim (a bare `<` pattern
+landing nowhere; re-aimed with context), one `NOBUILD!!` re-aim (deleting the cadence comparison
+orphaned the variable; re-aimed as an inversion), and **one honest `SURVIVED`, diagnosed rather
+than absorbed**: the funding notional's `RoundTowardZero` mutant survived because the product's
+`RoundFloor` absorbs the notional's single-ulp mode difference — rate × 1e-9 is sub-ulp for
+every funding-scale rate — which is the fixture-too-small-for-the-mechanism shape at the
+arithmetic layer: *a second rounding can absorb the first's mode entirely, except exactly
+astride a rounding boundary*. The added pin puts the product on that boundary
+(0.999999999 × 4e-9 × 0.5), and its fix was the mutant's lone killer. Kills include: both sides
+of every boundary (margin, band floor, dwell persist, residual tolerance, min-qty, min-APR,
+min-hold, at-budget age, at-limit skew, exactly-funded capital), the expected-for-adverse swap
+in BOTH directions, ask-for-bid on income and bid-for-ask on the min-notional gate, the C_legs
+capital pocket swap, each Δ term dropped, each slippage leg dropped, the haircut netting, the
+dwell's advance/reset/recount rules, the flip-vs-shift inversion, the revision number, the
+terminal-as-last-settlement mutant, the write-ahead sink on both the scored and refusal paths,
+the fed-back dwell replaced with a reset, and the TTL stamp.
+
+**The reading pass** (beside the marker grep, per the standing rule): the docket's four carried
+readings — §40e's explicit-materials signature, §40f's HoldPlan/working-revision rule, §40l's
+strict-after boundary (now also RegeneratePlan's partition: retained = at-or-before,
+forecastable = strictly-after, no instant in both), and §40m's six model readings — are all
+CONFIRMED as readings by this pass; none is a deviation, no further edit owed. The slice's own
+readings are the bullets above, stated for the next external round. The one place the pass
+flagged for honesty rather than change: `RefuseCore` and `RefuseAssembly` are refusal rules
+whose green-suite reachability is via mutation evidence only (they fire on arithmetic faults and
+post-assembly validation failures the healthy fixtures cannot stage) — recorded here so the
+unreachable-sentinel check has an answer on file, not a surprise.
+
 ---
 
 ## RESUME HERE
 
-**Step 3 is DESIGNED (session 45), SLICE A IS BUILT (session 46) and SLICE B IS BUILT (session
-47, all 2026-07-31)** — §40 is the design, §40j the build order, §40l and §40m the build records.
-The design survived four adversarial review rounds (provenance note at top). §39l-2 and §39l-3
-are ANSWERED here (§40h, §40i) — do not reopen them; §39l-1 passes to step 4/5, and two debts
-stay pre-registered with their constructs (§40k-2 the revision repository — step 5; §40k-5 the
-foundation loop's error door — milestone 3).
+**STEP 3 IS CODE-COMPLETE AND CLOSED (sessions 45–48, all designed/built 2026-07-31): the doc
+set is v0.9.17.** §40 is the design, §40j the build order, §40l/§40m/§40n the build records —
+slice A the skeleton and value types, slice B the models, slice C the cashcarry core, the
+write-ahead `Decide` door, and the close (the §2.4 fee-revision clauses LANDED, marker grep
+ZERO). The tutorial §3.9 pinned-ledger test passes: three independent implementations of the
+flagship's kill-math now agree to the digit. §39l-2 and §39l-3 are ANSWERED here (§40h, §40i) —
+do not reopen them; §39l-1 passes to step 4/5, and two debts stay pre-registered with their
+constructs (§40k-2 the revision repository — step 5; §40k-5 the foundation loop's error door —
+milestone 3).
 
 **Next, in order:**
-1. ~~Slice D's one-day disk figure~~ — **TAKEN, session 47 (2026-07-31 11:00 UTC): 3.0G/day
-   measured, 0 integrity / 353 coverage over the full day, recorded as §32m-D in the capture
-   design record.** Funding alone is ~114M/day; books are the cost, and the figure under-measures
-   a healthy day (the honest ~23:00–04:15 absent window is inside it).
-2. **The off-host destination** — still the user's open §38f decision; the laptop still holds the
-   ONLY copy, and §32m-D's arithmetic (weeks, not months, of disk) now puts a clock on it.
-3. ~~Step 3 slice B~~ — **BUILT, session 47 (§40m): the time-decay EWMA estimator + Dispersion
-   with outward-from-median selection + the conservative BasisForecast + the §8 conservative cost
-   bound + the joint rule + the math/big oracle + `Rate.Div`. Checklist found three collapses
-   BEFORE the battery; 27/27 aimed mutations caught (one NOBUILD re-aim).**
-4. **Slice C** (the cashcarry core) — the open code work: entry inequality, exit incremental
-   score with the fed-back dwell, the `HoldPlanRevision` regeneration rule (interval-flip
-   fixtures in BOTH directions), quantization over port-resolved lot rules, the write-ahead
-   `Decide` semantics, the tutorial §3.9 pinned-ledger test, refusal Decisions. Its close lands
-   the §2.4 edit (the ONE standing marker, at the `ReferenceData` port), runs the reading pass —
-   docket now: §40e's signature reading, §40f's `HoldPlan` reading, slice A's exit-forecast
-   strict-after boundary (§40l), and slice B's stated readings (§40m: time-based decay, outward
-   selection, dispersion-on-imminent, worse-side pricing, the latency direction, the
-   plan-independent basis charge) — and bumps the doc set.
+1. **The off-host destination** — still the user's open §38f decision; the laptop still holds
+   the ONLY copy of the capture archive, and §32m-D's arithmetic (3.0G/day measured; weeks of
+   disk, not months) keeps the clock on it.
+2. **§31a step 4: the calibration artifact** — the pre-registered, independently-approved
+   thresholds record (§8) the class-2 measured quantities refuse to construct without: the
+   dispersion distribution, the slippage bound's numbers, the exit band's width, the adverse
+   basis move, the rescue-margin figure. Every seam it fills was built expecting it
+   (CalibrationRef + hash, the fixture-marker discipline, §40e's one-artifact rule). Design
+   session first, in the record's style.
+3. **§31a step 5: the scored replay runner** — the capture-container DecisionSink adapter
+   (§40h's fsync-on-write door), the SettlementHistory accumulator's first instantiation
+   (§40c), the reference-revision repository + replay applicator (§40k-2's pre-registered
+   debt), replay-driven paper decisions over the accumulated days (§40i), and §39l-1's
+   data-source decision for the ≥3-month window.
 
 Standing rituals first, every session: `pgrep -fl "arblab capture run"` (PID 74192 as of session
-46), `capture verify` over the accumulated range (0 integrity findings, always — coverage gaps are
-information, not failures), `git status --short` (clean), marker grep (**exactly one**: §40d's, at
-`strategy/application/ports` — until slice C's close lands the edit and removes it).
+48), `capture verify` over the accumulated range (0 integrity findings, always — coverage gaps
+are information, not failures; the verify now takes several minutes over the multi-gigabyte
+archive — run it in the background), `git status --short` (clean), marker grep (**ZERO** — the
+next marker arrives only when a future slice takes a deliberate deviation).
 
 Do not reopen from this record: §40b's placement and the one-`DecisionInput` shape (policy
 projection and Δ terms included), §40c's split read seam and the dispatched-stream accumulator,

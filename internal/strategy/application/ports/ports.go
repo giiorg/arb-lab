@@ -125,17 +125,14 @@ type ExecutionCostModel interface {
 // no period-correct revision exists is a REFUSAL NAMING THE INPUT — never a
 // silent apply-current.
 //
-// [SPEC EDIT OWED] §2.4's cost sentence gains two clauses (§40d, taken
-// deliberately at this port, landed in the core spec before step 3 closes):
-// (i) the composition rule — fetched fees land as dated revisions; the
-// decision path (live and replay) reads a revision as-of its instant; a
-// revision without provenance is refused; (ii) the milestone-2
-// authorization — the pre-capital gate MAY be scored on a sourced, dated,
-// published-tier revision, labeled modeled-tier; account-real authenticated
-// fee revisions are a precondition of any live order. Without (i), §2.4
-// reads as demanding a scoring-time venue call §3.5 forbids; without (ii),
-// the milestone-2 gate is non-conforming the day it is scored and the record
-// absorbs the violation silently.
+// [SPEC EDIT LANDED — v0.9.17] §2.4's cost sentence gained the two §40d
+// clauses at slice C's close: (i) the composition rule — fetched fees land
+// as dated revisions; the decision path (live and replay) reads a revision
+// as-of its instant; a revision without provenance is refused; (ii) the
+// milestone-2 authorization — the pre-capital gate MAY be scored on a
+// sourced, dated, published-tier revision, labeled modeled-tier;
+// account-real authenticated fee revisions are a precondition of any live
+// order.
 type ReferenceData interface {
 	Fees(inst ids.VenueInstrument, asOf time.Time) (domain.LegFees, error)
 	LotRules(inst ids.VenueInstrument, asOf time.Time) (domain.LotRules, error)
