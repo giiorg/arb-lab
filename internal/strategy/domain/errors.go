@@ -140,6 +140,22 @@ var (
 	// stated.
 	ErrQuantileMixed = fmt.Errorf("strategy: forecasts drawn at different quantiles")
 
+	// ErrStratumShape reports a stratum interval no value can satisfy, or a
+	// bound whose declaration contradicts itself (a value on an unbounded
+	// end). A dead stratum is a name the artifact freezes that nothing can
+	// ever reach — refused at construction, not discovered at scoring.
+	ErrStratumShape = fmt.Errorf("strategy: stratum interval out of shape")
+
+	// ErrStratumDuplicate reports two classifier rules wearing one name —
+	// two populations claiming one p90 cell key, with a silent winner.
+	ErrStratumDuplicate = fmt.Errorf("strategy: duplicate stratum name")
+
+	// ErrStratumUnclassifiable reports book features no frozen stratum
+	// admits. The artifact has no number for this book state; the refusal
+	// names that, because the alternative — the nearest cell — is a charge
+	// drawn from a population the book is not in (§41b-ii-b).
+	ErrStratumUnclassifiable = fmt.Errorf("strategy: book state outside every frozen stratum")
+
 	// ErrArtifactMixed reports class-2 identities citing different
 	// calibration artifacts inside one aggregate. §40e: a scored verdict
 	// resolving from two artifacts is a version the governance never
