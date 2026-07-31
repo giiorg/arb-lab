@@ -107,11 +107,12 @@ findings (reconnect gaps + absent windows), self-recovered before session start.
 information, not failures — but the slice D disk-figure row should name this one.
 
 **What is next, in order (the RESUME lists it):**
-1. **Slice D's one-day disk figure, ~09:53 UTC 2026-07-31** — `du -sh archive/` + a full-day
-   verify, recorded in the capture design record (§32m's row). Not yet taken as of session 46's
-   end.
+1. ~~Slice D's one-day disk figure~~ — **TAKEN, session 47 (2026-07-31): 3.0G/day, 0 integrity /
+   353 coverage over the full day, recorded as §32m-D in the capture design record.** Funding
+   alone ~114M/day; books are the cost; the figure under-measures a healthy day (the honest
+   23:00–04:15 absent window is inside it).
 2. **The off-host destination** — still the user's open §38f decision; the laptop still holds the
-   only copy.
+   only copy, and §32m-D's arithmetic (weeks of disk, not months) now puts a clock on it.
 3. **Step 3 slice B** (§40j): the default estimators + Dispersion/quantile machinery + the
    `math/big` oracle. §40j names slice B's checklist suspects in advance — an EWMA window pinned
    to one settlement, a clamp that never binds, a symmetric quantile fixture, a zero-width

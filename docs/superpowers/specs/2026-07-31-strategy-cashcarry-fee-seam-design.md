@@ -664,12 +664,12 @@ their constructs (§40k-2 the revision repository — step 5; §40k-5 the founda
 door — milestone 3).
 
 **Next, in order:**
-1. **Slice D's one-day disk figure, ~09:53 UTC 2026-07-31** — `du -sh archive/` + a full-day
-   verify, recorded in the capture design record (§32m's row). Session 46 ran a 16-hour verify
-   (verdict COVERAGE, 0 integrity findings) and found the Bybit spot book absent ~23:00–04:15 UTC,
-   honestly recorded — expect that gap in the full-day row.
+1. ~~Slice D's one-day disk figure~~ — **TAKEN, session 47 (2026-07-31 11:00 UTC): 3.0G/day
+   measured, 0 integrity / 353 coverage over the full day, recorded as §32m-D in the capture
+   design record.** Funding alone is ~114M/day; books are the cost, and the figure under-measures
+   a healthy day (the honest ~23:00–04:15 absent window is inside it).
 2. **The off-host destination** — still the user's open §38f decision; the laptop still holds the
-   ONLY copy.
+   ONLY copy, and §32m-D's arithmetic (weeks, not months, of disk) now puts a clock on it.
 3. **Step 3 slice B** (§40j): the default EWMA estimator on the explicit-materials signature, the
    conservative `BasisForecast` adapter, the milestone-2 `ExecutionCostModel` conservative-bound
    structure, Dispersion/quantile machinery with class-2 refusal, the joint aggregation rule, the

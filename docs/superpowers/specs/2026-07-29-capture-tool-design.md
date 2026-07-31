@@ -520,9 +520,37 @@ is completed first.
 `verify` is deliberately **not** last. Slice C ships the minimal version, because a capture running
 unverified for a week is the same failure this whole tool exists to prevent, one level up.
 
----
+### §32m-D — the one-day disk figure (measured 2026-07-31, closing slice D's done-when)
 
-## §32n — what this tool deliberately is not
+Measured at 11:00 UTC 2026-07-31, capture live since ~09:53 UTC 2026-07-30 (PID 74192), all eight
+streams. **`du -sh archive/` = 3.0G** (3,103,316 KB, 351 files) for the first elapsed calendar day.
+The full-day verify over exactly that day (`-from 2026-07-30T09:53:00Z -to 2026-07-31T09:53:00Z`)
+reports **0 integrity, 353 coverage — verdict COVERAGE**, so the figure is measured over an archive
+that testifies to its own honesty.
+
+Per-stream, largest first:
+
+| Stream | One day |
+|---|---|
+| binance perp book `btcusdt@depth@100ms` (the diff evidence stream) | 890M |
+| binance spot book `btcusdt@depth20@100ms` | 612M |
+| bybit perp book `orderbook.50.BTCUSDT` | 531M |
+| bybit spot book `orderbook.50.BTCUSDT` | 442M |
+| binance perp book `btcusdt@depth20@100ms` | 441M |
+| bybit perp funding `tickers.BTCUSDT` | 101M |
+| binance funding `btcusdt@markPrice@1s` | 11M |
+| binance `fundingInfo` REST overlay | 2.2M |
+| `_manifest` | 68K |
+
+Two readings, both worth the row. **§31d's actual question — one day of *funding* on disk — answers
+at ~114M/day** (tickers + markPrice + fundingInfo); the other ~2.9G is books, and within books the
+single diff evidence stream is the largest line item at 890M. And **the 3.0G is an under-measure of
+a healthy day**: the day it covers contains the honest ~23:00–04:15 UTC all-source absent window
+(laptop lid — the machine is the §38f problem restated) plus reconnect-churn hours at 12–42/60
+alive through the 04:00–09:00 morning. A naive scale-up to full wall coverage lands ~3.6–3.8G/day —
+**derived, not measured**, labeled so; the measured number is the 3.0G above. At either figure, a
+laptop disk carries weeks, not months, before the §38f off-host decision stops being deferrable on
+capacity grounds alone.
 
 Stated as a roster because §31e's hazard is *growth*, and growth is easiest to refuse against a list:
 
