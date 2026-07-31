@@ -84,12 +84,20 @@ type DecisionTerms struct {
 
 	// ScaledHurdle is hurdle · C_allocated · holdFraction — the right-hand
 	// side of the entry inequality. The denominator inside it is C_allocated,
-	// never C_legs (§40f rule 3).
+	// never C_legs (§40f rule 3). For an exit it is the same product over the
+	// REMAINING hold — §2.4's exit "opportunity-cost" line, computed by the
+	// core so the hurdle arithmetic has one home for both directions.
 	ScaledHurdle fixedpoint.Money
 
-	// HoldFraction is the planned hold as a fraction of a year, the scaling
-	// applied to the annualized hurdle.
+	// HoldFraction is the hold as a fraction of a year — planned (entry) or
+	// remaining (exit) — the scaling applied to the annualized hurdle.
 	HoldFraction fixedpoint.Rate
+
+	// EntryMargin is the C3 drift margin the entry score was judged against
+	// (§2.2's "clears (round-trip cost + hurdle) WITH MARGIN"): the measured
+	// EntryDrift rate, carried with its artifact exactly as Band carries the
+	// exit band's. Entry only.
+	EntryMargin MeasuredRate
 
 	// Band is the exit band the score was judged against; exit only.
 	Band MeasuredRate
@@ -127,6 +135,9 @@ func (t DecisionTerms) Validate(kind DecisionKind) error {
 	}
 	switch kind {
 	case KindEntry:
+		if err := t.EntryMargin.Validate(); err != nil {
+			return fmt.Errorf("entry margin: %w", err)
+		}
 		if t.Band != (MeasuredRate{}) {
 			return fmt.Errorf("entry with exit band: %w", ErrVerdictKindMismatch)
 		}
@@ -135,6 +146,9 @@ func (t DecisionTerms) Validate(kind DecisionKind) error {
 		}
 		return nil
 	case KindExit:
+		if t.EntryMargin != (MeasuredRate{}) {
+			return fmt.Errorf("exit with entry margin: %w", ErrVerdictKindMismatch)
+		}
 		if err := t.Band.Validate(); err != nil {
 			return fmt.Errorf("band: %w", err)
 		}

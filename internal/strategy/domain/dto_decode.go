@@ -810,6 +810,9 @@ func parseTerms(w *termsWire) (DecisionTerms, error) {
 	if t.ScaledHurdle, err = parseMoney("terms scaled hurdle", w.ScaledHurdle); err != nil {
 		return DecisionTerms{}, err
 	}
+	if t.EntryMargin, err = parseMeasuredRate("terms entry margin", w.EntryMargin); err != nil {
+		return DecisionTerms{}, err
+	}
 	if t.HoldFraction, err = parseRate("terms hold fraction", w.HoldFraction); err != nil {
 		return DecisionTerms{}, err
 	}

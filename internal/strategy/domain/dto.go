@@ -298,6 +298,7 @@ type termsWire struct {
 	RiskDelta        *moneyWire        `json:"risk_delta"`
 	ScaledHurdle     *moneyWire        `json:"scaled_hurdle"`
 	HoldFraction     *rateWire         `json:"hold_fraction"`
+	EntryMargin      *measuredRateWire `json:"entry_margin"`
 	Band             *measuredRateWire `json:"band"`
 	Dwell            *dwellWire        `json:"dwell"`
 }

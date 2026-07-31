@@ -76,6 +76,17 @@ var (
 	// entries") depends on the two being distinguishable.
 	ErrRevisionSequence = fmt.Errorf("strategy: revision number disagrees with trigger")
 
+	// ErrCandidateNotHeld reports an exit input whose candidate quantity is
+	// not the held quantity. The exit score prices flattening; a different
+	// candidate is a partial close no §2.4 rule defines.
+	ErrCandidateNotHeld = fmt.Errorf("strategy: exit candidate is not the held quantity")
+
+	// ErrTerminalMoved reports a working HoldPlanRevision whose terminal
+	// disagrees with the position's entry evidence. §40f regenerates "to the
+	// unchanged terminal time"; a moved terminal is a silently lengthened or
+	// shortened hold wearing a revision's clothes.
+	ErrTerminalMoved = fmt.Errorf("strategy: plan terminal disagrees with entry evidence")
+
 	// ErrDwellUndeclared reports a dwell state nobody fed back. The zero
 	// count is a legitimate value (a position before its first adverse
 	// settlement), so absence needs its own bit; see DwellState.

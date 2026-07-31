@@ -310,6 +310,20 @@ func (in DecisionInput) validateKindMembers() error {
 		if err := in.Dwell.Validate(); err != nil {
 			return fmt.Errorf("dwell: %w", err)
 		}
+		// An exit prices flattening the position, so the candidate under
+		// score IS the held quantity — a different candidate is a partial
+		// close nobody's policy stated, wearing the exit test's clothes.
+		if in.CandidateQty != in.Position.Qty {
+			return fmt.Errorf("candidate %s, held %s: %w", in.CandidateQty, in.Position.Qty, ErrCandidateNotHeld)
+		}
+		// §40f: a regeneration runs "to the unchanged terminal time" — the
+		// terminal is the one instant no revision may move, so a working plan
+		// whose terminal disagrees with the entry evidence is not a later
+		// revision of that entry's hold, whatever its Num claims.
+		if !in.Plan.Plan.Terminal.Equal(in.Position.EntryPlan.Terminal) {
+			return fmt.Errorf("plan terminal %s, entry terminal %s: %w",
+				in.Plan.Plan.Terminal, in.Position.EntryPlan.Terminal, ErrTerminalMoved)
+		}
 		return nil
 	}
 	// Unreachable past Validate's kind check; named so a new kind fails here

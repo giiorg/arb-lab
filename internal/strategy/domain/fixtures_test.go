@@ -306,12 +306,14 @@ func entryTerms(t *testing.T) domain.DecisionTerms {
 		RiskDelta:        fixedpoint.ZeroMoney("USDT"),
 		ScaledHurdle:     mustMoney(t, "2.31"),
 		HoldFraction:     mustRate(t, "0.003424657"),
+		EntryMargin:      domain.MeasuredRate{Value: mustRate(t, "0.00004"), Artifact: fixtureCalibration("drift")},
 	}
 }
 
 func exitTerms(t *testing.T) domain.DecisionTerms {
 	t.Helper()
 	terms := entryTerms(t)
+	terms.EntryMargin = domain.MeasuredRate{}
 	terms.ClosingCostDelta = mustMoney(t, "0.85")
 	terms.RiskDelta = mustMoney(t, "2.10")
 	terms.Band = domain.MeasuredRate{Value: mustRate(t, "0.00006"), Artifact: fixtureCalibration("band")}

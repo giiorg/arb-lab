@@ -262,6 +262,18 @@ func TestTermsKindMembers(t *testing.T) {
 	if err := et.Validate(domain.KindExit); err == nil {
 		t.Fatal("exit terms without band validated")
 	}
+	// The entry margin mirrors the band exactly: required on an entry,
+	// refused on an exit.
+	terms = entryTerms(t)
+	terms.EntryMargin = domain.MeasuredRate{}
+	if err := terms.Validate(domain.KindEntry); err == nil {
+		t.Fatal("entry terms without margin validated")
+	}
+	et = exitTerms(t)
+	et.EntryMargin = entryTerms(t).EntryMargin
+	if err := et.Validate(domain.KindExit); !errors.Is(err, domain.ErrVerdictKindMismatch) {
+		t.Fatalf("exit terms with entry margin: want ErrVerdictKindMismatch, got %v", err)
+	}
 }
 
 // --- capital: one asset, and Total sums every term -------------------------

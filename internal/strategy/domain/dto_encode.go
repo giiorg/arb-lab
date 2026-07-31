@@ -445,6 +445,7 @@ func wireTerms(t DecisionTerms) *termsWire {
 		RiskDelta:        wireMoney(t.RiskDelta),
 		ScaledHurdle:     wireMoney(t.ScaledHurdle),
 		HoldFraction:     wireRate(t.HoldFraction),
+		EntryMargin:      wireMeasuredRate(t.EntryMargin),
 		Band:             wireMeasuredRate(t.Band),
 		Dwell:            wireDwell(t.Dwell),
 	}
