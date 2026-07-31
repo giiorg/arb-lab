@@ -68,16 +68,21 @@ func (a Adapter) Params() domain.StrategyParams   { return a.S.Params() }
 // caller-supplied view with a port-assembled one would make two authorities
 // over one fact.
 func (a Adapter) Evaluate(domain.MarketView) []domain.Intent {
-	_, intents, err := a.S.Decide(nil)
+	_, intents, err := a.S.Decide(nil, Continuation{})
 	if err != nil {
 		return nil
 	}
 	return intents
 }
 
-// OnPosition adapts the exit direction, same rules as Evaluate.
+// OnPosition adapts the exit direction, same rules as Evaluate. It has no
+// access to the fed-back continuation state (§3.3's signature carries none),
+// so through this door an exit evaluation journals a continuation refusal —
+// which is the adapter being honest about not being the production path, not
+// a gap to patch: the state exists precisely so that only a journal-reading
+// runner can drive exits.
 func (a Adapter) OnPosition(p domain.PositionView, _ domain.MarketView) []domain.Intent {
-	_, intents, err := a.S.Decide([]domain.PositionView{p})
+	_, intents, err := a.S.Decide([]domain.PositionView{p}, Continuation{})
 	if err != nil {
 		return nil
 	}
