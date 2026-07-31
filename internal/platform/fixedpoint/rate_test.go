@@ -120,6 +120,8 @@ func TestRate_UnsetDiscipline(t *testing.T) {
 		"Abs":         func() error { _, err := unset.Abs(); return err },
 		"Sign":        func() error { _, err := unset.Sign(); return err },
 		"Mul":         func() error { _, err := valid.Mul(unset, fixedpoint.RoundHalfEven); return err },
+		"Div":         func() error { _, err := valid.Div(unset, fixedpoint.RoundHalfEven); return err },
+		"Div reverse": func() error { _, err := unset.Div(valid, fixedpoint.RoundHalfEven); return err },
 	}
 	for name, op := range ops {
 		if err := op(); !errors.Is(err, fixedpoint.ErrRateUnset) {
@@ -181,5 +183,79 @@ func TestRate_Mul(t *testing.T) {
 				t.Errorf("Mul = %s; want %s", got.Decimal(), tc.want)
 			}
 		})
+	}
+}
+
+// Dividing two rates normalizes a weighted sum by its weights — the EWMA's
+// closing step. The mechanics are Money.Div's (numerator scaled up before the
+// divide, so the quotient lands on the canonical scale), which these cases
+// pin: the scale composition, the mode's authority over an inexact quotient,
+// the zero divisor, and the overflow the scale-up can hit.
+func TestRate_Div(t *testing.T) {
+	cases := []struct {
+		a, b string
+		mode fixedpoint.RoundingMode
+		want string // "" means the operation must fail with err
+		err  error
+	}{
+		{a: "0.25", b: "0.5", mode: fixedpoint.RoundExact, want: "0.5"},
+		{a: "0.0003", b: "3", mode: fixedpoint.RoundExact, want: "0.0001"},
+		{a: "-0.25", b: "0.5", mode: fixedpoint.RoundExact, want: "-0.5"},
+		{a: "0.5", b: "0.25", mode: fixedpoint.RoundExact, want: "2"},
+
+		// 1/3 does not terminate: the mode decides, and RoundExact refuses.
+		{a: "1", b: "3", mode: fixedpoint.RoundExact, err: fixedpoint.ErrPrecisionLoss},
+		{a: "1", b: "3", mode: fixedpoint.RoundTowardZero, want: "0.333333333"},
+		{a: "1", b: "3", mode: fixedpoint.RoundAwayFromZero, want: "0.333333334"},
+		{a: "2", b: "3", mode: fixedpoint.RoundHalfEven, want: "0.666666667"},
+		{a: "-1", b: "3", mode: fixedpoint.RoundFloor, want: "-0.333333334"},
+		{a: "-1", b: "3", mode: fixedpoint.RoundCeil, want: "-0.333333333"},
+
+		// A mode nobody set must fail even though the quotient is exact.
+		{a: "0.25", b: "0.5", mode: fixedpoint.RoundInvalid, err: fixedpoint.ErrRoundingMode},
+
+		{a: "1", b: "0", mode: fixedpoint.RoundHalfEven, err: fixedpoint.ErrDivideByZero},
+		{a: maxDecimal, b: ulp, mode: fixedpoint.RoundExact, err: fixedpoint.ErrOverflow},
+	}
+
+	for _, tc := range cases {
+		name := tc.a + " / " + tc.b + " " + tc.mode.String()
+		t.Run(name, func(t *testing.T) {
+			got, err := mustRate(t, tc.a).Div(mustRate(t, tc.b), tc.mode)
+			if tc.want == "" {
+				if err == nil {
+					t.Fatalf("Div = %s, nil; want %v", got.Decimal(), tc.err)
+				}
+				if !errors.Is(err, tc.err) {
+					t.Fatalf("Div error = %v; want it to wrap %v", err, tc.err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Div failed: %v", err)
+			}
+			if got.Decimal() != tc.want {
+				t.Errorf("Div = %s; want %s", got.Decimal(), tc.want)
+			}
+		})
+	}
+}
+
+// Div and Mul must be inverses where the arithmetic is exact: (a/b)*b == a.
+// One directed case rather than a property — the mantissa core underneath is
+// already property-tested against the big.Rat oracle for every mode.
+func TestRate_DivMulRoundTrip(t *testing.T) {
+	a := mustRate(t, "0.000375")
+	b := mustRate(t, "0.5")
+	q, err := a.Div(b, fixedpoint.RoundExact)
+	if err != nil {
+		t.Fatalf("Div failed: %v", err)
+	}
+	back, err := q.Mul(b, fixedpoint.RoundExact)
+	if err != nil {
+		t.Fatalf("Mul failed: %v", err)
+	}
+	if c, err := back.Cmp(a); err != nil || c != 0 {
+		t.Errorf("(a/b)*b = %s; want %s (cmp %d, err %v)", back.Decimal(), a.Decimal(), c, err)
 	}
 }

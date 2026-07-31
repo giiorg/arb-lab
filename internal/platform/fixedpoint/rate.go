@@ -152,3 +152,22 @@ func (r Rate) Mul(o Rate, mode RoundingMode) (Rate, error) {
 	}
 	return Rate{r: v, set: true}, nil
 }
+
+// Div returns r / o: normalizing a weighted sum by its weights, or expressing
+// one ratio as a fraction of another. Money.Div's mechanics with both operands
+// already dimensionless — the quotient of two ratios is a ratio.
+func (r Rate) Div(o Rate, mode RoundingMode) (Rate, error) {
+	if err := binaryRate("div", r, o); err != nil {
+		return Rate{}, err
+	}
+	if o.r == 0 {
+		return Rate{}, fmt.Errorf("rate div %s by zero: %w", r, ErrDivideByZero)
+	}
+	// Scale the numerator up before dividing so the quotient lands on the
+	// canonical scale rather than being truncated to whole units.
+	v, err := mulDivMantissa(r.r, scaleFactor, o.r, mode)
+	if err != nil {
+		return Rate{}, fmt.Errorf("rate div %s / %s: %w", r, o, err)
+	}
+	return Rate{r: v, set: true}, nil
+}
