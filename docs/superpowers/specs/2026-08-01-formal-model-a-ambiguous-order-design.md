@@ -174,6 +174,11 @@ is checking.**
 | `P3` | A `Held/Alert` generation eventually resumes to `Complete` or enters `TerminalFlatten` — FLAG-4's nonterminal ruling, mechanized. |
 | `P4` | An `IntervalFloorReduction` whose own result is ambiguous eventually resolves through the same contract — i.e. the recursion terminates. |
 
+**As built (slice C), `P2` is checked in a stronger form than this table
+states and `P4` in a narrower one. Both are recorded in §9e with the
+reason** — this table is normative for the model, so a divergence between it
+and `AmbiguousOrder.tla` is marked here rather than left to be found.
+
 ### Negative controls — **one per liveness property, from the start**
 
 Model (b)'s sharpest methodological lesson (Cx8) was that **a passing liveness
@@ -773,27 +778,270 @@ already named for it:
 
 ---
 
+## 9. Slice C — BUILT and VERIFIED (2026-08-01/02, session 67)
+
+Liveness `P1`–`P4` under a fairness set argued action-by-action, each
+shipping with its negative control in the same slice per §5 and decision
+(2). **Nominal liveness green on the same 832,179-state graph; all four
+controls violate their predicted temporal property; four new
+CONTROL-WITNESS probes show each control's harm is real and not an artifact
+of where TLC stopped looking.** No spec defect this slice — but it produced
+the sharpest available answer to *why* slice C had to exist, and that is
+`NC15`: see §9d.
+
+### 9a. Decisions taken during the build
+
+**1. The fairness set is the theorem, so what is left OUT of it is argued
+line by line.** A fairness assumption is a premise of every `P`, so a
+generous one is a weaker result. Fair: the per-venue finality contract (per
+order slot, as the *disjunction* `OrderFill ∨ OrderFinal` — fairness on
+`OrderFinal` alone would assume the no-execution path and on `OrderFill`
+alone would assume away the cancel case §2 Scope names), the reduction
+generation's resolution (again a disjunction, `ReductionFills ∨
+ReductionAmbiguous`, so `P4` is not handed its conclusion), and §7's own
+protocol steps. **Unfair, each for a stated reason:** `DeadlineBlows` (an
+environment degradation), `PdSpotHolds` (the degradation that *creates*
+`P3`'s antecedent), `PdTerminalFlatten` (a policy branch), `PdPlan` and
+`Supersede` (decisions out of model), and **both compensating-trade
+dispatches**.
+
+**2. §8g's budget trap is answered by the properties' SUBJECT, not by an
+antecedent — and that is the stronger answer.** §8g predicted `P1`–`P4`
+would have to be conditioned on the budget the way model (b) conditions
+liveness on `BOUND_CRASHES`, because budget exhaustion produces a `Settled`
+stutter with a possibly-nonzero residual. They are not conditioned, because
+**none of the four asserts that a dispatch ever happens** — leaving
+`IssueExposureReduction` and `IssueFloor` out of the fairness set is what
+makes that true. A behaviour that spends `MAX_DISPATCH` and stutters
+forever with a naked residual falsifies nothing here. The property that
+*would* have needed the conditioning is "the residual is eventually flat",
+and it is deliberately not stated: it is not one of §4's four, and it would
+have been a claim about the model's own bound rather than about the spec.
+**`MAX_GEN` gets the same treatment**: `P3` is about the held generation's
+own resolution and never mentions a later one, so a spent generation count
+cannot read as a stall.
+
+**3. `NC16` needed a STATE where slices A and B had an EDGE.** A reduction's
+ambiguity was a choice between two transitions, never something the machine
+sits in — so "it never blind-retries" named a behaviour the model could not
+represent, and a re-send that changes nothing observable is a **stuttering
+step**, which weak fairness steps straight over: `WF_vars(ReductionFills ∨
+ReductionAmbiguous)` would simply have forced the fill and `P4` would have
+passed with the defect installed. `pending[k].amb` is what turns the retry
+into a fair lasso. It is gated on the constant, so the nominal graph is
+untouched — **verified, not assumed: 6,729,250 / 832,179, slice B's figures
+to the digit.**
+
+**4. Each consequent is kept as narrow as its claim allows, so a control
+names its own defect.** `P4` stops at "the floor generation leaves the
+ledger" rather than conjoining "and the episode ends `Determined`" — the
+conjunction would have made `NC13` fail `P4` as well, and a property two
+controls can fail shows that *something* objected, not that *this* rule did.
+That is CLAUDE.md's isolating-probe rule at model altitude. What the narrow
+`P4` gives up is recovered by **composition**: what the floor routes into is
+an order, and `P1` is the claim about orders. The one deliberate overlap is
+`NC13`, which fails `P1` *and* `P2` because it removes re-classification on
+the finality edge wholesale; `NC14` is the narrower control that isolates
+`P2`, which is why both exist.
+
+**5. Deadlock checking comes off in exactly two configs, and the asymmetry
+is itself evidence.** `NC13`/`NC14` strand the machine — a frozen verdict
+with every interval collapsed and budget left has no enabled action at all —
+so TLC reports `Deadlock reached` during state generation and never runs the
+liveness pass. Stranding is the point of those two, so the check comes off
+there. It stays **on** in `NC15`/`NC16`, where nothing is stranded
+(`PdTerminalFlatten` and `ReductionBlindRetry` stay enabled throughout): the
+controls were designed to remove an *edge* rather than a state's successors,
+precisely so the defect reports as the temporal violation it is instead of
+as a deadlock, which would be TLC objecting to the shape of the control.
+
+### 9b. Results
+
+Toolchain unchanged: Java 25, `tla2tools.jar` pinned by SHA-256, TLC 2.19,
+`-lncheck final`, `TLC_WORKERS=4` throughout (the capture was running).
+
+| Run | Constant flipped | Predicted | Result |
+|---|---|---|---|
+| `_Live` (nominal) | — | pass, `P1`–`P4` + all seven invariants | **PASS** — 6,729,250 / **832,179 distinct**, depth 30, ~4 min |
+| NC13 | `RECLASSIFY_ON_FINALITY = FALSE` | `P1` | **VIOLATED** — 7,101,314 / 930,385 |
+| NC14 | `RECLASSIFY_AFTER_DEADLINE = FALSE` | `P2` | **VIOLATED** — 3,597,110 / 460,997 |
+| NC15 | `HELD_RESUMES = FALSE` | `P3` | **VIOLATED** — 6,600,882 / **832,179** |
+| NC16 | `BLIND_RETRY = TRUE` | `P4` | **VIOLATED** — 10,787,270 / 1,352,785 |
+| W1 (NC12 constants) | — | `NoNonzeroOrphan` reached | **REACHED** |
+| W2 (NC13 constants) | — | `NoStrandedNakedResidual` reached | **REACHED** |
+| W3 (NC14 constants) | — | `NoStrandedNakedResidual` reached | **REACHED** |
+| W4 (NC16 constants) | — | `NoStuckFloorSubtrahend` reached | **REACHED** |
+
+Plus three positive controls for the liveness antecedents — `PC22`
+(`Ambiguous`), `PC23` (`DeadlineExceeded`), `PC24` (a floor generation
+**outstanding**, which is not the same state `PC1`'s dispatch *count*
+names). `P3`'s antecedent was already `PC14`. All violated, i.e. reached.
+
+**Every violation was read.** `NC13` ends with every interval collapsed,
+`pdPerp = 0`, no generation running, a naked long of 1 — and
+`cls = "Ambiguous"` for ever, so §2's determined branch is barred from
+compensating a residual that is now exactly knowable. `NC15` parks at
+`pd = "Held"` with `gens = 2`, an **active** `pkgspot` reservation of 1,
+`pdDone = 1`, `pdSold = 0` and `budget = 1` left: the perp leg bought, the
+spot leg never sold it back, and the reservation goes on subtracting from
+every later sizing. `NC16` lassos on a **`floor`** entry of −1 against
+`realized = −2`, cycling `amb` for ever.
+
+### 9c. The control-witness probes — asking a control what its evidence shows
+
+**`NC13`'s and `NC16`'s witnesses both land at `budget = 0`.** There the
+machine could not have compensated anything even with a perfect classifier,
+so those traces demonstrate the **stall** — which is all `P1` and `P4`
+claim — while saying nothing about what the stall costs. That is exactly
+the shape of §8b's `NC12` finding, where TLC's shortest orphan was an entry
+of amount **zero**: a control can demonstrate a flag flipping while its
+witness is degenerate for the harm. TLC reports *a* counterexample, not the
+most harmful one, and the difference is not visible unless the trace is
+read.
+
+So the question was asked of all four controls. Three needed a probe; one
+answered it in its own trace (`NC15`'s park is harmful on its face). The
+probes are committed runs rather than a hand-check, and **`W1` is a
+committed run of the check §8b performed by hand in session 66** — the
+session that adds the mirrors is the session that owes the original, which
+is CLAUDE.md's rule about fixes and their symmetric cases.
+
+| Probe | Asks | Answer |
+|---|---|---|
+| `W1` | is `NC12`'s orphaned entry ever **nonzero**? | reached |
+| `W2` | can `NC13` strand the machine with a **nonzero residual and budget left**? | reached — **2 steps from `Init`**: `realized = −1`, every interval collapsed, `cls = "Ambiguous"`, `budget = 3` (the *full* budget) |
+| `W3` | the same of `NC14`'s latched `DeadlineExceeded` | reached |
+| `W4` | can the determined branch be **about to size** while a floor generation stuck in the retry loop contributes to the subtraction? | reached — `realized = 2`, a stuck `floor` entry of 1, `budget = 2`: the branch sizes `2 − 1 = 1` and compensates half of a naked long |
+
+`W3` was run rather than inferred from `W2` on purpose: the two controls
+prune the state graph very differently (930,385 vs 460,997 distinct states),
+and "the harmful state is reachable over there" is not evidence that it is
+reachable here.
+
+### 9d. Findings from the build
+
+**`NC15` produces a state graph IDENTICAL to the nominal one — 832,179
+distinct states, to the digit.** The argument, not just the coincidence:
+the control only *removes* a transition (`PdSpotFinal` from `Held`), and
+removing transitions can only shrink the reachable set, so NC15's states are
+a **subset** of the nominal ones — and an equal-cardinality subset of a
+finite set is the set. (The generated counts do differ, 6,600,882 vs
+6,729,250, which is the removed edge showing up exactly where it should: in
+the transitions explored, not in the states reached.) The consequence is the strongest available
+statement of why this slice exists: **a machine that parks a generation for
+ever, holding an unsold net-long transient and a reservation that subtracts
+from every later sizing, is a machine whose reachable states are exactly the
+correct machine's.** Every invariant in this module — all seven, plus
+`TypeOK` — is a state predicate, so every one of them is still green on it.
+No safety property could have caught it, and that is not a claim about which
+invariants were chosen; it is arithmetic about the state set.
+
+**`NC13` doubles as the control on the fairness set's own omissions, and
+this was the reason for leaving `DeadlineBlows` unfair.** `DeadlineBlows` is
+enabled in *every* `Ambiguous` state and its target satisfies `P1`'s
+consequent, so a fair `DeadlineBlows` would discharge `P1` by assuming the
+very degradation `P1` exists to survive — and `NC13`'s stall would be
+"rescued" by the deadline blowing, leaving `P1` green with the defect
+installed. `NC13` failing is therefore evidence about the fairness set and
+not only about the classifier. `NC15` is the same check on
+`PdTerminalFlatten`: fair, it would discharge `P3` by itself.
+
+**None of the four properties is satisfiable in its own antecedent state** —
+checked by inspection before the runs, because it is the model-altitude form
+of the fixture-collapse tell. `cls = "Ambiguous"` is not in `P1`'s
+consequent set, `DeadlineExceeded ≠ Determined`, `Held ∉ {Complete,
+TerminalFlatten}`, and `FloorOutstanding` contradicts `¬FloorOutstanding`.
+A property whose consequent already holds where its antecedent does is
+green, vacuous and indistinguishable from a real one.
+
+### 9e. Stated bounds and abstractions
+
+- **Two of the four properties differ from §4's wording, and both
+  differences are marked rather than absorbed** — §4 is this document's own
+  normative text for the model, so a silent divergence between the table in
+  §4 and the module is the design-record equivalent of spec drift.
+  - **`P2` is checked in a STRONGER form than §4 states.** §4 says "a
+    `DeadlineExceeded` episode **whose intervals later collapse**
+    eventually reaches `Determined`"; the module drops the qualifier and
+    claims it of *every* deadline-exceeded episode. That is sound here
+    because the fairness set makes the qualifier automatic — the finality
+    barrier is fair, so the intervals always do collapse — and the stronger
+    claim is the one worth checking. It passes.
+  - **`P4` is checked in a NARROWER form than §4 states.** §4 says "…
+    eventually resolves through the same contract — i.e. **the recursion
+    terminates**"; the module claims only that the floor generation leaves
+    the ledger. Two reasons, both above: the finitely-many-floors reading is
+    guaranteed by `MAX_DISPATCH` rather than by the spec, and the wider
+    consequent would have been failed by `NC13` as well as `NC16`, leaving
+    neither control naming its own defect. The give-up is recovered by
+    composition with `P1`.
+- **Fairness is a premise, not a fact.** `P1`–`P4` are claimed only for
+  behaviours satisfying `Fairness`; the module argues each conjunct and,
+  more importantly, each omission. Model (b)'s `EnvStabilizes` antecedent is
+  the same discipline expressed as an implication instead.
+- **"The recursion terminates" in the finitely-many-floors sense is
+  guaranteed here by `MAX_DISPATCH` — by the model's own bound, not by the
+  spec.** So a control against *that* reading could not exist, and a
+  property stating it would be evidence about the bound. `P4` checks the
+  claim the bound does not supply: each floor generation individually
+  reaches finality. `NC16`'s retry spends no budget precisely so the bound
+  cannot terminate the loop and hide the defect.
+- **The liveness config's state graph is the safety config's.** Fairness
+  constrains behaviours, never reachability. That is what lets the 24
+  positive controls, all run against the safety constants, stand as the
+  non-vacuity evidence for the liveness antecedents.
+- **`CHECK_DEADLOCK FALSE` in `NC13`/`NC14` and in `W1`–`W3`**, for the
+  reason in §9a decision 5. It stays on everywhere else, including every
+  nominal config.
+- **`Held/Alert`'s exit is still the single barrier §8f describes.** `P3`
+  says the park is left; it does not say the remaining per-leg target is
+  re-driven, which §8f already records as unmodeled.
+
+### 9f. What slice D inherits
+
+Slice D is the companion artifact `docs/formal/ambiguous-order-model.md`:
+the correspondence map (spec clause ↔ model construct), the results table,
+the honesty notes and a how-to-run, with every clause in §2's and §7's
+Invariants sections either mapped or listed as deliberately unmodeled with a
+reason. Three things to carry into it:
+
+- **`FM-5`'s normative edit is still OWED** and still scheduled for slice E
+  (§5's roster). The wording is in §8d. Until it lands the two artifacts
+  disagree and CLAUDE.md's rule decides.
+- **The `W*` probes are a pattern, not four files.** Any control whose
+  witness TLC chose deserves the question "does this trace show the harm or
+  the flag?", and the answer belongs in a committed run. **Its own mirror is
+  therefore owed and is named here rather than assumed done: model (b)'s
+  five controls have never been asked it.** That is not slice D's work —
+  it belongs with slice E's adversarial round, where model (b) is in scope
+  anyway — but the debt is recorded now, because the session that
+  generalizes a check is the session that can see where else it applies.
+- **`run.sh` is now 55 runs** (8 for model (b), 47 for model (a)), and every
+  model-(a) config tag is inside the `AmbiguousOrder_` namespace so
+  `./run.sh AmbiguousOrder` selects all 47 — the session-66 lesson, which
+  slice C re-armed by adding nine configs.
+
+---
+
 ## RESUME HERE
 
-**Slices A and B are BUILT and VERIFIED** (§7, §8 above). Next act is
-**slice C**: liveness `P1`–`P4`, each shipping with its negative control in
-the same slice (§5, and decision (2) below).
+**Slices A, B and C are BUILT and VERIFIED** (§7, §8, §9 above). Next act is
+**slice D**: the companion artifact `docs/formal/ambiguous-order-model.md` —
+correspondence map (spec clause ↔ model construct), results table, honesty
+notes, how-to-run. **Done when** every clause in §2's and §7's Invariants
+sections is either mapped to a model construct or listed as deliberately
+unmodeled *with a reason*. §9f is the shortest statement of what it
+inherits.
 
-**Before slice C, one thing is OWED and it is not optional: `FM-5`'s
-normative edit** (§8d). The model found a spec defect in SM §7's FLAG-3
-ruling composed with §2's reservation-aware sizing; the model encodes the
-sound reading and the negative control NC7 encodes the defective one, but
-`docs/state-machines.md` still says the unsound thing. §5's roster puts
-findings triage in slice E, so it is scheduled there — but until it lands,
-the two artifacts disagree and CLAUDE.md's standing rule ("treat the formal
-model as authoritative about the safety kernel's behaviour") is what
-resolves it. The wording to land is in §8d.
-
-Slice B's done-when (§5): green, **plus** the positive control that the
-unbroken model reaches the interesting states — extend
-`AmbiguousOrderCoverage.tla` so that **each of the three producers is shown to
-contribute a nonzero term to the one subtraction**, which is §2.1's whole
-argument for modeling §2 with §7. Report state counts; do not assume them.
+**`FM-5`'s normative edit is still OWED, and it is not optional** (§8d). The
+model found a spec defect in SM §7's FLAG-3 ruling composed with §2's
+reservation-aware sizing; the model encodes the sound reading and NC7
+encodes the defective one, but `docs/state-machines.md` still says the
+unsound thing. §5's roster puts findings triage in **slice E**, so it is
+scheduled there — but until it lands the two artifacts disagree and
+CLAUDE.md's standing rule ("treat the formal model as authoritative about
+the safety kernel's behaviour") is what resolves it. The wording to land is
+in §8d.
 
 Decisions already taken, recorded so they are not silently reopened:
 **(1)** §2 is modeled **with** §7, because the shared
@@ -802,12 +1050,27 @@ composition is where model (b) found its headline defect (§2.1); **(2)**
 every liveness property ships with its negative control in the same slice,
 because Cx8 proved a vacuous liveness property is indistinguishable from a
 passing one; **(3)** slice A's seven build decisions in §7a — in particular
-the `Impl*`/`True*` split and the `floorIssued`/`floorCount` separation, both
-of which slice B must preserve as it adds producers.
+the `Impl*`/`True*` split and the `floorIssued`/`floorCount` separation;
+**(4)** slice B's two in §8a/§8e — `INV1b` lives in the `MAX_GEN = 0`
+config because §7's perp reduce legitimately breaks its premise, and the
+generation's own legs are not `RecordDispatch`ed; **(5)** slice C's five in
+§9a — in particular that the fairness set's OMISSIONS are the theorem, that
+§8g's budget trap is answered by the properties' subject rather than by an
+antecedent, and that a consequent stays narrow so each control names its own
+defect.
+
+**Two things slice D should say out loud, because they are the model's own
+best evidence** (§9d): `NC15` produces a state graph *identical* to the
+nominal one, so the defect it installs is invisible to every invariant in
+the module by arithmetic rather than by choice — that is the correspondence
+map's answer to "why is there a liveness section at all"; and `NC13`
+doubles as the control on the fairness set's own omissions.
 
 Carried forward for **slice E**, not to be resolved earlier: §7d's question
 about whether "never issued twice" carries safety weight independent of the
-reservation.
+reservation, and §8f's question about whether *physical* neutrality is the
+stronger and intended precondition for opening a generation (it is FM-5's
+mirror and should be attacked with it).
 
 Standing context: task **#154**. The §45 gate waits on evidence until
 ~2026-09-30 (task #152); the §32m-D disk figure is due 2026-08-03T11:13Z

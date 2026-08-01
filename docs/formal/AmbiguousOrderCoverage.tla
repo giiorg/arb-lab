@@ -166,4 +166,34 @@ PC20_NeverTwoGenerations == gens < 2
 \* trivially.
 PC21_TransientAlwaysZero == ~(PdActive /\ pdDone - pdSold > 0)
 
+(***************************************************************************)
+(* SLICE C probes -- THE LIVENESS ANTECEDENTS.                              *)
+(*                                                                          *)
+(* A liveness property whose antecedent is unreachable is not merely weak,   *)
+(* it is TRUE: `[](A => <>B)` with A never reached is the vacuous pass Cx8   *)
+(* named, and a negative control does not close it -- a control shows the    *)
+(* property CAN fail somewhere, not that its subject occurs in the NOMINAL   *)
+(* model. So each of P1-P4 gets its antecedent named here, in the same       *)
+(* slice, on the same terms as every other probe: a PASS is the gap.         *)
+(*                                                                          *)
+(* Two of the four were already covered and are NOT duplicated: P3's         *)
+(* antecedent is PC14 (`pd = "Held"` is reached) and PC1 is adjacent to      *)
+(* P4's. PC24 exists anyway because PC1 counts DISPATCHES (`floorCount`)     *)
+(* while P4 quantifies over OUTSTANDING LEDGER ENTRIES, and the states       *)
+(* those two name come apart exactly when a floor dispatches and resolves    *)
+(* inside one step of the other -- the "does the fixture contain the thing   *)
+(* under test" question, asked of a probe instead of a test.                 *)
+(***************************************************************************)
+
+\* PC22/PC23 -- P1's and P2's antecedents. Both look obvious (Init itself can
+\* be Ambiguous), and that is precisely why they are cheap to state and
+\* worth stating: the alternative is inferring them from a probe that was
+\* written for something else.
+PC22_ClsNeverAmbiguous        == cls # "Ambiguous"
+PC23_ClsNeverDeadlineExceeded == cls # "DeadlineExceeded"
+
+\* PC24 -- P4's antecedent: a reserved IntervalFloorReduction generation is
+\* OUTSTANDING in the ledger, not merely counted as dispatched.
+PC24_FloorNeverOutstanding == ~FloorOutstanding
+
 ===============================================================================

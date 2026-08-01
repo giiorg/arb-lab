@@ -9,10 +9,20 @@
 # Model (a) AmbiguousOrder: SM SS2 composed with SM SS7 -- the
 #   ambiguous-order classifier, the finality contract, the interval-floor
 #   generation and PackageDelever's generations on one reservation ledger.
-#   Slices A+B: 14 runs (composed nominal + the SS2-only nominal + NC1-NC12)
-#   plus 21 POSITIVE controls, which are expected to be VIOLATED: each names
-#   an interesting state, and a probe that PASSES is a coverage gap, not a
-#   success. See AmbiguousOrderCoverage.tla.
+#   Slices A+B+C: 47 runs. 19 are the nominals and the negative controls
+#   (composed nominal + the SS2-only nominal + NC1-NC12, then the nominal
+#   LIVENESS config + NC13-NC16); 24 are POSITIVE controls, expected to be
+#   VIOLATED because each names an interesting state and a probe that PASSES
+#   is a coverage gap (see AmbiguousOrderCoverage.tla); and 4 are
+#   CONTROL-WITNESS probes (W1-W4), which ask of a control's own
+#   counterexample whether it demonstrates the HARM or only the flag.
+#
+#   Slice C's four temporal properties run under LiveSpec (Spec + a fairness
+#   set argued action-by-action in the module). Fairness constrains
+#   BEHAVIOURS, not reachable states, so the liveness config's state graph is
+#   the safety config's -- which is what lets the probes, all run against the
+#   safety constants, stand as the non-vacuity evidence for P1-P4's
+#   antecedents.
 #
 #   AmbiguousOrder_SM2 is the SS2-ONLY configuration (MAX_GEN = 0). It is
 #   where INV1's persistent conjunct INV1b is checked -- that conjunct's
@@ -146,6 +156,10 @@ CONSTANTS
   QUIESCE_BEFORE_SUPERSEDE = TRUE
   RELEASE_ON_FINALITY      = TRUE
   RELEASE_ON_SUPERSEDE     = TRUE
+  RECLASSIFY_ON_FINALITY    = TRUE
+  RECLASSIFY_AFTER_DEADLINE = TRUE
+  HELD_RESUMES              = TRUE
+  BLIND_RETRY               = FALSE
 $2
   $1
 EOF
@@ -172,7 +186,7 @@ r FenceTakeover FenceTakeover_NC3   fail "I1_NeverTwoWriters"
 r FenceTakeover FenceTakeover_NC4   fail "I2_HostIndependentCoverage|I3_EvidenceGatedTerminal"
 r FenceTakeover FenceTakeover_NC5   failprop "P4_ArbitrationCompletes"
 
-echo "################ MODEL (a): AmbiguousOrder -- SM SS2 (slice A) #############"
+echo "###### MODEL (a): AmbiguousOrder -- SM SS2 x SS7, slices A+B+C ############"
 echo
 r AmbiguousOrder AmbiguousOrder      pass
 r AmbiguousOrder AmbiguousOrder_SM2  pass
@@ -189,6 +203,17 @@ r AmbiguousOrder AmbiguousOrder_NC10 fail "INV6_SupersessionQuiescesFirst"
 r AmbiguousOrder AmbiguousOrder_NC11 fail "INV4_ReservationLedgerSound"
 r AmbiguousOrder AmbiguousOrder_NC12 fail "INV4_ReservationLedgerSound"
 
+# SLICE C -- liveness. The nominal config checks P1-P4 under LiveSpec (the
+# fairness set), and each control below flips ONE constant and must produce a
+# TEMPORAL violation. `failprop` cannot name the property TLC violated, so
+# each of these configs lists exactly one -- the NC5 discipline, applied to
+# four more.
+r AmbiguousOrder AmbiguousOrder_Live pass
+r AmbiguousOrder AmbiguousOrder_NC13 failprop "P1_AmbiguousEventuallyClassified"
+r AmbiguousOrder AmbiguousOrder_NC14 failprop "P2_DeadlineExceededResolves"
+r AmbiguousOrder AmbiguousOrder_NC15 failprop "P3_HeldGenerationResumes"
+r AmbiguousOrder AmbiguousOrder_NC16 failprop "P4_FloorGenerationResolves"
+
 echo "###### MODEL (a) POSITIVE CONTROLS -- each MUST be violated (reached) ######"
 echo
 # PC2 and PC20 share a suffix and are NOT duplicates -- do not delete one as
@@ -204,13 +229,29 @@ for p in PC1_FloorNeverDispatched PC2_NeverTwoGenerations \
          PC13_PdNeverCompletes PC14_PdNeverHeld PC15_PdNeverInFlight \
          PC16_NeverSupersededByEmergency PC17_NeverSupersededByFence \
          PC18_PerpAlwaysFullyConfirmed PC19_PdNeverTerminalFlatten \
-         PC20_NeverTwoGenerations PC21_TransientAlwaysZero; do
+         PC20_NeverTwoGenerations PC21_TransientAlwaysZero \
+         PC22_ClsNeverAmbiguous PC23_ClsNeverDeadlineExceeded \
+         PC24_FloorNeverOutstanding; do
   gen_probe_cfg "$p" INVARIANTS
   r AmbiguousOrderCoverage "$TOOLS_DIR/AmbiguousOrder_PC_$p" probe "$p"
 done
 gen_probe_cfg PC8_NoCancelWithZeroExecutions PROPERTIES
 r AmbiguousOrderCoverage "$TOOLS_DIR/AmbiguousOrder_PC_PC8_NoCancelWithZeroExecutions" \
   probe "PC8_NoCancelWithZeroExecutions"
+
+echo "###### MODEL (a) CONTROL-WITNESS PROBES -- is the CONTROL'S witness harmful? #####"
+echo
+# TLC reports A counterexample, not the most harmful one. Each of these runs
+# a CONTROL's constants and asks whether the harmful version of that
+# control's state is reachable at all -- so a control cannot demonstrate a
+# flag flipping while saying nothing about the cost. Same polarity as the
+# positive controls: the claim is the good outcome, so VIOLATED = reached.
+# W1 was asked by hand in session 66 and is committed here because the
+# session that added its mirrors (W2/W3) is the session that owed it.
+r AmbiguousOrder AmbiguousOrder_W1 probe "NoNonzeroOrphan"
+r AmbiguousOrder AmbiguousOrder_W2 probe "NoStrandedNakedResidual"
+r AmbiguousOrder AmbiguousOrder_W3 probe "NoStrandedNakedResidual"
+r AmbiguousOrder AmbiguousOrder_W4 probe "NoStuckFloorSubtrahend"
 
 # A filtered run is NOT the suite result. Say so in the summary line, so a
 # partial green can never be quoted as the whole one.

@@ -162,7 +162,60 @@ CONSTANTS
   \* from QUIESCE_BEFORE_SUPERSEDE (NC10) rather than folded into it so that
   \* one control trips one invariant: NC10 is about the LEG's finality
   \* (INV6), this is about the LEDGER ENTRY (INV4).
-  RELEASE_ON_SUPERSEDE
+  RELEASE_ON_SUPERSEDE,
+
+  \* --- SLICE C: the LIVENESS controls (one per property) -----------------
+  \* Each of these four is read by exactly one action, and each is the
+  \* constant a single P fails on. They are all NOMINAL-VALUED here in the
+  \* safety configs too, where they change nothing: none of them is read by
+  \* a guard that a safety invariant can see, and the nominal state graph is
+  \* IDENTICAL to slice B's (the recorded 832,179 / 5,169 distinct-state
+  \* counts are the check on that claim, not an assumption behind it).
+  \*
+  \* Nominal TRUE: SM SS2 Scope -- classification re-runs on every
+  \* fill/position event AND "every hedge-group order-lifecycle/finality
+  \* event", the case where "a cancel confirmed with ZERO executions emits
+  \* no fill and no position event, yet fully collapses that order's
+  \* interval". FALSE = negative control NC13: the machine re-classifies on
+  \* FILLS ONLY, so an interval that collapses without executing leaves the
+  \* verdict STALE-AMBIGUOUS -- the residual is determined and the machine
+  \* never says so. SS46 SS7e parked this half of the clause here on purpose:
+  \* its SAFETY half is INV7/NC4 (a classifier that reads fills alone
+  \* OVERSHOOTS); this half STALLS instead, which no invariant can see.
+  RECLASSIFY_ON_FINALITY,
+  \* Nominal TRUE: SM SS2's late-resolution transition -- a
+  \* DeadlineExceededAmbiguous episode whose intervals later collapse goes
+  \* back to `Determined`. FALSE = negative control NC14: the machine treats
+  \* the deadline-exceeded verdict as latched until an operator clears it,
+  \* so classification stops re-running for the rest of the episode. The
+  \* narrower control of the two: NC13 removes the finality edge for EVERY
+  \* verdict (so it fails P1 and P2 both), this one removes only the
+  \* transition BACK OUT of DeadlineExceeded, which is P2 alone.
+  RECLASSIFY_AFTER_DEADLINE,
+  \* Nominal TRUE: SM SS7 FLAG-4 rules `Held/Alert` NONTERMINAL -- eventual
+  \* finality of the held leg RESUMES the generation. FALSE = negative
+  \* control NC15: `Held` is a park, and the leg reaching finality no longer
+  \* completes the generation. The park's only remaining exit is
+  \* TerminalFlatten, which is a POLICY branch and therefore unfair, so a
+  \* generation may sit held forever. Note the exit is REMOVED, not the
+  \* state's successors: PdTerminalFlatten stays enabled, so the control
+  \* reports as a temporal violation rather than as a deadlock.
+  HELD_RESUMES,
+  \* Nominal FALSE: SM SS2 row 4 -- "it NEVER BLIND-RETRIES, and its own
+  \* ambiguous result ... routes through this same SS6.7 finality contract".
+  \* TRUE = negative control NC16: on an ambiguous result the machine
+  \* RE-SENDS the reduction instead of routing it, so the generation can
+  \* cycle result-ambiguous -> re-send -> result-ambiguous forever and its
+  \* reservation never leaves the ledger.
+  \*
+  \* This is the one control that needed a STATE rather than a constant
+  \* flip, and the reason is worth keeping: in slices A/B a reduction's
+  \* ambiguity is a CHOICE OF EDGE (ReductionFills vs ReductionAmbiguous),
+  \* never a state the machine sits in -- so a blind retry was literally
+  \* unrepresentable, and a control that leaves `vars` unchanged is a
+  \* STUTTER, which weak fairness steps straight over. `pending[k].amb` is
+  \* what makes the retry loop a fair lasso instead of a stutter.
+  BLIND_RETRY
 
 (***************************************************************************)
 (* Value domains. Deliberately generous: TypeOK is the CHECK that the      *)
@@ -228,6 +281,12 @@ VARIABLES
   \* entry outlived it; reachable only under RELEASE_ON_FINALITY = FALSE
   \* (NC11), and read by the SIZING but never by the invariants -- the
   \* Impl/True split pushed down into the ledger.
+  \* `amb` (SLICE C) = the generation's own result came back ambiguous and
+  \* the machine has NOT yet routed it through the finality contract.
+  \* Reachable only under BLIND_RETRY = TRUE (NC16): nominally a reduction's
+  \* ambiguity is an EDGE (ReductionAmbiguous) and never a state, so `amb`
+  \* is FALSE in every reachable nominal state and the nominal state graph
+  \* is unchanged by its existence.
   pending,
   \* --- The classifier's REPORTED verdict (SM SS2 States) ----------------
   \* A variable, not a definition: the whole content of INV7 is that the
@@ -473,13 +532,33 @@ ReportedDetermined(o, p) ==
 \* An episode ENDS when the classifier reports Determined: the deadline
 \* clears and the floor's guard and dispatch count reset with it. INV2 is
 \* therefore per-episode, exactly as SS46 SS4 states it.
+\* SLICE C. `frozen` is NC14: the machine latches the deadline-exceeded
+\* verdict and stops re-classifying for the rest of the episode, so SS2's
+\* late-resolution transition (row 6 -> row 2) never fires. Written as a
+\* whole-step no-op rather than as a guard on `det`, because the defect
+\* being modeled is "classification stopped running", not "classification
+\* ran and answered wrongly" -- the latter is INV7's territory and already
+\* has NC4.
 Reclassify(o, p, d) ==
-  LET det == ReportedDetermined(o, p)
-  IN  /\ cls'         = IF det THEN "Determined"
+  LET det    == ReportedDetermined(o, p)
+      frozen == ~RECLASSIFY_AFTER_DEADLINE /\ d
+  IN  /\ cls'         = IF frozen THEN cls
+                        ELSE IF det THEN "Determined"
                         ELSE IF d THEN "DeadlineExceeded" ELSE "Ambiguous"
-      /\ deadline'    = IF det THEN FALSE ELSE d
-      /\ floorIssued' = IF det THEN FALSE ELSE floorIssued
-      /\ floorCount'  = IF det THEN 0     ELSE floorCount
+      /\ deadline'    = IF frozen THEN deadline
+                        ELSE IF det THEN FALSE ELSE d
+      /\ floorIssued' = IF frozen \/ ~det THEN floorIssued ELSE FALSE
+      /\ floorCount'  = IF frozen \/ ~det THEN floorCount  ELSE 0
+
+\* SLICE C. The ORDER-LIFECYCLE/FINALITY half of SM SS2 Scope's
+\* re-classification clause, split out so NC13 can remove it alone. The
+\* fill/position half stays in `Reclassify` at its own call sites: a machine
+\* that re-classifies on fills only is exactly the stale-ambiguous stall the
+\* clause exists to forbid, and the collapse-with-no-execution case is the
+\* one where the two halves differ (PC8 is the probe that says that case is
+\* reached).
+ReclassifyOnFinality(o, p, d) ==
+  IF RECLASSIFY_ON_FINALITY THEN Reclassify(o, p, d) ELSE UNCHANGED epiVars
 
 (***************************************************************************)
 (* Dispatch bookkeeping.                                                   *)
@@ -529,14 +608,14 @@ FreeOrder == { i \in OrderIds : orders[i].q = 0 }
 \* classifier's `q = 0 \/ ~seen` is already true at q = 0. It exists only
 \* to stop two behaviorally identical states counting twice.
 DeadPend  == [active |-> FALSE, amt |-> 0, kind |-> "exposure",
-               stale |-> FALSE, sent |-> FALSE]
+               stale |-> FALSE, sent |-> FALSE, amb |-> FALSE]
 DeadOrder == [dir |-> -1, q |-> 0, seen |-> FALSE]
 
 \* A live ledger entry, by producer. `snt` = its counterpart order has been
 \* SUBMITTED. A reservation booked at INTENT and one booked at DISPATCH are
 \* different objects and INV4 has to tell them apart -- see CommittedLo.
 Pend(a, kd, snt) == [active |-> TRUE, amt |-> a, kind |-> kd,
-                     stale |-> FALSE, sent |-> snt]
+                     stale |-> FALSE, sent |-> snt, amb |-> FALSE]
 
 (***************************************************************************)
 (* Init. The environment picks the hedge group's opening position: the     *)
@@ -609,7 +688,7 @@ OrderFinal(i) ==
   /\ orders[i].q > 0
   /\ LET no == [orders EXCEPT ![i] = DeadOrder]
      IN /\ orders' = no
-        /\ Reclassify(no, pdPerp, deadline)
+        /\ ReclassifyOnFinality(no, pdPerp, deadline)
   /\ UNCHANGED << realized, pending, budget >>
   /\ UNCHANGED pdVars
   /\ UNCHANGED histVars
@@ -704,6 +783,11 @@ ReductionFills(k) ==
   /\ pending[k].active
   /\ pending[k].kind # "pkgspot"
   /\ ~pending[k].stale
+  \* SLICE C: a generation whose result has already come back ambiguous
+  \* cannot now report a clean fill. Nominally vacuous (`amb` is FALSE in
+  \* every reachable state); under NC16 it is what leaves the re-send as
+  \* the only edge out, which is the defect.
+  /\ ~pending[k].amb
   /\ realized' = realized - pending[k].amt
   \* RELEASE_ON_FINALITY = FALSE (NC11) keeps the entry in the ledger after
   \* its counterpart has realized. It is MARKED rather than silently left
@@ -732,6 +816,7 @@ ReductionAmbiguous(k) ==
   /\ pending[k].active
   /\ pending[k].kind # "pkgspot"
   /\ ~pending[k].stale
+  /\ ~pending[k].amb
   /\ FreeOrder # {}
   /\ LET i == CHOOSE i \in FreeOrder : TRUE
          a == pending[k].amt
@@ -743,6 +828,53 @@ ReductionAmbiguous(k) ==
         /\ Reclassify(no, pdPerp, deadline)
   /\ UNCHANGED << realized, budget >>
   /\ UNCHANGED pdVars
+  /\ UNCHANGED histVars
+
+(***************************************************************************)
+(* SLICE C: the BLIND RETRY (NC16 only).                                   *)
+(*                                                                         *)
+(* SM SS2 row 4 forbids exactly this: "it NEVER blind-retries, and its own *)
+(* ambiguous result ... routes through this same SS6.7 finality contract". *)
+(* Under BLIND_RETRY the machine takes the other path -- it re-sends the   *)
+(* reduction on its own authority -- and the two actions below are that    *)
+(* path, so the forbidden behaviour is REACHABLE and P4 has something to   *)
+(* fail on. Both are disabled nominally.                                   *)
+(*                                                                         *)
+(* Why the ambiguity needed a STATE here when slices A/B modeled it as an  *)
+(* EDGE: a re-send that changes nothing observable is a STUTTERING step,   *)
+(* and weak fairness steps over stutter -- WF_vars(ReductionFills \/       *)
+(* ReductionAmbiguous) would simply force the fill and P4 would pass with  *)
+(* the defect installed. The `amb` bit makes the retry loop a genuine fair *)
+(* LASSO: in the `amb` state both nominal exits are disabled, so the       *)
+(* fairness premise (continuous enabledness) is not met and nothing forces *)
+(* the generation out. That is also the honest shape of the defect -- a    *)
+(* machine that keeps re-sending is not one whose fills are being starved. *)
+(***************************************************************************)
+ReductionResultAmbiguous(k) ==
+  /\ BLIND_RETRY
+  /\ pending[k].active
+  /\ pending[k].kind # "pkgspot"
+  /\ ~pending[k].stale
+  /\ ~pending[k].amb
+  /\ pending' = [pending EXCEPT ![k].amb = TRUE]
+  /\ UNCHANGED << orders, realized, budget >>
+  /\ UNCHANGED pdVars
+  /\ UNCHANGED epiVars
+  /\ UNCHANGED histVars
+
+\* The re-send. It spends NO dispatch budget on purpose: a machine that
+\* blind-retries is not asking the finality contract for permission, and
+\* charging the retry to MAX_DISPATCH would let the model's own bound
+\* terminate the loop and hide the defect -- the budget trap of SS46 SS8g,
+\* pointed the other way.
+ReductionBlindRetry(k) ==
+  /\ BLIND_RETRY
+  /\ pending[k].active
+  /\ pending[k].amb
+  /\ pending' = [pending EXCEPT ![k].amb = FALSE]
+  /\ UNCHANGED << orders, realized, budget >>
+  /\ UNCHANGED pdVars
+  /\ UNCHANGED epiVars
   /\ UNCHANGED histVars
 
 (***************************************************************************)
@@ -871,11 +1003,16 @@ PdPerpFill(x) ==
 \* confirmation the whole "no more spot than the CONFIRMED perp reduction"
 \* rule is about, and the state SPOT_CAPPED_BY_PERP needs in order to bite
 \* at all (checklist item 1, probe PC18).
+\* SLICE C: this is the SAME barrier as OrderFinal, so it reads the same
+\* constant (NC13). Supersede's Reclassify is deliberately NOT covered by
+\* it -- that is an arbitration event, not a venue finality event -- and
+\* ReductionAmbiguous's is not either, which is what keeps NC13's stall
+\* attributable to the collapse-with-no-execution case PC8 names.
 PdPerpFinal ==
   /\ pd = "PerpReduceInFlight"
   /\ pdPerp' = 0
   /\ pd' = "PerpReduceFinal"
-  /\ Reclassify(orders, 0, deadline)
+  /\ ReclassifyOnFinality(orders, 0, deadline)
   /\ UNCHANGED << orders, realized, pending, pdTarget, pdDone, pdSold,
                   gens, superseded, budget >>
   /\ UNCHANGED histVars
@@ -946,8 +1083,13 @@ PdSpotHolds ==
 \* re-sent -- SS7's "never blind-retries"). Reachable from SpotReduceInFlight
 \* directly and from Held, which is FLAG-4's ruling: eventual finality of the
 \* held leg resumes the generation.
+\* SLICE C: `Held` is in the from-set because FLAG-4 rules the park
+\* NONTERMINAL -- "eventual finality of the held leg resumes the
+\* generation". HELD_RESUMES = FALSE (NC15) takes it back out, which is the
+\* park read as terminal-pending-policy, and P3 is what notices.
 PdSpotFinal(x) ==
-  /\ pd \in { "SpotReduceInFlight", "Held" }
+  /\ pd \in (IF HELD_RESUMES THEN { "SpotReduceInFlight", "Held" }
+                             ELSE { "SpotReduceInFlight" })
   /\ PdPendIds # {}
   /\ LET k == CHOOSE k \in PdPendIds : TRUE
      IN /\ x \in 0..pending[k].amt
@@ -1047,6 +1189,9 @@ Next ==
   \/ IssueFloor
   \/ \E k \in PendIds : ReductionFills(k)
   \/ \E k \in PendIds : ReductionAmbiguous(k)
+  \* --- SLICE C: disabled unless BLIND_RETRY (NC16) ------------------------
+  \/ \E k \in PendIds : ReductionResultAmbiguous(k)
+  \/ \E k \in PendIds : ReductionBlindRetry(k)
   \* --- SLICE B: the SS7 generation ---------------------------------------
   \/ \E t \in 1..MAXQ : PdPlan(t)
   \/ PdSubmitPerp
@@ -1064,6 +1209,73 @@ Next ==
 Spec == Init /\ [][Next]_vars
 
 (***************************************************************************)
+(* SLICE C: FAIRNESS, and the argument for every line of it.               *)
+(*                                                                         *)
+(* The split is the same one model (b) made and for the same reason: what  *)
+(* the VENUE and the MACHINE promise is fair; what an adversary, a policy  *)
+(* branch or a discretionary decision does is NOT. A fairness assumption   *)
+(* is a premise of every P below, so a generous one is a weaker theorem --  *)
+(* every action left out of this list is an action the properties are      *)
+(* proved WITHOUT.                                                         *)
+(*                                                                         *)
+(* DELIBERATELY UNFAIR, each with its reason:                              *)
+(*                                                                         *)
+(*  - DeadlineBlows -- an environment degradation (queries unavailable /   *)
+(*    rate-limited). Model (b) keeps crashes and degradations unfair. It   *)
+(*    matters here more than it looks: DeadlineBlows is ENABLED in every   *)
+(*    Ambiguous state and its target satisfies P1's consequent, so a fair  *)
+(*    DeadlineBlows would discharge P1 by ASSUMING the very degradation    *)
+(*    P1 is meant to survive. P1 is instead driven by the finality         *)
+(*    barrier, which is the promise SS2 actually rests on.                 *)
+(*  - IssueExposureReduction / IssueFloor -- the compensating trades. Left *)
+(*    unfair for TWO reasons. (i) It makes P1-P4 stronger: no property     *)
+(*    below asserts that a dispatch ever happens. (ii) It is what defuses  *)
+(*    SS46 SS8g's budget trap AT THE SOURCE rather than with an antecedent: *)
+(*    a behaviour that exhausts MAX_DISPATCH and then stutters in `Settled`*)
+(*    with a nonzero residual falsifies NO property here, because none of  *)
+(*    them says a residual is eventually compensated. A "the residual is   *)
+(*    eventually flat" property WOULD have needed the budget conditioning; *)
+(*    it is not one of SS46 SS4's four, and adding it would have been a    *)
+(*    claim about the model's bound rather than about the spec.            *)
+(*  - PdPlan -- a generation is opened by the liq-distance ladder, which   *)
+(*    is a decision and out of model.                                      *)
+(*  - PdSpotHolds -- the degradation that CREATES P3's antecedent.         *)
+(*  - PdTerminalFlatten -- a policy branch (FLAG-4's "if completion is     *)
+(*    impossible"). If it were fair it would discharge P3 by itself, and   *)
+(*    P3 would be green with NC15's defect installed.                      *)
+(*  - Supersede -- an external arbitration event (core SS5.3 / SS7.4).     *)
+(*  - Settled -- the terminal stutter.                                     *)
+(***************************************************************************)
+Fairness ==
+  \* The per-venue finality contract's own promise, per order slot: an
+  \* order eventually executes or reaches a terminal status. The DISJUNCTION
+  \* is the honest form -- fairness on OrderFinal alone would assume the
+  \* no-execution path, and on OrderFill alone would assume away the cancel
+  \* case SS2 Scope names. Model (b)'s WF_vars(VEntryFill \/ VEntryTerminal).
+  /\ \A i \in OrderIds :
+       WF_vars((\E x \in QDom \ {0} : OrderFill(i, x)) \/ OrderFinal(i))
+  \* A reduction generation reaches finality one way or the other: it fills,
+  \* or its own result is ambiguous and routes back through the contract.
+  \* Which of the two is the VENUE's choice, never the machine's, so the
+  \* fairness is on the disjunction and P4 is not handed its conclusion.
+  /\ \A k \in PendIds : WF_vars(ReductionFills(k) \/ ReductionAmbiguous(k))
+  \* The SS7 generation's own protocol steps -- the machine's obligations
+  \* once a generation exists. Model (b)'s WF over the engine's arbitration
+  \* and the actuator's protocol.
+  /\ WF_vars(PdSubmitPerp)
+  /\ WF_vars((\E x \in QDom \ {0} : PdPerpFill(x)) \/ PdPerpFinal)
+  /\ WF_vars(\E s \in QDom : PdAuthorizeSpot(s))
+  /\ WF_vars(PdSubmitSpot)
+  \* The reserved spot leg's finality -- the same barrier as OrderFinal,
+  \* and the ONLY fair exit from `Held`. P3's whole content is that this
+  \* barrier is what resumes a held generation (FLAG-4), so its fairness is
+  \* the finality promise and not a policy assumption.
+  /\ WF_vars(\E x \in QDom : PdSpotFinal(x))
+  /\ WF_vars(PdEnds)
+
+LiveSpec == Spec /\ Fairness
+
+(***************************************************************************)
 (* Invariants.                                                             *)
 (***************************************************************************)
 
@@ -1071,7 +1283,7 @@ TypeOK ==
   /\ orders \in [ OrderIds -> [dir: Dirs, q: QDom, seen: BOOLEAN] ]
   /\ realized \in AmtDom
   /\ pending \in [ PendIds -> [active: BOOLEAN, amt: AmtDom, kind: Kinds,
-                               stale: BOOLEAN, sent: BOOLEAN] ]
+                               stale: BOOLEAN, sent: BOOLEAN, amb: BOOLEAN] ]
   /\ pd \in PdPhases
   /\ pdTarget \in QDom /\ pdPerp \in QDom
   /\ pdDone \in QDom /\ pdSold \in QDom
@@ -1298,5 +1510,126 @@ NoNonzeroOrphan ==
   pd = "None" =>
     \A k \in PendIds :
       ~(pending[k].active /\ pending[k].kind = "pkgspot" /\ pending[k].amt # 0)
+
+\* SLICE C. The same question asked of NC13's and NC14's witnesses, and it
+\* had to be asked for the same reason: TLC reports A counterexample, not the
+\* most harmful one, and NC13's ends in a state where `budget = 0`. There the
+\* machine could not have compensated the residual even with a correct
+\* classifier -- so that trace demonstrates the STALL (which is all P1
+\* claims) while saying nothing about the HARM, exactly as NC12's shortest
+\* orphan was an entry of amount zero.
+\*
+\* This asks whether the machine can be stranded on a residual it was still
+\* able to act on: every interval collapsed, no generation running, a NONZERO
+\* residual, dispatch budget LEFT, and a verdict that is not `Determined` and
+\* now never will be. Checked against NC13's and NC14's constants, where a
+\* violation is the good outcome; it is not in any nominal configuration,
+\* where it is TRUE and says nothing.
+NoStrandedNakedResidual ==
+  ~ /\ cls # "Determined"
+    /\ AllCollapsed
+    /\ pdPerp = 0
+    /\ pd = "None"
+    /\ TrueResidual # 0
+    /\ budget > 0
+
+\* SLICE C. The same question asked of NC16's witness, which lassos at
+\* `budget = 0` for the same reason NC13's stutters there: TLC's
+\* counterexample search finds the deep states. A stuck reservation costs
+\* nothing if nothing will ever size against it again, so the harm claim is
+\* that the machine can be ABOUT TO SIZE -- determined, budget left, a free
+\* generation slot, a residual to act on -- while a floor generation caught
+\* in the blind-retry loop contributes a nonzero term to the subtraction it
+\* will size from. That reduction is short by exactly the amount of a
+\* reduction that is never going to land.
+\*
+\* Deliberately the same shape as the PC9-PC11 `SubtrahendFrom` probes, one
+\* conjunct longer: the conjunct is `amb`, and it is the whole difference
+\* between a reservation that is working and one that is stuck.
+NoStuckFloorSubtrahend ==
+  ~ \E k \in PendIds :
+      /\ pending[k].active /\ pending[k].kind = "floor" /\ pending[k].amb
+      /\ cls = "Determined"
+      /\ budget > 0
+      /\ FreePend # {}
+      /\ realized - TrueReserved # 0
+
+(***************************************************************************)
+(* SLICE C: LIVENESS (SS46 SS4), checked under LiveSpec only.              *)
+(*                                                                         *)
+(* Each ships with its negative control in this same slice, because Cx8    *)
+(* proved a vacuous liveness property and a passing one are indistinguish- *)
+(* able. The controls are NC13-NC16 and the mapping is one-to-one:         *)
+(* P1 -> NC13, P2 -> NC14, P3 -> NC15, P4 -> NC16.                         *)
+(*                                                                         *)
+(* ISOLATION IS PART OF THE DESIGN, not a happy accident. CLAUDE.md's rule *)
+(* for the lint gates -- a probe two gates can see shows that SOMETHING    *)
+(* objected, not that THIS rule did -- applies to a control the same way.  *)
+(* So the consequents below are kept as narrow as the claim allows:        *)
+(* P4 says the floor generation leaves the ledger and stops there, because *)
+(* conjoining "and the episode ends at Determined" would make NC13 fail P4 *)
+(* as well and the control would no longer name its own defect. What the   *)
+(* narrow P4 gives up is recovered by COMPOSITION: what the floor routes   *)
+(* into is an order, and P1 is the claim about orders.                     *)
+(*                                                                         *)
+(* The one deliberate overlap is NC13, which fails P1 AND P2: it removes   *)
+(* re-classification on the finality edge for every verdict. NC14 is the   *)
+(* narrower control that isolates P2, which is why both exist.             *)
+(***************************************************************************)
+
+\* A reserved IntervalFloorReduction generation is outstanding.
+FloorOutstanding ==
+  \E k \in PendIds : pending[k].active /\ pending[k].kind = "floor"
+
+\* P1 -- an `Ambiguous` residual never sits unclassified: it reaches
+\* `Determined` (its intervals collapsed and the machine SAID SO) or
+\* `DeadlineExceeded` (the contract's deadline blew and the machine said
+\* THAT). SM SS2 Scope's "the machine MUST NOT wait for the next fill",
+\* stated as the liveness half SS46 SS7e split off from INV7.
+\*
+\* Its evidence is NC13. Note what the property does NOT assume: the
+\* deadline never has to blow (DeadlineBlows is unfair), so P1 is
+\* discharged by the finality barrier alone.
+P1_AmbiguousEventuallyClassified ==
+  [] ( cls = "Ambiguous" => <> (cls \in { "Determined", "DeadlineExceeded" }) )
+
+\* P2 -- SS2's LATE-RESOLUTION transition: a deadline-exceeded episode whose
+\* intervals later collapse goes back to `Determined`. The episode is not a
+\* terminal state, and the difference between "not terminal" and "terminal
+\* pending an operator" is invisible to every invariant in this module --
+\* which is the whole reason a liveness property is the right instrument.
+P2_DeadlineExceededResolves ==
+  [] ( cls = "DeadlineExceeded" => <> (cls = "Determined") )
+
+\* P3 -- FLAG-4's nonterminal ruling, mechanized: a `Held/Alert` generation
+\* eventually resumes to `Complete` or enters `TerminalFlatten`. It holds
+\* and alerts; it does not hold forever.
+\*
+\* SS46 SS8g's MAX_GEN trap is answered by the SUBJECT, not by an
+\* antecedent: this is a claim about THE HELD GENERATION's own resolution,
+\* and nothing in it mentions a LATER generation. A spent `gens` count
+\* disables PdPlan, which would stall a "another generation eventually
+\* starts" property -- so that property is not stated, because the ladder
+\* stopping at MAX_GEN is a bound of the model and not a behaviour of the
+\* spec.
+P3_HeldGenerationResumes ==
+  [] ( pd = "Held" => <> (pd \in { "Complete", "TerminalFlatten" }) )
+
+\* P4 -- the reserved floor generation does not stay outstanding: it fills,
+\* or its own ambiguous result ROUTES back through the same SS6.7 finality
+\* contract as an order (SM SS2 row 4, "it never blind-retries"). Either way
+\* the ledger entry clears, and that is what makes the recursion a
+\* recursion rather than a hang.
+\*
+\* Honesty note, and it is the sharpest one in this slice: "the recursion
+\* TERMINATES" in the sense of "there are finitely many floors" is
+\* guaranteed here by MAX_DISPATCH, i.e. by the model's own bound -- so a
+\* control against THAT reading could not exist, and a property stating it
+\* would be evidence about the bound. What is checked instead is the claim
+\* the bound does NOT supply: each floor generation individually reaches
+\* finality. NC16 is what shows that claim has content, and it has content
+\* precisely because a blind retry spends no budget.
+P4_FloorGenerationResolves ==
+  [] ( FloorOutstanding => <> ~FloorOutstanding )
 
 =============================================================================
