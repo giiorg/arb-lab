@@ -99,7 +99,38 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated session 58, 2026-08-01 — §45 SLICE A BUILT + ALL FOUR §45f FORKS RULED; next: §45 slices B–D in order; the §32m-D figure due by 2026-08-03T11:13Z)
+## START HERE (updated session 59, 2026-08-01 — §45 SLICE B BUILT: the gate's domain math exists with oracles; next: §45 slices C–D in order; the §32m-D figure due by 2026-08-03T11:13Z)
+
+**Branch `feat/milestone-1-foundation`.** Session 59 built §45's slice B:
+**`internal/strategy/domain/crossvenue`** — pairing (the screening's rules
+restated domain-grade, exact per-leg instants kept for the phase ledger),
+the window-emitting episode machine (`(OpenAt, CloseAt]` — no-lookahead
+made structural), the funding-phase ledger (unhedged term = running net
+minus its value at the last count-balanced instant, atomically batched, so
+aligned grids collapse it to exactly zero), the §8 cost selections
+(`WorseOf`/`WorseSide` pure, `RoundTrip` refuses negative cells), and
+ruling §45f-3's portfolio statistic (weights sum exactly 1, stationary-
+bootstrap LCB on a pinned in-package SplitMix64 stream, FLOOR order
+statistic). Four oracles beside them. 29/29 aimed mutations caught; one
+SURVIVED diagnosed EQUIVALENT (the same-instant batch loop could never
+iterate twice under the duplicate rule — production now states the
+invariant as a guarded `if`); one TIMEOUT!! (a mutant froze the merge
+loop — a hang names no defect) re-aimed and caught. Read
+**`2026-08-01-strategy2-crossvenue-gate.md` §45k**, then its RESUME HERE.
+
+**What is next, in order: (1) the §32m-D per-tier figure when its day has
+run (due by 2026-08-03T11:13Z, measurable from ~2026-08-02T11:13Z) → §44e
++ the §38f off-host re-argument; (2) §45 slice C** — the walker's
+measurement stages + sim CLI, including the Bybit book ACCUMULATOR (§45d
+named it walker machinery; §45g's accumulator/depth-walk suspects still
+open) and the post-cutoff seal IN CODE; **(3) §45 slice D** — the
+procedure commit pinning every argument slice B left open. Capture rituals
+first, always: pgrep PID 8495, background verify (session 59: COVERAGE, 0
+integrity, 2570 coverage), marker grep (ZERO).
+
+---
+
+## START HERE (updated session 58, 2026-08-01 — HISTORICAL — §45 SLICE A BUILT + ALL FOUR §45f FORKS RULED; superseded by session 59's slice B build)
 
 **Branch `feat/milestone-1-foundation`.** Session 57 executed the §42c capture expansion: WS
 ceilings verified into the profiles first, the shortlist × four streams into

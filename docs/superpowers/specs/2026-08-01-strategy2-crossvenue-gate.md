@@ -1,8 +1,9 @@
 # Strategy #2 crossvenue read-path, research sim & gate procedure — design (§45, 2026-08-01, session 58)
 
-**Status: RULED + SLICE A BUILT — all four §45f forks were ruled by the user
-2026-08-01 (same session, after slice A landed); slices B–D build in order,
-nothing waits on a decision.** Mandate: §42's RESUME item 3 and §44's RESUME item 2 — the
+**Status: RULED + SLICES A AND B BUILT — all four §45f forks were ruled by
+the user 2026-08-01 (session 58, after slice A landed); slice B (the domain
+math, §45k) landed session 59; slices C–D build in order, nothing waits on
+a decision.** Mandate: §42's RESUME item 3 and §44's RESUME item 2 — the
 `strategy/crossvenue` read-path, the research simulator, and the gate's
 procedure commit. Taken up while §44e's per-tier disk figure accumulates its
 measured day (the §37-preamble ordering principle: the figure is a one-command
@@ -288,28 +289,98 @@ and the Binance dialect-routing fixture where a product swap surfaces as
 refusals. Profiles gained the dated own-archive observation block. `make ci`
 green, marker grep zero.
 
+## §45k — slice B build record (session 59, 2026-08-01)
+
+**Slice B is BUILT: `internal/strategy/domain/crossvenue` — pairing,
+episode machine, phase ledger, cost selections, portfolio scoring at the
+LCB — with an oracle beside each, calibrate's mirror (§45c).** Parameters
+stay arguments throughout; slice D pins the values.
+
+The semantics this slice makes normative, each stated in the code:
+
+- **Pairing restates the screening's committed rules** (drop-and-count
+  collision buckets, nearest-rounding of published instants) and ADDS what
+  the screening threw away: each leg's exact instant survives into the
+  `Match`, because the phase ledger accrues at venue instants, not
+  buckets.
+- **The episode machine emits windows `(OpenAt, CloseAt]`** instead of
+  accruing inline — the no-lookahead rule made structural (trigger
+  observed never collected; exit print collected because the position is
+  open when it settles). Exit level is entry/divisor at RoundTowardZero,
+  bit-identical to the screening's halving. The signal is the
+  decision-time estimate; the ledger owns settled truth.
+- **The phase ledger needs no cross-leg pairing to define the unhedged
+  term**: at any instant where both legs have settled equally often the
+  position is hedged, so the term is the running signed net's deviation
+  from its value at the LAST count-balanced instant, extremes reported
+  both ways. Same-instant settlements are processed atomically, which
+  makes the aligned-grid collapse to zero exact. A count imbalance at
+  close is REPORTED (`EndImbalance`), not refused — whether it voids the
+  episode is slice D's rule.
+- **A duplicated same-leg settlement inside a window is refused**
+  (`ErrDuplicateSettlement`) where pairing would drop-and-count it: the
+  screening's tolerance is its committed rule; accrual truth with a
+  doubled print has no honest reading. The asymmetry is deliberate and
+  documented at the sentinel.
+- **Conservatism enters once, at selection** (calibrate's convention):
+  `WorseOf` (walked vs p90) and `WorseSide` (per venue, independently —
+  §45g's disagree case) are pure selections where negative measurements
+  survive; `RoundTrip` is the CHARGING act and refuses a negative cell
+  (`ErrCostNegative`) — an unpopulated cost must not read as free, and a
+  market that measured negative is a governance question, not a discount.
+- **The portfolio statistic is ruling §45f-3 executed**: weights positive,
+  unique, summing EXACTLY to one; the series set must match the declared
+  holdings exactly both ways. The LCB is a stationary-bootstrap percentile
+  bound whose resampling stream is pinned to an in-package SplitMix64 (a
+  rerun IS a replay), selected at the FLOOR order statistic — never above
+  the exact rank, UpperQuantile's rule mirrored for a lower bound.
+
+**Verification.** Four oracles: pairing (independent integer-ms rounding +
+occupancy counting + big.Rat spreads), ledger (big.Rat brute-force prefix
+re-summation, no running state, byte equality — the arithmetic is exact so
+no tolerance exists to go vacuous), episodes (a second implementation in a
+different shape: index-scanning over plain int64 mantissas, no
+fixedpoint), LCB (independent SplitMix64 transcription + exact-rational
+rank arithmetic + an inline floor-vs-ceil control at non-integer ranks).
+The checklist-before-battery pass forced the collapse-avoiding fixtures up
+front (jitter straddling a bucket edge where Round and Truncate disagree;
+a non-zero balanced anchor so "deviation from anchor" ≠ "running net";
+0.75/0.25 weights so "weighted" ≠ "average"; odd-mantissa exit level so
+toward-zero ≠ half-even; boundary prints exactly ON OpenAt/CloseAt and a
+spacing exactly AT maxGap) and added one fixture mid-battery-planning: a
+flip landing EXACTLY at the entry level, without which the retrigger
+comparison's `>=` was unpinned. **Mutations: 29 aimed, 29 caught**, plus
+one SURVIVED diagnosed as an EQUIVALENT mutant — the ledger's same-instant
+batch loop could never iterate twice because the duplicate rule forbids
+it, so production now states the invariant as a guarded `if` with the
+comment carrying the why — and one TIMEOUT!! (an `if false` mutant froze
+the merge loop; the suite hung, naming no defect) re-aimed at the accrual
+arithmetic and caught. `make ci` green, marker grep zero.
+
 ## RESUME HERE
 
-Slice A is BUILT (§45j), the shortlist's bytes are PROVEN to decode, and
-**all four §45f forks are RULED (user, 2026-08-01)** — nothing waits on a
-decision. Build in order:
+Slices A and B are BUILT (§45j, §45k): the shortlist's bytes decode and
+the gate's domain math exists with oracles. **All four §45f forks are
+RULED** — nothing waits on a decision. Build in order:
 
-1. **Slice B — the domain math** (§45i): pairing, episodes, phase ledger,
-   the portfolio scoring statistic (ruling §45f-3 fixes its shape: a
-   pre-declared allocation policy scored at the LCB), depth-cost bound;
-   oracles beside each.
-2. **Slice C — the walker's measurement stages + sim CLI**, with the
-   post-cutoff seal IN CODE (ruling §45f-2) — the sim refuses post-cutoff
-   reads until the procedure commit exists; pre-cutoff exploration runs are
-   labeled and logged.
-3. **Slice D — the procedure commit**: params roster with rationale, VCS
-   binding, dataset ledger, write-once artifact + attestation, the holdout
-   declaration naming §43b (ruling §45f-4: the clean window IS the sample),
-   and the end rule (ruling §45f-1: ≥180 post-cutoff matched settlements
-   per symbol, short symbols refused by name).
+1. **Slice C — the walker's measurement stages + sim CLI** (§45i):
+   manifest-gated walk over the §42c capture, REST-history store
+   (screening's raw-file + digest-ledger pattern), the Bybit book
+   ACCUMULATOR (deltas applied with sequence-break re-anchor — §45d named
+   it walker machinery and slice A did not need it; §45g's accumulator and
+   depth-walk suspects are still open), decision-point sampling, and
+   `arblab crossvenue sim` over pre-cutoff data with the post-cutoff seal
+   IN CODE (ruling §45f-2) — the sim refuses post-cutoff reads until the
+   procedure commit exists; exploration runs labeled and logged.
+2. **Slice D — the procedure commit**: params roster with rationale (every
+   argument slice B left open: pairing round, entry grid, exit divisor,
+   max gap, allocation policy, mean block, resamples, confidence, seed,
+   fees, depth cells), VCS binding, dataset ledger, write-once artifact +
+   attestation, the holdout declaration naming §43b (ruling §45f-4), and
+   the end rule (ruling §45f-1: ≥180 post-cutoff matched settlements per
+   symbol, short symbols refused by name).
 
-The capture rituals stand (PID 8495, verify COVERAGE/0-integrity — 2528
-coverage findings over the full range is the expansion being honest: 2002
-window_absent are pre-restart alt windows absent by construction). §44e's
-per-tier figure remains due by 2026-08-03T11:13Z; its clock runs
-independently of this record.
+The capture rituals stand (PID 8495, verify COVERAGE/0-integrity — 2570
+coverage findings at session 59's check, the 2002 pre-restart alt
+window_absent findings by construction). §44e's per-tier figure remains
+due by 2026-08-03T11:13Z; its clock runs independently of this record.
