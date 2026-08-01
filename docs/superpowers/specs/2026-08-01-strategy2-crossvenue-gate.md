@@ -560,10 +560,69 @@ intervening Open/Gap record is the same connection, so carrying state
 is not crossing a hole) — a fork for slice D to rule on explicitly,
 not something to absorb into the walker silently.
 
+## §45n — slice D's four forks RULED (user, 2026-08-01, session 62)
+
+All four were put to the user before any slice-D code, each with its
+price, and RULED as recommended; the alternatives stand recorded:
+
+1. **The §45m Bybit-coverage fork — RULED: carry stream state across
+   same-connection file boundaries, keyed on the capture's framing
+   records.** The reset rule becomes "cold on Gap records and on
+   CaptureSeq/`PrevLastSeq` discontinuity", not "cold per file": every
+   genuine discontinuity writes a Gap by construction, a lost Gap still
+   leaves a CaptureSeq hole, the rotation Open's `PrevLastSeq` makes
+   cross-file continuity checkable without reading either file in full,
+   and the book accumulator keeps its independent `u == lastU+1` check
+   regardless. Applied to BOTH venues' samplers AND the book walkers —
+   the mirror rule, up front this time. Rejected: accepting ~9% —
+   not merely thinner evidence but a biased sample (covered instants
+   cluster after reconnects, a non-random selection of market states),
+   and the joined decision grid is capped at the worse venue's coverage,
+   so the whole episode machine ran at ~9% resolution.
+2. **Allocation policy (ruling §45f-3's declared policy) — RULED: equal
+   weight over the shortlist.** Rejected: rank-proportional (imports the
+   pre-cutoff selection's magnitudes — >50% in LABUSDT's 71.6%/yr, the
+   single most selection-contaminated number in the record — into the
+   verdict statistic) and tiered weights (an arbitrary tier boundary the
+   roster would have to defend). Depth-weighted was never available:
+   measured depth is post-cutoff evidence and §45f-4 pins parameters
+   before any post-cutoff read. Per-symbol verdicts are reported beside
+   the portfolio verdict in every variant.
+3. **Episode-integrity rules — RULED: EndImbalance ≠ 0 VOIDS the episode
+   by name, and a per-symbol refusal ceiling gates the verdict.** On
+   same-grid pairs an imbalanced end usually marks missing settled rows
+   or a venue interval change, not economics — scoring over suspect
+   settlement data is the wrong default, and the void is cheap because
+   the case is rare by construction. The ceiling: refused episodes
+   exceeding a declared fraction of a symbol's episodes refuse that
+   symbol's verdict BY NAME (the §45f-1 short-symbol mould), so the
+   sample cannot silently thin; the fraction is a roster constant with
+   its rationale. Rejected: report-only scoring and a void-without-
+   ceiling middle ground (a symbol scored on a small unrepresentative
+   surviving fraction reads as clean evidence).
+4. **Entry levels — RULED: per-symbol best-E from §43d** (KAITO 5bp;
+   LAB/MMT/M/BCH 10bp; BEAT/SOON/ESPORTS 20bp), pinned before any
+   post-cutoff read — which is what the holdout discipline actually
+   requires; the §41e informed-not-tuned trail plus §43b's contamination
+   statement cover exactly this use. Rejected: a single modal 10bp —
+   it mis-sizes five of eight symbols in both directions (5bp KAITO
+   churns round trips; the 20bp names under-trigger), measuring a
+   different strategy from the one the ranking evidenced, and the
+   mismatch is not conservative, just different.
+
+Consequences for the build order inside slice D: the continuity carry
+(ruling 1) lands FIRST — it changes the walker/sampler/accumulator
+semantics the procedure commit then freezes — with its own fixtures and
+aimed mutations; then the roster + gate verb + artifact machinery pin
+everything else. SimParams grows per-symbol entry (ruling 4) and the two
+integrity rules (ruling 3) as declared parameters, so the exploration
+sim can exercise what the gate enforces.
+
 ## RESUME HERE
 
 **Slice C is CLOSED (§45m): code, batteries, oracles, 31/31 mutations,
-the labeled smoke. What remains, in order:**
+the labeled smoke. §45n: slice D's four forks are RULED (session 62).
+What remains, in order:**
 
 1. **The §32m-D per-tier one-day figure, DUE BY 2026-08-03T11:13Z**
    (measurable from ~2026-08-02T11:13Z), landing as §44e in the §44
@@ -572,19 +631,23 @@ the labeled smoke. What remains, in order:**
    integrity; the restart's gaps will show honestly). **This is §38f's
    named revisit point** (ruling §42f-3): re-argue off-host on the
    measured disk clock.
-2. **Slice D — the procedure commit**: params roster with rationale
-   (pairing round, entry grid, exit divisor, max gap, allocation
-   policy, mean block, resamples, confidence, seed, fees, depth cells —
-   every argument slices B/C left open, now including a ruling on the
-   §45m Bybit-coverage fork: accept ~9% Bybit grids, or carry ticker
-   state across same-connection file boundaries keyed on framing
-   records), VCS binding via `ReadBuildRevision`/`CheckExecutionBinding`,
-   dataset ledger over the store digests + manifest-day hashes the
-   report already carries, write-once artifact + detached attestation,
-   the holdout declaration naming §43b (ruling §45f-4), and the end
-   rule in code (ruling §45f-1: ≥180 post-cutoff matched settlements
-   per shortlisted symbol, short symbols refused by name). The seal
-   lifts ONLY through that commit.
+2. **Slice D — the procedure commit**, its four forks now RULED (§45n).
+   In build order: **(a) the continuity carry** (ruling §45n-1: cold on
+   Gap records and CaptureSeq/`PrevLastSeq` discontinuity, not per
+   file — both venues' samplers AND book walkers, fixtures + aimed
+   mutations); **(b) the roster + gate verb + artifact**: params roster
+   with rationale (per-symbol best-E entries §45n-4, equal-weight
+   policy §45n-2, EndImbalance void + refusal ceiling §45n-3, pairing
+   round, exit divisor, max gap, sample cadence/slack, fees, p90,
+   period, mean block, resamples, confidence, seed, per-symbol qty,
+   the hurdle as a dated sourced benchmark — every argument slices B/C
+   left open), VCS binding via `ReadBuildRevision`/
+   `CheckExecutionBinding`, dataset ledger over the store digests +
+   manifest-day hashes the report already carries, write-once artifact
+   + detached attestation, the holdout declaration naming §43b (ruling
+   §45f-4), and the end rule in code (ruling §45f-1: ≥180 post-cutoff
+   matched settlements per shortlisted symbol, short symbols refused
+   by name). The seal lifts ONLY through that commit.
 
 The capture rituals stand (PID 8495, pgrep FIRST; verify COVERAGE/0-
 integrity expected — session 61's verify: COVERAGE, 0 integrity, the
