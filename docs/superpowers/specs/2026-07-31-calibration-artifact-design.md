@@ -938,9 +938,97 @@ fork discussion should start from.
 - **Doc set bumps to v0.9.18** (this close). §41o "part 2" is this section and §41p —
   the close happened, with a kill where the attestation would have been.
 
+### §41r — the fork ruling (session 54, 2026-08-01): fork (c), the alt/dislocation niche — the other three adjudicated on the §41p record
+
+**The user's dated ruling (2026-08-01): fork (c).** Strategy #2 — the cross-exchange
+spread on alt pairs and dislocation windows (core §2.3, roster item 7) — arrives early,
+as core §12's fork (c) pre-registered. Maker-entry is retained as a **standing tactic**
+for whatever eventually trades; forks (b) and (d) are **declined on the measured record**.
+
+**Why (c), from the §41p decomposition — the forks turned out not to be parallel.** §12's
+prose lists four peer options, but the decomposition `clearing(h) ≈ A/h + R` makes them
+asymmetric: three could be adjudicated on paper from the existing record, and only one
+could not. The taxonomy the ruling rests on:
+
+- **(a) maker-entry — numerically REFUTED as a standalone fork, retained as a tactic.**
+  It attacks only A (≈39bp), and A is the binding term only at short holds. At the
+  committed corner (h=3, clearing 16.0bp) a 40% cut on A lands clearing at ≈10.8bp —
+  still **1.2× the era's all-time maximum print** (8.8bp), so not one additional
+  settlement becomes admissible. At long holds A is already amortized to noise: at h=90,
+  A/h ≈ 0.4bp of the 3.6bp clearing, so the cut moves clearing by ≈0.2bp. §41p finding 2
+  said the general form: even with A fully amortized away, the recurring floor R alone
+  exceeds the era's p90 print. A tactic that composes with any strategy is not a fork
+  that changes this verdict.
+- **(b) regime-selective — already MEASURED, and the measurement is the kill.** The
+  conservative estimator *is* regime-selectivity priced: it enters only when funding
+  clears, and the deployment sweep bounded exactly what the concession buys — best
+  admissible corner 11.5% utilization, 4 entries/3yr, clearing 2.2bp against an era
+  median of 0.74bp, which §8's own LCB scoring cannot plausibly pass (most 90-day
+  windows hold no position). Choosing (b) would be choosing the corner §41p already
+  bounded. The one reading of (b) NOT covered — *predictive* regime detection ahead of
+  the funding print — is a different, unbuilt research program, not this fork.
+- **(d) tuition — MISPRICED by the sweep's own numbers.** The §2.4 tuition math (≈3.4%
+  vs the ≈4.6% hurdle) assumed 60% utilization; measured, the strategy tops out at 11.5%
+  with 4 entries in three years, so the sub-hurdle spread buys almost no live-trading
+  education per dollar-year — capital sits in standby ≈88% of the time and the OMS would
+  fill a handful of orders per year. The platform-building value (d) points at is real
+  and is captured by (c)'s build path instead, without consciously deploying capital
+  sub-hurdle.
+- **(c) alt/dislocation — the only fork whose hypothesis the era has NOT refuted.** The
+  kill decomposes as: costs are irreducibly ≈2–3bp/settlement at best, and BTC's funding
+  distribution (median 0.74bp, max 8.8bp) simply does not reach them. Forks (a), (b),
+  (d) all accept that distribution and shave around it; only (c) changes the revenue
+  side. That is also its risk, recorded here as the ruling's two caveats.
+
+**The ruling's two caveats, normative for the scoping work:**
+1. **§41p's "the cost is fees, not depth" is a BTC measurement and does NOT transfer.**
+   Alt books are thinner; depth re-enters the cost model, and any strategy-#2 frame must
+   measure it rather than inherit the BTC finding.
+2. **§2.3's edge bar is doing real work:** "edge bar set from measured spread
+   persistence, not the headline spread." (c)'s numbers are unmeasured — this is a
+   ruling to go measure, not a pass in hand. The kill-gate discipline that produced
+   §41p/§41q applies to strategy #2 unchanged: pre-registered procedure, holdout
+   discipline, an explicit economic gate that can kill.
+
+**Consequences:**
+- **Core §12's milestone roster re-sequencing is the next scoping task**, in a NEW design
+  record (strategy #2 was roster item 7, "on the same foundation" — what "the same
+  foundation" means when the OMS does not exist yet is exactly the scoping question).
+  This record's story — the v1 cash-and-carry calibration — is complete and closes here.
+- **The first concrete step is capture-shaped and time-sensitive:** the capture universe
+  is BTC-only, Tardis cannot backfill our own gap (§8's day-one argument), and every day
+  before an alt/cross-venue capture surface exists is a day of self-captured evidence
+  strategy #2 will never have. Candidate-universe selection is part of the scoping.
+- **The H1 holdout discipline carries over unchanged** (post-2026-02-01 stays unpolluted
+  for any calibration a strategy-#2 gate revives on BTC data; strategy #2's own holdout
+  rules are part of its scoping).
+- **Maker-entry is recorded as a standing tactic:** any strategy that eventually trades
+  should price maker entry where the venue's fee schedule rewards it; it is a cost knob,
+  not a strategy.
+- **Doc set bumps to v0.9.19** (this ruling). Milestone 2's story — gate built, gate
+  fired, fork ruled — is complete.
+
 ---
 
 ## RESUME HERE
+
+**THE FORK IS RULED — (c), THE ALT/DISLOCATION NICHE (session 54, 2026-08-01, §41r,
+v0.9.19). THIS RECORD IS COMPLETE.** Milestone 2 closed by kill (§41p/§41q); the user then
+ruled core §12's fork (c): strategy #2 — the cross-exchange spread on alts/dislocation
+windows — arrives early, with maker-entry retained as a standing tactic and forks (b)/(d)
+declined on the measured record (§41r holds the adjudication and the two caveats: alt
+depth must be measured, §2.3's persistence-measured edge bar is normative). **The next
+work is a NEW design record scoping strategy #2:** the §12 roster re-sequencing, the
+alt/cross-venue capture surface (time-sensitive — Tardis cannot backfill our own gap),
+candidate-universe selection, and strategy #2's own economic gate under the same
+pre-registration discipline. Nothing further lands in THIS record: the v1 cash-and-carry
+calibration story — machinery built, governed act refused, kill ruled, fork ruled — is
+closed. The capture process and its rituals continue unchanged. The H1 holdout era stays
+untouched. The §41h seal stands as a record, unreopened.
+
+---
+
+## RESUME HERE (superseded session 54 — HISTORICAL)
 
 **MILESTONE 2 IS CLOSED — THE ECONOMIC GATE FIRED (session 53, 2026-08-01, §41p/§41q,
 v0.9.18).** The governed derivation refused on the real era (`ErrNoExcursions`,

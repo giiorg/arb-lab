@@ -1,6 +1,6 @@
 # ADR & Review History — Funding-Rate Arbitrage Platform
 
-**Status:** v0.9.18 (2026-08-01) — **milestone 2's economic gate FIRED** (calibration design record §41p/§41q; ADR §3 gains the dated verdict block): the governed derivation refused on the real era, the sensitivity diagnostic bounded the admissible space (best corner 11.5% utilization, 4 entries/3yr), and the user ruled the kill by governance rather than measuring the same verdict through a v2 ceremony. One core edit lands with the close — §8's pre-registered latency clause (declared upper bound authorized for the $1K gate, measured order-path latency before capital), the §40d modeled-tier shape carried by the slice's one marker — reasoned in the design record, so the tagless total **stays fifty-four**; §12's milestone-2 row gains its dated outcome sentence, an outcome record rather than a normative change. The §12 fork choice is the open user decision. Previous: v0.9.17 (2026-07-31), the cashcarry decision core (strategy design record §40) — §2.4's cost sentence gained §40d's two fee-revision clauses, ADR §3 gained no row.
+**Status:** v0.9.19 (2026-08-01) — **the §12 post-kill fork is RULED: (c), the alt/dislocation niche — strategy #2 arrives early** (calibration design record §41r; ADR §3 gains the dated ruling block): the four pre-registered forks proved asymmetric under §41p's measured decomposition — (a) maker-entry numerically refuted standalone and retained as a standing tactic, (b) regime-selective declined as the corner the deployment sweep already bounded, (d) tuition declined as mispriced (assumed 60% utilization; measured 11.5%) — leaving (c) the one fork whose hypothesis the era has not refuted. **No core normative change:** §12's milestone-2 row gains the dated ruling sentence beside its kill sentence (an outcome record, like the kill), so the tagless total **stays fifty-four**; the ruling's two caveats (alt depth must be measured; §2.3's persistence-measured edge bar stands) are normative for the coming strategy-#2 scoping record, not core edits today. Previous: v0.9.18 (2026-08-01), milestone 2's economic-gate kill (§41p/§41q; ADR §3's verdict block; §8's latency clause the one core edit, total stayed fifty-four).
 
 **Previous (v0.9.16, 2026-07-30):** the parity wiring slice (§39j slice C closed): one core edit — §3.5's `Envelope.Validate` clause narrowed to `IngressSeq`, the absence door §39m-5 deferred now open at its construct — plus the Profiles instruments-info measurement, both reasoned in the parity dispatcher design record (§39p-5, §39q).
 **Doc set:** normative core `build-spec.md` · venue facts `venue-profiles.md` · kernel machines `state-machines.md` · history/traceability `adr-history.md` · teaching companion `tutorial.md`.
@@ -252,6 +252,31 @@ Draft v0.7.1 (2026-07-19) — Codex adversarial rounds 1–4 (11 → 6 → 4 →
 | **The `Envelope` is authoritative for provenance; a normalized payload carries none.** §4's `StreamFunding` comment lists "source, venueSeq" among payload contents, and both are `Envelope` fields §3.5 defines for every stream — read literally it asks for two copies with nothing saying which wins. The unsafe direction is reachable without an implementer noticing they chose: **gap detection reads `VenueSeq` while freshness reads the timestamps**, so a payload disagreeing with its envelope gets those two questions answered from different sources, and a venue restamping an unchanged reading becomes a fresh observation with no gap — the silent stall §3.4's timer exists to catch. A payload carries no instrument either, since `SourceID` is the mailbox key | core §4 |
 | **`marketdata` does not publish `MarketView`; `engine/state` builds it.** §3.2's row said `marketdata` publishes an immutable `MarketView` while §3.3 and §3.2's own next row give that translation to `engine/state`. §3.3 wins: a context publishing a strategy-owned type would have to know cross-leg skew and the strategy's view shape, coupling the two across exactly the boundary §3.6 rule 1 and the read ports exist to keep — and it also needs the book path, which does not exist. Rejected: §3.2 winning, which would additionally reduce `engine/state` to a cache | core §3.2 |
 | **Rules 1 and 10 are enforced; rule 6 is the only deferral left, and rule 10's deferral named the wrong trigger.** `hexboundary` and `exhaustiveswitch` landed the session their subjects appeared rather than after the code they police. Rule 10 had waited on a **state machine**, while what actually made it buildable was the shared kernel's **eleven enum-likes**, which had existed for several slices — it found **13 silent fallthroughs** on its first real run, every one of them reachable the whole time. A deferral must name the *construct the analyzer reads*, not the feature that motivated it, and rule 6's was re-checked against that. Separately, and normative for any future gate: **rule 1's obvious positive control is an import cycle** — `application/` importing `infrastructure/` is refused by the type-checker before the analyzer runs, so the gate scores a pass without executing. Within one context Go's no-cycles rule already covers most of rule 1; where it earns its place is the edge Go cannot see (`engine/`, another context's infrastructure) | core §3.6 |
+
+**Milestone-2 post-kill fork: RULED (v0.9.19, 2026-08-01) — (c), the alt/dislocation niche.**
+The decision the kill left open, taken the same day on the same record — and the record is what
+made three of the four forks decidable without building anything. §41p's decomposition
+(`clearing(h) ≈ A/h + R`; A ≈ 39bp round trip, R ≈ 3.2bp/settlement recurring drag) sorts §12's
+four nominally-parallel forks into refuted / measured / mispriced / untested: **(a) maker-entry**
+attacks only A, and a 40% cut leaves the short-hold corner at ≈10.8bp clearing against the era's
+8.8bp all-time maximum print while moving long-hold clearing ≈0.2bp — refuted as a fork, retained
+as a **standing tactic** for whatever eventually trades; **(b) regime-selective** is the corner
+the deployment sweep already bounded, because the conservative estimator *is* regime-selectivity
+priced and it measured 11.5% utilization with 4 entries in three years (the unbounded reading —
+*predictive* regime detection — is a different research program, not this fork); **(d) tuition**
+was priced at 60% utilization, so at the measured 11.5% the sub-hurdle spread buys standby
+management rather than live education, and its real value — the platform build — is captured by
+(c)'s path anyway; **(c) alone changes the funding distribution itself** rather than shaving
+costs around BTC's (median 0.74bp, max 8.8bp — costs irreducibly ≈2–3bp/settlement at best).
+**Two caveats are normative for the scoping:** §41p's "the cost is fees, not depth" is a BTC
+measurement that does not transfer (alt books are thinner; depth re-enters the cost model), and
+§2.3's edge bar — measured spread persistence, not the headline spread — stands; strategy #2
+gets its own pre-registered economic gate under the same kill discipline that produced this
+verdict. The rejected alternatives are recorded with their numbers because a rejection nobody
+can re-derive is an unchecked claim: each declined fork's outcome is computable from §41p's
+table, which is what a kill that produces a *decomposition* rather than a verdict buys. Next:
+a new design record scoping strategy #2 (roster re-sequencing, the alt/cross-venue capture
+surface — time-sensitive, self-capture cannot be backfilled — candidate-universe selection).
 
 **Milestone-2 economic gate: FIRED (v0.9.18, 2026-08-01).** The decision §12's milestone-2 row
 exists to force, taken on the day its machinery delivered the evidence. The governed derivation

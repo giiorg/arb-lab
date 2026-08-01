@@ -1,6 +1,6 @@
 # Building a Funding-Rate Arbitrage Bot — A Teaching Companion
 
-**Status:** v0.9.18 (2026-08-01) — set-version alignment, no change in this doc (v0.9.18 is milestone 2's economic-gate kill: the measured era confirmed the direction §3.9's worked ledger has predicted since v0.1 — the gate fired by dated governance ruling, calibration design record §41p/§41q; this tutorial's figures and their status are unchanged). Previous: v0.9.17 (2026-07-31), the cashcarry decision core.
+**Status:** v0.9.19 (2026-08-01) — set-version alignment, no change in this doc (v0.9.19 is the §12 post-kill fork ruling: fork (c), the alt/dislocation niche — strategy #2 arrives early, calibration design record §41r; this tutorial still teaches cash-and-carry first because the *why* it teaches — including §3.9's ledger predicting exactly this kill — is the record of how the ruling was earned; the legacy tutorial's cross-exchange demotion to strategy #2 is now the promotion path, with §2.3's edge bar unchanged). Previous: v0.9.18 (2026-08-01), milestone 2's economic-gate kill.
 **Doc set:** normative core `build-spec.md` · venue facts `venue-profiles.md` · kernel machines `state-machines.md` · history/traceability `adr-history.md` · teaching companion `tutorial.md`.
 
 **Audience.** Senior engineers with strong systems instincts and little-to-no derivatives background. This teaches the *why*; the normative *what to build* lives in [`docs/build-spec.md`](./build-spec.md), which this document cross-references as **§spec**. Where the two ever disagree, the build-spec wins.
