@@ -30,6 +30,14 @@ func dispatch(args []string, stdout, stderr io.Writer) int {
 			return captureManifest(args[2:], stdout, stderr)
 		}
 	}
+	if len(args) >= 2 && args[0] == "calibrate" {
+		switch args[1] {
+		case "fetch":
+			return calibrateFetch(args[2:], stdout, stderr)
+		case "run":
+			return calibrateRun(args[2:], stderr)
+		}
+	}
 	fmt.Fprint(stderr, usage)
 	return 64 // EX_USAGE: the caller's request was malformed, not a capture verdict
 }
@@ -41,6 +49,14 @@ usage:
   arblab capture verify   -config <file> -from <RFC3339> -to <RFC3339> [-root <dir>] [-min-alive <pct>]
   arblab capture cat      <file.arbcap> [...]
   arblab capture manifest -config <file> -day <YYYY-MM-DD> [-root <dir>]
+  arblab calibrate fetch  -venue <v> -series <s> -symbol <sym> -start <RFC3339> -end <RFC3339> [-out <dir>]
+  arblab calibrate run
+
+calibrate fetch commits one closed family-1 dataset identity (venue REST
+history, verbatim, digested) under datasets/; it refuses holdout-era
+ranges, incomplete grids, and existing files. calibrate run is the
+governed derivation door — it refuses until step 4 slice C lands the
+freeze.
 
 capture verify exit codes: 0 clean, 1 integrity (the archive is lying),
 2 coverage (the archive is honest and thin). Integrity decides when both
