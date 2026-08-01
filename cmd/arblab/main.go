@@ -38,6 +38,9 @@ func dispatch(args []string, stdout, stderr io.Writer) int {
 			return calibrateRun(args[2:], stdout, stderr)
 		}
 	}
+	if len(args) >= 2 && args[0] == "screen" && args[1] == "run" {
+		return screenRun(args[2:], stdout, stderr)
+	}
 	fmt.Fprint(stderr, usage)
 	return 64 // EX_USAGE: the caller's request was malformed, not a capture verdict
 }
@@ -51,6 +54,7 @@ usage:
   arblab capture manifest -config <file> -day <YYYY-MM-DD> [-root <dir>]
   arblab calibrate fetch  -venue <v> -series <s> -symbol <sym> -start <RFC3339> -end <RFC3339> [-out <dir>]
   arblab calibrate run
+  arblab screen run       [-root <dir>] [-out <dir>] [-stage fetch|compute|all]
 
 calibrate fetch commits one closed family-1 dataset identity (venue REST
 history, verbatim, digested) under datasets/; it refuses holdout-era
@@ -67,6 +71,12 @@ invalid frame — diagnosing a file cat refuses is verify's job.
 
 capture manifest backfills the day's manifest from sidecars, labeled
 "backfill"; it never overwrites a close-time entry.
+
+screen run is the §42b screening harness: both venues' settled-funding
+REST history for the intersection universe (raw pages verbatim under
+-root, git-ignored), then the committed ledger, ranking, shortlist and
+dislocation census under -out. Parameters are pinned in the screening
+package; the fetch stage resumes past files already on disk.
 `
 
 // buildInfo names this binary for the archive's provenance records.

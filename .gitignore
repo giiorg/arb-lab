@@ -33,6 +33,14 @@ coverage.*
 # being the only honest one.
 /archive/
 
+# The §42b screening raw store: hundreds of megabytes of venue REST
+# responses, verbatim. Re-derivable from the venues (settled funding is
+# backfillable — the §42a asymmetry), and every file's sha256 is pinned
+# in the COMMITTED research/screening/ledger.json, so a divergent
+# refetch is visible. Committing the bytes would buy nothing the ledger
+# doesn't already prove.
+/research/screening/raw/
+
 # Local environment
 .env
 .env.*
@@ -47,3 +55,4 @@ go.work.sum
 # Stray tooling artifact
 logger.log
 /capture.log
+/screening-run.log
