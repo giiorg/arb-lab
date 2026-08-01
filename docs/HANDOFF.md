@@ -89,7 +89,54 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 51, 2026-08-01 — STEP 4 SLICE B IS BUILT; slice C is the open work)
+## START HERE (updated end of session 52, 2026-08-01 — STEP 4 SLICE C IS HALF-BUILT; the governed derivation run is the open work)
+
+**Branch `feat/milestone-1-foundation`.** Session 52 built slice C's machinery in four commits
+(`c4bcd82`…the battery commit): **the §41h seal re-verified standing** (slice C's mandated first
+act — seal commit predates every dataset fetch, no holdout-era file exists), the **Binance
+partial-depth wire decoders** (spot and futures dialects, each refusing the other as foreign —
+plus the session's headline finding: encoding/json's case-INSENSITIVE tag fallback meant the
+futures u-vs-U position claim was held by the venue's key order, not the type; found by the
+battery's one survivor, fixed with an exact-match `U` field), the **family-2 domain math**
+(counterfactual slippage per §41b-ii-i, adverse fill move, upper-quantile selection, the
+two-family merge under ShiftAt's outward convention — big.Rat oracles with inline controls), the
+**family-2 collectors** (H2 universe = day manifests strictly before the freeze day, per-file
+vouching, the committed pairing rule with gap/slack/depth-short all counted), **`procedure.go` —
+the §41e parameter roster, every derivation constant chosen with in-file rationale** (latency
+bound 250ms = healthy p99 ×2.5; classifier cut points; MinEvidence 500; frame clamps ±0.003
+measured from OUR fundingInfo overlay), and the real **`Calibrator.Run`** (§41b's order, §41e
+binding checked before and recorded after, write-once, emitted bytes re-loaded through the
+production door, two invariants CHECKED: drift-tail family pinning and clearing-level band
+independence). **§41o in the calibration design record is the mid-slice build record; that
+record's `RESUME HERE` is the live statement — read both before anything.**
+
+Verify rather than trust: `git status --short` (clean), `make ci` (green COLD, all six gates),
+`grep -rn "SPEC EDIT OWED" internal/ tools/` — expect **EXACTLY ONE** (§8's latency marker at
+`strategy/infrastructure/driven/cost.go`; it stays until the slice C close lands the §8 clause).
+
+**The capture rituals stay first, every session:** `pgrep -fl "arblab capture run"` (PID 74192),
+then a verify over the accumulated range **in the background** (`capture verify` needs `-config`,
+`-from` AND `-to`, RFC3339; **exit code 2 IS the COVERAGE verdict**) — 0 integrity findings,
+always; session 52's check: COVERAGE-only, the known Bybit-spot absent-window ledger.
+
+**Verification shape this session:** checklist BEFORE battery found **five collapses** in the
+slice's own new fixtures (17th–21st instances) plus the rounding-tie gap — the tie fixture became
+the SOLE killer of its mutant. **23 aimed mutations: 22 first-aim kills, 1 SURVIVED diagnosed
+into the real u-vs-U routing defect** (fix + key-order fixture then killed both tag mutants),
+2 NO-OP re-aims caught. `exhaustiveswitch` and `nofloat` both fired live on first drafts.
+
+**What is next, in order (the RESUME lists it):**
+1. **The governed derivation run** (§41e): clean checkout, VCS-stamped build, `arblab calibrate
+   run -freeze <RFC3339>` twice, byte-identical, artifact committed write-once. Refusals
+   (`ErrNoExcursions`, zero occupancy, `ErrFrameUnpriced`) are governance questions for the
+   user — never numbers to invent.
+2. **The 24-hour delay → attestation → close** (§8 latency clause landed, marker to ZERO,
+   doc-set bump to v0.9.18, §41o part 2).
+3. Then **step 5**: the scored replay runner under the sealed identity.
+
+---
+
+## START HERE (updated end of session 51, 2026-08-01 — HISTORICAL — STEP 4 SLICE B IS BUILT; superseded by session 52's slice C machinery build)
 
 **Branch `feat/milestone-1-foundation`.** Session 51 built §41j's slice B in five commits
 (`d9c41ef`…`51f6adf` + the close commit): **`strategy/domain/calibrate`** (the family-1

@@ -716,9 +716,131 @@ the §41e binding); no family-2 measurements, no family-3 declarations, no merge
 artifact or attestation file; `Calibrator.Run` still refuses (`calibrate fetch` is real, `calibrate
 run` is the honest door).
 
+### §41o — slice C build record, part 1 of 2 (session 52, 2026-08-01 — MID-SLICE, machinery built, governed act pending)
+
+**The slice C machinery is BUILT and verified; the governed derivation run, the 24h delay, the
+attestation and the close are deliberately NOT done** — the derivation must run from a clean
+checkout of a commit that contains all of this, and the 24-hour delay forces the session split
+anyway. Four commits (`c4bcd82`, `1454b36`, `c906f4e`, + the battery commit), landing:
+
+- **First act, per §41j: the seal was verified standing.** Seal commit `a5b5d33`
+  (2026-07-31T19:37Z) predates every dataset fetch (`fetched_at` 2026-08-01T05:50Z); all four
+  committed datasets end 2026-01-31 (strictly inside H1's calibration era); no holdout-era file
+  exists anywhere; `PromotionIdentityDoc` + the driving seal constants are what the emitter
+  enumerates.
+- **`engine/venue` book decoders** (`wire_binance_book.go`): the spot `depth20` dialect (bare
+  `lastUpdateId/bids/asks`, NO venue timestamp — the consumer's anchor is RecvTime, stated) and
+  the futures dialect (a `depthUpdate` event around the same twenty levels, event time `E`,
+  position `u`), each refusing the other's bytes as FOREIGN, ordering copied never repaired.
+  **Finding worth carrying (the battery's one survivor, diagnosed):** encoding/json matches tags
+  case-INSENSITIVELY as a fallback, and the futures frame carries both `"U"` and `"u"` — so with
+  only `u` declared, the u-vs-U claim was enforced by the venue's KEY ORDER (last case-insensitive
+  match wins), not by the type. Fixed by declaring `U` its own exact-match field (read by nobody,
+  documented as routing); a key-order-independence fixture now kills both tag mutants.
+- **`strategy/domain/calibrate` family-2 math** (`slippage.go`): `CounterfactualSlippage`
+  (§41b-ii-i verbatim — walk the candidate through the book at t+latency, measure against best at
+  t, adverse-positive both sides, negative samples KEPT, thin later book = `ErrDepthShort` never a
+  zero), `AdverseFillMove` (execution-scale, signed adverse-positive), `UpperQuantile` (ceil
+  selection, `ceilIndex` shared), `MergeAdverse` (§41b's committed merge: pointwise more-adverse
+  under ShiftAt's own outward convention, shared grid demanded). Measurement arithmetic is
+  half-even with conservatism entering ONCE at selection (basis.go's stated convention). big.Rat
+  oracles with inline vacuity controls; the merge oracle is exact with the inward anti-rule as its
+  control.
+- **`driving` family-2 collectors** (`family2.go`): `LoadManifestDays` (the H2 universe = day
+  manifests STRICTLY before the freeze day — the freeze day's manifest is still growing, so the
+  strict bound is what makes two invocations agree; digests over manifest bytes are the artifact's
+  H2 identifiers), `scanStream` (per-FILE vouching against the day's manifest, a vouched file that
+  fails to decode is `ErrArchiveCorrupt` — integrity, never measured around), `MeasureBooks` (the
+  committed pairing rule: epoch-grid samples, last book at-or-before t within slack, FIRST book
+  at-or-after t+latency within slack, gap-spanning pairs discarded AND counted, depth-short
+  excluded AND counted), `MeasureImminent` (settlement-flip realized rule within slack, stale
+  instants take no sample, unrealized dropped and counted), `LatencyStats` (negatives KEPT — venue
+  clock skew observed live, reported not clamped).
+- **`procedure.go` — the §41e commit's parameter roster, every value chosen with rationale
+  in-file:** 7-point residual grid {.05,.1,.25,.5,.75,.9,.95}; drift tail 0.05; EWMA half-life 72h
+  (§2.4's stated default); replay policy (APR floor 1%, min hold 3, p25, dwell 2, 4× leverage);
+  band q=0.9; basis horizon 24h q=0.99; family-2 cadences (10s grid, 1s slack, candidates
+  0.02/0.1/0.5 BTC); classifier (calm/normal/stressed, leg-agnostic cut points: spread ≤5e-6 &
+  depth ≥2 → calm; ≤2e-5 & ≥0.5 → normal; catch-all stressed — LAST RULE UNBOUNDED so every
+  runtime book classifies, pinned by test); MinEvidence 500; **latency assumed bound 250ms**
+  (healthy-hour transport p99 ≈100ms × stated 2.5 multiplier — the §8 marker's subject); frame
+  clamps ±0.003 (measured from OUR fundingInfo overlay, 2026-07-31); capital 1100/300/100/50;
+  scoring block (90d window, written regime rule, standby 3.69%, ceiling 5%, 0.95
+  block-bootstrap LCB, min-util = 0.5×expected floor).
+- **`Calibrator.Run`** (`run.go`/`emit.go`): §41b's order as the function's shape; §41e binding
+  checked before one byte derives (dirty/unstamped/mismatch refusals + injectable seams) and
+  recorded after (commit + executable self-digest); emit-time dataset re-hash; write-once;
+  emitted bytes re-loaded through the production loader. Two invariants CHECKED not assumed:
+  **the drift's family-1 pinning cannot understate the merged tail** (`ErrDriftTailDominated` —
+  compared as RESULTING DRIFTS, because two non-negative tails both freeze zero; the first draft
+  compared raw shifts and the synthetic world honestly refused it), and **the clearing level must
+  not move when the frozen band substitutes into the frame** (`ErrClearingUnstable`). The CLI
+  `calibrate run` takes `-freeze` (RFC3339, REQUIRED — a derivation that stamps "now" cannot be
+  byte-identical twice). The dataset block enumerates the THREE files derivation reads (binance
+  funding + spot/mark klines); Bybit funding stays committed but un-enumerated — read by no v1
+  derivation, recorded here rather than silently included.
+
+**Verification ledger (checklist BEFORE battery, again decisive):** the checklist found FIVE
+collapses in this slice's own new fixtures (17th–21st instances): the pair-expiry arm was never
+exercised (and its `<=` boundary had no at-boundary fixture); the stale-book skip never fired;
+the imminent slack arms (stale estimate, stale realized testimony) never fired; `runWorld`'s two
+legs and two sides were IDENTICAL books (§41i's named suspect verbatim — fixed with distinct
+ladders, a perp completion that vanishes its best ask, and value assertions that pin leg AND side
+keying); and every cell sat at 505 observations with MinEvidence 500 — no at-boundary cell (fixed
+with a 500-exact spot tail KEPT and a 20-observation perp tail DROPPED). Plus the rounding-tie
+fixture: every slippage ratio terminated before the ninth digit, where half-even and truncate are
+the same function — the tie fixture (ratio exactly 1.5e-9 → half-even 2e-9) became the SOLE
+killer of the rounding mutant. **23 aimed mutations: 22 first-aim kills, 1 SURVIVED diagnosed
+into the real u-vs-U routing defect above (fix + fixture then killed both tag mutants), 2 NO-OP
+re-aims caught.** Two gates fired live on first drafts: `exhaustiveswitch` (both RecordKind
+switches) and `nofloat` (a test helper's float64) — the §3.6 machinery catching this slice's own
+code. `make ci` green COLD, all six gates. Marker grep still EXACTLY ONE (§8's latency marker —
+lands at part 2's close).
+
+**Deliberately not done (part 2's docket, in order):** the governed derivation run from a CLEAN
+checkout (two binary invocations, byte-identical; the artifact committed write-once), the
+24-hour delay, the attestation + dated approval entry HERE, and the close (reading pass over
+§41n's docket + slice A's + this record's stated readings, the §8 latency clause landed, marker
+to ZERO, doc-set bump). **Watch on the real run:** the frame's clearing level will sit near
+0.0011/settlement (the 24h min hold amortizes the full round trip) — if the real era yields no
+recovered dips below it (`ErrNoExcursions`) or zero occupancy, that refusal is the governance
+working, and what an evidence-free era means is the USER'S question, not a number to invent.
+
 ---
 
 ## RESUME HERE
+
+**SLICE C IS HALF-BUILT (session 52, 2026-08-01, §41o): the family-2 machinery, the procedure
+roster, and the real `Calibrator.Run` are BUILT and verified (23 mutations, one diagnosed into
+the u-vs-U decoder fix); the GOVERNED ACT IS NOT DONE.** The seal was re-verified standing
+(§41o first bullet). `calibrate run -freeze` is real and demands a clean stamped build. The §8
+latency marker stays TAKEN (marker grep expects EXACTLY ONE until the close). The promotion
+identity stays SEALED (§41h): hybrid + Binance — do not reopen. Next, in order:
+
+1. **The governed derivation run** (§41e): from a CLEAN checkout of the committed tree, build
+   `bin/arblab` (VCS-stamped), run `arblab calibrate run -freeze <RFC3339>` TWICE into two
+   paths, verify byte-identical, commit the artifact write-once at
+   `configs/calibration.btcusdt.v1.json`. Choose the freeze instant at the run (its UTC day
+   bounds H2 to days strictly before). Expect and honor refusals: `ErrNoExcursions` /
+   zero-occupancy / `ErrFrameUnpriced` are governance questions for the user, never numbers to
+   invent (§41o's watch note).
+2. **The 24-hour delay**, then the attestation (`configs/calibration.btcusdt.v1.approval.json`,
+   §41e's shape: artifact ID + content hash, procedure commit, dataset ledger, approval instant,
+   sign-off, out-of-band confirmation) + the dated approval entry in THIS record.
+3. **The close**: reading pass over the three docket lists (§41n's three items, slice A's, and
+   §41o's stated readings), land the §8 latency clause (the §40d modeled-tier shape: declared
+   upper bound authorized for the $1K gate, measured order-path latency required before capital),
+   marker grep to ZERO, doc-set bump to v0.9.18, §41o part 2, HANDOFF update.
+4. Then **step 5** (§31a): the scored replay runner under the sealed identity.
+
+Standing rituals first, every session: `pgrep -fl "arblab capture run"` (PID 74192), backgrounded
+`capture verify` over the accumulated range (0 integrity findings, always — COVERAGE verdicts
+over the known Bybit-spot absent windows are the honest ledger; **exit code 2 IS the COVERAGE
+verdict**), `git status --short`, marker grep (EXACTLY ONE, §8's, at `driven/cost.go`).
+
+---
+
+## RESUME HERE (superseded end of session 52 — HISTORICAL)
 
 **SLICE B IS BUILT (session 51, 2026-08-01, §41n): the family-1 derivations exist with oracles
 (residuals/quantiles/drift, band, basis, the surrogate frame, clearing level, the
