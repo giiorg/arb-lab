@@ -138,6 +138,22 @@ func TestJitterToleranceBoundary(t *testing.T) {
 	if _, err := driving.FundingSettlements(f, fetchPerp); !errors.Is(err, driving.ErrRowOffGrid) {
 		t.Errorf("row past tolerance error = %v; want ErrRowOffGrid", err)
 	}
+
+	// Jitter runs BOTH ways: a row BEFORE its grid instant must round up
+	// to it, not down to the previous one — every fixture above drifts
+	// late, where round-to-nearest and truncate-to-floor are the same
+	// answer. This row belongs to the SECOND grid point.
+	early := fmt.Sprintf(`[{"symbol":"BTCUSDT","fundingTime":%d,"fundingRate":"0.0001"},{"symbol":"BTCUSDT","fundingTime":%d,"fundingRate":"0.0002"}]`,
+		grid, grid+8*time.Hour.Milliseconds()-8)
+	f = datasetOf(driving.SeriesFunding, "binance",
+		"2023-01-01T00:00:00Z", "2023-01-01T08:00:00Z", "8h0m0s", early)
+	got, err := driving.FundingSettlements(f, fetchPerp)
+	if err != nil {
+		t.Fatalf("early-jitter row refused: %v", err)
+	}
+	if !got[1].At.Equal(time.Date(2023, 1, 1, 8, 0, 0, 0, time.UTC)) {
+		t.Errorf("early-jitter row normalized to %s; want 08:00", got[1].At)
+	}
 }
 
 func TestDatasetCompletenessRefusals(t *testing.T) {

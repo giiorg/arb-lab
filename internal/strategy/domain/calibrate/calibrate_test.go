@@ -201,6 +201,19 @@ func TestPointsOutwardSelection(t *testing.T) {
 		}
 	}
 
+	// The median itself with an INEXACT rank: four residuals put q=0.5 at
+	// rank 1.5, where "at the median takes the upper" and "above the
+	// median takes the upper" are different rules — every five-element
+	// case above pins the median at an exact rank, where they collapse.
+	four := grid(t, "-0.00009", "-0.00004", "0.00003", "0.0002")
+	atMedian, err := calibrate.Points(four, grid(t, "0.5"))
+	if err != nil {
+		t.Fatalf("Points at median: %v", err)
+	}
+	if atMedian[0].Shift.Decimal() != "0.00003" {
+		t.Errorf("q=0.5 rank 1.5 shift = %s; want the UPPER statistic 0.00003", atMedian[0].Shift.Decimal())
+	}
+
 	// The emitted points must satisfy the domain's own dispersion shape —
 	// strictly ascending Q, non-decreasing Shift — under a real artifact
 	// identity, because that is exactly how the tool will freeze them.

@@ -89,7 +89,52 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated end of session 50, 2026-08-01 — STEP 4 SLICE A IS BUILT; slice B is the open work)
+## START HERE (updated end of session 51, 2026-08-01 — STEP 4 SLICE B IS BUILT; slice C is the open work)
+
+**Branch `feat/milestone-1-foundation`.** Session 51 built §41j's slice B in five commits
+(`d9c41ef`…`51f6adf` + the close commit): **`strategy/domain/calibrate`** (the family-1
+derivation math — causal EWMA residuals with saturation warmup, outward-from-median quantile
+points, the EntryDrift tail rule via the exported `cashcarry.Annualized`, the excursion band,
+the relative adverse basis move, the `Surrogate` constant-cost frame, `ClearingLevel` by exact
+bisection against the DEPLOYED `Enter`, and the `Occupancy` replay driving the real
+`Enter`/`Continue` over history), the **family-1 fetchers** (verbatim venue pages, grid
+normalization with an observed-jitter tolerance, H1 refused before one byte moves, write-once
+digested files), **`arblab calibrate fetch`** wired, and **four committed datasets** under
+`datasets/` with digests/counts/eras PINNED in `committed_test.go`. One slice-A schema defect
+fixed at its first consumer: `adverse_basis_move` is now a RATE (the runtime adapter charges
+rate × notional; a relative move is what transfers across an era where BTC tripled). **§41n in
+the calibration design record is the build record; that record's `RESUME HERE` is the live
+statement — read both before anything.**
+
+Verify rather than trust: `git status --short` (clean), `make ci` (green COLD, all six gates),
+`grep -rn "SPEC EDIT OWED" internal/ tools/` — expect **EXACTLY ONE** (§8's latency marker at
+`strategy/infrastructure/driven/cost.go`; it stays until slice C's close lands the §8 clause).
+
+**The capture rituals stay first, every session:** `pgrep -fl "arblab capture run"` (PID 74192),
+then a verify over the accumulated range **in the background** (`capture verify` needs
+`-config`, `-from` AND `-to`, RFC3339) — 0 integrity findings, always; session 51's check:
+COVERAGE-only, the known Bybit-spot absent-window ledger.
+
+**Verification shape this slice:** 25 aimed mutations — 21 first-aim kills, 3 NOBUILD re-aims
+and 1 NO-OP re-aim (all caught on re-aim), **ZERO survived**. Checklist BEFORE battery found
+**three collapses in this slice's own new fixtures** (14th–16th instances: every q=0.5 rank
+exact; every jitter fixture drifting late; the dwell-reset arm only ever run at count zero) —
+and each checklist fixture was the decisive killer for its aimed mutant. The `exhaustiveswitch`
+gate fired live on the first draft's two verdict switches. H3's completeness refusal fired live
+on real data (Binance's 2023-03-24 spot-halt kline hole), which is why the kline era starts
+2023-04-01.
+
+**What is next, in order (the RESUME lists it):**
+1. **Step 4 slice C** (§41j): seal verification first, then family-2 measurements over the
+   archive, family-3 declarations, the derivation run from a CLEAN checkout (§41e binding,
+   §41b's derivation order, the two-invocation determinism claim), the 24h delay, attestation,
+   close (lands §8's latency clause, marker to ZERO, doc-set bump). The frame's committed
+   constants and every derivation quantile are procedure parameters chosen AT the §41e commit.
+2. **Step 5**: the scored replay runner under the sealed identity.
+
+---
+
+## START HERE (updated end of session 50, 2026-08-01 — HISTORICAL — STEP 4 SLICE A IS BUILT; superseded by session 51's slice B build)
 
 **Branch `feat/milestone-1-foundation`.** Session 50 built §41j's slice A in four commits
 (`5281dfa`…`4642879`): the frozen stratum classifier (`strategy/domain/stratum.go`), the

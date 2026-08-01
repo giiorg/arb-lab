@@ -216,6 +216,32 @@ func TestOccupancyDwellCloseRoundsDown(t *testing.T) {
 	}
 }
 
+func TestOccupancyDwellResetsOnRecovery(t *testing.T) {
+	sur := testFrame(t)
+	// A six-settlement plan so the dwell story outlives the hold's
+	// minimum: dip (dwell 1) → recovery (RESET) → dip (dwell 1, not 2)
+	// → dip (dwell 2 → close at 40h). A mutant that stops resetting
+	// closes one settlement early at 32h, and the occupied duration
+	// moves from 32h to 24h — the checklist gap this fixture exists
+	// for: every other scenario only ever hits the reset arm with a
+	// zero count, where resetting and not resetting are the same state.
+	sur.Params.MinHoldSettlements = 6
+	res, err := calibrate.Occupancy(series(t,
+		"0.003", "0.003", "0", "0.003", "0", "0", "0", "0"), sur)
+	if err != nil {
+		t.Fatalf("Occupancy: %v", err)
+	}
+	if res.Entries != 1 || res.Closes != 1 {
+		t.Errorf("entries %d, closes %d; want 1, 1", res.Entries, res.Closes)
+	}
+	if res.Occupied != 32*time.Hour {
+		t.Errorf("occupied %v; want 32h (close at the SECOND post-reset dip settlement)", res.Occupied)
+	}
+	if res.Utilization.Decimal() != "0.666666666" {
+		t.Errorf("utilization = %s; want 0.666666666 (floor, not half-even)", res.Utilization.Decimal())
+	}
+}
+
 func TestOccupancyExceedsEligibilityProxy(t *testing.T) {
 	sur := testFrame(t)
 	// Exactly ONE clearing instant (16h) out of seven evaluated; the hold

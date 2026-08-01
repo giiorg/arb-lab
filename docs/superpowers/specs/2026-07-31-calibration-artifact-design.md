@@ -648,27 +648,102 @@ six gates clean.
 slice C's governed derivation run); no CLI wiring of `calibrate` into `cmd/arblab` (lands with a
 runnable derivation, slice B/C); no fetchers (slice B).
 
+### §41n — slice B build record (session 51, 2026-08-01)
+
+**Slice B is BUILT: the family-1 derivations exist with oracles, the fetchers exist with real
+committed datasets, and the CLI doors are wired.** Five commits (`d9c41ef`, `821d947`, `c0970d7`,
+`4ae7d17`, `51f6adf`), landing:
+
+- **`strategy/domain/calibrate`** (new package, §41f's pure half): `Residuals` (causal trailing-EWMA
+  residuals; warmup = the EWMA's own saturation horizon via the new `domain.EWMAHorizon`, so the
+  rule froze no extra number), `Points` (outward-from-median order statistics matching `ShiftAt`'s
+  read-time rule — one convention on both sides of the artifact), `EntryDriftFrom` (annualized
+  adverse-tail magnitude via the now-exported `cashcarry.Annualized` — one annualization base, both
+  consumers), `ExitBandWidth` (dips strictly below clearing, at-level ends a dip, recovered =
+  shorter than the dwell, truncated runs are evidence of nothing, upper-statistic depth,
+  no-recovered-dip refusal), `AdverseBasisMove` (relative rise of mark−spot over spot per §41b-note,
+  upper statistic, negative tail freezes as a DECLARED zero mirroring `NewConservativeBasis`),
+  `Surrogate` (§41b's constant-cost frame, ONE type feeding both), `ClearingLevel` (exact mantissa
+  bisection against the DEPLOYED `Enter` in a flat-rate world; cap-never-clears refuses,
+  floor-clears answers the floor), `Occupancy` (the actual `Enter`/`Continue` replay: same-instant
+  re-entry after a close, era truncation stated, funding-floor refusals are idle time, every OTHER
+  refusal is `ErrReplayRefused` — a broken frame must not measure as an idle era; occupied over
+  deployable, `RoundFloor`).
+- **The `adverse_basis_move` schema correction**: `MoneyQuantityDoc` → `RateQuantityDoc`. Slice A
+  froze a Money the runtime could not consume — `NewConservativeBasis` charges rate × notional, so
+  the Money had no consumer without an unstated price to divide by — and a relative move is the only
+  measurement that transfers across an era in which the underlying tripled. Caught at the seam's
+  first consumer; no committed artifact existed, so no version was orphaned.
+- **`driving` datasets + fetchers**: the verbatim-pages `DatasetFile` (the digest the artifact cites
+  is a digest over the venue's words), venue-dialect parsers, grid normalization with
+  `GridJitterTolerance` (1 min, inclusive — Binance fundingTime jitter observed live:
+  `1672560000008`), `Fetcher` behind an injected transport seam (cursor dialect and window dialect,
+  stall refusal, H1 refused before one byte moves), write-once files, `calibrate fetch`/`calibrate
+  run` in `cmd/arblab`. Bybit klines refuse by name (`ErrSeriesUnsupported`) — no derivation
+  consumes them this milestone.
+- **Four committed datasets** (fetched 2026-08-01): both venues' funding 2023-01-01→2026-01-31
+  (3381 rows, complete 8h grids) and Binance spot+mark 1h klines 2023-04-01→2026-01-31 (24 888 rows
+  each). **The kline era starts 2023-04-01 because H3 fired live**: Binance served no spot kline for
+  2023-03-24T13:00Z (that day's spot halt), and a closed identity cannot claim an instant the venue
+  never served. Digests/counts/eras are PINNED in `committed_test.go`, so write-once is a build
+  break. Venue-profiles gains the dated endpoint-observation section.
+
+**Stated readings for slice C's reading-pass docket** (each also recorded at its code site):
+(i) residuals grade the UNCLAMPED trailing forecast — the refetchable history carries no cap/floor
+series, and unclamped residuals are never smaller in magnitude than deployed ones (conservative);
+(ii) the surrogate frame's prices are FIXED — price level enters only through notional-vs-capital
+scaling, and a kline-driven frame would make the clearing level a curve no single number honestly
+summarizes; stated limitation, not absorbed; (iii) a close falls through to a same-instant re-entry,
+which is how `ProposeHoldPlan`'s minimum-hold reading composes into long occupancies.
+
+**Verification ledger.** Checklist BEFORE battery found **three collapses in this slice's own new
+fixtures** (14th–16th instances): every `q=0.5` fixture sat at an EXACT rank, collapsing the
+at-median rule (`>=` vs `>`) — fixed with a four-element set putting the median at rank 1.5; every
+jitter fixture drifted LATE, collapsing round-to-nearest into truncate-toward-floor — fixed with a
+row 8 ms BEFORE its grid point; and the dwell RESET arm only ever ran at count zero, where resetting
+and not resetting are the same state — fixed with a dip→recovery→dip series under a six-settlement
+plan. **25 aimed mutations: 21 caught on first aim, 3 NOBUILD re-aims and 1 NO-OP re-aim (all
+caught on re-aim), ZERO survived** — and each of the three checklist fixtures was the sole or
+decisive killer for its mutant, so the checklist paid before the battery ran, again. The
+`exhaustiveswitch` gate fired live on this slice's first draft (two verdict switches with
+`default:` arms) — the §3.6 rule-10 machinery catching new code the session it was written. The
+occupancy battery's every count, duration and digit string was hand-derived before the first run
+and matched unmodified. `make ci` green on a COLD cache, all six gates clean; marker grep still
+EXACTLY ONE (§8's latency marker, lands at slice C's close).
+
+**Deliberately not done:** no derivation RUN (slice C's governed act, from a clean checkout, with
+the §41e binding); no family-2 measurements, no family-3 declarations, no merge rule (slice C); no
+artifact or attestation file; `Calibrator.Run` still refuses (`calibrate fetch` is real, `calibrate
+run` is the honest door).
+
 ---
 
 ## RESUME HERE
 
-**SLICE A IS BUILT (session 50, 2026-08-01, §41m): the schema, loader, attestation contract,
-classifier, H1/H2/H3 refusal frame and `datasets/` layout are real; the §8 latency marker is
+**SLICE B IS BUILT (session 51, 2026-08-01, §41n): the family-1 derivations exist with oracles
+(residuals/quantiles/drift, band, basis, the surrogate frame, clearing level, the
+Enter/Continue occupancy replay), the fetchers are real, and FOUR datasets are COMMITTED with
+pinned digests (both venues' funding 2023-01-01→2026-01-31; Binance spot+mark 1h klines
+2023-04-01→2026-01-31 — the kline era starts late because H3 fired live on the 2023-03-24 spot
+halt). `calibrate fetch` works; `calibrate run` still refuses. The §8 latency marker stays
 TAKEN (marker grep expects EXACTLY ONE until slice C's close).** The promotion identity stays
 SEALED (§41h): hybrid + Binance, 2026-07-31 — do not reopen. Next, in order:
 
-1. **Slice B** (§41j): the family-1 fetchers (both venues' funding/kline history → committed
-   `datasets/` files, calibration era only, H1-guarded, H3-complete against the venue's grid) +
-   the derivations (EWMA residuals via the domain's own estimator, exit band from excursions,
-   adverse basis move, occupancy-with-surrogate utilization, `EntryDrift` from the dispersion
-   tail) + their `math/big` oracles. §41i's slice-B suspects are named in advance: a residual
-   fixture symmetric about zero, excursion dips all exceeding the dwell, a utilization fixture
-   dividing exactly. Wire `calibrate` into `cmd/arblab` when Run stops refusing.
-2. **Slice C**: seal verification first, then family-2 measurements over the archive, family-3
-   declarations, the derivation run from a clean checkout (the §41i two-invocation determinism
-   claim lives here), the 24-hour delay, the attestation + approval entry, the close (lands the
-   §8 latency clause; marker grep back to ZERO; doc-set bump).
-3. Then **step 5** (§31a): the scored replay runner — the hybrid's pre-registered §8 reading
+1. **Slice C** (§41j): **first act — verify the §41h seal stands** (no holdout-era fetch
+   predates it; the sealed identity is what the artifact will enumerate). Then the family-2
+   measurements over the archive (stratified per-leg p90 cells via the frozen classifier and
+   the committed counterfactual observation, adverse fill move, imminent residuals from the
+   `markPrice@1s` stream + the §41b pointwise-more-adverse merge), transport-latency
+   statistics, the family-3 declarations with rationale, the derivation run from a CLEAN
+   checkout (§41e's execution binding; §41i's two-invocation determinism claim; §41b's order —
+   costs, dispersion, band freeze before the occupancy replay consumes them), the 24-hour
+   delay, the attestation + dated approval entry, and the close: the reading pass over §41n's
+   three-item docket + slice A's, **the §8 latency clause landed** (marker grep back to ZERO),
+   doc-set bump. Slice C decisions still open: the surrogate frame's committed constants (frame
+   prices from the era's first klines, candidate quantity, capital decomposition), the residual
+   quantile grid, the band/basis quantiles and the basis horizon — all procedure parameters the
+   §41e commit pins, chosen and recorded THERE, never here.
+2. Then **step 5** (§31a): the scored replay runner — the hybrid's pre-registered §8 reading
    duty, §40k-2's revision repository, the sealed identity's everything-eligible rule.
 
 Standing rituals first, every session: `pgrep -fl "arblab capture run"`, backgrounded
