@@ -99,7 +99,37 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated session 59, 2026-08-01 — §45 SLICE B BUILT: the gate's domain math exists with oracles; next: §45 slices C–D in order; the §32m-D figure due by 2026-08-03T11:13Z)
+## START HERE (updated session 60, 2026-08-01 — §45 SLICE C CODE + BATTERY BUILT, mutations and the live smoke PENDING; the §32m-D figure due by 2026-08-03T11:13Z)
+
+**Branch `feat/milestone-1-foundation`.** Session 60 built everything §45
+slice C names, checkpointing deliberately before the mutation battery:
+the wire fact FIRST (Profiles §5 dated block: Bybit book `u` advances by
+EXACTLY 1 per delta — 8.46M deltas, zero exceptions — measured from our
+own archive before the accumulator read it), then
+`strategy/infrastructure/crossvenue`'s walker stack — manifest gating
+with the gate's own guards (`walk.go`), the §43b post-cutoff seal IN CODE
+(`seal.go`), the settled REST store (`store.go`, screening imported not
+copied), decision-point sampling with the churn-refreshes-anchor rule
+(`sample.go`), the Bybit book accumulator on the measured contiguity fact
+(`accumulator.go`), the book-cost walkers (`books.go`), the sim assembly
+(`sim.go`) — plus `domain/crossvenue.WalkedFill` (the standing depth
+walk; CounterfactualSlippage's pair guard rightly refuses a same-instant
+pair, so the walk got its own function and oracle) and the `arblab
+crossvenue fetch`/`sim` verbs. TWO new oracles green (big.Rat depth walk;
+sorted-slice reference book). The checklist-before-battery pass found
+THREE fixture collapses before any mutation ran (staleness-at-the-bound,
+churn-vs-state reset, p90≡max masking the walked arm). `make ci` GREEN,
+marker grep ZERO. **Read
+`2026-08-01-strategy2-crossvenue-gate.md` §45l, then its RESUME HERE —
+the aimed mutation roster and the BTC exploration smoke are written out
+there and are the next two work items, then slice D.** The §32m-D
+per-tier figure (due by 2026-08-03T11:13Z, measurable from
+~2026-08-02T11:13Z) outranks them if the calendar is tight. Capture
+rituals first, always: pgrep PID 8495, background verify, marker grep.
+
+---
+
+## START HERE (updated session 59, 2026-08-01 — HISTORICAL — §45 SLICE B BUILT; superseded by session 60's slice C build)
 
 **Branch `feat/milestone-1-foundation`.** Session 59 built §45's slice B:
 **`internal/strategy/domain/crossvenue`** — pairing (the screening's rules

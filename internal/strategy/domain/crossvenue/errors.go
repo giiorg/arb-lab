@@ -71,4 +71,19 @@ var (
 	// block below 1, a resample count below 1, or a confidence outside
 	// (0,1) exclusive.
 	ErrBootstrapInvalid = fmt.Errorf("strategy/crossvenue: bootstrap parameters out of range")
+
+	// ErrDepthShort reports a book side too thin to fill the walked
+	// candidate — the sample measures nothing, and a silent zero would put
+	// the thinnest books at the flattering end of the distribution
+	// (calibrate.ErrDepthShort's rule, this package's own name for it).
+	ErrDepthShort = fmt.Errorf("strategy/crossvenue: book side too thin for the walked candidate")
+
+	// ErrCandidateInvalid reports a walked candidate quantity that is not
+	// strictly positive — a zero candidate walks nothing and reads as a
+	// free fill.
+	ErrCandidateInvalid = fmt.Errorf("strategy/crossvenue: walked candidate not positive")
+
+	// ErrSideInvalid reports a book side token this package has no case
+	// for.
+	ErrSideInvalid = fmt.Errorf("strategy/crossvenue: book side invalid")
 )

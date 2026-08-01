@@ -189,6 +189,16 @@ The page's silence is evidence for the routing split, not a failed fetch.
   pairs. A delta may carry an empty side array; a live delete (`["63052","0"]`) was observed in the
   BTCUSDT spot stream. Snapshot depth on both products: 50 levels per side, bids descending, asks
   ascending. *(own-archive observation, not a doc quote — labelled as such deliberately)*
+- **Orderbook `u` advances by EXACTLY 1 per delta within a connection, observed from our own capture
+  (2026-08-01, all 10 Bybit book streams then recorded — BTCUSDT linear + spot across 47 hour-files
+  each, 8 linear alts):** of 8,463,452 deltas, every one with an in-connection predecessor had
+  `u = prev + 1` — zero larger jumps, zero backward or repeated `u`. Snapshots appeared **only** as a
+  subscribe/reconnect's first frame (zero mid-stream snapshots), and `seq` was strictly increasing
+  across every consecutive emitted pair. **Consequence the crossvenue accumulator builds on:** a delta
+  with `u ≠ prev + 1` is a sequence break — re-anchor at the next snapshot, never absorb; monotonic-but-
+  gapped `u` is NOT a healthy feed. The docs do not state contiguity; this is a measurement, and a
+  re-measurement that finds a legitimate jump shape must land here before any consumer absorbs it.
+  *(own-archive observation, not a doc quote — labelled as such deliberately)*
 
 ### The two venues' depth update-ID shapes — the standing debt, and it is THREE shapes, not two `[→ standing debt #1, CLEARED]`
 The debt was recorded as *"the two venues' depth update-ID shapes"*. That framing is wrong, and the

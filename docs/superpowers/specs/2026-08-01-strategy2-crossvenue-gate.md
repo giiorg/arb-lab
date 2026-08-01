@@ -357,30 +357,154 @@ comment carrying the why — and one TIMEOUT!! (an `if false` mutant froze
 the merge loop; the suite hung, naming no defect) re-aimed at the accrual
 arithmetic and caught. `make ci` green, marker grep zero.
 
+## §45l — slice C build state (session 60, 2026-08-01): CODE + BATTERY BUILT, mutations and the live smoke PENDING
+
+**Everything slice C names exists in code with its battery green and
+`make ci` green; what has NOT run yet is the mutation battery and the
+real-archive exploration smoke.** The session checkpointed here
+deliberately (context budget), with the tree committed clean.
+
+**The wire fact first (§45d's rule executed).** The accumulator's follows
+rule needed a contiguity fact the profiles did not hold. Measured from our
+own archive (all 10 Bybit book streams then recorded, 8,463,452 deltas):
+every delta with an in-connection predecessor advanced `u` by EXACTLY 1 —
+zero jumps, zero backward moves; snapshots appear ONLY as a
+subscribe/reconnect's first frame; `seq` strictly increasing throughout.
+Recorded into Profiles §5 as a dated own-archive observation BEFORE the
+accumulator was written. Consequence: follows ≡ `u == lastU+1`; anything
+else is a break, re-anchored at the next snapshot.
+
+**What was built** (all in `strategy/infrastructure/crossvenue` unless
+said otherwise):
+
+- `walk.go` — the gate's own manifest walker (family2's SHAPE, not that
+  file): strictly-before-day bound, file-granular vouching
+  (`ErrDayUnmanifested`), torn = `ErrArchiveCorrupt`, and an `onFile`
+  cold-start seam for stateful consumers (§39p-2).
+- `seal.go` — §43b's two cutoffs as cited constants; enumeration bound =
+  the seal made structural; settled rows AT or past the cutoff are
+  dropped-and-counted (`SealedExcluded`), a row AT the instant sealed
+  because evidence begins AT it. `ErrPostCutoffSealed` reserved for an
+  explicit bound-past-the-seal request.
+- `store.go` — settled REST store: screening imported (not copied — its
+  fetchers are generic over symbol/cutoff), one file per (venue, symbol,
+  cutoff-day), `ErrStoreExists` checked BEFORE the venue walk (a resume
+  costs no requests), merge by exact instant with disagreement refused
+  (`ErrStoreConflict`) and identity dedup.
+- `sample.go` — decision-point sampling: epoch grid, RecvTime anchor both
+  venues, family2's exactly-on-grid convention (the boundary instant
+  reports the frame AT it, emitted on the next frame); Bybit ticker
+  consumed through the venue accumulator with **churn refreshing the
+  freshness anchor** — absent-means-unchanged is the venue's semantics,
+  and without it §45j's rare-news alts would never sample; cold per file
+  and per gap. `MergeDecisionPoints` joins equal instants, one-sided
+  counted, signal = Binance − Bybit.
+- `accumulator.go` — the Bybit book accumulator on the measured fact:
+  snapshot re-anchors unconditionally, `u≠lastU+1` breaks (book dropped
+  until next snapshot), delete-of-absent is a counted no-op (window
+  slide, NOT desync — the reasoning is in the file), `Sample()` renders
+  best-first truncated to the venue's 50 (bounds the unmaintained tail),
+  `Drop()` for gap/file seams (not a break).
+- `domain/crossvenue/depth.go` — `WalkedFill`, the standing depth walk.
+  Deliberately NOT `CounterfactualSlippage(book, book, …)`: its pair
+  validation requires the later instant strictly after, and satisfying a
+  guard with a forged watermark is not this repo's move. Own sentinels
+  (`ErrDepthShort`, `ErrCandidateInvalid`, `ErrSideInvalid`).
+- `books.go` — per-venue cost walkers on the shared grid: walked-slip
+  distributions per side + boundary samples at wanted instants
+  (episode open/close); depth-short excluded-and-counted; a wanted
+  instant with no measurable book carries its reason out.
+- `sim.go` — the assembly. Cost composition stated once in its header:
+  per venue per side, worse-of-boundaries → worse-of p90 → worse-side;
+  `RoundTrip` doubles each cell. Episode refusals NAMED and excluded,
+  EndImbalance's mould (voiding is slice D's rule). Period series sparse
+  in the report (`NonZeroReturns`, period-start keyed). Label required
+  (`ErrLabelUnset`) — §45f-2's labeled-and-logged trail; the report is
+  write-once at the CLI.
+- `cmd/arblab` — `crossvenue fetch` (politeGet, per-identity skip via
+  `ErrStoreExists`) and `crossvenue sim` (-params JSON with
+  DisallowUnknownFields, -out write-once).
+
+**exhaustiveswitch bit during the build** — four `default:` switches over
+`RecordKind` in the new walkers, refused by the gate and rewritten as
+named groups. The gate doing exactly what §3.6 rule 10 promises.
+
+**Checklist-before-battery found three fixture collapses BEFORE any
+mutation ran** (the nine-times rule, now three-for-three on new code):
+(1) no fixture held staleness EXACTLY equal to Slack — `>` vs `>=`
+unpinned; a :16 frame against a :20 instant at 4s slack now pins
+at-the-bound-is-fresh. (2) the file-boundary reset fixture used a churn
+frame, which cannot distinguish the ticker-STATE reset from the anchor
+reset — a funding DELTA in file 2 (emits against retained state, silent
+against cold) now kills both. (3) the sim's four-sample distributions
+made p90 ≡ max, so the walked arm of WorseOf could never win and
+open-vs-close attribution shared a period — rebuilt with 38-sample
+tails, venues disagreeing on the worse side (binance bid-worse via the
+BOUNDARY WALK, bybit ask-worse via the P90 ARM), and a 10s period grid
+whose `NonZeroReturns` key moves if attribution swaps to the open.
+
+**Verification state:** all batteries green (`go test` whole repo via
+`make ci`, race included), TWO new oracles green — `oracle_depth_test.go`
+(independent big.Rat walk, rounding parity BY CONSTRUCTION: ≤4-decimal
+inputs make every notional exact so only the final half-even division
+rounds, reusing the score oracle's SplitMix64 + `roundHalfEven9`) and
+`oracle_accumulator_test.go` (sorted-slice reference book over a
+generated stream mixing follows/dup/jump/drop/absent-deletes, with
+every arm asserted non-vacuous). Worked sim episode hand-computed end to
+end: net 0.0008, cost 0.2219, return −0.2211, all four p90s pinned.
+
 ## RESUME HERE
 
-Slices A and B are BUILT (§45j, §45k): the shortlist's bytes decode and
-the gate's domain math exists with oracles. **All four §45f forks are
-RULED** — nothing waits on a decision. Build in order:
+**Slice C: code + battery + oracles + ci are DONE (§45l). Two work items
+close the slice, then slice D:**
 
-1. **Slice C — the walker's measurement stages + sim CLI** (§45i):
-   manifest-gated walk over the §42c capture, REST-history store
-   (screening's raw-file + digest-ledger pattern), the Bybit book
-   ACCUMULATOR (deltas applied with sequence-break re-anchor — §45d named
-   it walker machinery and slice A did not need it; §45g's accumulator and
-   depth-walk suspects are still open), decision-point sampling, and
-   `arblab crossvenue sim` over pre-cutoff data with the post-cutoff seal
-   IN CODE (ruling §45f-2) — the sim refuses post-cutoff reads until the
-   procedure commit exists; exploration runs labeled and logged.
-2. **Slice D — the procedure commit**: params roster with rationale (every
-   argument slice B left open: pairing round, entry grid, exit divisor,
-   max gap, allocation policy, mean block, resamples, confidence, seed,
-   fees, depth cells), VCS binding, dataset ledger, write-once artifact +
-   attestation, the holdout declaration naming §43b (ruling §45f-4), and
-   the end rule (ruling §45f-1: ≥180 post-cutoff matched settlements per
-   symbol, short symbols refused by name).
+1. **The mutation battery** (`tools/mutate.sh`, aimed, one per claim).
+   The planned roster, worked out but NOT yet run — aim at: the follows
+   check both ways (`>` absorbs the dup, `<`/`>=`-shaped absorbs the
+   jump — the two fixtures exist separately); the cold-delta return; the
+   delete-absent counter (`if false` on the presence check — killed by
+   the stats assertion); the lastU advance (killed by `UpdateID()==11`);
+   `bybitBookDepth` 50→49 (killed by the 51-level fixture); the sort
+   direction; walk.go's `>=` bound (bound-day fixture), Vouches check,
+   day-mismatch check, empty-days check, onFile call (trace fixture);
+   seal's `Before` (at-cutoff fixture); store's conflict `c != 0`,
+   empty-glob check, ascending sort, pre-fetch exists check (patch the
+   stub to overflow gracefully first — today it would panic, a PANIC!!
+   non-verdict); sample.go's `t.Equal(recv)` break (boundary rate),
+   staleness `>` (at-bound fixture), gap `cur=nil`, churn-refresh else-arm,
+   per-file state reset (funding-delta fixture), merge orientation;
+   sim.go's seal wiring (SealedExcluded==1 dies), Net.Sub→Add,
+   close-period attribution (NonZeroReturns key dies), the four cost-
+   composition substitutions (boundary-worse bid arm, p90 ask arm, both
+   WorseSide directions — the §45l fixture was rebuilt so each changes
+   the cost); depth.go's short check and orientation swap (plus oracle).
+   Expect NOBUILD re-aims on unused-variable mutants as usual. Record
+   verdicts in a §45m block.
+2. **The live exploration smoke** (the slice's positive control, slice
+   A's precedent): `arblab crossvenue fetch -symbols BTCUSDT -cutoff
+   2026-08-01T00:00:00Z -rest research/crossvenue/rest` (public REST,
+   polite pacing; Binance ~6 pages, Bybit ~25), then `arblab crossvenue
+   sim -params <exploration json> -out research/crossvenue/sims/<label>.json`
+   over the pre-cutoff BTC days (entry small, e.g. 0.00001 — machinery
+   smoke, not economics; label it `s60-smoke-btc` or successor). Runtime
+   minutes (≈15M frames). **Build the binary to the scratchpad if the
+   capture is still writing bin/arblab's inode — never rebuild over a
+   running capture's binary.** Note the sim walks BTC only: alts have no
+   pre-cutoff books by construction (§43b — the cutoff IS their first
+   byte).
+3. **Then slice D — the procedure commit**: params roster with rationale
+   (pairing round, entry grid, exit divisor, max gap, allocation policy,
+   mean block, resamples, confidence, seed, fees, depth cells — every
+   argument slices B/C left open), VCS binding via
+   `ReadBuildRevision`/`CheckExecutionBinding`, dataset ledger over the
+   store digests + manifest-day hashes the report already carries,
+   write-once artifact + detached attestation, the holdout declaration
+   naming §43b (ruling §45f-4), and the end rule in code (ruling §45f-1:
+   ≥180 post-cutoff matched settlements per shortlisted symbol, short
+   symbols refused by name). The seal lifts ONLY through that commit.
 
-The capture rituals stand (PID 8495, verify COVERAGE/0-integrity — 2570
-coverage findings at session 59's check, the 2002 pre-restart alt
-window_absent findings by construction). §44e's per-tier figure remains
-due by 2026-08-03T11:13Z; its clock runs independently of this record.
+The capture rituals stand (PID 8495, pgrep FIRST; verify COVERAGE/0-
+integrity expected). **§44e's per-tier figure is due by
+2026-08-03T11:13Z** (measurable from ~2026-08-02T11:13Z) and outranks
+slice C's remainder if the calendar is tight; its clock runs
+independently of this record.

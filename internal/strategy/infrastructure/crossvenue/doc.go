@@ -7,14 +7,19 @@
 // classify as no layer at all under §3.6 rule 1's analyzer, and a package the
 // gate is silent about is a package the gate is not policing (§45c).
 //
-// What exists today is slice A's smoke check: Check walks one UTC day of
-// archive files, routes every stream to the decoder that owns its wire, and
-// reports counts and refusals per stream — with every undecodable stream
-// SKIPPED BY NAME, never silently. The §32 verify proves the bytes are
-// intact; this proves they are the thing we think they are, and it exists
-// because the shortlist's 32 streams started recording 2026-08-01T11:13Z and
-// nothing had ever parsed an alt's bytes (§45d). The walker's measurement
-// stages (matched funding series, book sampling) are slice C.
+// Slice A's smoke check (check.go) walks one UTC day of archive files,
+// routes every stream to the decoder that owns its wire, and reports counts
+// and refusals per stream — with every undecodable stream SKIPPED BY NAME,
+// never silently. The §32 verify proves the bytes are intact; this proves
+// they are the thing we think they are (§45d).
+//
+// Slice C is the measurement walk and the research sim: the manifest-gated
+// scan with the gate's own guards (walk.go), the §43b post-cutoff seal in
+// code (seal.go), the settled-funding REST store (store.go), decision-point
+// sampling of the two venues' live estimates (sample.go), the Bybit book
+// accumulator on the measured u-contiguity fact (accumulator.go), the
+// book-cost walkers (books.go), and the labeled exploration assembly
+// (sim.go) that scores the pre-declared portfolio at the bootstrap LCB.
 //
 // This package is a READ path. It imports the capture and venue engines
 // (legal here, and only here in this context — §3.6 rule 1), touches no
