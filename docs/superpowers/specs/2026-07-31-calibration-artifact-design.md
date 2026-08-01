@@ -866,6 +866,36 @@ sweep held all of them frozen. The open question — revise the procedure openly
 commit, post-hoc, dated) versus record the evidence-free era as kill-gate-shaped evidence —
 is the user's, pending below.
 
+**Addendum, same session — the deployment sweep (the user's second dated ruling: sweep the
+one untested axis before ruling).** The committed candidate (0.02 BTC ≈ $569 at the frame's
+anchor price of $28,465) deploys ~36% of the spot principal; the sweep added 0.03 (~55%) and
+0.038 (~98%, the lot-aligned maximum under the $1,100 principal, perp margin $270 ≤ $300 at
+4×) — with REAL cost cells measured for both (the collectors re-ran with five candidates;
+calm-stratum p90 is zero at every size). Deployment moves only the hurdle-on-`C_allocated`
+term, exactly as the §41p decomposition predicts — clearing at h=3 falls just 9% (0.001603 →
+0.001465) where round-trip amortization dominates, and 38% at h=90 (0.000359 → 0.000221)
+where the recurring drag does:
+
+| min hold | 36% (committed) | 55% | 98% | util @98% | entries/3yr @98% |
+|---|---|---|---|---|---|
+| 3 (24h) | 0.001603 | 0.001506 | 0.001465 | — | — |
+| 9 (72h) | 0.000745 | 0.000648 | 0.000607 | 0 | 0 |
+| 21 (7d) | 0.000500 | 0.000403 | 0.000362 | 0.027 | 4 |
+| 45 (15d) | 0.000402 | 0.000305 | 0.000264 | 0.057 | 4 |
+| 90 (30d) | 0.000359 | 0.000262 | 0.000221 | **0.115** | 4 |
+
+Two readings. **First, the space is now bounded:** the most favorable admissible corner —
+98% deployment, 30-day minimum hold — yields 11.5% utilization and 4 entries in three years,
+clearing 2.2bp/settlement against an era median of 0.74bp. Under §41's own scoring protocol
+(90-day rolling windows, block-bootstrap LCB against the 3.69% standby + hurdle), a strategy
+that is in T-bills ~88% of the time and enters 4 times in 3 years cannot plausibly clear a
+measured pass — most windows contain no position at all. A v2 ceremony would deliver a
+MEASURED kill, not a pass. **Second, the raw at-or-above count overstates the strategy:** at
+98%/h=9 the era has 15 settlements at-or-above clearing and a measurable band, yet the
+replay enters ZERO times — the conservative estimator (p25 with the adverse dispersion
+shift) demands more than the raw print, so utilization is the honest column, and it is the
+column that stays small everywhere.
+
 ---
 
 ## RESUME HERE
