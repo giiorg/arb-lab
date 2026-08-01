@@ -1,6 +1,8 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-01, session 63): **v0.9.23 — §45 IS CODE-COMPLETE: strategy #2's cross-venue gate PROCEDURE COMMIT landed (`7ccadec`), which lifts the §45f-2 post-cutoff seal. The gate now waits on EVIDENCE, not on code.** The build record is **§45p** in `docs/superpowers/specs/2026-08-01-strategy2-crossvenue-gate.md` — read it, then its RESUME HERE. Landed: the `Proc*` roster (`procedure_crossvenue.go`) with rationale beside every constant — per-symbol entry levels CHECKED on every run against the committed `shortlist.json` `best_entry` (and a three-distinct-levels assertion, so a collapse to one modal level cannot pass); per-symbol sizes by one stated rule (**250 USDT notional per leg, rounded UP, lot-aligned on BOTH venues** — steps differ on KAITO 0.1/1 and BCH 0.001/0.01, Binance's BCHUSDT wants 20 USDT notional against every other row's 5; eight symbols × two legs = 4,006 gross = **1,001 USDT of margin at 4×**, §8's $1K tier, so the size is the tier divided by the roster); equal weights (§45n-2), the 180-matched end rule (§45f-1), a **0.25 refusal ceiling** (§45n-3 — refusals cluster on stalls, which are the expensive instants, so the survivors are biased CALM), 4h periods, 6-period mean block, 2000 resamples, 0.95 confidence, date-derived seed. **Fees and the hurdle are READ, not pinned** — §2.4 forbids hardcoded fee constants and §2.1 a hardcoded hurdle, and the committed reference already carries both perp taker cells (venue+product keyed, no symbol column) plus the dated treasury.gov hurdle; `ProcCrossVenueSimParams` takes the fees as ARGUMENTS so the assembly cannot complete without the read (a zero taker fee is a free round trip). Two pure judgements in `domain/crossvenue/gate.go` (the ceiling cross-multiplies at the mantissa scale — dividing first would force a rounding call exactly at the boundary the rule is about). The runner **refuses the RUN** when any symbol is unfit rather than dropping it, because §45f-3's pass shape is a PRE-DECLARED portfolio — that interpretation is recorded in §45p so it is not silently reopened. **One spec deviation TAKEN and its clause landed the same commit:** the gate reports on the per-leg NOTIONAL, not `C_allocated`; §2.1's prohibition names only SMALLER denominators because the risk is a flattered return, and the notional is larger here, so the figure understates — §2.1 gained the declared-and-demonstrably-larger clause. Marker grep **ZERO**. Battery: the checklist BEFORE the battery caught a **ceiling of exactly 1.0 that could never fire**; **22 aimed mutations — 20 caught, two NOBUILD re-aims, one SURVIVED** diagnosed as a wrong mutant AND a real finding (an `episodes == 0` branch that could not fail, removed). **THE SMOKE REFUSED THREE TIMES, all three the machinery working:** dirty tree (§41e), then the unvouched OPEN hour (H2 — so a gate window can only include COMPLETE days), then, over a hardlinked scratch archive with the open hour excluded (live archive untouched, verified after), **the end rule by name, exit 2, no artifact written**. That run measured three things: matched counts **4 (4h grid) and 2 (BCH 8h)** exactly as the seal's window arithmetic predicts; **286 joined decision points against 287 available minutes (~99.7%)**, which is §45o(a)'s continuity carry on live data against the ~9% ruling §45n-1 rejected; and **MMTUSDT scoring 4 episodes end to end** — episode machine, both book walks, cost composition and phase ledger, on real post-cutoff bytes. **NEXT (in order): (1) the §32m-D per-tier figure, DUE BY 2026-08-03T11:13Z** (§44e + §38f's revisit; archive stood at 9.4G on 08-01); **(2) accumulate evidence and re-run the gate — `arblab crossvenue fetch` periodically (first fetch 2026-08-01T16:00Z, 16/16 ok), then `arblab crossvenue gate`. BCHUSDT is the BINDING symbol** (8h grid = half the others' rate), so the roster qualifies around **2026-09-30**, not the majority's ~08-31 — a forecast, not a schedule; the `matched` column decides. **(3) when it scores**, the write-once artifact authorizes nothing until a detached attestation binds it (24h cooling, sign-off, out-of-band) — a USER decision under milestone 2's kill discipline. Doc set v0.9.23. H1 unpolluted; capture runs on (**PID 8495**). **Start at `## START HERE` below.**
+## Status (2026-08-01, session 64): **FORMAL MODEL (a) IS COMMISSIONED AND DESIGNED — §12 hard-gates milestones 3–7 on strategy #2's gate, so this is the substantial engineering that gate does NOT forbid.** Docs stay at v0.9.23 (no normative change this session; `docs/formal/` still at Cx8). The design record is **§46** in `docs/superpowers/specs/2026-08-01-formal-model-a-ambiguous-order-design.md` — read it, then its RESUME HERE; **the next act is slice A, `docs/formal/AmbiguousOrder.tla`.** Model (a) is `state-machines.md` **§2** (ambiguous-order classifier + finality contract) composed with **§7** (`PackageDelever` generations + reserved reductions); next finding tag is **FM-5**. **It is not a bet on the gate passing** — core §6 is titled "Trade lifecycle (foundation, STRATEGY-AGNOSTIC)", and the two-leg partial-failure problem is identical for cash-and-carry (spot+perp) and strategy #2 (perp+perp), so the work is wasted only if the PROJECT ends, not if strategy #2 does; milestone 3 independently requires it ("model-test it here, before any live capital"). **Two §46 decisions taken and argued, do not silently reopen: (1) §2 is modeled WITH §7** — the tempting smaller scope is rejected on model (b)'s own headline result, because FM-1 was a COMPOSITION defect and here the composition is three-way (`outstanding_reserved_reductions` has three producers: the determined branch's fenced generation, the `IntervalFloorReduction`, and `PackageDelever`'s reserved spot leg, all resting on one subtraction being exactly right); **(2) every liveness property ships with its negative control in the same slice**, because Cx8 proved a passing liveness property and a vacuous one look identical (NC5 arrived late; model (b)'s P2/P3/Branch1/Branch2 still have none). **Two traps named BEFORE any `.tla` was written, both the fixture-collapse checklist at formal-methods altitude:** `INV2` ("floor never issued twice") must count dispatched reductions, NOT read the `floorIssued` guard, else it proves the flag consistent with itself; and `INV1` must be phrased over RESOLUTIONS ("no resolution produces an opposite sign"), never over the endpoint formula — the spec already carried a bug there (v0.7.1's `|b|` was right only for the net-long case, corrected to `max(|a|,|b|)` by R1d-2), so a model re-implementing the corrected formula and checking itself against it proves nothing. Toolchain verified runnable: Java 25, `tla2tools.jar` pinned by SHA-256, `docs/formal/run.sh` fetches it. **Also this session:** HANDOFF's entry point had DRIFTED (sessions 62 and 63 updated the Status line but stacked no START HERE, so the file CLAUDE.md designates as "start here" routed readers to session 61's block, whose next item was §45 slice D — already landed); fixed, and **the convention is: a session that updates Status MUST also stack a START HERE and mark the prior one HISTORICAL.** A new capture observation is recorded and awaits a ruling (**task #153**): `capture verify` reports `restart_boundary` on binance `fundingInfo` EVERY HOUR because a REST-overlay source writes `data 0`, so the writer's `lastSeq` never leaves zero — not a correctness bug (the archive is honest), a SIGNAL-QUALITY question, since that marker also means "a restart happened". **NEXT (in order): (1) §46 slice A** (task #154); **(2) the §32m-D per-tier figure, DUE BY 2026-08-03T11:13Z**, measurable from 2026-08-02T11:13Z (task #150); **(3) off-host archive sync — the user has no target yet; recommendation is a ~$60 external USB drive** (slice F's machinery is built and proven against its second-root fixture; §38g excluded transport+credentials, so a cloud bucket is the larger change), because the gate's ~2-month evidence wait now commits ~180–200G of un-backfillable archive to a single laptop disk and §38f's own words are "the money loss is bounded, the schedule loss is not"; **(4) the gate itself** (task #152, BCHUSDT binds ~2026-09-30). H1 unpolluted; capture runs on (**PID 8495**); marker grep ZERO; `make ci` green. **Start at `## START HERE` below.**
+
+## Status (2026-08-01, session 63 — HISTORICAL): **v0.9.23 — §45 IS CODE-COMPLETE: strategy #2's cross-venue gate PROCEDURE COMMIT landed (`7ccadec`), which lifts the §45f-2 post-cutoff seal. The gate now waits on EVIDENCE, not on code.** The build record is **§45p** in `docs/superpowers/specs/2026-08-01-strategy2-crossvenue-gate.md` — read it, then its RESUME HERE. Landed: the `Proc*` roster (`procedure_crossvenue.go`) with rationale beside every constant — per-symbol entry levels CHECKED on every run against the committed `shortlist.json` `best_entry` (and a three-distinct-levels assertion, so a collapse to one modal level cannot pass); per-symbol sizes by one stated rule (**250 USDT notional per leg, rounded UP, lot-aligned on BOTH venues** — steps differ on KAITO 0.1/1 and BCH 0.001/0.01, Binance's BCHUSDT wants 20 USDT notional against every other row's 5; eight symbols × two legs = 4,006 gross = **1,001 USDT of margin at 4×**, §8's $1K tier, so the size is the tier divided by the roster); equal weights (§45n-2), the 180-matched end rule (§45f-1), a **0.25 refusal ceiling** (§45n-3 — refusals cluster on stalls, which are the expensive instants, so the survivors are biased CALM), 4h periods, 6-period mean block, 2000 resamples, 0.95 confidence, date-derived seed. **Fees and the hurdle are READ, not pinned** — §2.4 forbids hardcoded fee constants and §2.1 a hardcoded hurdle, and the committed reference already carries both perp taker cells (venue+product keyed, no symbol column) plus the dated treasury.gov hurdle; `ProcCrossVenueSimParams` takes the fees as ARGUMENTS so the assembly cannot complete without the read (a zero taker fee is a free round trip). Two pure judgements in `domain/crossvenue/gate.go` (the ceiling cross-multiplies at the mantissa scale — dividing first would force a rounding call exactly at the boundary the rule is about). The runner **refuses the RUN** when any symbol is unfit rather than dropping it, because §45f-3's pass shape is a PRE-DECLARED portfolio — that interpretation is recorded in §45p so it is not silently reopened. **One spec deviation TAKEN and its clause landed the same commit:** the gate reports on the per-leg NOTIONAL, not `C_allocated`; §2.1's prohibition names only SMALLER denominators because the risk is a flattered return, and the notional is larger here, so the figure understates — §2.1 gained the declared-and-demonstrably-larger clause. Marker grep **ZERO**. Battery: the checklist BEFORE the battery caught a **ceiling of exactly 1.0 that could never fire**; **22 aimed mutations — 20 caught, two NOBUILD re-aims, one SURVIVED** diagnosed as a wrong mutant AND a real finding (an `episodes == 0` branch that could not fail, removed). **THE SMOKE REFUSED THREE TIMES, all three the machinery working:** dirty tree (§41e), then the unvouched OPEN hour (H2 — so a gate window can only include COMPLETE days), then, over a hardlinked scratch archive with the open hour excluded (live archive untouched, verified after), **the end rule by name, exit 2, no artifact written**. That run measured three things: matched counts **4 (4h grid) and 2 (BCH 8h)** exactly as the seal's window arithmetic predicts; **286 joined decision points against 287 available minutes (~99.7%)**, which is §45o(a)'s continuity carry on live data against the ~9% ruling §45n-1 rejected; and **MMTUSDT scoring 4 episodes end to end** — episode machine, both book walks, cost composition and phase ledger, on real post-cutoff bytes. **NEXT (in order): (1) the §32m-D per-tier figure, DUE BY 2026-08-03T11:13Z** (§44e + §38f's revisit; archive stood at 9.4G on 08-01); **(2) accumulate evidence and re-run the gate — `arblab crossvenue fetch` periodically (first fetch 2026-08-01T16:00Z, 16/16 ok), then `arblab crossvenue gate`. BCHUSDT is the BINDING symbol** (8h grid = half the others' rate), so the roster qualifies around **2026-09-30**, not the majority's ~08-31 — a forecast, not a schedule; the `matched` column decides. **(3) when it scores**, the write-once artifact authorizes nothing until a detached attestation binds it (24h cooling, sign-off, out-of-band) — a USER decision under milestone 2's kill discipline. Doc set v0.9.23. H1 unpolluted; capture runs on (**PID 8495**). **Start at `## START HERE` below.**
 
 ## Status (2026-08-01, session 57 — HISTORICAL): **v0.9.22 — MILESTONE 2b STEP 2 IS LANDED: the capture runs the shortlist — 40 sources (PID 8495), 32 of them new, restarted 11:13Z with the honest `process_restart` gap on every pre-existing source.** The capture-expansion design record is **`docs/superpowers/specs/2026-08-01-strategy2-capture-expansion.md` (§44)** — read it, then its RESUME HERE. The order §42c demanded was kept: **the per-IP WebSocket ceiling verification landed FIRST** (profiles' dated block, discharging the v0.9.20 scope item — Bybit ≤500 new connections/5min per domain, restart burst 19; Binance spot 300/5min, we open 1; **Binance futures states NO numeric per-IP ceiling** — behavioral bound, the per-source 1s→60s backoff ladder is the compliance), then the config (§44b: 8 → 40 sources, **nothing per-symbol chosen** — every new source is its BTC counterpart's shape with the symbol substituted, scripted with a uniqueness assertion; BTC's eight byte-identical; §42c's absences re-affirmed), then the restart (§44c: ritual verify FIRST — **COVERAGE, 0 integrity, 639 coverage**, the known thin windows — SIGTERM 11:13:02Z, clean stop, start 11:13:10Z, **~8s recorded gap**, all 40 sources non-thin within two minutes, all 8 pre-existing BTCUSDT sources minted `process_restart` gap records; config hash `1c362feffe4a`). **NEXT (in order): (1) the §32m-D per-tier one-day figure, DUE BY 2026-08-03T11:13Z** — lands as §44e in the §44 record; `du` split BTC-tier vs alt-tier against §42c's derived ~0.6–1.1G/day/symbol bound, full-day verify over the measured day (must still be 0 integrity; it will honestly show this restart's gaps) — **this is also §38f's named revisit point** (ruling §42f-3: the off-host decision gets re-argued on the measured disk clock); **(2) the `strategy/crossvenue` read-path, the research sim, and the gate's procedure commit** (§42e — gate parameters pinned THERE; §43b's selection-contamination statement is a named holdout input). Doc set v0.9.22. H1 unpolluted; capture runs on (**PID 8495** — the old 74192 is gone, stop pgrep-ing for it). **Start at `## START HERE` below.**
 
@@ -101,7 +103,139 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated session 61, 2026-08-01 — §45 SLICE C IS CLOSED; next: the §32m-D figure by 2026-08-03T11:13Z, then slice D)
+## START HERE (updated session 64, 2026-08-01 — FORMAL MODEL (a) COMMISSIONED + DESIGNED; next act is §46 SLICE A)
+
+**Branch `feat/milestone-1-foundation`. THE NEXT ACT IS §46 SLICE A —
+write `docs/formal/AmbiguousOrder.tla`.** Read
+**`docs/superpowers/specs/2026-08-01-formal-model-a-ambiguous-order-design.md`
+(§46), then its RESUME HERE**, before anything else; it holds the scope
+ruling, the variable table, the seven safety invariants, the four liveness
+properties and the slice plan. Task **#154**.
+
+**Why this work, now.** §12 hard-gates milestones 3–7 on strategy #2's
+economic gate, which waits on evidence until ~2026-09-30 — so the heavy
+build is closed, and model (a) is the substantial engineering that is not.
+It is **not** a bet on that gate: core §6 is "Trade lifecycle (foundation,
+**strategy-agnostic**)", the two-leg partial-failure problem is identical
+for spot+perp and perp+perp, and milestone 3 requires the model-test before
+any live capital regardless.
+
+**Slice A's done-when** (from §46 §5): the interval algebra + classifier
+transitions + `INV1`–`INV3` + `INV7`, nominal TLC run green, **and one
+deliberate broken-constant run per invariant showing each one CAN fail.**
+Toolchain is verified runnable — Java 25, `tla2tools.jar` pinned by
+SHA-256; `docs/formal/run.sh` is the pattern to extend (it already asserts
+every negative control FAILS on its predicted property).
+
+**The two traps §46 names before any `.tla` exists — both are the
+fixture-collapse checklist at formal-methods altitude, and both are easy to
+walk into while feeling productive:**
+
+- `INV2` ("the interval floor is never issued twice") must **count
+  dispatched `IntervalFloorReduction` entries**, never read the
+  `floorIssued` guard the implementation will have. Written as
+  `floorIssued ⇒ ¬issue` it proves the flag consistent with itself —
+  green, vacuous, worthless.
+- `INV1` must be phrased **over resolutions** ("no resolution of the
+  unresolved intervals produces an opposite sign"), never over the endpoint
+  formula. The spec already carried a bug in exactly this algebra —
+  v0.7.1's `|b|` was correct only for the net-long case and R1d-2 corrected
+  it to `max(|a|,|b|)` — so a model that re-implements the corrected
+  formula and checks itself against it proves nothing.
+
+**Also standing, in order after slice A:** (2) the **§32m-D per-tier
+figure, due 2026-08-03T11:13Z**, measurable from 2026-08-02T11:13Z → §44e +
+§38f's revisit (task #150); (3) **off-host archive sync** — no target
+exists yet, recommendation is a ~$60 external USB drive, because slice F's
+machinery is already proven against its second-root fixture while §38g
+excluded transport+credentials (so a cloud bucket is the bigger change),
+and the gate's two-month wait now commits ~180–200G of un-backfillable
+archive to one laptop disk; (4) the **gate** itself (task #152). Task #153
+(the hourly `restart_boundary` on REST-overlay sources) awaits a user
+ruling and blocks nothing.
+
+Capture rituals first, always: **pgrep PID 8495**, background verify,
+marker grep (**ZERO**). QA binaries to the scratchpad — **never rebuild
+over `bin/arblab` while capture runs**; `make ci` writes no `bin/`.
+
+---
+
+## START HERE (updated session 64, 2026-08-01 — HISTORICAL — §45 code-complete + the capture observation; superseded by the §46 block above)
+
+**Branch `feat/milestone-1-foundation`.** Sessions 62–63 landed §45 slice D
+end to end, and **there is no crossvenue code left to write for the gate**:
+the continuity carry (`efa4bbe`), (b)'s first half (`b6c99fb`), and (b)'s
+SECOND HALF — the procedure commit (`7ccadec`) that lifts the §45f-2
+post-cutoff seal — recorded as §45p (`d66b553`). **Read
+`2026-08-01-strategy2-crossvenue-gate.md` §45p, then its RESUME HERE**; that
+record's RESUME HERE is the live statement of what remains.
+
+**What is next, in order — both items are clock-bound, not work-bound:**
+
+1. **The §32m-D per-tier one-day figure, DUE BY 2026-08-03T11:13Z**
+   (measurable from **~2026-08-02T11:13Z**, one full day after the 11:13:10Z
+   restart), landing as §44e — `du` split BTC-tier vs alt-tier against
+   §42c's derived ~0.6–1.1G/day/symbol, plus a full-day verify (0 integrity;
+   the restart's gaps show honestly). **This is §38f's named revisit point**
+   (ruling §42f-3): re-argue off-host on the measured disk clock. Archive
+   stood at 9.4G on 2026-08-01 — context for that argument, not the figure.
+2. **Accumulate the gate's evidence, then run the gate.** `arblab crossvenue
+   fetch` periodically (the store is keyed by cutoff DAY and refuses to
+   overwrite, so a new day accumulates beside the old file); `arblab
+   crossvenue gate` reads the evidence table any time. **BCHUSDT is the
+   BINDING symbol** — 8h grid against the other seven's 4h, so it accrues
+   matched settlements at half their rate and the roster qualifies on BCH's
+   clock, around **2026-09-30** rather than the majority's ~08-31. That is a
+   forecast, not a schedule: the `matched` column decides. Two operational
+   facts, both guards working: the tree must be CLEAN (§41e), and `-before`
+   must fall on a day AFTER the last complete archive day (H2 — the open
+   hour is not yet vouched by its day manifest). A not-yet-scoreable run
+   exits **2**, names every short symbol, and writes NOTHING.
+3. **When it scores**, the write-once artifact authorizes nothing until a
+   detached attestation binds it (24h cooling, sign-off, out-of-band). That
+   is a **USER decision** under milestone 2's kill discipline.
+
+**One interpretation §45p had to take, recorded so it is not silently
+reopened:** a symbol failing either admission rule refuses the whole RUN
+rather than being dropped, because ruling §45f-3's pass shape is a
+PRE-DECLARED portfolio and scoring the survivors would score a portfolio
+nobody declared, chosen by whichever symbol happened to be thin. If that
+reading is wrong it is a ruling to revisit with the user, not a bug to patch.
+
+**NEW (session 64) — an observation measured, not absorbed, in the spirit of
+§45m's Bybit-coverage fork.** The standing verify ritual came back **0
+integrity / COVERAGE** as expected, but its coverage list carries a
+`restart_boundary` finding on
+`binance/…/BTCUSDT/funding/fundingInfo` **every hour** — hours 01…10 before
+the restart and 12…15 after it, so it is chronic, not a restart artifact.
+The cause is a designed property meeting an undesigned consequence: slice E
+settled that **"a Rest record is not a Data record"**, so this REST-overlay
+source mints `records 63, data 0` per hour; the writer's `lastSeq` therefore
+never leaves zero, and `w.prevLastSeq = w.lastSeq` at rotation makes every
+hourly Open declare "no predecessor". Verify's classification is defensible
+and the archive is **not** lying — a stream with no sequenced data genuinely
+has no predecessor *sequence*, and zero is the documented "no predecessor".
+**What is at stake is signal quality, not correctness:** `restart_boundary`
+is the evidence that a *restart* happened (HANDOFF §32a's price;
+`pipeline_test.go:668` asserts exactly it), and a marker that also fires
+once per hour by construction stops distinguishing "a restart happened" from
+"an hour passed on a REST source" — and it scales with every REST source
+added. **It is ruled by nobody yet, and it blocks nothing:** BTCUSDT is
+sealed out of the crossvenue gate (§43b), and the walker's continuity carry
+runs on the WS book/funding sources, which sequence correctly (§45p's smoke
+measured ~99.7% joined coverage). The tension to rule on is this project's
+own two-directions rule pointing both ways — suppressing the finding would
+hide a real restart on a source that was quiet the previous hour, while
+keeping it spends attention every hour on a non-event.
+
+Capture rituals first, always: **pgrep PID 8495** (alive, restarted
+2026-08-01T11:13:10Z), background verify, marker grep (**ZERO**). QA
+binaries go to the scratchpad — **never rebuild over `bin/arblab` while
+capture runs**; `make ci` writes no `bin/`, so it is safe.
+
+---
+
+## START HERE (updated session 61, 2026-08-01 — HISTORICAL — §45 SLICE C IS CLOSED; superseded by session 64's block above)
 
 **Branch `feat/milestone-1-foundation`.** Session 61 closed §45 slice C
 (**read `2026-08-01-strategy2-crossvenue-gate.md` §45m, then its RESUME
