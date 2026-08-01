@@ -253,6 +253,27 @@ Draft v0.7.1 (2026-07-19) — Codex adversarial rounds 1–4 (11 → 6 → 4 →
 | **`marketdata` does not publish `MarketView`; `engine/state` builds it.** §3.2's row said `marketdata` publishes an immutable `MarketView` while §3.3 and §3.2's own next row give that translation to `engine/state`. §3.3 wins: a context publishing a strategy-owned type would have to know cross-leg skew and the strategy's view shape, coupling the two across exactly the boundary §3.6 rule 1 and the read ports exist to keep — and it also needs the book path, which does not exist. Rejected: §3.2 winning, which would additionally reduce `engine/state` to a cache | core §3.2 |
 | **Rules 1 and 10 are enforced; rule 6 is the only deferral left, and rule 10's deferral named the wrong trigger.** `hexboundary` and `exhaustiveswitch` landed the session their subjects appeared rather than after the code they police. Rule 10 had waited on a **state machine**, while what actually made it buildable was the shared kernel's **eleven enum-likes**, which had existed for several slices — it found **13 silent fallthroughs** on its first real run, every one of them reachable the whole time. A deferral must name the *construct the analyzer reads*, not the feature that motivated it, and rule 6's was re-checked against that. Separately, and normative for any future gate: **rule 1's obvious positive control is an import cycle** — `application/` importing `infrastructure/` is refused by the type-checker before the analyzer runs, so the gate scores a pass without executing. Within one context Go's no-cycles rule already covers most of rule 1; where it earns its place is the edge Go cannot see (`engine/`, another context's infrastructure) | core §3.6 |
 
+**Milestone 2b step 2 landed (v0.9.22, 2026-08-01) — the capture runs the shortlist.**
+The §42c expansion executed the same day the shortlist was measured (capture-expansion design
+record §44): 32 new sources — eight symbols × both venues' perp funding + perp books, every shape
+its BTC counterpart's with only the symbol substituted (§44b: nothing per-symbol was chosen;
+scripted generation with a uniqueness assertion; BTC's eight streams byte-identical) — and the
+capture restarted 11:13Z as **PID 8495, 40 sources** (config `1c362feffe4a`). The pre-config item
+cleared first (§44a; the profiles' dated ceilings block): Bybit's 500-connections-per-5-minutes
+per domain (restart burst 19), Binance spot's 300-per-attempt-per-5-minutes (we open 1), and the
+finding with teeth — **Binance futures states no numeric per-IP ceiling at all**, so the 19
+connections to `fstream` rest on the behavioral reading (ban-on-churn) plus the per-source backoff
+ladder being exactly the pacing it asks for. The restart is recorded, not hidden (§44c): ritual
+verify first over the full accumulated range (**COVERAGE, 0 integrity, 639 coverage** — the known
+honest thin windows), clean SIGTERM stop, **~8 seconds of recorded gap**, and every pre-existing
+source minted its `process_restart` gap record at reopen — §32j's restart-required trade doing its
+job. The alt streams' history simply begins at 11:13Z; §42a already named everything earlier as
+un-backfillable by anyone. **Deliberate absences unchanged from §42c** (no spot legs, no per-alt
+diff evidence, no third venue, no broad funding tier) — re-affirmed, not re-decided. Due next, with
+dates: the **§32m-D per-tier one-day figure by 2026-08-03T11:13Z** (lands as §44e), which is also
+**§38f's named revisit point** (ruling §42f-3 — the off-host decision gets re-argued on a measured
+disk clock); then §42e's read-path + simulator + gate procedure commit, parameters pinned there.
+
 **Milestone 2b step 1 executed (v0.9.21, 2026-08-01) — the screening ran, and the shortlist is measured.**
 The §42b screening step turned into committed code and a committed dataset the same day (screening
 design record §43). The harness — `internal/strategy/infrastructure/screening` + `arblab screen run` —

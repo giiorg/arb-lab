@@ -12,10 +12,11 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/config"
 )
 
-// realConfigPath is the checked-in capture set — §32c's seven sources. Tests
-// load the real document rather than a fixture copy so there is exactly one
-// spelling of the capture set in the repository, and the tests are what keep
-// it loadable.
+// realConfigPath is the checked-in capture set — §32c's seven BTC sources
+// plus §44's thirty-two shortlist sources (eight symbols × four streams).
+// Tests load the real document rather than a fixture copy so there is exactly
+// one spelling of the capture set in the repository, and the tests are what
+// keep it loadable.
 const realConfigPath = "../../../configs/capture.json"
 
 func loadReal(t *testing.T) config.Snapshot[Config] {
@@ -33,12 +34,49 @@ func loadReal(t *testing.T) config.Snapshot[Config] {
 
 // TestRealCaptureConfigLoads is the schema's positive control: the document
 // the operator will actually run is loadable, valid, and holds §32c's seven
-// sources. A schema test suite that only ever loads synthetic fixtures can
-// pass while the real document does not parse.
+// BTC sources plus §44's shortlist expansion. A schema test suite that only
+// ever loads synthetic fixtures can pass while the real document does not
+// parse.
 func TestRealCaptureConfigLoads(t *testing.T) {
 	snap := loadReal(t)
-	if got := len(snap.Value.Sources); got != 7 {
-		t.Fatalf("the capture set has %d sources, want §32c's 7", got)
+	if got := len(snap.Value.Sources); got != 39 {
+		t.Fatalf("the capture set has %d sources, want §32c's 7 + §44's 32", got)
+	}
+
+	// §44b's roster shape: BTCUSDT keeps §32c's seven exactly, and each
+	// shortlisted symbol has exactly four — both venues' perp funding and
+	// perp book, nothing else (no spot legs, no diff evidence stream).
+	shortlist := []string{
+		"LABUSDT", "BEATUSDT", "KAITOUSDT", "MMTUSDT",
+		"MUSDT", "SOONUSDT", "ESPORTSUSDT", "BCHUSDT",
+	}
+	bySymbol := make(map[string][]SourceConfig)
+	for _, s := range snap.Value.Sources {
+		bySymbol[s.Symbol] = append(bySymbol[s.Symbol], s)
+	}
+	if got := len(bySymbol["BTCUSDT"]); got != 7 {
+		t.Errorf("BTCUSDT has %d sources, want §32c's 7 unchanged", got)
+	}
+	for _, sym := range shortlist {
+		srcs := bySymbol[sym]
+		if len(srcs) != 4 {
+			t.Errorf("%s has %d sources, want §44b's 4", sym, len(srcs))
+			continue
+		}
+		kinds := make(map[string]int)
+		for _, s := range srcs {
+			if s.Product != "linear_perp" {
+				t.Errorf("%s has a %q source; §44b has no spot legs", sym, s.Product)
+			}
+			kinds[string(s.Venue)+"/"+string(s.Stream)]++
+		}
+		for _, want := range []string{
+			"binance/funding", "binance/book", "bybit/funding", "bybit/book",
+		} {
+			if kinds[want] != 1 {
+				t.Errorf("%s has %d %s sources, want exactly 1", sym, kinds[want], want)
+			}
+		}
 	}
 
 	// §36c's pair: Bybit's linear and spot books have byte-identical topics
@@ -51,8 +89,8 @@ func TestRealCaptureConfigLoads(t *testing.T) {
 		keys[s.Key().String()]++
 		topics[s.Topic]++
 	}
-	if len(keys) != 7 {
-		t.Errorf("the 7 sources produce %d distinct capture keys, want 7", len(keys))
+	if len(keys) != 39 {
+		t.Errorf("the 39 sources produce %d distinct capture keys, want 39", len(keys))
 	}
 	if topics["orderbook.50.BTCUSDT"] != 2 {
 		t.Errorf("the identical-topic pair is not in the real config (found %d); "+
