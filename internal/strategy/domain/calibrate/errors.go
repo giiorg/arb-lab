@@ -40,4 +40,21 @@ var (
 	// whole number of kline steps — the move would need instants the
 	// series does not carry.
 	ErrHorizonOffGrid = fmt.Errorf("strategy/calibrate: horizon not a whole number of kline steps")
+
+	// ErrDepthShort reports a book side too thin to fill the candidate —
+	// the counterfactual walk has nothing to measure at this instant.
+	// Whether the instant is excluded-and-counted or fails the cell is
+	// the collector's committed rule; silently sampling zero would put
+	// the thinnest books at the BOTTOM of the distribution the p90 reads.
+	ErrDepthShort = fmt.Errorf("strategy/calibrate: book side too thin for the candidate quantity")
+
+	// ErrBookPairMismatch reports a counterfactual pair that is not two
+	// instants of one book — different instruments, or not in t then
+	// t+latency order.
+	ErrBookPairMismatch = fmt.Errorf("strategy/calibrate: book pair is not two ordered instants of one book")
+
+	// ErrMergeMisaligned reports two quantile sets on different grids —
+	// a pointwise merge across them would interpolate, minting residuals
+	// nobody measured.
+	ErrMergeMisaligned = fmt.Errorf("strategy/calibrate: quantile sets on different grids")
 )
