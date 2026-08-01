@@ -38,12 +38,7 @@ func Points(residuals []fixedpoint.Rate, grid []fixedpoint.Rate) ([]domain.Quant
 		return nil, err
 	}
 
-	// Sorting by mantissa is exactly Rate ordering: every Rate lives at
-	// the one canonical scale, so the integer order IS the value order —
-	// and it cannot error mid-sort the way Cmp-based comparison would
-	// have to ignore.
-	sorted := append([]fixedpoint.Rate(nil), residuals...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Mantissa() < sorted[j].Mantissa() })
+	sorted := sortRates(residuals)
 
 	half, err := fixedpoint.ParseRate("0.5")
 	if err != nil {
@@ -59,6 +54,17 @@ func Points(residuals []fixedpoint.Rate, grid []fixedpoint.Rate) ([]domain.Quant
 		out = append(out, domain.QuantilePoint{Q: q, Shift: sorted[idx]})
 	}
 	return out, nil
+}
+
+// sortRates returns an ascending copy. Sorting by mantissa is exactly
+// Rate ordering: every Rate lives at the one canonical scale, so the
+// integer order IS the value order — and it cannot error mid-sort the way
+// Cmp-based comparison would have to ignore. Callers validate every
+// element first.
+func sortRates(rs []fixedpoint.Rate) []fixedpoint.Rate {
+	sorted := append([]fixedpoint.Rate(nil), rs...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Mantissa() < sorted[j].Mantissa() })
+	return sorted
 }
 
 // outwardIndex resolves quantile q over n sorted observations to an index,

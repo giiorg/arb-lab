@@ -41,26 +41,13 @@ func Residuals(history []domain.RealizedSettlement, halfLife time.Duration) ([]f
 	if halfLife <= 0 {
 		return nil, fmt.Errorf("residuals half-life %v: %w", halfLife, domain.ErrUnset)
 	}
-	if len(history) == 0 {
-		return nil, fmt.Errorf("residuals: %w", domain.ErrWindowEmpty)
-	}
-	// The whole history is judged once, up front: every row real, one
-	// instrument, strictly ascending. EWMA re-checks each window it is
-	// handed, but the LAST row joins no window — it only ever grades one —
-	// so without this pass a trailing out-of-order or foreign-instrument
-	// row would slip through exactly where the era ends.
-	for i, s := range history {
-		if err := s.Validate(); err != nil {
-			return nil, fmt.Errorf("residuals row %d: %w", i, err)
-		}
-		if s.Instrument != history[0].Instrument {
-			return nil, fmt.Errorf("residuals row %d is %s, history is %s: %w",
-				i, s.Instrument, history[0].Instrument, domain.ErrLegsMismatch)
-		}
-		if i > 0 && !history[i-1].At.Before(s.At) {
-			return nil, fmt.Errorf("residuals row %d at %s, %d at %s: %w",
-				i-1, history[i-1].At.Format(time.RFC3339), i, s.At.Format(time.RFC3339), domain.ErrNotAscending)
-		}
+	// The whole history is judged once, up front. EWMA re-checks each
+	// window it is handed, but the LAST row joins no window — it only
+	// ever grades one — so without this pass a trailing out-of-order or
+	// foreign-instrument row would slip through exactly where the era
+	// ends.
+	if err := validateHistory(history); err != nil {
+		return nil, fmt.Errorf("residuals: %w", err)
 	}
 	horizon := domain.EWMAHorizon(halfLife)
 

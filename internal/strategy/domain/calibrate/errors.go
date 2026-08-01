@@ -24,4 +24,20 @@ var (
 	// understate a tail the grid never reached — the flattering
 	// direction, refused for ShiftAt's own reason.
 	ErrTailOffGrid = fmt.Errorf("strategy/calibrate: tail quantile not on the measured grid")
+
+	// ErrNoExcursions reports an era in which no dip below the clearing
+	// level ever recovered within the dwell — a band width would have to
+	// be invented, and what an evidence-free era means is the
+	// governance's question, not this package's.
+	ErrNoExcursions = fmt.Errorf("strategy/calibrate: no recovered excursion to measure a band from")
+
+	// ErrSeriesMismatch reports two kline series that do not describe the
+	// same instants, assets, or step — a basis computed across misaligned
+	// grids is a subtraction between two different moments.
+	ErrSeriesMismatch = fmt.Errorf("strategy/calibrate: kline series misaligned")
+
+	// ErrHorizonOffGrid reports a hold horizon that is not a positive
+	// whole number of kline steps — the move would need instants the
+	// series does not carry.
+	ErrHorizonOffGrid = fmt.Errorf("strategy/calibrate: horizon not a whole number of kline steps")
 )
