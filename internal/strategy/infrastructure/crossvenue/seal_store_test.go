@@ -149,6 +149,12 @@ func TestFetchSettledWriteOnce(t *testing.T) {
 	calls := 0
 	tr := screening.Transport{Get: func(url string) ([]byte, error) {
 		calls++
+		if calls > len(pages) {
+			// A call past the script is the resume path costing a request —
+			// an error, not a panic, so a broken exists-check fails the
+			// assertions below instead of crashing the suite.
+			return nil, fmt.Errorf("transport call %d beyond the %d scripted pages", calls, len(pages))
+		}
 		return []byte(pages[calls-1]), nil
 	}}
 	path, digest, err := FetchSettled(tr, root, "binance", "ABCUSDT", cutoff, cutoff, 1000)

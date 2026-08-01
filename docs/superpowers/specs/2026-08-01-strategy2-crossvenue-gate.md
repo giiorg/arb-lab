@@ -453,7 +453,144 @@ generated stream mixing follows/dup/jump/drop/absent-deletes, with
 every arm asserted non-vacuous). Worked sim episode hand-computed end to
 end: net 0.0008, cost 0.2219, return −0.2211, all four p90s pinned.
 
+## §45m — slice C CLOSE (session 61, 2026-08-01): 31/31 aimed mutations caught, the smoke ran clean
+
+**Checklist round two BEFORE the battery — the mirror pass found two more
+fixture collapses** (instances 4 and 5 for this slice; the mirror rule is
+"a fix applied in one place gets applied to its symmetric case", and both
+were found by re-walking the pre-written roster against the fixtures
+before running anything):
+
+- **(4) The Bybit staleness bound was unpinned — §45l's finding 1 had
+  been fixed on Binance only.** Every Bybit sampled instant sat strictly
+  inside the 4s slack (1s, 1s, 3s) or strictly outside (6s, 6s, 8s), so
+  `>` vs `>=` on the Bybit arm was indistinguishable — the ratelimit
+  `freeAt` shape exactly. Moving the news frame :22 → :21 puts the :25
+  instant EXACTLY at the bound with every expected count unchanged; only
+  the comment moved. The mirror mutation then failed precisely one test.
+- **(5) The Binance sampler's file-boundary reset had NO fixture** — the
+  Bybit boundary test existed (§45l finding 2's home) and its Binance
+  mirror did not; a held Binance estimate carried across a file boundary
+  within a wide slack would have sampled as fresh with nothing failing.
+  New `TestSampleBinanceFileBoundaryResets` (a 10:58:58 frame, an
+  11:00:07 frame, one-minute slack — only the cold start explains the
+  skip at 11:00:05). Its aimed mutation was then caught by exactly this
+  test, so the gap was real, not a formality.
+
+**The predicted `PANIC!!` was pre-empted, per the roster:** the
+write-once test's transport stub indexed `pages[calls-1]` unguarded, so
+disabling the pre-fetch exists check would have crashed the suite (a
+kill by crash — the resume-costs-no-requests claim itself unchecked).
+The stub now errors gracefully past its script, and the exists-check
+mutant dies on the assertions it was aimed at.
+
+**The battery: 31 distinct claims, 31 caught. Zero SURVIVED, zero
+PANIC!!, zero TIMEOUT!!.** Three honest `NOBUILD!!` re-aims, all the
+predicted unused-variable class, each re-aimed inside the same claim and
+caught: the store conflict check (`if false` orphaned `c` → `c != c`),
+and both WorseSide substitutions (dropping one argument orphaned the
+other cell → closures returning one cell and explicitly discarding the
+other). By file:
+
+- `accumulator.go` 7/7 — duplicate-u absorbed by `>` (2 failing tests),
+  jumped-u absorbed by `<` (4), cold delta applied (3), absent-delete
+  uncounted (2), held position not advanced (3), window 49-not-50 (1),
+  render sorted ascending (6 — the oracle among them).
+- `walk.go` 5/5 — bound day admitted (1), mislabeled manifest accepted
+  (1), empty universe not refused (1), unvouched file consumed (1), file
+  boundary not signaled (3).
+- `seal.go` 1/1 — at-cutoff row kept as pre-cutoff (1).
+- `store.go` 4/4 — exists check disabled / resume costs requests (1),
+  empty store reads as never-settled (1), conflicting refetch merged
+  (re-aim, 1), merged series descending (3).
+- `sample.go` 8/8 — boundary instant sampled on its own frame (2),
+  Binance at-bound skipped as stale (1), **Bybit at-bound skipped as
+  stale — the mirror (1)**, Binance gap not invalidating (1), **Binance
+  file boundary carrying the estimate — the mirror (1)**, churn not
+  refreshing the anchor (1), file boundary carrying ticker state (1),
+  merge orientation mirrored (2).
+- `sim.go` 7/7 — seal not wired (1), cost added not charged (1), return
+  attributed to the open period (1), bid boundary worse-of dropped (1),
+  p90 ask arm dropped (1), worse-side pinned to bid (re-aim, 1),
+  worse-side pinned to ask (re-aim, 1) — the §45l rebuilt fixture doing
+  exactly what it was rebuilt for: each of the four composition arms
+  changes the cost, and the two venues disagree about the worse side so
+  BOTH pin directions die.
+- `domain/crossvenue/depth.go` 2/2 — short fill measured as a fill (2),
+  ask orientation mirrored (2 — the big.Rat oracle among them).
+
+**The live exploration smoke (slice A's precedent, the slice's positive
+control) ran end to end, labeled `s61-smoke-btc`:**
+
+- `crossvenue fetch -symbols BTCUSDT -cutoff 2026-08-01T00:00:00Z` —
+  both venues stored verbatim with digests (binance `a78500bda48f…`,
+  bybit `562bdbd47536…`), under the new `/research/crossvenue/rest/`
+  gitignore rule (the CLI's "(git-ignored)" claim was ahead of the
+  actual ignore file — rule added this session, in the screening-raw
+  pattern; reports and params beside it in `sims/` are COMMITTED, the
+  labeled-and-logged trail).
+- `crossvenue sim` over the pre-cutoff corpus: **days 2026-07-30 +
+  2026-07-31 only** (hashes `fdf6141c884b…`, `4eb3ebefaa95…`) — the
+  2026-08-01 manifest exists and the enumeration bound left it unread,
+  the seal structural in a live run. Binance 90,654 frames / 912
+  skipped; Bybit 684,764 frames / 2,077 skipped; merge 202 joined,
+  1,171 Binance-only, 7 Bybit-only. Pairing over the full REST history:
+  7,550 Binance × 6,958 Bybit rows → **6,958 matched, zero collisions**.
+  Nine episodes, all scored, zero refusals, `SealedExcluded` 0 (the
+  fetch cutoff IS the seal instant, so the store holds nothing to
+  exclude — the sim-battery fixture is where the exclusion arm is
+  exercised). **Every episode's cost is exactly 0.0021 = 2×(0.0005) +
+  2×(0.00055): all four p90s are ZERO at 0.05 BTC — §41p's
+  calm-stratum zero-slippage finding, reproduced from our own measured
+  books.** Sparse period attribution lands each return in its close's
+  8h period; portfolio LCB −0.0049 over 6 periods (negative as a
+  tiny-entry costs-only smoke must be).
+
+**One measured observation for slice D (recorded, not absorbed): Bybit
+decision-grid coverage is ~9%** (209 sampled of ~2,286 grid instants;
+Binance covered ~60%). The mechanism is the designed cold-start rule
+meeting Bybit's wire shape: tickers snapshot only at subscribe, the
+hourly file rotation restarts ticker state cold (§39p-2's rule), and a
+delta-only file leaves the state incomplete until the full field set
+happens to recur — so coverage clusters after reconnects. This is the
+conservative trade the walker documents, made visible by the honest
+counters. If the procedure commit wants that coverage back, the safe
+seam is the capture's own framing records (a file boundary with no
+intervening Open/Gap record is the same connection, so carrying state
+is not crossing a hole) — a fork for slice D to rule on explicitly,
+not something to absorb into the walker silently.
+
 ## RESUME HERE
+
+**Slice C is CLOSED (§45m): code, batteries, oracles, 31/31 mutations,
+the labeled smoke. What remains, in order:**
+
+1. **The §32m-D per-tier one-day figure, DUE BY 2026-08-03T11:13Z**
+   (measurable from ~2026-08-02T11:13Z), landing as §44e in the §44
+   record — `du` split BTC-tier vs alt-tier against §42c's derived
+   ~0.6–1.1G/day/symbol, full-day verify over the measured day (0
+   integrity; the restart's gaps will show honestly). **This is §38f's
+   named revisit point** (ruling §42f-3): re-argue off-host on the
+   measured disk clock.
+2. **Slice D — the procedure commit**: params roster with rationale
+   (pairing round, entry grid, exit divisor, max gap, allocation
+   policy, mean block, resamples, confidence, seed, fees, depth cells —
+   every argument slices B/C left open, now including a ruling on the
+   §45m Bybit-coverage fork: accept ~9% Bybit grids, or carry ticker
+   state across same-connection file boundaries keyed on framing
+   records), VCS binding via `ReadBuildRevision`/`CheckExecutionBinding`,
+   dataset ledger over the store digests + manifest-day hashes the
+   report already carries, write-once artifact + detached attestation,
+   the holdout declaration naming §43b (ruling §45f-4), and the end
+   rule in code (ruling §45f-1: ≥180 post-cutoff matched settlements
+   per shortlisted symbol, short symbols refused by name). The seal
+   lifts ONLY through that commit.
+
+The capture rituals stand (PID 8495, pgrep FIRST; verify COVERAGE/0-
+integrity expected — session 61's verify: COVERAGE, 0 integrity, the
+restart gap and pre-restart alt absences honest).
+
+## RESUME HERE (session 60 — HISTORICAL, superseded by §45m's close)
 
 **Slice C: code + battery + oracles + ci are DONE (§45l). Two work items
 close the slice, then slice D:**

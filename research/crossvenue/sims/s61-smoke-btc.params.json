@@ -1,0 +1,19 @@
+{
+  "label": "s61-smoke-btc",
+  "symbols": [{ "symbol": "BTCUSDT", "qty": "0.05" }],
+  "sample_every": "1m",
+  "slack": "10s",
+  "entry": "0.00001",
+  "exit_divisor": 2,
+  "max_gap": "10m",
+  "round": "1m",
+  "binance_fee": "0.0005",
+  "bybit_fee": "0.00055",
+  "p90": "0.9",
+  "period": "8h",
+  "policy": [{ "symbol": "BTCUSDT", "weight": "1" }],
+  "mean_block": 3,
+  "resamples": 500,
+  "confidence": "0.9",
+  "seed": 1
+}

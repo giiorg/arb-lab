@@ -99,7 +99,44 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated session 60, 2026-08-01 — §45 SLICE C CODE + BATTERY BUILT, mutations and the live smoke PENDING; the §32m-D figure due by 2026-08-03T11:13Z)
+## START HERE (updated session 61, 2026-08-01 — §45 SLICE C IS CLOSED; next: the §32m-D figure by 2026-08-03T11:13Z, then slice D)
+
+**Branch `feat/milestone-1-foundation`.** Session 61 closed §45 slice C
+(**read `2026-08-01-strategy2-crossvenue-gate.md` §45m, then its RESUME
+HERE**): the aimed battery ran — **31/31 claims caught** (3 predicted
+`NOBUILD!!` unused-variable re-aims, all re-aimed and caught; zero
+SURVIVED/PANIC/TIMEOUT), after a mirror-pass checklist round found TWO
+more fixture collapses BEFORE any mutation ran (the Bybit staleness
+at-bound — §45l's fix had landed on Binance only, the ratelimit shape;
+and the Binance sampler's file-boundary reset had NO fixture — the Bybit
+mirror existed, its counterpart didn't; both new fixtures then killed
+their aimed mutants). The write-once stub was patched to fail gracefully
+past its script, pre-empting the roster's predicted `PANIC!!`
+non-verdict. **The labeled smoke ran end to end** (`s61-smoke-btc`,
+params + report committed under `research/crossvenue/sims/`, raw REST
+store now properly git-ignored): fetch stored both venues with digests;
+the sim walked ONLY the two pre-cutoff days (the seal structural in a
+live run), paired 6,958 settlements with zero collisions, scored 9/9
+episodes at cost exactly 0.0021 — **all four p90s ZERO at 0.05 BTC,
+§41p's calm-stratum zero-slippage reproduced from our own books**. One
+measured observation recorded for slice D (§45m): **Bybit decision-grid
+coverage is ~9%** — the designed per-file cold start meeting a wire
+whose tickers snapshot only at subscribe; the safe recovery seam (framing
+records) is written up as a slice-D fork, not absorbed. `make ci` green,
+marker grep ZERO.
+
+**What is next, in order: (1) the §32m-D per-tier figure** (due by
+2026-08-03T11:13Z, measurable from ~2026-08-02T11:13Z) → §44e + the §38f
+off-host re-argument on the measured disk clock; **(2) §45 slice D** —
+the procedure commit (params roster incl. the Bybit-coverage ruling, VCS
+binding, dataset ledger, write-once artifact + attestation, holdout
+declaration naming §43b, the ≥180-matched end rule; the seal lifts only
+through it). Capture rituals first, always: pgrep PID 8495, background
+verify (session 61: COVERAGE, 0 integrity), marker grep (ZERO).
+
+---
+
+## START HERE (updated session 60, 2026-08-01 — HISTORICAL — §45 SLICE C CODE + BATTERY BUILT; superseded by session 61's close)
 
 **Branch `feat/milestone-1-foundation`.** Session 60 built everything §45
 slice C names, checkpointing deliberately before the mutation battery:

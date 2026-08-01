@@ -41,6 +41,15 @@ coverage.*
 # doesn't already prove.
 /research/screening/raw/
 
+# The §45a crossvenue settled-funding store: the same verbatim-page shape
+# as the screening raw store, accumulating one file per (venue, symbol,
+# cutoff day) as the evidence window grows. Re-derivable over REST; each
+# file's sha256 comes back from FetchSettled/LoadSettled and lands in the
+# committed run reports (and, at slice D, the procedure's dataset ledger).
+# The sims/ reports BESIDE it are committed — they are the labeled,
+# logged exploration trail ruling §45f-2 requires.
+/research/crossvenue/rest/
+
 # Local environment
 .env
 .env.*

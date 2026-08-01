@@ -158,6 +158,40 @@ func TestSampleBinanceGapInvalidates(t *testing.T) {
 	}
 }
 
+// A file boundary restarts the Binance sampler cold too (the Bybit
+// boundary test's mirror — §39p-2's rule binds every stateful consumer):
+// the first file's last frame sits 7s before the second file's first grid
+// instant, well inside the one-minute slack, so ONLY the cold start
+// explains a skip there.
+func TestSampleBinanceFileBoundaryResets(t *testing.T) {
+	wide := SampleParams{Every: 5 * time.Second, Slack: time.Minute}
+	root := t.TempDir()
+	a := sampleBase.Add(58*time.Minute + 58*time.Second)
+	b := sampleBase.Add(1*time.Hour + 7*time.Second)
+	writeFixture(t, filepath_Join(root, bnFundingRel("2026-07-30T10.arbcap")), false,
+		dataAt(a, markFrame(a, "0.0001")))
+	writeFixture(t, filepath_Join(root, bnFundingRel("2026-07-30T11.arbcap")), false,
+		dataAt(b, markFrame(b, "0.0002")))
+	writeManifest(t, root, sampleDay,
+		bnFundingRel("2026-07-30T10.arbcap"), bnFundingRel("2026-07-30T11.arbcap"))
+	days, err := LoadManifestDays(root, BooksCutoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := SampleBinanceEstimates(root, days, bnFundingKeyFix, wide)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 11:00:05 sits 7s after file 1's frame — fresh by slack, cold by the
+	// boundary rule: skipped, never sampled from across the hole.
+	if len(got.Points) != 0 {
+		t.Fatalf("points %+v, want none across the boundary", got.Points)
+	}
+	if got.Skipped == 0 {
+		t.Fatal("nothing skipped — the boundary instant was never even considered")
+	}
+}
+
 // The churn rule: a delta with no funding fields refreshes the anchor —
 // the venue's absent-means-unchanged semantics — so the held rate stays
 // fresh; and before any snapshot the stream is cold, skipped.
@@ -165,7 +199,7 @@ func TestSampleBybitChurnRefreshesAnchor(t *testing.T) {
 	cold := sampleBase.Add(2 * time.Second)   // churn before any snapshot
 	snap := sampleBase.Add(4 * time.Second)   // snapshot, rate A
 	churn := sampleBase.Add(14 * time.Second) // churn at :14
-	news := sampleBase.Add(22 * time.Second)  // funding delta, rate B
+	news := sampleBase.Add(21 * time.Second)  // funding delta, rate B — :25 reads it EXACTLY Slack old
 	tail := sampleBase.Add(31 * time.Second)  // pushes the grid past :30
 	root, days := sampleRoot(t, byFundingRel, "2026-07-30T10.arbcap",
 		dataAt(cold, tickerChurn(cold)),
@@ -180,7 +214,9 @@ func TestSampleBybitChurnRefreshesAnchor(t *testing.T) {
 	}
 	// :05 → snapshot 1s old: rate A. :10 → snapshot 6s stale: skip.
 	// :15 → churn refreshed the anchor at :14: rate A again. :20 → 6s
-	// stale: skip. :25 → news at :22: rate B. :30 → 8s stale: skip.
+	// stale: skip. :25 → news at :21 is EXACTLY Slack old, at-the-bound
+	// fresh (the Binance staleness fixture's mirror): rate B. :30 → 8s
+	// stale: skip.
 	if len(got.Points) != 3 {
 		t.Fatalf("points %d, want 3: %+v", len(got.Points), got.Points)
 	}

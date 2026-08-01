@@ -1,0 +1,148 @@
+{
+ "Label": "s61-smoke-btc",
+ "Days": [
+  "2026-07-30",
+  "2026-07-31"
+ ],
+ "DayHashes": [
+  "fdf6141c884bde147c41004735c538d6f86d0e30da9e4ad4408b7bd8333f5953",
+  "4eb3ebefaa952ac284a34c553d3e88461a80cbc77be0ff71b17daedf2d35f018"
+ ],
+ "Symbols": [
+  {
+   "Symbol": "BTCUSDT",
+   "BinanceFrames": 90654,
+   "BybitFrames": 684764,
+   "BinanceSkipped": 912,
+   "BybitSkipped": 2077,
+   "Merge": {
+    "Joined": 202,
+    "BinanceOnly": 1171,
+    "BybitOnly": 7
+   },
+   "Pairing": {
+    "BinanceRows": 7550,
+    "BybitRows": 6958,
+    "Matched": 6958,
+    "BinanceCollisions": 0,
+    "BybitCollisions": 0
+   },
+   "SealedExcluded": 0,
+   "BnP90Bid": "0",
+   "BnP90Ask": "0",
+   "ByP90Bid": "0",
+   "ByP90Ask": "0",
+   "Episodes": [
+    {
+     "OpenAt": "2026-07-30T15:03:00Z",
+     "CloseAt": "2026-07-30T15:59:00Z",
+     "Sign": 1,
+     "Points": 56,
+     "Refused": "",
+     "Net": "0",
+     "Cost": "0.0021",
+     "Return": "-0.0021",
+     "EndImbalance": 0
+    },
+    {
+     "OpenAt": "2026-07-30T17:26:00Z",
+     "CloseAt": "2026-07-30T17:59:00Z",
+     "Sign": -1,
+     "Points": 33,
+     "Refused": "",
+     "Net": "0",
+     "Cost": "0.0021",
+     "Return": "-0.0021",
+     "EndImbalance": 0
+    },
+    {
+     "OpenAt": "2026-07-31T04:19:00Z",
+     "CloseAt": "2026-07-31T04:59:00Z",
+     "Sign": 1,
+     "Points": 40,
+     "Refused": "",
+     "Net": "0",
+     "Cost": "0.0021",
+     "Return": "-0.0021",
+     "EndImbalance": 0
+    },
+    {
+     "OpenAt": "2026-07-31T05:35:00Z",
+     "CloseAt": "2026-07-31T05:35:00Z",
+     "Sign": 1,
+     "Points": 0,
+     "Refused": "",
+     "Net": "0",
+     "Cost": "0.0021",
+     "Return": "-0.0021",
+     "EndImbalance": 0
+    },
+    {
+     "OpenAt": "2026-07-31T06:35:00Z",
+     "CloseAt": "2026-07-31T06:35:00Z",
+     "Sign": 1,
+     "Points": 0,
+     "Refused": "",
+     "Net": "0",
+     "Cost": "0.0021",
+     "Return": "-0.0021",
+     "EndImbalance": 0
+    },
+    {
+     "OpenAt": "2026-07-31T06:55:00Z",
+     "CloseAt": "2026-07-31T06:56:00Z",
+     "Sign": 1,
+     "Points": 1,
+     "Refused": "",
+     "Net": "0",
+     "Cost": "0.0021",
+     "Return": "-0.0021",
+     "EndImbalance": 0
+    },
+    {
+     "OpenAt": "2026-07-31T09:50:00Z",
+     "CloseAt": "2026-07-31T09:54:00Z",
+     "Sign": 1,
+     "Points": 4,
+     "Refused": "",
+     "Net": "0",
+     "Cost": "0.0021",
+     "Return": "-0.0021",
+     "EndImbalance": 0
+    },
+    {
+     "OpenAt": "2026-07-31T10:39:00Z",
+     "CloseAt": "2026-07-31T10:40:00Z",
+     "Sign": 1,
+     "Points": 1,
+     "Refused": "",
+     "Net": "0",
+     "Cost": "0.0021",
+     "Return": "-0.0021",
+     "EndImbalance": 0
+    },
+    {
+     "OpenAt": "2026-07-31T10:53:00Z",
+     "CloseAt": "2026-07-31T10:59:00Z",
+     "Sign": 1,
+     "Points": 6,
+     "Refused": "",
+     "Net": "0",
+     "Cost": "0.0021",
+     "Return": "-0.0021",
+     "EndImbalance": 0
+    }
+   ],
+   "Scored": 9,
+   "RefusedN": 0,
+   "NonZeroReturns": {
+    "2026-07-30T08:00:00Z": "-0.0021",
+    "2026-07-30T16:00:00Z": "-0.0021",
+    "2026-07-31T00:00:00Z": "-0.0084",
+    "2026-07-31T08:00:00Z": "-0.0063"
+   }
+  }
+ ],
+ "Periods": 6,
+ "PortfolioLCB": "-0.0049"
+}
