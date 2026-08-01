@@ -41,6 +41,9 @@ func dispatch(args []string, stdout, stderr io.Writer) int {
 	if len(args) >= 2 && args[0] == "screen" && args[1] == "run" {
 		return screenRun(args[2:], stdout, stderr)
 	}
+	if len(args) >= 2 && args[0] == "crossvenue" && args[1] == "check" {
+		return crossvenueCheck(args[2:], stdout, stderr)
+	}
 	fmt.Fprint(stderr, usage)
 	return 64 // EX_USAGE: the caller's request was malformed, not a capture verdict
 }
@@ -55,6 +58,7 @@ usage:
   arblab calibrate fetch  -venue <v> -series <s> -symbol <sym> -start <RFC3339> -end <RFC3339> [-out <dir>]
   arblab calibrate run
   arblab screen run       [-root <dir>] [-out <dir>] [-stage fetch|compute|all]
+  arblab crossvenue check -day <YYYY-MM-DD> [-root <dir>]
 
 calibrate fetch commits one closed family-1 dataset identity (venue REST
 history, verbatim, digested) under datasets/; it refuses holdout-era

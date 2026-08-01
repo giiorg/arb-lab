@@ -182,6 +182,13 @@ The page's silence is evidence for the routing split, not a failed fetch.
   during service restarts"***, **`seq` cross sequence**, `b`/`a` as `[price, size]`. **Size 0 means
   delete the entry; a new snapshot means reset the local book.** Level-1 repeats its snapshot every 3 s
   with an unchanged `u`. → https://bybit-exchange.github.io/docs/v5/websocket/public/orderbook
+- **Orderbook JSON value types, observed from our own capture (2026-08-01, LABUSDT linear + BTCUSDT
+  spot frames, config `1c362feffe4a`):** the envelope is `{topic, type, ts, data, cts}` with `ts`/`cts`
+  epoch-ms JSON **numbers**; `data` is `{s, b, a, u, seq}` with `u` and `seq` JSON **numbers** — unlike
+  the tickers topic, whose funding fields are all strings — and `b`/`a` as `[price, size]` **string**
+  pairs. A delta may carry an empty side array; a live delete (`["63052","0"]`) was observed in the
+  BTCUSDT spot stream. Snapshot depth on both products: 50 levels per side, bids descending, asks
+  ascending. *(own-archive observation, not a doc quote — labelled as such deliberately)*
 
 ### The two venues' depth update-ID shapes — the standing debt, and it is THREE shapes, not two `[→ standing debt #1, CLEARED]`
 The debt was recorded as *"the two venues' depth update-ID shapes"*. That framing is wrong, and the

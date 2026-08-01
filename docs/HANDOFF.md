@@ -99,7 +99,7 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated session 57, 2026-08-01 — MILESTONE 2b STEP 2 LANDED; next is the §32m-D figure, due by 2026-08-03T11:13Z)
+## START HERE (updated session 58, 2026-08-01 — §45 SLICE A BUILT, the shortlist's bytes decode; §45f forks OPEN for the user; the §32m-D figure due by 2026-08-03T11:13Z)
 
 **Branch `feat/milestone-1-foundation`.** Session 57 executed the §42c capture expansion: WS
 ceilings verified into the profiles first, the shortlist × four streams into
@@ -129,9 +129,18 @@ observation — luck of the tooling, not a guarantee).
    ~0.6–1.1G/day/symbol — the two Bybit streams are the unmeasured scale-down), plus the
    full-day verify over the measured day. **This is §38f's named revisit point** (ruling
    §42f-3): re-argue the off-host decision on the measured clock, not the derived one.
-2. **The `strategy/crossvenue` read-path, the research simulator, and the gate's procedure
-   commit** (§42e) — gate parameters pinned THERE, never earlier; holdout declared at that
-   commit with §43b's selection-contamination statement as a named input.
+2. **The §42e work is UNDER WAY — design record §45**
+   (`2026-08-01-strategy2-crossvenue-gate.md`, session 58 — read it, then its RESUME HERE).
+   Slice A is BUILT: `venue.DecodeBybitOrderbook` (the wire facts verified into the profiles
+   from our own capture bytes first), `strategy/infrastructure/crossvenue` (§45c's policed
+   placement — a top-level `strategy/crossvenue` would be invisible to `hexboundary`), and
+   `arblab crossvenue check` — **the live smoke ran same-session: all 40 streams decode, 0
+   refusals over ~3.7M frames.** 19/19 aimed mutations caught (one SURVIVED diagnosed into
+   the wrong-day-fixture gap and fixed). **§45f's four forks are OPEN for the user** (evidence
+   end rule; exploration posture; pass shape; holdout shape); slice D — the procedure commit,
+   gate parameters pinned THERE with §43b as a named holdout input — is blocked on them;
+   slices B–C (domain math with oracles; walker measurement stages + sim CLI with the
+   post-cutoff seal in code) are fork-independent and build next.
 
 Constraints that carry over: H1 (post-2026-02-01 BTC) unpolluted; the §41h seal stands;
 maker-entry a standing tactic priced at the gate; no v2 of the v1 cash-and-carry procedure.
