@@ -158,6 +158,14 @@ say so.
 whenever the capture is running: model (b)'s liveness configs hold every
 core for ~30 minutes and the archive is un-backfillable.
 
+**`./run.sh AmbiguousOrder` now really does select model (a)'s 35 runs** —
+it selected **14** until session 66, because `$FILTER` is matched against
+the config TAG and the generated probe configs were named `PC_*`, outside
+the namespace their own model owns. They are `AmbiguousOrder_PC_*` now.
+Worth carrying as a shape, since slice C adds `P1`–`P4` and their controls:
+a probe a plausible invocation cannot select is a probe that is not run,
+and the FILTERED summary line counts the skips without naming them.
+
 **Also standing, in order after slice C:** (2) the **§32m-D per-tier
 figure, due 2026-08-03T11:13Z**, measurable from 2026-08-02T11:13Z → §44e +
 §38f's revisit (task #150); (3) **off-host archive sync** — no target exists
