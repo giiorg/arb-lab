@@ -255,11 +255,19 @@ type ScoringDoc struct {
 }
 
 // ArtifactQuantities is §41b's roster.
+//
+// AdverseBasisMove is a RATE — the relative hold-scale move, Δbasis over
+// the spot price — for two reasons that arrived together in slice B: the
+// runtime consumer (NewConservativeBasis) charges rate × notional, so a
+// Money here had no consumer without an unstated price to divide by; and
+// only a relative move transfers across a calibration era in which the
+// underlying's price tripled — an absolute 2023 USDT move is not a 2026
+// risk statement.
 type ArtifactQuantities struct {
 	Dispersion          DispersionDoc    `json:"dispersion"`
 	EntryDrift          RateQuantityDoc  `json:"entry_drift"`
 	ExitBand            RateQuantityDoc  `json:"exit_band"`
-	AdverseBasisMove    MoneyQuantityDoc `json:"adverse_basis_move"`
+	AdverseBasisMove    RateQuantityDoc  `json:"adverse_basis_move"`
 	RescueMargin        MoneyQuantityDoc `json:"rescue_margin"`
 	ExpectedUtilization RateQuantityDoc  `json:"expected_utilization"`
 	Cost                CostDoc          `json:"cost"`
@@ -368,7 +376,7 @@ type Artifact struct {
 	EntryDrift          domain.MeasuredRate
 	ExitBand            domain.MeasuredRate
 	ExpectedUtilization domain.MeasuredRate
-	AdverseBasisMove    domain.MeasuredMoney
+	AdverseBasisMove    domain.MeasuredRate
 	RescueMargin        domain.MeasuredMoney
 	Cost                CostCalibration
 	Scoring             ScoringProtocol
@@ -497,7 +505,7 @@ func (d ArtifactDoc) toArtifact(ref domain.CalibrationRef) (*Artifact, error) {
 	if err := checkUnitInterval("expected_utilization", util.Value); err != nil {
 		return nil, err
 	}
-	basis, err := d.Quantities.AdverseBasisMove.toMoney("adverse_basis_move", FamilyRESTHistory, ref)
+	basis, err := d.Quantities.AdverseBasisMove.toRate("adverse_basis_move", FamilyRESTHistory, ref)
 	if err != nil {
 		return nil, err
 	}

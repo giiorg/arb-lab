@@ -33,9 +33,14 @@ func holdFraction(at, terminal time.Time) (fixedpoint.Rate, error) {
 		Div(fixedpoint.RateFromMantissa(yearNanos), fixedpoint.RoundHalfEven)
 }
 
-// annualized converts a per-settlement rate at the live interval to an APR:
-// rate × (year / interval). Used by the min_funding_apr floor.
-func annualized(perSettlement fixedpoint.Rate, interval time.Duration) (fixedpoint.Rate, error) {
+// Annualized converts a per-settlement rate at the live interval to an APR:
+// rate × (year / interval), on the 365-day base above. Used by the
+// min_funding_apr floor — and exported for the step-4 calibrate derivations,
+// which must emit EntryDrift and the exit band in exactly the unit
+// scaledThreshold consumes: one implementation, both consumers, or the two
+// annualization bases drift a few basis points apart and the artifact's
+// numbers silently mean something else here.
+func Annualized(perSettlement fixedpoint.Rate, interval time.Duration) (fixedpoint.Rate, error) {
 	perYear, err := fixedpoint.RateFromMantissa(yearNanos).
 		Div(fixedpoint.RateFromMantissa(int64(interval)), fixedpoint.RoundHalfEven)
 	if err != nil {

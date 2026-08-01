@@ -67,7 +67,7 @@ func TestHoldFractionPins(t *testing.T) {
 func TestAnnualizedPins(t *testing.T) {
 	// A 7-hour interval: 8760/7 is infinite in decimal, so both the
 	// division and the multiply engage their modes.
-	got, err := annualized(rate(t, "0.0001"), 7*time.Hour)
+	got, err := Annualized(rate(t, "0.0001"), 7*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestAnnualizedPins(t *testing.T) {
 		t.Fatalf("annualized = %s", got.Decimal())
 	}
 	// The §3.9 interval is exact: 0.00015 × 1095.
-	got, err = annualized(rate(t, "0.00015"), 8*time.Hour)
+	got, err = Annualized(rate(t, "0.00015"), 8*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

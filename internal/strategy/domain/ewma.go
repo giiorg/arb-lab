@@ -40,6 +40,20 @@ const (
 	maxDecayHalfLives = 31
 )
 
+// EWMAHorizon is the span beyond which a settlement contributes exactly
+// nothing to the EWMA at the canonical scale: maxDecayHalfLives half-lives
+// (see that constant — 2^-31 rounds to zero at scale 9).
+//
+// Exported for the step-4 calibrate derivations, which use it as the
+// warmup rule: a residual is collected only once the trailing window
+// already spans this horizon, so every collected residual sees the same
+// effective window shape as the live steady state — a rule derived from
+// the EWMA's own constants rather than a tunable the governance would
+// have to freeze.
+func EWMAHorizon(halfLife time.Duration) time.Duration {
+	return maxDecayHalfLives * halfLife
+}
+
 // EWMA is the trailing realized-settlement average §2.4's default estimator
 // uses for settlements beyond the imminent one: exponentially weighted by
 // age, half-life a strategy param.

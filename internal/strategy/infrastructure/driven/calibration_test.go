@@ -82,9 +82,8 @@ func goldenDoc() map[string]any {
 				"provenance": prov("rest_history", "excursion_persistence_v1", "measured regime persistence", dig(0x14)),
 			},
 			"adverse_basis_move": map[string]any{
-				"asset":      "USDT",
-				"amount":     "12.5",
-				"provenance": prov("rest_history", "basis_proxy_high_quantile_v1", "hold-scale adverse basis move", dig(0x15)),
+				"value":      "0.0125",
+				"provenance": prov("rest_history", "basis_proxy_high_quantile_v1", "hold-scale adverse basis move, relative to spot", dig(0x15)),
 			},
 			"rescue_margin": map[string]any{
 				"asset":      "USDT",
@@ -242,7 +241,7 @@ func TestLoadArtifact_IdentityAndValues(t *testing.T) {
 	if got, want := a.EntryDrift.Value.Decimal(), "0.0002"; got != want {
 		t.Errorf("EntryDrift = %s; want %s", got, want)
 	}
-	if got, want := a.AdverseBasisMove.Amount.Decimal(), "12.5"; got != want {
+	if got, want := a.AdverseBasisMove.Value.Decimal(), "0.0125"; got != want {
 		t.Errorf("AdverseBasisMove = %s; want %s", got, want)
 	}
 	if got, want := len(a.Cost.Cells), 4; got != want {

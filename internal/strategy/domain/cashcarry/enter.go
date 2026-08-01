@@ -33,7 +33,7 @@ func Enter(in domain.DecisionInput) (domain.Decision, error) {
 
 	// §5.2 min_funding_apr: the annualized live estimate must clear the
 	// policy floor, or the hold is not evaluated further.
-	apr, err := annualized(in.View.Funding.Rate, in.View.Funding.Interval)
+	apr, err := Annualized(in.View.Funding.Rate, in.View.Funding.Interval)
 	if err != nil {
 		return domain.Decision{}, fmt.Errorf("enter: %w", err)
 	}
