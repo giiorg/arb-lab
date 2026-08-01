@@ -302,3 +302,22 @@ recorded here only so a later reader knows which column the numbers came from.
 3. **Bybit's page states a caveat worth carrying**: "Actual fees charged depend on the displayed fee
    rates applicable to your account after login" — one more reason the provenance class of these rows
    is `hand_recorded`, never `fetched`.
+
+### Family-1 REST history endpoints, observed live (2026-08-01) — the slice B fetch facts `[→ design §41c/§41f, step 4 slice B]`
+
+Verified by the `arblab calibrate fetch` runs that committed the four `datasets/` files (unauthenticated
+GETs from this host, pages stored verbatim in the files — the observations below are re-derivable from
+the committed bytes):
+
+| Series | Endpoint | Page limit | Shape facts |
+|---|---|---|---|
+| Binance funding history | `GET https://fapi.binance.com/fapi/v1/fundingRate?symbol=&startTime=&endTime=&limit=` | 1000 | rows ASCENDING; `fundingTime` ms epoch **with millisecond jitter** (observed `1672560000008`, 8 ms past the 08:00 grid instant); `fundingRate` decimal string; `markPrice` empty on old rows; serves 2023-01-01 onward with a complete 8h grid through 2026-01-31 |
+| Bybit funding history | `GET https://api.bybit.com/v5/market/funding/history?category=linear&symbol=&startTime=&endTime=&limit=` | 200 | V5 envelope (`retCode`/`result.list`); rows **NEWEST-FIRST**; `fundingRateTimestamp` is a STRING of ms; grid exact (no jitter observed); complete 8h grid 2023-01-01 → 2026-01-31 |
+| Binance spot klines | `GET https://api.binance.com/api/v3/klines?symbol=&interval=1h&startTime=&endTime=&limit=` | 1000 | array-of-arrays, index 0 open-time ms, index 1 open-price string; **2023-03-24T13:00Z DOES NOT EXIST** (that day's spot halt — the completeness refusal fired live on the full range, so the committed kline era starts 2023-04-01); complete thereafter |
+| Binance mark-price klines | `GET https://fapi.binance.com/fapi/v1/markPriceKlines?symbol=&interval=1h&startTime=&endTime=&limit=` | 1500 (1000 used) | same array shape, volume fields zero; **no 2023-03-24 hole** (perp mark kept printing through the spot halt) — the shared 2023-04-01 era start is the SPOT series' constraint, adopted by both because the basis derivation subtracts them pairwise |
+
+1. **The jitter tolerance is an observed necessity, not caution**: exact-grid matching would refuse
+   real Binance funding history on the 8 ms row above. `driving.GridJitterTolerance` (1 minute,
+   inclusive) is 1/480th of the funding interval — no row can be ambiguous between grid points.
+2. **§38f's "funding is re-fetchable" now has a measured floor**: both venues served the full
+   three-year 8h grid with zero gaps. Klines are re-fetchable too, with the one spot-halt hole.

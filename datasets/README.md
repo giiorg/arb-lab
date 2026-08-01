@@ -31,4 +31,24 @@ process loads.
 Book data is deliberately **not** here: the capture archive owns book
 bytes, and the artifact cites archive manifest digests instead (rule H2).
 
-The directory is empty until step 4 slice B lands the fetchers.
+## The committed roster (slice B, fetched 2026-08-01)
+
+| File | Rows | Grid |
+|---|---|---|
+| `binance/funding.BTCUSDT.2023-01-01.2026-01-31.json` | 3381 | 8h, 00:00→16:00 UTC |
+| `bybit/funding.BTCUSDT.2023-01-01.2026-01-31.json` | 3381 | 8h, 00:00→16:00 UTC |
+| `binance/spot_kline_1h.BTCUSDT.2023-04-01.2026-01-31.json` | 24888 | 1h open times |
+| `binance/mark_kline_1h.BTCUSDT.2023-04-01.2026-01-31.json` | 24888 | 1h open times |
+
+Digests, row counts and era bounds are PINNED in
+`internal/strategy/infrastructure/driving/committed_test.go`, so an edit
+to any of these files is a build break, not a review hope.
+
+**The kline era starts 2023-04-01, not the funding era's 2023-01-01.**
+Binance served no spot kline for 2023-03-24T13:00Z (that day's spot
+halt), and a closed identity cannot claim an instant the venue never
+served — the completeness refusal fired live on the full range, which is
+rule H3 doing its job. Both kline series share one era because the basis
+derivation subtracts them pairwise. Bybit klines are deliberately absent:
+no derivation consumes them this milestone (the §41h seal fixes the
+scored venue to Binance), and the fetcher refuses them by name.
