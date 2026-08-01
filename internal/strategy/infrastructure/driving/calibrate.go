@@ -299,12 +299,6 @@ func CheckDatasetDigest(recorded string, data []byte) error {
 	return nil
 }
 
-// Calibrator is the `arblab calibrate` command's core. The frame above is
-// real; the derivation is not — Run refuses by name until slices B and C
-// land the fetchers, the derivation math and the freeze.
-type Calibrator struct{}
-
-// Run refuses: the derivation is unbuilt. The refusal is the same honesty
-// as step 3's ErrCoreUnbuilt door — a skeleton that admits it is one,
-// rather than an empty derivation emitting an empty artifact.
-func (Calibrator) Run() error { return ErrDerivationUnbuilt }
+// Calibrator moved to run.go the session the derivation became real —
+// slice C retired the ErrDerivationUnbuilt door (its sentinel above stays
+// for the battery that proved the door refused while it existed).

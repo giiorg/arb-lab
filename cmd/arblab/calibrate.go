@@ -82,14 +82,43 @@ func calibrateFetch(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// calibrateRun is `arblab calibrate run`: the governed derivation. The
-// frame exists (step 4 slice A); the derivation run lands with slice C's
-// freeze — until then the door refuses by name rather than emitting an
-// empty artifact.
-func calibrateRun(_ []string, stderr io.Writer) int {
-	if err := (driving.Calibrator{}).Run(); err != nil {
+// calibrateRun is `arblab calibrate run`: the governed derivation (§41e).
+// The freeze instant is an ARGUMENT — the one wall-clock read here is the
+// operator's stated intent, recorded on the command line, never an
+// ambient default: a derivation that stamps "now" cannot produce
+// byte-identical artifacts across the two invocations §41i demands.
+func calibrateRun(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("calibrate run", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	datasets := fs.String("datasets", "datasets", "committed dataset root")
+	archive := fs.String("archive", "archive", "capture archive root")
+	reference := fs.String("reference", "configs/reference.btcusdt.json", "committed reference revision")
+	out := fs.String("out", "configs/calibration.btcusdt.v1.json", "artifact output path (write-once)")
+	freeze := fs.String("freeze", "", "freeze instant, RFC3339 (required; derivation reads archive days strictly before its UTC day)")
+	if err := fs.Parse(args); err != nil {
+		return 64
+	}
+	if *freeze == "" {
+		fmt.Fprintln(stderr, "calibrate run: -freeze is required")
+		return 64
+	}
+	freezeAt, err := time.Parse(time.RFC3339, *freeze)
+	if err != nil {
+		fmt.Fprintln(stderr, "calibrate run: -freeze:", err)
+		return 64
+	}
+
+	res, err := driving.Calibrator{}.Run(driving.RunConfig{
+		DatasetsDir:   *datasets,
+		ArchiveRoot:   *archive,
+		ReferencePath: *reference,
+		OutPath:       *out,
+		Freeze:        freezeAt,
+	})
+	if err != nil {
 		fmt.Fprintln(stderr, "calibrate run:", err)
 		return 1
 	}
+	fmt.Fprintf(stdout, "calibrate run: %s\n  id %s\n  sha256 %s\n", res.ArtifactPath, res.ArtifactID, res.Hash)
 	return 0
 }

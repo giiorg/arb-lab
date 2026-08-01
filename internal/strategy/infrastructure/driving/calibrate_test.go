@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/giiorg/arb-lab/internal/strategy/domain"
 	"github.com/giiorg/arb-lab/internal/strategy/infrastructure/driven"
 	"github.com/giiorg/arb-lab/internal/strategy/infrastructure/driving"
 )
@@ -228,8 +229,13 @@ func TestCheckDatasetDigest(t *testing.T) {
 	}
 }
 
-func TestCalibratorRunRefusesUnbuilt(t *testing.T) {
-	if err := (driving.Calibrator{}).Run(); !errors.Is(err, driving.ErrDerivationUnbuilt) {
-		t.Errorf("Run = %v; want ErrDerivationUnbuilt", err)
+// The slice-B unbuilt door is retired: Run is real as of slice C, and its
+// FIRST refusal is the world's completeness — an unspecified config
+// refuses by name before the §41e binding, before one byte is derived
+// (run_test.go holds the rest of Run's battery).
+func TestCalibratorRunRefusesUnspecifiedConfig(t *testing.T) {
+	_, err := (driving.Calibrator{}).Run(driving.RunConfig{})
+	if !errors.Is(err, domain.ErrUnset) {
+		t.Errorf("Run over an empty config = %v; want domain.ErrUnset (paths)", err)
 	}
 }

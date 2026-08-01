@@ -35,7 +35,7 @@ func dispatch(args []string, stdout, stderr io.Writer) int {
 		case "fetch":
 			return calibrateFetch(args[2:], stdout, stderr)
 		case "run":
-			return calibrateRun(args[2:], stderr)
+			return calibrateRun(args[2:], stdout, stderr)
 		}
 	}
 	fmt.Fprint(stderr, usage)
