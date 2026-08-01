@@ -1,29 +1,36 @@
 ---------------------------- MODULE AmbiguousOrder ----------------------------
 (***************************************************************************)
-(* Formal model (a), SLICE A: the ambiguous-order classifier, the          *)
-(* possible-delta interval algebra, the per-venue finality contract, and   *)
-(* the reserved IntervalFloorReduction.                                    *)
+(* Formal model (a), SLICES A+B: the ambiguous-order classifier, the       *)
+(* possible-delta interval algebra, the per-venue finality contract, the   *)
+(* reserved IntervalFloorReduction, and PackageDelever's generations       *)
+(* composed onto the one shared reservation ledger.                        *)
 (*                                                                         *)
 (* COMPANION ARTIFACT. docs/state-machines.md (SM) stays normative; this   *)
 (* module model-checks SM SS2 (ambiguous-order classifier & the finality   *)
-(* contract) against the invariants its prose promises. Design record:     *)
+(* contract) composed with SM SS7 (PackageDelever generations & reserved   *)
+(* reductions) against the invariants their prose promises. Design record: *)
 (* docs/superpowers/specs/2026-08-01-formal-model-a-ambiguous-order-       *)
 (* design.md (SS46). Companion to FenceTakeover.tla (model (b)); same      *)
 (* artifact discipline, next finding tag is FM-5.                          *)
 (*                                                                         *)
-(* SLICE A scope (SS46 SS5): the interval algebra, the classifier          *)
-(* transitions, INV1-INV3 + INV7, and one deliberate broken-constant run   *)
-(* per invariant. The reservation ledger is present but SINGLE-PRODUCER    *)
-(* (this model's own reductions). Slice B adds PackageDelever's reserved   *)
-(* spot leg and the determined branch's fenced generation as the second    *)
-(* and third producers, with INV4-INV6. Slice C adds liveness P1-P4.       *)
+(* SLICE A (SS46 SS5): the interval algebra, the classifier transitions,   *)
+(* INV1-INV3 + INV7, one deliberate broken-constant run per invariant.     *)
+(* SLICE B: the reservation ledger's remaining producer (PackageDelever's  *)
+(* reserved spot leg), the SS7 generation phases, and INV4-INV6. This is   *)
+(* where SS46 SS2.1's ruling is cashed: `outstanding_reserved_reductions`  *)
+(* has THREE producers -- the determined branch's fenced generation, the   *)
+(* IntervalFloorReduction, and PackageDelever's reserved spot leg -- and   *)
+(* they all rest on ONE subtraction being exactly right. Model (b)'s       *)
+(* headline defect (FM-1) was a COMPOSITION defect; this is the            *)
+(* composition. Slice C adds liveness P1-P4.                               *)
 (*                                                                         *)
 (* Deliberately OUT of model (SS46 "Deliberately not modeled"):            *)
 (* venue-specific REST semantics, money/prices/fees (quantities are small  *)
-(* bounded integers), the liq-distance trigger, the full SS1 OMS order     *)
-(* lifecycle (an order is modeled by the interval it contributes and       *)
-(* whether it has been observed executing), and real time (a deadline is a *)
-(* nondeterministic environment event, exactly as in model (b)).           *)
+(* bounded integers), the liq-distance trigger and the margin top-up       *)
+(* ladder that precedes a generation, the full SS1 OMS order lifecycle (an *)
+(* order is modeled by the interval it contributes and whether it has been *)
+(* observed executing), and real time (a deadline is a nondeterministic    *)
+(* environment event, exactly as in model (b)).                            *)
 (***************************************************************************)
 EXTENDS Integers, Sequences
 
@@ -51,6 +58,12 @@ CONSTANTS
   \* (its ambiguous result re-enters the same contract) so the state graph
   \* is finite. A stated bound, not a claim.
   MAX_DISPATCH,
+  \* PackageDelever generations per behavior (SM SS7: "each generation is a
+  \* bounded attempt made ONLY AFTER the prior generation reaches SS6.7
+  \* finality"). TWO, not one: with a single generation the ladder's
+  \* Complete -> next-generation edge is unreachable and the "only after
+  \* finality" gate blocks nothing observable.
+  MAX_GEN,
 
   \* --- Nominal-vs-control constants (each FALSE/TRUE-flip is one NC) ----
   \* Nominal TRUE: the interval-floor magnitude is the endpoint NEAREST
@@ -94,19 +107,102 @@ CONSTANTS
   \* the realized delta alone, so a reduction already reserved is re-read
   \* as fresh naked residual and compensated a second time. This is the
   \* single subtraction SS46 SS2.1 calls the composition surface.
-  RESERVATION_AWARE_SIZING
+  RESERVATION_AWARE_SIZING,
+
+  \* --- SLICE B: PackageDelever (SM SS7) ---------------------------------
+  \* The reservation's LIFETIME. SM SS7 FLAG-3's ruling reads: "the
+  \* reservation stays generation-scoped FROM CREATION, not first made here
+  \* [SpotReduceAuthorized]; the SS2 classifier subtracts it THROUGHOUT."
+  \* TRUE models that literally -- the pkg-spot entry enters the ledger at
+  \* `Planned`, carrying the generation's target, before the perp reduce has
+  \* confirmed anything. FALSE models the alternative reading: the entry is
+  \* the generation's OUTSTANDING NET intent, which is zero while the
+  \* not-yet-executed perp buy still offsets the intended spot sell, so the
+  \* counted amount only becomes nonzero at SpotReduceAuthorized, sized from
+  \* the CONFIRMED perp reduction.
+  \* The two readings differ observably, which is why this is a constant and
+  \* not a modeling choice taken silently.
+  RESERVE_AT_CREATION,
+  \* Nominal TRUE: the reserved spot leg "sells no more spot than the
+  \* CONFIRMED perp reduction" (SM SS7 Invariants, perp-short-first
+  \* sequencing). FALSE = negative control NC8: sized from the generation's
+  \* TARGET instead, so a partially-confirmed perp reduction is followed by
+  \* a full-size spot sale and the transient goes net-SHORT -- exactly the
+  \* direction SS7 says it must never take, in the rally that triggered the
+  \* generation. Detectable ONLY where the perp confirmation can fall short
+  \* of the target; probe PC18 is what proves that state is reached.
+  SPOT_CAPPED_BY_PERP,
+  \* Nominal TRUE: the perp short is reduced FIRST and confirmed to finality
+  \* before the spot leg is authorized (SM SS7 transitions: "confirms that
+  \* reduction to finality (SS6.7)" before any spot sell). FALSE = negative
+  \* control NC9: the spot leg may be authorized from `Planned`.
+  \* NOT an independent knob on the same number: an authorization taken
+  \* before finality has NO confirmed quantity to size from, so the target
+  \* is all that exists. NC9 removes the CONFIRMATION; sizing from the
+  \* target is what its absence leaves behind (see SpotCap).
+  PERP_FIRST,
+  \* Nominal TRUE: both superseding paths (EmergencyClosePackage, core
+  \* SS5.3; FenceReadyLost, core SS7.4) "cancel/quiesce the generation's
+  \* reserved second leg to SS6.7 finality FIRST" (SM SS7 Invariants).
+  \* FALSE = negative control NC10: the generation is ended while its
+  \* reserved leg is still live.
+  QUIESCE_BEFORE_SUPERSEDE,
+  \* Nominal TRUE: a reservation is released when its reduction reaches
+  \* finality. FALSE = negative control NC11: the entry survives its own
+  \* counterpart, so `outstanding_reserved_reductions` keeps subtracting a
+  \* reduction that already happened -- SS46 SS4's "no naked residual is
+  \* masked by a reservation that has already COMPLETED". This is the
+  \* control that forces the Impl/True split down into the LEDGER itself:
+  \* see ImplReserved vs TrueReserved.
+  RELEASE_ON_FINALITY,
+  \* Nominal TRUE: a generation that ends by supersession or terminal
+  \* flatten takes its reservation with it. FALSE = negative control NC12:
+  \* the entry is ORPHANED -- no generation owns it and nothing will ever
+  \* resolve it, so it subtracts from every later sizing forever. Separated
+  \* from QUIESCE_BEFORE_SUPERSEDE (NC10) rather than folded into it so that
+  \* one control trips one invariant: NC10 is about the LEG's finality
+  \* (INV6), this is about the LEDGER ENTRY (INV4).
+  RELEASE_ON_SUPERSEDE
 
 (***************************************************************************)
 (* Value domains. Deliberately generous: TypeOK is the CHECK that the      *)
 (* bounds hold, so a domain that is too tight would report as a type       *)
 (* violation (a real signal) rather than silently truncating behavior.     *)
 (***************************************************************************)
-QDom    == 0..8        \* an order's remaining quantity
-AmtDom  == -16..16     \* signed reduction magnitudes / realized delta
+\* Widened for slice B, and the widening was FORCED rather than chosen: with
+\* SS7 composed in, TypeOK failed at depth 22 on an order of q = 9 against
+\* the slice-A ceiling of 8. That is the domain doing its declared job -- a
+\* too-tight domain reports as a type violation, which is a real signal,
+\* instead of silently truncating behavior. The composition ratchets the
+\* residual higher than SS2 alone can: SS7's generations move delta without
+\* spending the dispatch budget, so the reachable |residual| gains
+\* MAX_GEN * MAXQ on top of what SS2's own budget allows, and a reduction
+\* sized from that residual re-enters as an order of that size.
+QDom    == 0..14       \* an order's remaining quantity
+AmtDom  == -28..28     \* signed reduction magnitudes / realized delta
 Dirs    == { -1, 1 }   \* -1 = the order can still SELL (reduce delta)
                        \* +1 = the order can still BUY  (raise delta)
-Kinds   == { "exposure", "floor" }
+\* The THREE producers of `outstanding_reserved_reductions` (SS46 SS2.1):
+\* the determined branch's fenced generation, the IntervalFloorReduction,
+\* and PackageDelever's reserved spot leg. The kind is carried on the entry
+\* so a per-producer claim can be made about the ONE subtraction they share
+\* -- without it, "the ledger is nonzero" could not be attributed.
+Kinds   == { "exposure", "floor", "pkgspot" }
 Classes == { "Determined", "Ambiguous", "DeadlineExceeded" }
+
+\* PackageDelever generation phases, verbatim from SM SS7 States, plus
+\* "None" for "no active generation" (SS7's own transition table names that
+\* as a from-state).
+PdPhases == { "None", "Planned", "PerpReduceInFlight", "PerpReduceFinal",
+              "SpotReduceAuthorized", "SpotReduceInFlight", "Complete",
+              "Held", "TerminalFlatten" }
+
+\* The two superseding paths, kept DISTINCT rather than collapsed to a
+\* boolean: SM SS7 names them separately (core SS5.3's EmergencyClosePackage
+\* and core SS7.4's FenceReadyLost arbitration), and a single flag would let
+\* one path be reachable while the other is dead code with the coverage
+\* probe still green.
+SupPaths == { "none", "EmergencyClosePackage", "FenceReadyLost" }
 
 VARIABLES
   \* --- The hedge group's unresolved counter-legs (SM SS2 `Ambiguous`) ---
@@ -124,11 +220,14 @@ VARIABLES
   \* residual, negative = net short residual.
   realized,
   \* outstanding_reserved_reductions, as reserved GENERATIONS.
-  \* pending[k] = [active, amt, kind]. `amt` is signed in the same units
-  \* as the residual it cancels: +1 means "1 of long residual is already
-  \* committed to be reduced". SLICE A is single-producer: every entry is
-  \* one of this model's own dispatches. Slice B promotes this to the
-  \* three-producer ledger of SS46 SS2.1.
+  \* pending[k] = [active, amt, kind, stale]. `amt` is signed in the same
+  \* units as the residual it cancels: +1 means "1 of long residual is
+  \* already committed to be reduced". `kind` names the PRODUCER, which is
+  \* what makes a per-producer claim about the shared subtraction possible.
+  \* `stale` = the entry's counterpart has already reached finality and the
+  \* entry outlived it; reachable only under RELEASE_ON_FINALITY = FALSE
+  \* (NC11), and read by the SIZING but never by the invariants -- the
+  \* Impl/True split pushed down into the ledger.
   pending,
   \* --- The classifier's REPORTED verdict (SM SS2 States) ----------------
   \* A variable, not a definition: the whole content of INV7 is that the
@@ -163,18 +262,54 @@ VARIABLES
   nonFloorInDeadline,        \* INV3: a non-floor reduction in the
                              \* deadline-exceeded branch
   floorWhileStraddling,      \* INV3: a floor over a straddling interval
+  \* --- SLICE B: the PackageDelever generation (SM SS7) -------------------
+  \* The generation's phase. "None" = no active generation.
+  pd,
+  \* The generation's explicit per-leg target (SM SS7 `Planned`: "explicit
+  \* per-leg target positions"). One number here: both legs share it,
+  \* because the package is neutral at entry so the per-leg targets are the
+  \* same reduction on each side.
+  pdTarget,
+  \* Remaining executable quantity on the IN-FLIGHT perp-short reduction
+  \* (a buy-to-reduce, so it can only RAISE delta: its possible-delta
+  \* interval is [0, pdPerp]). It is an exposure-changing order on the
+  \* hedge group, so it enters SS2's interval algebra and makes the residual
+  \* Ambiguous while it is live -- that is the composition, not a bolt-on.
+  pdPerp,
+  \* CONFIRMED perp reduction this generation (executed and reconciled).
+  \* The spot leg is capped by THIS, never by pdTarget.
+  pdDone,
+  \* Spot actually SOLD this generation. INV5 reads this (the outcome), not
+  \* the cap (the guard).
+  pdSold,
+  \* Generations started, bounded by MAX_GEN.
+  gens,
+  \* Which superseding path fired, if any (SM SS7's two supersession rows).
+  superseded,
+  \* INV6: a supersession ended a generation whose reserved second leg had
+  \* NOT reached finality. Written unconditionally from the state at the
+  \* supersession, exactly like the SS2 history flags above.
+  supersededWithLiveLeg,
   \* --- Bound bookkeeping ------------------------------------------------
   budget
 
 vars == << orders, realized, pending, cls, deadline, floorIssued, floorCount,
            overshoot, longReduced, shortReduced,
            dispatchedWhileAmbiguous, nonFloorInDeadline, floorWhileStraddling,
+           pd, pdTarget, pdPerp, pdDone, pdSold, gens, superseded,
+           supersededWithLiveLeg,
            budget >>
 
-histVars == << overshoot, longReduced, shortReduced,
+\* The SS2 flags and the SS7 flag are kept as two groups so a SS7 action can
+\* write its own flag while leaving the SS2 six alone, without listing six
+\* names at every site (where one omission is a silently unassigned
+\* variable, the trap SS46 SS7d records).
+sm2Hist  == << overshoot, longReduced, shortReduced,
                dispatchedWhileAmbiguous, nonFloorInDeadline,
                floorWhileStraddling >>
+histVars == << sm2Hist, supersededWithLiveLeg >>
 epiVars  == << cls, deadline, floorIssued, floorCount >>
+pdVars   == << pd, pdTarget, pdPerp, pdDone, pdSold, gens, superseded >>
 
 OrderIds == 1..NORD
 PendIds  == 1..NPEND
@@ -190,12 +325,35 @@ Abs(x)   == IF x < 0 THEN -x ELSE x
 LoOf(o)  == IF o.dir = -1 THEN -o.q ELSE 0
 HiOf(o)  == IF o.dir =  1 THEN  o.q ELSE 0
 
+\* The summed possible-delta interval. The in-flight PackageDelever perp
+\* reduction is part of it: it is an exposure-changing order on the hedge
+\* group with remaining executable quantity, so SM SS2 `Ambiguous` covers it
+\* verbatim. It is a BUY-to-reduce, so it can only raise delta -- its
+\* interval is [0, pdPerp] and it contributes to the high end alone.
 SumLo    == SumSeq([i \in OrderIds |-> LoOf(orders[i])])
-SumHi    == SumSeq([i \in OrderIds |-> HiOf(orders[i])])
+SumHi    == SumSeq([i \in OrderIds |-> HiOf(orders[i])]) + pdPerp
 
-\* outstanding_reserved_reductions, summed over live generations.
-Reserved == SumSeq([k \in PendIds |->
-                      IF pending[k].active THEN pending[k].amt ELSE 0])
+\* outstanding_reserved_reductions, summed over live generations -- TWICE.
+\*
+\*   ImplReserved -- what the SIZING subtracts. Includes an entry whose
+\*                   counterpart already reached finality (RELEASE_ON_
+\*                   FINALITY = FALSE, NC11).
+\*   TrueReserved -- what is genuinely still outstanding. The INVARIANTS
+\*                   read this and only this.
+\*
+\* Without the split, NC11 would corrupt the invariants' own inputs and the
+\* control would be checking a quantity it had just broken.
+ImplReserved == SumSeq([k \in PendIds |->
+                          IF pending[k].active THEN pending[k].amt ELSE 0])
+TrueReserved == SumSeq([k \in PendIds |->
+                          IF pending[k].active /\ ~pending[k].stale
+                            THEN pending[k].amt ELSE 0])
+
+\* The PackageDelever producer's own contribution to that one sum.
+PdPendIds  == { k \in PendIds : pending[k].active /\ pending[k].kind = "pkgspot" }
+PdReserved == SumSeq([k \in PendIds |->
+                        IF pending[k].active /\ pending[k].kind = "pkgspot"
+                          THEN pending[k].amt ELSE 0])
 
 (***************************************************************************)
 (* TWO views of the same quantities, kept apart on purpose.                *)
@@ -209,15 +367,73 @@ Reserved == SumSeq([k \in PendIds |->
 (* the mechanism it is checking": an invariant physically cannot see a     *)
 (* constant's effect on the implementation's arithmetic.                   *)
 (***************************************************************************)
-ImplResidual == IF RESERVATION_AWARE_SIZING THEN realized - Reserved ELSE realized
+ImplResidual == IF RESERVATION_AWARE_SIZING THEN realized - ImplReserved ELSE realized
 ImplLo       == ImplResidual + SumLo
 ImplHi       == ImplResidual + SumHi
 ImplStraddles == ImplLo < 0 /\ ImplHi > 0
 
-TrueResidual == realized - Reserved
+TrueResidual == realized - TrueReserved
 TrueLo       == TrueResidual + SumLo
 TrueHi       == TrueResidual + SumHi
 Straddles    == TrueLo < 0 /\ TrueHi > 0
+
+(***************************************************************************)
+(* NOT LIVE. PhysLo/PhysHi and CommittedLo/Hi below exist only to define    *)
+(* UnwarrantedREJECTED, which no configuration checks -- they are kept so   *)
+(* the rejected reasoning can be read rather than re-proposed. INV4's live  *)
+(* clause is IntentsBacked.                                                 *)
+(*                                                                         *)
+(* The PHYSICAL exposure range: fills that happened, plus the intervals of *)
+(* orders that are actually live. The LEDGER PLAYS NO PART IN IT.          *)
+(*                                                                         *)
+(* This exists because True-side quantities are not a third opinion -- they *)
+(* are computed FROM the ledger, so a corrupt ledger corrupts them too, and *)
+(* INV1, phrased over them, computes a dispatch as non-overshooting         *)
+(* precisely when the ledger it trusted is the thing that is wrong. An      *)
+(* invariant built on the ledger cannot audit the ledger. PhysLo/PhysHi are *)
+(* the independent quantity INV4 needs to say what the harm actually is.    *)
+(***************************************************************************)
+PhysLo == realized + SumLo
+PhysHi == realized + SumHi
+
+\* ...plus the reductions that are ACTUALLY OUT. A reservation whose order
+\* has been submitted WILL move delta, so netting against it is correct
+\* anticipation; a reservation that is still an INTENTION will not, and
+\* netting against it is the FM-5 defect. The `sent` bit is what separates
+\* them, and the separation is the whole content of INV4's harm clause:
+\*
+\*   YOU MAY NET AGAINST AN ORDER THAT IS OUT.
+\*   YOU MAY NOT NET AGAINST AN INTENTION.
+\*
+\* Note the SIZING must still subtract intentions -- that is precisely what
+\* stops SS7's deliberate net-long transient being re-hedged (SS7 Invariants,
+\* "the SS6.7 classifier subtracts the reservation"). The two questions are
+\* different, so they get two quantities: ImplResidual for the sizing,
+\* CommittedLo/Hi for the harm.
+SentReserved == SumSeq([k \in PendIds |->
+                          IF pending[k].active /\ ~pending[k].stale
+                             /\ pending[k].sent
+                            THEN pending[k].amt ELSE 0])
+CommittedLo == realized - SentReserved + SumLo
+CommittedHi == realized - SentReserved + SumHi
+
+\* THE SECOND FORMULATION THAT WAS TRIED AND IS ALSO WRONG (SS46 SS8e,
+\* FM-model-2). A dispatch whose direction no reachable state warrants once
+\* every order actually in flight has settled.
+\*
+\* It fails in the opposite direction to ReservationsBackedREJECTED: judged
+\* against SENT reservations only, it flags CORRECT anticipation of a booked
+\* intent (TLC, 8 steps: a group flat at `realized = 0` with the generation
+\* committed to sell 2, where buying 2 is exactly right and lands flat);
+\* judged against ALL reservations, it reads the very ledger that is wrong
+\* and FM-5 becomes invisible to it again.
+\*
+\* THE CONCLUSION IS THE FINDING: there is no harm-level phrasing here that
+\* is both sound and complete, because every "what will the position be"
+\* quantity is computed from the ledger. A ledger defect has to be caught at
+\* the LEDGER level -- which is what IntentsBacked does.
+UnwarrantedREJECTED(amt) == \/ (amt > 0 /\ CommittedHi <= 0)
+                            \/ (amt < 0 /\ CommittedLo >= 0)
 
 (***************************************************************************)
 (* The classifier (SM SS2 States + Scope).                                 *)
@@ -228,15 +444,22 @@ Straddles    == TrueLo < 0 /\ TrueHi > 0
 (* collapsed by executing in full or by a cancel acknowledged with zero    *)
 (* executions.                                                             *)
 (***************************************************************************)
-TrulyDetermined(o)    == \A i \in OrderIds : o[i].q = 0
+\* `p` is the in-flight PackageDelever perp reduction's remaining quantity.
+\* It is an exposure-changing order on the group like any other, so a
+\* classifier that ignored it would report Determined over a live leg -- the
+\* composition's own version of INV7's hazard.
+TrulyDetermined(o, p)    == (\A i \in OrderIds : o[i].q = 0) /\ p = 0
 
 \* What the classifier REPORTS. Under CLASSIFY_ON_FILLS_ONLY it reads the
 \* fill ledger alone, so an order with remaining quantity that has never
-\* been observed executing is invisible to it.
-ReportedDetermined(o) ==
+\* been observed executing is invisible to it -- including a PackageDelever
+\* perp reduction that has not yet printed a fill (pdDone = 0), which is
+\* the same SubmissionUnknown/Acknowledged case one level out.
+ReportedDetermined(o, p) ==
   IF CLASSIFY_ON_FILLS_ONLY
-  THEN \A i \in OrderIds : (o[i].q = 0 \/ ~o[i].seen)
-  ELSE TrulyDetermined(o)
+  THEN /\ \A i \in OrderIds : (o[i].q = 0 \/ ~o[i].seen)
+       /\ (p = 0 \/ pdDone = 0)
+  ELSE TrulyDetermined(o, p)
 
 \* Re-classification. SM SS2 Scope [-> R1d-3]: classification re-runs on
 \* EVERY fill/position event AND every hedge-group order-lifecycle/finality
@@ -250,8 +473,8 @@ ReportedDetermined(o) ==
 \* An episode ENDS when the classifier reports Determined: the deadline
 \* clears and the floor's guard and dispatch count reset with it. INV2 is
 \* therefore per-episode, exactly as SS46 SS4 states it.
-Reclassify(o, d) ==
-  LET det == ReportedDetermined(o)
+Reclassify(o, p, d) ==
+  LET det == ReportedDetermined(o, p)
   IN  /\ cls'         = IF det THEN "Determined"
                         ELSE IF d THEN "DeadlineExceeded" ELSE "Ambiguous"
       /\ deadline'    = IF det THEN FALSE ELSE d
@@ -290,6 +513,11 @@ RecordDispatch(amt, kind) ==
                                   \/ (cls = "DeadlineExceeded" /\ kind # "floor"))
   /\ floorWhileStraddling'     = (floorWhileStraddling
                                   \/ (kind = "floor" /\ Straddles))
+  \* The SS7 flag is written by Supersede alone. Named here rather than at
+  \* the two call sites so that adding a third dispatching action cannot
+  \* leave it unassigned -- which is not a silent failure (TLC refuses the
+  \* successor state outright) but is a failure at the wrong moment.
+  /\ UNCHANGED supersededWithLiveLeg
 
 FreePend  == { k \in PendIds : ~pending[k].active }
 FreeOrder == { i \in OrderIds : orders[i].q = 0 }
@@ -297,11 +525,18 @@ FreeOrder == { i \in OrderIds : orders[i].q = 0 }
 \* An inactive slot is canonicalized (amt = 0, kind = "exposure") and a
 \* collapsed order is canonicalized (dir = -1, seen = FALSE). Sound
 \* because nothing reads those fields once the slot/order is inactive:
-\* LoOf/HiOf are 0 at q = 0, Reserved skips inactive slots, and the broken
+\* LoOf/HiOf are 0 at q = 0, the ledger sums skip inactive slots, and the
 \* classifier's `q = 0 \/ ~seen` is already true at q = 0. It exists only
 \* to stop two behaviorally identical states counting twice.
-DeadPend  == [active |-> FALSE, amt |-> 0, kind |-> "exposure"]
+DeadPend  == [active |-> FALSE, amt |-> 0, kind |-> "exposure",
+               stale |-> FALSE, sent |-> FALSE]
 DeadOrder == [dir |-> -1, q |-> 0, seen |-> FALSE]
+
+\* A live ledger entry, by producer. `snt` = its counterpart order has been
+\* SUBMITTED. A reservation booked at INTENT and one booked at DISPATCH are
+\* different objects and INV4 has to tell them apart -- see CommittedLo.
+Pend(a, kd, snt) == [active |-> TRUE, amt |-> a, kind |-> kd,
+                     stale |-> FALSE, sent |-> snt]
 
 (***************************************************************************)
 (* Init. The environment picks the hedge group's opening position: the     *)
@@ -321,7 +556,10 @@ Init ==
   /\ realized \in -MAXQ..MAXQ
   /\ pending = [ k \in PendIds |-> DeadPend ]
   /\ deadline = FALSE
-  /\ cls = (IF ReportedDetermined(orders) THEN "Determined" ELSE "Ambiguous")
+  /\ pd = "None" /\ pdTarget = 0 /\ pdPerp = 0
+  /\ pdDone = 0 /\ pdSold = 0 /\ gens = 0
+  /\ superseded = "none" /\ supersededWithLiveLeg = FALSE
+  /\ cls = (IF ReportedDetermined(orders, 0) THEN "Determined" ELSE "Ambiguous")
   /\ floorIssued = FALSE /\ floorCount = 0
   /\ overshoot = FALSE
   /\ longReduced = FALSE /\ shortReduced = FALSE
@@ -337,8 +575,10 @@ Init ==
 \* A fill/position event. The order executes x of its remaining quantity:
 \* the realized delta moves by dir*x and the remaining interval shrinks by
 \* exactly the same amount -- so the TRUE net range [TrueLo, TrueHi] is
-\* INVARIANT under a fill. (That is the first half of why INV1 checked at
-\* dispatch is not weaker than INV1 checked everywhere; see INV1.)
+\* INVARIANT under a fill. (That is the first half of the small theorem
+\* behind INV1b -- which slice B moved to the SS2-ONLY configuration, because
+\* SS7's perp reduce is exactly the kind of event the theorem assumes away.
+\* See INV1b.)
 OrderFill(i, x) ==
   /\ orders[i].q > 0
   /\ x \in 1..orders[i].q
@@ -348,8 +588,9 @@ OrderFill(i, x) ==
          no == [orders EXCEPT ![i] = o2]
      IN /\ orders' = no
         /\ realized' = realized + orders[i].dir * x
-        /\ Reclassify(no, deadline)
+        /\ Reclassify(no, pdPerp, deadline)
   /\ UNCHANGED << pending, budget >>
+  /\ UNCHANGED pdVars
   /\ UNCHANGED histVars
 
 \* An order-lifecycle/finality event that collapses the interval with NO
@@ -368,8 +609,9 @@ OrderFinal(i) ==
   /\ orders[i].q > 0
   /\ LET no == [orders EXCEPT ![i] = DeadOrder]
      IN /\ orders' = no
-        /\ Reclassify(no, deadline)
+        /\ Reclassify(no, pdPerp, deadline)
   /\ UNCHANGED << realized, pending, budget >>
+  /\ UNCHANGED pdVars
   /\ UNCHANGED histVars
 
 \* SM SS2 row 3: the contract cannot complete within its deadline
@@ -379,6 +621,7 @@ DeadlineBlows ==
   /\ deadline' = TRUE
   /\ cls' = "DeadlineExceeded"
   /\ UNCHANGED << orders, realized, pending, floorIssued, floorCount, budget >>
+  /\ UNCHANGED pdVars
   /\ UNCHANGED histVars
 
 (***************************************************************************)
@@ -403,11 +646,11 @@ IssueExposureReduction ==
   /\ ImplResidual # 0
   /\ LET k == CHOOSE k \in FreePend : TRUE
          amt == ImplResidual
-     IN /\ pending' = [pending EXCEPT ![k] =
-                         [active |-> TRUE, amt |-> amt, kind |-> "exposure"]]
+     IN /\ pending' = [pending EXCEPT ![k] = Pend(amt, "exposure", TRUE)]
         /\ RecordDispatch(amt, "exposure")
   /\ budget' = budget - 1
   /\ UNCHANGED << orders, realized >>
+  /\ UNCHANGED pdVars
   /\ UNCHANGED epiVars
 
 \* SM SS2 row 5 + the Interval-floor rule: the deadline-exceeded branch's
@@ -434,13 +677,13 @@ IssueFloor ==
            ELSE (IF Abs(ImplLo) <= Abs(ImplHi) THEN ImplLo ELSE ImplHi)
          k == CHOOSE k \in FreePend : TRUE
      IN /\ amt # 0
-        /\ pending' = [pending EXCEPT ![k] =
-                         [active |-> TRUE, amt |-> amt, kind |-> "floor"]]
+        /\ pending' = [pending EXCEPT ![k] = Pend(amt, "floor", TRUE)]
         /\ RecordDispatch(amt, "floor")
   /\ floorIssued' = TRUE
   /\ floorCount' = floorCount + 1
   /\ budget' = budget - 1
   /\ UNCHANGED << orders, realized, cls, deadline >>
+  /\ UNCHANGED pdVars
 
 (***************************************************************************)
 (* How a reserved generation resolves.                                     *)
@@ -448,13 +691,29 @@ IssueFloor ==
 
 \* The generation reaches finality fully executed: the committed delta
 \* becomes realized delta and the reservation is released. The TRUE net
-\* range is unchanged across this step (realized and Reserved move
-\* together) -- the second half of INV1's at-dispatch sufficiency.
+\* range is unchanged across this step (realized and the ledger move
+\* together) -- the second half of INV1b's small theorem.
+\*
+\* The pkg-spot producer is excluded here and resolves through PdSpotFinal
+\* instead: SM SS7 gates its dispatch on the perp reduction's finality, so a
+\* reserved-but-not-yet-authorized spot leg cannot fill, and "only the
+\* RESERVED spot reduction (never a policy-selected re-hedge) completes the
+\* generation" makes its resolution a generation event rather than a plain
+\* reduction's.
 ReductionFills(k) ==
   /\ pending[k].active
+  /\ pending[k].kind # "pkgspot"
+  /\ ~pending[k].stale
   /\ realized' = realized - pending[k].amt
-  /\ pending' = [pending EXCEPT ![k] = DeadPend]
+  \* RELEASE_ON_FINALITY = FALSE (NC11) keeps the entry in the ledger after
+  \* its counterpart has realized. It is MARKED rather than silently left
+  \* alone, so the invariant can name the condition instead of inferring it
+  \* from an arithmetic discrepancy it is not allowed to see.
+  /\ pending' = [pending EXCEPT ![k] =
+                   IF RELEASE_ON_FINALITY THEN DeadPend
+                   ELSE [pending[k] EXCEPT !.stale = TRUE]]
   /\ UNCHANGED << orders, budget >>
+  /\ UNCHANGED pdVars
   /\ UNCHANGED epiVars
   /\ UNCHANGED histVars
 
@@ -471,6 +730,8 @@ ReductionFills(k) ==
 \* non-termination here is a naked position held open indefinitely.
 ReductionAmbiguous(k) ==
   /\ pending[k].active
+  /\ pending[k].kind # "pkgspot"
+  /\ ~pending[k].stale
   /\ FreeOrder # {}
   /\ LET i == CHOOSE i \in FreeOrder : TRUE
          a == pending[k].amt
@@ -479,20 +740,297 @@ ReductionAmbiguous(k) ==
                    q   |-> Abs(a), seen |-> FALSE]]
      IN /\ orders' = no
         /\ pending' = [pending EXCEPT ![k] = DeadPend]
-        /\ Reclassify(no, deadline)
+        /\ Reclassify(no, pdPerp, deadline)
   /\ UNCHANGED << realized, budget >>
+  /\ UNCHANGED pdVars
   /\ UNCHANGED histVars
+
+(***************************************************************************)
+(* SLICE B: PackageDelever generations (SM SS7), composed onto the SAME    *)
+(* reservation ledger.                                                     *)
+(*                                                                         *)
+(* The composition is deliberately made of PARTS THAT ALREADY EXIST rather *)
+(* than a parallel bookkeeping track:                                      *)
+(*                                                                         *)
+(*  - the perp-short reduction is an exposure-changing order on the hedge  *)
+(*    group, so while it is in flight it contributes a possible-delta      *)
+(*    interval [0, pdPerp] to the SAME sum SS2's classifier reads, and the *)
+(*    residual is Ambiguous for the SAME reason any counter-leg makes it   *)
+(*    ambiguous;                                                           *)
+(*  - the reserved spot leg is a `pending` entry, one of the THREE         *)
+(*    producers of the one subtraction, distinguished only by its kind.    *)
+(*                                                                         *)
+(* WHAT IS NOT RECORDED THROUGH RecordDispatch, and why: the generation's  *)
+(* own legs are not SS2 compensating trades. SS2's single-gate invariant    *)
+(* says PackageDelever ROUTES THROUGH the classifier -- and it does here,  *)
+(* because its perp leg lands in the interval algebra and its spot leg     *)
+(* lands in the ledger -- but neither leg compensates an uncertain         *)
+(* residual, so INV1/INV3 are not the properties that own them. INV5 is.   *)
+(* Recording them as dispatches would make INV3 fire on the generation     *)
+(* completing normally, which is a property the spec does not state.       *)
+(***************************************************************************)
+
+\* A generation exists and has not finished.
+PdActive  == pd \notin { "None", "Complete", "TerminalFlatten" }
+
+\* The reserved SECOND leg has been submitted and has not reached finality.
+\* This is precisely what SM SS7's two supersession rows require to be
+\* quiesced to SS6.7 finality FIRST.
+PdLegLive == pd \in { "SpotReduceInFlight", "Held" }
+
+\* The spot leg's size cap. SM SS7: "sells no more spot than the CONFIRMED
+\* perp reduction". An authorization taken before perp finality (NC9) has
+\* no confirmed quantity in existence, so the generation's target is all
+\* there is to size from -- which is why PERP_FIRST and SPOT_CAPPED_BY_PERP
+\* are not two knobs on one number.
+SpotCap == IF SPOT_CAPPED_BY_PERP /\ pd = "PerpReduceFinal"
+             THEN pdDone
+             ELSE pdTarget
+
+\* SM SS7 Planned: "a generation is created" carrying "explicit per-leg
+\* target positions", entered from the liq-distance/top-up ladder.
+\*
+\* The two entry conjuncts are SS7's own precondition, not convenience:
+\* core SS5.3 defines PackageDelever as reducing leverage "on a STILL-NEUTRAL
+\* package", and SS7 Invariants say "the package has NO NAKED RESIDUAL".
+\* A generation opened over an unresolved or nonzero residual is a different
+\* scenario that SS7 does not specify, and letting the model open one there
+\* would manufacture violations of properties nobody claimed.
+PdPlan(t) ==
+  /\ pd = "None"
+  /\ superseded = "none"
+  /\ gens < MAX_GEN
+  /\ cls = "Determined"
+  /\ TrueResidual = 0
+  /\ t \in 1..MAXQ
+  /\ pd' = "Planned"
+  /\ pdTarget' = t
+  /\ pdDone' = 0
+  /\ pdSold' = 0
+  /\ gens' = gens + 1
+  \* SM SS7 FLAG-3: "the reservation stays generation-scoped FROM CREATION,
+  \* not first made here [SpotReduceAuthorized]". The ENTRY is created here
+  \* under both readings; what they disagree about is its AMOUNT.
+  \*   nominal  -- the generation's OUTSTANDING NET INTENT: it will buy the
+  \*               perp and sell the same back, so at creation, with nothing
+  \*               bought yet, the outstanding commitment is ZERO. It grows
+  \*               with the perp leg (PdPerpFill amends it).
+  \*   NC7      -- the generation's TARGET, counted immediately.
+  /\ FreePend # {}
+  /\ pending' = [pending EXCEPT ![CHOOSE k \in FreePend : TRUE] =
+                   Pend(IF RESERVE_AT_CREATION THEN t ELSE 0, "pkgspot", FALSE)]
+  /\ UNCHANGED << orders, realized, pdPerp, superseded, budget >>
+  /\ UNCHANGED epiVars
+  /\ UNCHANGED histVars
+
+\* SM SS7: "the trigger is the perp short nearing liquidation on a rally, so
+\* it reduces the perp short FIRST (buy-to-reduce -- which itself relieves
+\* the liq risk)". The submission makes the residual Ambiguous, which is the
+\* composition doing its work: SS2 now refuses every compensating trade until
+\* this leg reaches finality.
+PdSubmitPerp ==
+  /\ pd = "Planned"
+  /\ pd' = "PerpReduceInFlight"
+  /\ pdPerp' = pdTarget
+  /\ Reclassify(orders, pdTarget, deadline)
+  /\ UNCHANGED << orders, realized, pending, pdTarget, pdDone, pdSold,
+                  gens, superseded, budget >>
+  /\ UNCHANGED histVars
+
+\* The perp reduction executes x. Buying to reduce a short RAISES delta, so
+\* this is where the intended net-LONG transient is created.
+\* The transient it creates is committed to be sold back, so the ledger entry
+\* is AMENDED to match it in the same step -- "coalesce / amend /
+\* cancel-replace it, never a fresh command per event" (SM SS2), applied to
+\* the reservation rather than to the order. Keeping the entry equal to the
+\* outstanding net intent at every instant is what keeps
+\* `realized - reserved` equal to the genuinely naked residual WHILE the
+\* generation runs, which is the composition's whole claim: SS7's
+\* "the SS6.7 classifier subtracts the reservation and does NOT misread it as
+\* a naked residual to re-hedge".
+\* Under RESERVE_AT_CREATION (NC7) the entry already carries the target and
+\* is left alone, which is what that reading means.
+PdPerpFill(x) ==
+  /\ pd = "PerpReduceInFlight"
+  /\ pdPerp > 0
+  /\ x \in 1..pdPerp
+  /\ realized' = realized + x
+  /\ pdPerp' = pdPerp - x
+  /\ pdDone' = pdDone + x
+  /\ pending' = (IF RESERVE_AT_CREATION \/ PdPendIds = {} THEN pending
+                 ELSE [pending EXCEPT ![CHOOSE k \in PdPendIds : TRUE] =
+                         Pend(pdDone + x - pdSold, "pkgspot", FALSE)])
+  /\ Reclassify(orders, pdPerp - x, deadline)
+  /\ UNCHANGED << orders, pd, pdTarget, pdSold, gens, superseded, budget >>
+  /\ UNCHANGED histVars
+
+\* SM SS7: "confirms that reduction to finality (SS6.7) before any spot sell"
+\* -- the same four-step contract abstracted to the same one barrier as
+\* OrderFinal. It collapses the leg's remaining interval WITHOUT executing
+\* it, so pdDone can be strictly less than pdTarget: that is the partial
+\* confirmation the whole "no more spot than the CONFIRMED perp reduction"
+\* rule is about, and the state SPOT_CAPPED_BY_PERP needs in order to bite
+\* at all (checklist item 1, probe PC18).
+PdPerpFinal ==
+  /\ pd = "PerpReduceInFlight"
+  /\ pdPerp' = 0
+  /\ pd' = "PerpReduceFinal"
+  /\ Reclassify(orders, 0, deadline)
+  /\ UNCHANGED << orders, realized, pending, pdTarget, pdDone, pdSold,
+                  gens, superseded, budget >>
+  /\ UNCHANGED histVars
+
+\* SM SS7: PerpReduceFinal -> "fsync the generation-scoped authorization
+\* record" -> SpotReduceAuthorized (FLAG-3's durable record). The spot leg's
+\* size is fixed HERE, from the confirmed perp reduction.
+\*
+\* s ranges over 0..cap rather than being pinned at the cap on purpose: with
+\* s always equal to the confirmed reduction, "no more than" and "exactly"
+\* are the same predicate and the inequality in SS7's own sentence would be
+\* unchecked (checklist item 3). s = 0 is the honest extreme -- a perp
+\* reduction that confirmed nothing authorizes no spot sale at all.
+\*
+\* The entry is AMENDED where one already exists rather than a second one
+\* added: SS2's fenced-generation rule is "coalesce / amend / cancel-replace
+\* it, never a fresh command per event", and a second entry for one
+\* commitment is the double-count INV4 forbids.
+PdAuthorizeSpot(s) ==
+  /\ pd \in (IF PERP_FIRST THEN {"PerpReduceFinal"} ELSE {"Planned", "PerpReduceFinal"})
+  /\ s \in 0..SpotCap
+  /\ pd' = "SpotReduceAuthorized"
+  /\ \/ /\ PdPendIds # {}
+        /\ pending' = [pending EXCEPT ![CHOOSE k \in PdPendIds : TRUE] =
+                         IF s = 0 THEN DeadPend ELSE Pend(s, "pkgspot", FALSE)]
+     \/ /\ PdPendIds = {}
+        /\ \/ /\ s = 0
+              /\ pending' = pending
+           \/ /\ s > 0
+              /\ FreePend # {}
+              /\ pending' = [pending EXCEPT
+                               ![CHOOSE k \in FreePend : TRUE] = Pend(s, "pkgspot", FALSE)]
+  /\ UNCHANGED << orders, realized, pdTarget, pdPerp, pdDone, pdSold,
+                  gens, superseded, budget >>
+  /\ UNCHANGED epiVars
+  /\ UNCHANGED histVars
+
+\* SM SS7: "submit the reserved spot reduction". A zero-size authorization
+\* has nothing to submit and the generation is done.
+PdSubmitSpot ==
+  /\ pd = "SpotReduceAuthorized"
+  /\ pd' = (IF PdPendIds = {} THEN "Complete" ELSE "SpotReduceInFlight")
+  \* The reservation stops being an intention here and becomes an order that
+  \* is actually out. Nothing else about the entry changes -- the AMOUNT was
+  \* fixed at authorization; what changes is whether other machinery may net
+  \* against it as a movement rather than a plan.
+  /\ pending' = (IF PdPendIds = {} THEN pending
+                 ELSE [pending EXCEPT
+                         ![CHOOSE k \in PdPendIds : TRUE].sent = TRUE])
+  /\ UNCHANGED << orders, realized, pdTarget, pdPerp, pdDone, pdSold,
+                  gens, superseded, budget >>
+  /\ UNCHANGED epiVars
+  /\ UNCHANGED histVars
+
+\* SM SS7: "a leg that is deadline-exceeded/ambiguous HOLDS AND ALERTS,
+\* never blind-retries or blind-flattens" -- and FLAG-4 rules Held/Alert
+\* NONTERMINAL, so the exit is finality (PdSpotFinal) or TerminalFlatten.
+PdSpotHolds ==
+  /\ pd = "SpotReduceInFlight"
+  /\ pd' = "Held"
+  /\ UNCHANGED << orders, realized, pending, pdTarget, pdPerp, pdDone, pdSold,
+                  gens, superseded, budget >>
+  /\ UNCHANGED epiVars
+  /\ UNCHANGED histVars
+
+\* The reserved spot reduction reaches SS6.7 finality with x actually
+\* executed (x <= the reserved size; a partial fill's remainder is not
+\* re-sent -- SS7's "never blind-retries"). Reachable from SpotReduceInFlight
+\* directly and from Held, which is FLAG-4's ruling: eventual finality of the
+\* held leg resumes the generation.
+PdSpotFinal(x) ==
+  /\ pd \in { "SpotReduceInFlight", "Held" }
+  /\ PdPendIds # {}
+  /\ LET k == CHOOSE k \in PdPendIds : TRUE
+     IN /\ x \in 0..pending[k].amt
+        /\ realized' = realized - x
+        /\ pdSold' = pdSold + x
+        /\ pending' = [pending EXCEPT ![k] =
+                         IF RELEASE_ON_FINALITY THEN DeadPend
+                         ELSE [pending[k] EXCEPT !.stale = TRUE]]
+  /\ pd' = "Complete"
+  /\ UNCHANGED << orders, pdTarget, pdPerp, pdDone, gens, superseded, budget >>
+  /\ UNCHANGED epiVars
+  /\ UNCHANGED histVars
+
+\* SM SS7 / FLAG-4: "if completion is impossible or the liquidation policy's
+\* imminence branch fires -> TerminalFlatten", whose full-flatten "routes
+\* through the same SS6.7 finality contract, not a blind market dump".
+\* The flatten's OWN orders are not modeled (they are a different scenario's
+\* legs); what is modeled is that the generation ends and its reservation
+\* stops being counted. A stated abstraction, not a claim.
+PdTerminalFlatten ==
+  /\ pd = "Held"
+  /\ pd' = "TerminalFlatten"
+  /\ pending' = (IF PdPendIds = {} \/ ~RELEASE_ON_SUPERSEDE THEN pending
+                 ELSE [pending EXCEPT ![CHOOSE k \in PdPendIds : TRUE] = DeadPend])
+  /\ UNCHANGED << orders, realized, pdTarget, pdPerp, pdDone, pdSold,
+                  gens, superseded, budget >>
+  /\ UNCHANGED epiVars
+  /\ UNCHANGED histVars
+
+\* The generation ends; SM SS7 admits a next one only from here ("each
+\* generation is a bounded attempt made ONLY AFTER the prior generation
+\* reaches SS6.7 finality"). The per-generation counters reset, which is also
+\* what makes INV5 a per-generation claim.
+PdEnds ==
+  /\ pd \in { "Complete", "TerminalFlatten" }
+  /\ pd' = "None"
+  /\ pdTarget' = 0 /\ pdPerp' = 0 /\ pdDone' = 0 /\ pdSold' = 0
+  /\ UNCHANGED << orders, realized, pending, gens, superseded, budget >>
+  /\ UNCHANGED epiVars
+  /\ UNCHANGED histVars
+
+\* SM SS7's two supersession rows: EmergencyClosePackage (core SS5.3) and the
+\* FenceReadyLost arbitration (core SS7.4; SS3 here) each "supersede and
+\* quiesce any active PackageDelever generation (cancelling its reserved
+\* second leg to SS6.7 finality FIRST)".
+\*
+\* The flag is written UNCONDITIONALLY from the state at the supersession and
+\* the GUARD is what prevents the bad one -- so relaxing the guard (NC10)
+\* SETS the flag rather than hiding the event. Same shape as RecordDispatch.
+Supersede(path) ==
+  /\ pd # "None"
+  /\ superseded = "none"
+  /\ (QUIESCE_BEFORE_SUPERSEDE => ~PdLegLive)
+  /\ supersededWithLiveLeg' = (supersededWithLiveLeg \/ PdLegLive)
+  /\ superseded' = path
+  /\ pd' = "None"
+  /\ pdTarget' = 0 /\ pdPerp' = 0 /\ pdDone' = 0 /\ pdSold' = 0
+  /\ pending' = (IF PdPendIds = {} \/ ~RELEASE_ON_SUPERSEDE THEN pending
+                 ELSE [pending EXCEPT ![CHOOSE k \in PdPendIds : TRUE] = DeadPend])
+  \* Dropping the in-flight perp leg's remaining interval is quiescence, not
+  \* amnesia: it is OrderFinal's semantics (the leg reaches finality with no
+  \* further executions), and everything it DID execute is already in
+  \* `realized`.
+  /\ Reclassify(orders, 0, deadline)
+  /\ UNCHANGED << orders, realized, gens, budget >>
+  /\ UNCHANGED sm2Hist
 
 (***************************************************************************)
 (* Settled terminal. Deadlock checking stays ON deliberately: this is the  *)
 (* ONLY terminal state the model predicts, so any other dead end is        *)
-(* reported by TLC as a deadlock and is a finding, not noise.              *)
+(* reported by TLC as a deadlock and is a finding, not noise. Slice B adds *)
+(* `pd = "None"` to the conjunction rather than widening it: every active  *)
+(* generation phase has an enabled successor, so a generation that could   *)
+(* get STUCK must report as a deadlock instead of being absorbed into the  *)
+(* terminal self-loop.                                                     *)
 (***************************************************************************)
 AllCollapsed == \A i \in OrderIds : orders[i].q = 0
 NoPending    == \A k \in PendIds : ~pending[k].active
 
 Settled ==
   /\ AllCollapsed /\ NoPending
+  /\ pd = "None"
+  /\ pdPerp = 0
   /\ (TrueResidual = 0 \/ budget = 0)
   /\ UNCHANGED vars
 
@@ -509,6 +1047,18 @@ Next ==
   \/ IssueFloor
   \/ \E k \in PendIds : ReductionFills(k)
   \/ \E k \in PendIds : ReductionAmbiguous(k)
+  \* --- SLICE B: the SS7 generation ---------------------------------------
+  \/ \E t \in 1..MAXQ : PdPlan(t)
+  \/ PdSubmitPerp
+  \/ \E x \in QDom \ {0} : PdPerpFill(x)
+  \/ PdPerpFinal
+  \/ \E s \in QDom : PdAuthorizeSpot(s)
+  \/ PdSubmitSpot
+  \/ PdSpotHolds
+  \/ \E x \in QDom : PdSpotFinal(x)
+  \/ PdTerminalFlatten
+  \/ PdEnds
+  \/ \E p \in SupPaths \ {"none"} : Supersede(p)
   \/ Settled
 
 Spec == Init /\ [][Next]_vars
@@ -520,7 +1070,14 @@ Spec == Init /\ [][Next]_vars
 TypeOK ==
   /\ orders \in [ OrderIds -> [dir: Dirs, q: QDom, seen: BOOLEAN] ]
   /\ realized \in AmtDom
-  /\ pending \in [ PendIds -> [active: BOOLEAN, amt: AmtDom, kind: Kinds] ]
+  /\ pending \in [ PendIds -> [active: BOOLEAN, amt: AmtDom, kind: Kinds,
+                               stale: BOOLEAN, sent: BOOLEAN] ]
+  /\ pd \in PdPhases
+  /\ pdTarget \in QDom /\ pdPerp \in QDom
+  /\ pdDone \in QDom /\ pdSold \in QDom
+  /\ gens \in 0..MAX_GEN
+  /\ superseded \in SupPaths
+  /\ supersededWithLiveLeg \in BOOLEAN
   /\ cls \in Classes
   /\ deadline \in BOOLEAN
   /\ floorIssued \in BOOLEAN
@@ -555,8 +1112,32 @@ TypeOK ==
 \*      later event should be able to introduce an opposite sign that a
 \*      dispatch did not. If (b) fires where (a) did not, that reasoning
 \*      was wrong, which is a finding either way.
-INV1_NeverOvershootSign ==
-  /\ ~overshoot
+\* SLICE B SPLIT THE TWO CONJUNCTS APART, and the reason is a MODEL finding
+\* rather than a weakening. See FM-model-1 in SS46 SS8e.
+\*
+\* Conjunct (a), `~overshoot`, is the faithful mechanization and stays in
+\* every configuration.
+\*
+\* Conjunct (b) rested on a small theorem about the SLICE A event set --
+\* fills leave the true net range invariant, finality only shrinks it, an
+\* ambiguous reduction result widens it only back toward the pre-dispatch
+\* side -- whose premise is SS46 SS7e's stated bound, IN THESE WORDS: "no new
+\* counter-leg order appears mid-episode ... so the only new intervals are
+\* the model's own reductions' residues". SS7's perp-short reduction IS a new
+\* exposure-changing order appearing mid-episode. It is authorized
+\* independently of any dispatch, its transient is net-long BY DESIGN (SS7's
+\* whole sequencing rule), and its own safety property is INV5.
+\*
+\* So in the COMPOSED model, conjunct (b) asserts "once a short has been
+\* reduced, no other authorized command may ever make long exposure
+\* reachable" -- which the spec nowhere says and which would forbid
+\* PackageDelever outright. It is not weakened; it is checked where its
+\* premise holds, in the MAX_GEN = 0 configuration, which is slice A's
+\* model exactly. Deleting it instead would have cost real bite: SS46 SS7a
+\* measured that (b) catches NC1 and NC6 on its own.
+INV1_NeverOvershootSign == ~overshoot
+
+INV1b_NoLaterOppositeSign ==
   /\ (longReduced  => TrueLo >= 0)
   /\ (shortReduced => TrueHi <= 0)
 
@@ -587,6 +1168,135 @@ INV3_NoUncertainCompensation ==
 \* correctness is load-bearing, since the same flip also makes INV1
 \* reachable through a determined dispatch over an unobserved interval.
 INV7_DeterminedIsReallyDetermined ==
-  cls = "Determined" => \A i \in OrderIds : orders[i].q = 0
+  cls = "Determined" => (\A i \in OrderIds : orders[i].q = 0) /\ pdPerp = 0
+
+(***************************************************************************)
+(* SLICE B invariants -- the composition (SS46 SS2.1).                      *)
+(***************************************************************************)
+
+\* THE INVARIANT THAT WAS TRIED FIRST AND IS WRONG -- kept, unused, because
+\* a rejected formulation nobody wrote down gets re-proposed (SS46 SS8e,
+\* FM-model-2).
+\*
+\* The idea was: a reservation must never commit to removing delta that does
+\* not exist, so the summed ledger is dominated by the realized delta. It is
+\* true throughout slice A, and it catches the FM-5 defect. It is
+\* nevertheless FALSE of correct composed behaviour, and TLC found the
+\* counterexample in six steps: a group short 2, a generation whose perp leg
+\* buys 1 (moving delta TOWARD zero), and a reserved spot sale of 1 that
+\* undoes exactly that -- `realized = -1` with `TrueReserved = +1`.
+\*
+\* The error is the premise that a reservation is always backed by the NET
+\* delta. PackageDelever's reserved leg is backed by the generation's own
+\* transient, and legitimately moves the group's delta AWAY from zero,
+\* because it is restoring a position the perp leg temporarily reduced. No
+\* inequality between the ledger's sum and `realized` survives that, which
+\* is why INV4 below is phrased over the HARM and the ENTRY instead.
+ReservationsBackedREJECTED ==
+  /\ (TrueReserved > 0 => realized >= TrueReserved)
+  /\ (TrueReserved < 0 => realized <= TrueReserved)
+
+\* An UNSENT reservation is an INTENTION: no order is out, so nothing will
+\* move delta on its account until one is. It may therefore only be booked
+\* against delta the generation HAS ALREADY MOVED -- the perp leg's
+\* confirmed reduction net of what has been sold back.
+\*
+\* This is FM-5 stated generally. Booking the generation's TARGET at
+\* creation (NC7) books an intention against a movement that has not
+\* happened, so `realized - reserved` reports a residual of the opposite
+\* sign on a package that is neutral, and SS2's determined branch buys back
+\* exactly the exposure the generation is about to buy itself.
+\*
+\* It is scoped to the pre-authorization phases deliberately. Once SS7 has
+\* SIZED the spot leg, the governing rule is its own cap ("no more spot than
+\* the confirmed perp reduction") and that is INV5's claim -- so NC8 trips
+\* INV5 alone rather than both, and each control still names one invariant.
+\*
+\* Not a restatement of the mechanism (SS46 SS3's trap): three different
+\* expressions write that amount -- 0 at creation, a running
+\* `pdDone + x - pdSold` per fill, and `s` at authorization -- and the
+\* invariant is an INEQUALITY with genuine slack, not the formula any of
+\* them uses.
+IntentsBacked ==
+  \A k \in PendIds :
+    ( /\ pending[k].active
+      /\ ~pending[k].stale
+      /\ ~pending[k].sent
+      /\ pd \in { "Planned", "PerpReduceInFlight", "PerpReduceFinal" } )
+    => pending[k].amt <= pdDone - pdSold
+
+\* INV4 -- ReservationLedgerSound. SS46 SS4: "determined sizing
+\* (realized - reserved) neither double-counts a reservation nor misses one;
+\* no reserved transient is read as naked residual, and no naked residual is
+\* masked by a reservation that has already completed."
+\*
+\* Three clauses, each with its own control:
+\*
+\*  (a) NO ORPHANED RESERVATION (NC12) -- a reserved spot leg with no
+\*      generation to own it. An orphan subtracts from EVERY later sizing
+\*      forever, which is SS46 SS4's "misses one" direction: a genuine naked
+\*      residual reads as already-committed and is never compensated.
+\*
+\*  (b) INTENTS BACKED (NC7) -- an intention booked against delta the
+\*      generation has not moved. This is SS46 SS4's "no reserved transient is
+\*      read as naked residual" and "neither double-counts a reservation",
+\*      and it is FM-5. It is stated at the LEDGER level and not as the
+\*      trade it causes, because both harm-level phrasings were tried and
+\*      both are wrong -- see UnwarrantedREJECTED. Note INV1 cannot see this
+\*      defect at all: INV1 is phrased over True-side quantities, which are
+\*      computed from the ledger, so they are wrong in exactly the states
+\*      this is about.
+\*
+\*  (c) NO STALE ENTRY (NC11) -- SS46 SS4's "no naked residual is masked by a
+\*      reservation that has already COMPLETED". A condition on the ENTRY,
+\*      not a discrepancy between the two ledger sums: an invariant that
+\*      compared ImplReserved to TrueReserved would be reading the
+\*      implementation's arithmetic, the one thing the Impl/True split
+\*      exists to make impossible.
+\*
+\* What is deliberately NOT here: an inequality bounding the ledger's sum by
+\* the realized delta. It was tried, it is false of correct composed
+\* behaviour, and ReservationsBackedREJECTED above records why.
+INV4_ReservationLedgerSound ==
+  /\ (pd = "None" => PdPendIds = {})
+  /\ IntentsBacked
+  /\ \A k \in PendIds : pending[k].active => ~pending[k].stale
+
+\* INV5 -- PackageDeleverNeverNetShort. SM SS7 Invariants: the generation is
+\* "sequenced so the transient never worsens the at-risk direction": perp
+\* short reduced first, confirmed to finality, then "SELLS NO MORE SPOT THAN
+\* THE CONFIRMED PERP REDUCTION -- the momentary exposure is thus net-LONG
+\* (safe in the triggering rally), NEVER NET-SHORT."
+\*
+\* Two conjuncts, mirroring INV1's at-dispatch/persistent pair:
+\*  (a) the OUTCOME -- what was actually sold never exceeds what was
+\*      actually confirmed. Reads pdSold, which the guard never touches.
+\*  (b) EVERY REACHABLE INTERLEAVING -- the still-outstanding reserved sale
+\*      could execute in full at any moment, so the commitment must already
+\*      satisfy the same bound. Without (b) the invariant would only catch a
+\*      generation that had already gone net-short, i.e. after the harm.
+INV5_PackageDeleverNeverNetShort ==
+  /\ pdSold <= pdDone
+  /\ (pdSold + PdReserved) <= pdDone
+
+\* INV6 -- SupersessionQuiescesFirst. SM SS7 Invariants: "both superseding
+\* paths (EmergencyClosePackage, core SS5.3; FenceReadyLost, core SS7.4)
+\* cancel/quiesce the generation's reserved second leg TO SS6.7 FINALITY
+\* FIRST." Read from the flag written at the supersession, never from the
+\* guard that prevents it.
+INV6_SupersessionQuiescesFirst == ~supersededWithLiveLeg
+
+\* Not in any nominal configuration. It exists to interrogate NC12's own
+\* witness: TLC reports the SHORTEST counterexample, and for the orphan
+\* clause that is an entry of amount ZERO -- which leaks a ledger slot but
+\* subtracts nothing, so the control would demonstrate the leak while saying
+\* nothing about the harm. Checked against NC12's constants, this asks
+\* whether the HARMFUL orphan is reachable too. It is a question about a
+\* control's evidence, which is the same question the fixture-collapse
+\* checklist asks about a fixture.
+NoNonzeroOrphan ==
+  pd = "None" =>
+    \A k \in PendIds :
+      ~(pending[k].active /\ pending[k].kind = "pkgspot" /\ pending[k].amt # 0)
 
 =============================================================================

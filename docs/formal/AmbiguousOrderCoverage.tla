@@ -39,8 +39,8 @@ PC2_NeverTwoGenerations ==
 \* different, simpler system.
 PC3_SubtrahendAlwaysZero ==
   ~ /\ cls = "Determined"
-    /\ Reserved # 0
-    /\ realized - Reserved # 0
+    /\ TrueReserved # 0
+    /\ realized - TrueReserved # 0
     /\ FreePend # {}
     /\ budget > 0
 
@@ -87,5 +87,83 @@ PC8_NoCancelWithZeroExecutions ==
           /\ ~orders[i].seen
           /\ orders'[i] = DeadOrder
           /\ realized' = realized ]_vars
+
+(***************************************************************************)
+(* SLICE B probes.                                                          *)
+(*                                                                          *)
+(* PC9-PC11 are SLICE B'S DONE-WHEN (SS46 SS7f): "whatever the ledger        *)
+(* becomes, there must be a reachable state in which EACH producer's         *)
+(* contribution to the one subtraction is nonzero". PC3 shows the sum is     *)
+(* nonzero somewhere; it cannot say WHICH producer put it there, and a       *)
+(* three-producer ledger where only one producer is ever nonzero would pass  *)
+(* PC3 while SS46 SS2.1's entire argument for modeling SS2 with SS7 went      *)
+(* unexercised.                                                              *)
+(***************************************************************************)
+
+\* The determined branch is about to size itself while producer `kd` is
+\* contributing a nonzero term to `realized - reserved`.
+SubtrahendFrom(kd) ==
+  /\ cls = "Determined"
+  /\ \E k \in PendIds :
+        pending[k].active /\ pending[k].kind = kd /\ pending[k].amt # 0
+  /\ realized - TrueReserved # 0
+  /\ FreePend # {}
+  /\ budget > 0
+
+PC9_NoExposureSubtrahend  == ~SubtrahendFrom("exposure")
+PC10_NoFloorSubtrahend    == ~SubtrahendFrom("floor")
+PC11_NoPkgSpotSubtrahend  == ~SubtrahendFrom("pkgspot")
+
+\* PC12 -- all THREE producers live in the ledger simultaneously. This is
+\* the sharpest composition state there is, and it is the reason NPEND went
+\* from 2 to 3: with two slots the sum can never have three terms and
+\* "the three producers rest on one subtraction" would be a claim the model
+\* could not reach. Same lesson as NPEND=1 in slice A, one producer out.
+PC12_NeverThreeProducers ==
+  ~ \E k1, k2, k3 \in PendIds :
+       /\ k1 # k2 /\ k2 # k3 /\ k1 # k3
+       /\ pending[k1].active /\ pending[k1].kind = "exposure"
+       /\ pending[k2].active /\ pending[k2].kind = "floor"
+       /\ pending[k3].active /\ pending[k3].kind = "pkgspot"
+
+\* PC13-PC15, PC19 -- the SS7 phases are reached at all. A phase no behavior
+\* enters is dead code that INV5/INV6 would police vacuously.
+PC13_PdNeverCompletes      == pd # "Complete"
+PC14_PdNeverHeld           == pd # "Held"
+PC15_PdNeverInFlight       == pd # "SpotReduceInFlight"
+PC19_PdNeverTerminalFlatten == pd # "TerminalFlatten"
+
+\* PC16/PC17 -- BOTH superseding paths fire, separately. SM SS7 names them as
+\* two rows (EmergencyClosePackage, core SS5.3; FenceReadyLost, core SS7.4),
+\* and one probe over a merged flag would let either be dead code while
+\* reading green. The sign-mirror lesson of PC6/PC7, applied to paths.
+\* Supersede requires an ACTIVE generation, so reaching either at all is
+\* also what makes INV6 non-vacuous.
+PC16_NeverSupersededByEmergency == superseded # "EmergencyClosePackage"
+PC17_NeverSupersededByFence     == superseded # "FenceReadyLost"
+
+\* PC18 -- THE SLICE B FIXTURE-COLLAPSE PROBE. A perp reduction that
+\* confirmed to finality having executed SOME BUT NOT ALL of its target.
+\* If the perp leg always confirms in full then pdDone = pdTarget always,
+\* "sells no more spot than the CONFIRMED reduction" and "...than the
+\* TARGET" are the same expression, and NC8 is undetectable -- the exact
+\* shape of the nine recorded fixture collapses, at model altitude. This is
+\* the slice-B counterpart of slice A's PC3/NPEND finding.
+PC18_PerpAlwaysFullyConfirmed ==
+  ~ /\ pd \in { "PerpReduceFinal", "SpotReduceAuthorized" }
+    /\ pdDone > 0
+    /\ pdDone < pdTarget
+
+\* PC20 -- a SECOND generation is started. SM SS7's ladder admits one "only
+\* after the prior generation reaches SS6.7 finality"; with MAX_GEN = 1 that
+\* edge is unreachable and the gate blocks nothing observable.
+PC20_NeverTwoGenerations == gens < 2
+
+\* PC21 -- the intended net-LONG transient is actually nonzero: the perp leg
+\* has bought and the spot leg has not yet sold it back. INV5 says this
+\* transient is never net-short; if it is never nonzero either, INV5 is a
+\* claim about a quantity that is always 0 and both of its conjuncts hold
+\* trivially.
+PC21_TransientAlwaysZero == ~(PdActive /\ pdDone - pdSold > 0)
 
 ===============================================================================

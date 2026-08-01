@@ -481,11 +481,313 @@ subtraction is nonzero, and a control that breaks it.
 
 ---
 
+## 8. Slice B — BUILT and VERIFIED (2026-08-01, session 66)
+
+SM §2 composed with SM §7 on the one shared reservation ledger, with
+`INV4`–`INV6`, six more negative controls and thirteen more positive
+controls. **Composed nominal green; all twelve negative controls violate
+their predicted invariant; all twenty-one positive controls confirm their
+state is reached. It found one SPEC DEFECT — `FM-5` — and two defects in
+this model's own slice-A reasoning.**
+
+### 8a. How §7 was composed — decisions taken during the build
+
+**1. §7's legs go through machinery that already exists, not beside it.**
+The perp-short reduction is an exposure-changing order on the hedge group,
+so while it is in flight it contributes a possible-delta interval `[0, q]`
+to the *same* sum §2's classifier reads and makes the residual `Ambiguous`
+for the *same* reason any counter-leg does. The reserved spot leg is a
+`pending` entry, one of the three producers of the one subtraction,
+distinguished only by its `kind`. Nothing about §7 is a parallel bookkeeping
+track — which is what makes the composition testable rather than asserted.
+
+**2. The generation's own legs are NOT recorded through `RecordDispatch`.**
+§2's single-gate invariant says `PackageDelever` *routes through* the
+classifier, and it does here — its perp leg lands in the interval algebra,
+its spot leg in the ledger. But neither leg *compensates an uncertain
+residual*, so `INV1`/`INV3` are not the properties that own them; `INV5` is.
+Recording them as dispatches would make `INV3` fire on a generation
+completing normally, which is a property the spec does not state.
+
+**3. `MAX_GEN = 2`, not 1.** With one generation the ladder's
+`Complete → next generation` edge is unreachable and §7's "only after the
+prior generation reaches finality" gate blocks nothing observable. Probe
+`PC20` is what proves the second generation is reached.
+
+**4. `NPEND` went 2 → 3.** Slice A needed two slots so the subtrahend could
+be nonzero at all; slice B needs three so the sum can have three terms —
+the state where §2.1's "three producers, one subtraction" is literally true.
+`PC12` proves it is reached. This is slice A's own `NPEND` lesson one
+producer out, and it was found by the checklist before the runs, not after.
+
+**5. The `sent` bit.** A ledger entry now records whether its counterpart
+order has actually been submitted. It exists because the two questions the
+ledger has to answer are different: the SIZING must subtract *intentions*
+(that is exactly what stops §7's deliberate net-long transient being
+re-hedged), while a claim about what the position can become may only count
+what is actually out. See §8e for the two formulations that were tried
+before this one and are wrong.
+
+### 8b. Results
+
+Toolchain unchanged: Java 25, `tla2tools.jar` pinned by SHA-256, TLC 2.19,
+`TLC_WORKERS=4` throughout (the capture was running).
+
+| Run | Constant flipped | Predicted | Result |
+|---|---|---|---|
+| nominal (composed) | — | pass, all seven invariants | **PASS** — 6,729,250 generated / **832,179 distinct**, depth 30, no deadlock, ~8 s |
+| `_SM2` (`MAX_GEN = 0`) | — | pass, incl. `INV1b` | **PASS** — 25,514 / **5,169**, depth 15 |
+| NC1 | `FLOOR_NEAREST_ZERO = FALSE` | `INV1` | **VIOLATED** |
+| NC2 | `FLOOR_ONCE = FALSE` | `INV2` | **VIOLATED** |
+| NC3 | `BLIND_COMPENSATION = TRUE` | `INV3` | **VIOLATED** |
+| NC4 | `CLASSIFY_ON_FILLS_ONLY = TRUE` | `INV7` | **VIOLATED** |
+| NC5 | `STRADDLE_GUARD = FALSE` | `INV3` | **VIOLATED** |
+| NC6 | `RESERVATION_AWARE_SIZING = FALSE` | `INV1` | **VIOLATED** |
+| NC7 | `RESERVE_AT_CREATION = TRUE` | `INV4` | **VIOLATED** — this is `FM-5` |
+| NC8 | `SPOT_CAPPED_BY_PERP = FALSE` | `INV5` | **VIOLATED** |
+| NC9 | `PERP_FIRST = FALSE` | `INV5` | **VIOLATED** |
+| NC10 | `QUIESCE_BEFORE_SUPERSEDE = FALSE` | `INV6` | **VIOLATED** |
+| NC11 | `RELEASE_ON_FINALITY = FALSE` | `INV4` | **VIOLATED** |
+| NC12 | `RELEASE_ON_SUPERSEDE = FALSE` | `INV4` | **VIOLATED** |
+
+**`_SM2` reproduces slice A's state graph to the digit** — 25,514 / 5,169 at
+depth 15, the numbers §7b recorded. That reproduction is the evidence that
+slice B's refactor (a doubled ledger, a `stale` field, a `sent` field, a new
+`SumHi` term, a changed `Reclassify` arity) did not quietly change the
+object slice A verified. It is the same evidence model (b) supplies by
+reproducing its v0.9.4 counts, applied within one model instead of across
+sessions.
+
+**Every violation was read, not merely counted.** Four are exact:
+NC7 books `amt = 1` on a package with `realized = 0` and `pdDone = 0`;
+NC8 authorizes a spot sale of 1 against a perp reduction that confirmed
+**zero**; NC9 authorizes the spot leg directly from `Planned`, before the
+perp order was even submitted; NC10 supersedes at `SpotReduceInFlight` with
+`supersededWithLiveLeg` set.
+
+**NC12's witness was DEGENERATE and that had to be chased.** TLC reports the
+shortest counterexample, and for the orphan clause that is an entry of
+amount **zero** — which leaks a ledger slot but subtracts nothing, so the
+control would have demonstrated the leak while saying nothing about the
+harm. That is the fixture-collapse tell aimed at a *control's evidence*
+rather than at a fixture. Checked separately (`NoNonzeroOrphan`, kept in the
+module for the purpose): the harmful orphan **is** reachable — the perp leg
+buys 1, the generation is superseded, and a `+1` entry is left behind
+masking a genuine naked long forever.
+
+**And NC12 deadlocks, which is a second signature of the same defect.**
+With the orphan un-releasable, `Settled` (which requires an empty ledger) is
+permanently unreachable and TLC reports `Deadlock reached`. §7a decision 7
+kept deadlock checking on precisely so a dead end would be a finding; here
+it independently reports "this ledger can never return to empty".
+
+### 8c. Positive controls — slice B's done-when
+
+`PC9`/`PC10`/`PC11` **are** the done-when (§7f): each of the three producers
+is shown to contribute a nonzero term to the one subtraction, separately.
+`PC3` shows only that the *sum* is nonzero somewhere; a three-producer
+ledger in which just one producer is ever nonzero would pass `PC3` while
+§2.1's entire argument for modeling §2 with §7 went unexercised. All three
+are violated, so all three are reached.
+
+| Probe | The state it proves is reached |
+|---|---|
+| `PC9`/`PC10`/`PC11` | a determined sizing with a nonzero term from the **exposure**, **floor**, **pkgspot** producer respectively |
+| `PC12` | all **three** producers live in the ledger at once |
+| `PC13`/`PC14`/`PC15`/`PC19` | `Complete`, `Held`, `SpotReduceInFlight`, `TerminalFlatten` are each entered |
+| `PC16`/`PC17` | **both** superseding paths fire, separately — the PC6/PC7 sign-mirror lesson applied to paths |
+| `PC18` | a perp reduction confirmed to finality having executed **some but not all** of its target |
+| `PC20` | a **second** generation is started |
+| `PC21` | the intended net-long transient is actually **nonzero** |
+
+**`PC18` is slice B's fixture-collapse probe, and the checklist named it
+before the model ran.** If the perp leg always confirmed in full, then
+`pdDone = pdTarget` always, "sells no more spot than the **confirmed** perp
+reduction" and "…than the **target**" would be the same expression, and NC8
+would be undetectable. `PC21` is its partner: if the transient were always
+zero, both of `INV5`'s conjuncts would hold trivially.
+
+### 8d. `FM-5` — the reservation may be counted before its counterpart exists
+
+**The defect.** SM §7's FLAG-3 ruling says the reservation "stays
+generation-scoped **from creation**, not first made here
+[`SpotReduceAuthorized`]; the §2 classifier **subtracts it throughout**",
+and §2's reservation-aware sizing subtracts
+`outstanding_reserved_reductions` unconditionally. Read literally and
+together, the two sentences let a generation book its **target** into the
+ledger at `Planned` — before the perp leg has bought anything.
+
+**The harm, and what is TLC-verified versus derived.** TLC exhibits two
+states: the unbacked ledger at **2 steps** (`PdPlan` books `amt = 1` while
+`realized = 0` and `pdDone = 0`), and the resulting **dispatch** at
+**3 steps** — §2's determined branch reads `realized − reserved` as a
+**short** of the target on a package that is neutral, and buys. That buy is
+the harm: it buys back exactly the exposure the generation's own perp leg is
+about to buy.
+
+The end position **follows arithmetically** from the model's own
+transitions and is stated as a derivation, not as a state TLC was asked to
+produce: the classifier's buy fills (`realized = +1`), the perp leg buys its
+target (`+2`), the spot leg sells the confirmed amount (`+1`) — the package
+ends **net long by the target**. Each step is an enabled action of the
+model, but the composite was not made a checked property, because pinning
+"the package was neutral at the start" would need history the model does not
+carry. The checked claim is the dispatch.
+
+**Why four rounds of review and slice A both missed it.** `INV1` is phrased
+over the ledger-exact `True*` quantities — but those are *computed from the
+ledger*, so a corrupt ledger corrupts them too, and the phantom buy computes
+as non-overshooting. `overshoot` is **FALSE** in the violating state. An
+invariant built on the ledger cannot audit the ledger, which is why `INV4`
+had to exist as a separate property and why it had to be phrased at the
+ledger level rather than as the trade (see §8e).
+
+**The resolution, and it is narrow.** What FLAG-3 left underdetermined is
+the reservation's **amount**, not its existence. Book the entry at creation
+as FLAG-3 requires, but carry the generation's **outstanding net intent** —
+it will buy the perp and sell the same back, so at creation, with nothing
+bought, the outstanding commitment is **zero**, and it grows with the perp
+leg as it fills (the entry is *amended*, which is §2's own "coalesce /
+amend / cancel-replace it, never a fresh command per event" applied to the
+reservation rather than to the order). Then the ledger is exactly backed at
+every instant, FLAG-3's words hold literally, and the phantom short cannot
+arise. That reading is the nominal configuration; the literal one is NC7.
+
+**Status: the normative edit is OWED and is slice E's first item, by the
+§5 roster** ("findings triaged; spec defects tagged FM-5…"), not by
+convenience. Until it lands, `docs/formal/` and `docs/state-machines.md`
+disagree about §7's FLAG-3, and CLAUDE.md's standing rule resolves which
+wins: *"treat [the formal model] as authoritative about the safety kernel's
+behaviour."* The wording to land, in §7's FLAG-3 ruling and beside §2's
+reservation-aware sizing, is the paragraph above.
+
+### 8e. Two defects in slice A's own reasoning, found by composing
+
+**`FM-model-1` — `INV1`'s persistent conjunct rests on a premise §7
+breaks.** §7a decision 4 justified it with a small theorem about which
+events can widen the true net range, and §7e's stated bounds gave the
+premise **in these words**: *"no new counter-leg order appears
+mid-episode … so the only new intervals are the model's own reductions'
+residues."* §7's perp-short reduction **is** a new exposure-changing order
+appearing mid-episode. In the composed model the conjunct therefore asserts
+"once a short has been reduced, no other authorized command may ever make
+long exposure reachable" — which the spec nowhere says and which would
+forbid `PackageDelever` outright. TLC produced the counterexample in four
+steps.
+
+Decision 4 had pre-committed to the reading — *"if (b) fires where (a) did
+not, that reasoning was wrong, which is a finding either way"* — and
+`overshoot` was FALSE, so (a) did not fire. **It was not weakened and not
+deleted**: it moved to `INV1b` in the `_SM2` configuration, where its
+premise holds. Deleting it would have cost real bite, because §7a measured
+that it catches NC1 and NC6 on its own. Verified in the other direction this
+session: the at-dispatch conjunct alone still catches NC1 and NC6 in the
+composed configuration, so nothing is unpoliced there either.
+
+**`FM-model-2` — two formulations of `INV4` were tried and both are
+wrong.** Recorded because a rejected alternative nobody wrote down gets
+re-proposed, and both are the kind a reviewer would suggest.
+
+- *"The ledger's sum is dominated by the realized delta"*
+  (`ReservationsBackedREJECTED`). True throughout slice A, catches FM-5 —
+  and **false of correct composed behaviour**: a group short 2, a generation
+  whose perp leg buys 1 (moving delta *toward* zero), and a reserved spot
+  sale of 1 that undoes exactly that gives `realized = −1` with
+  `reserved = +1`. The error is the premise that a reservation is backed by
+  the *net* delta; §7's reserved leg is backed by the generation's own
+  transient and legitimately moves the group's delta *away* from zero.
+- *"No dispatch in a direction no reachable state warrants"*
+  (`UnwarrantedREJECTED`). Judged against **sent** reservations only, it
+  flags correct anticipation of a booked intent (8 steps: a group flat with
+  the generation committed to sell 2, where buying 2 is right and lands
+  flat). Judged against **all** reservations, it reads the very ledger that
+  is wrong and FM-5 becomes invisible to it again.
+
+**The conclusion is itself the finding: there is no harm-level phrasing here
+that is both sound and complete**, because every "what will the position
+become" quantity is computed from the ledger. A ledger defect has to be
+caught at the ledger level — which is what `IntentsBacked` does, by
+forbidding an intention booked against delta the generation has not moved.
+
+### 8f. Stated bounds and abstractions
+
+- **`QDom` widened 0..8 → 0..14 and `AmtDom` ±16 → ±28, and the widening was
+  FORCED.** With §7 composed in, `TypeOK` failed at depth 22 on an order of
+  `q = 9`. That is the domain doing its declared job — a too-tight domain
+  reports as a type violation, a real signal, instead of silently truncating
+  behavior. The composition ratchets the reachable residual because §7's
+  generations move delta **without spending the dispatch budget**, so the
+  reachable magnitude gains `MAX_GEN × MAXQ` on top of what §2's own budget
+  allows, and a reduction sized from that residual re-enters as an order of
+  that size.
+- **`MAX_GEN = 2`, and generations are bounded by that count rather than by
+  `budget`.** Each generation's phase chain is finite and its perp leg
+  strictly shrinks, so the sub-machine terminates; charging leg submissions
+  to the shared dispatch budget would instead have starved §2's own branches
+  and cost the floor/exposure coverage. A stated bound, not a claim.
+- **A generation may only open on a package the classifier calls
+  `Determined` with a zero residual.** That is §7's own entry context (core
+  §5.3's "still-neutral package"; §7's "the package has no naked residual"),
+  and it is a *reading*: "no naked residual" is evaluated on §2's
+  reservation-netted residual, which admits a package that is neutral
+  **pending an in-flight reduction** rather than physically flat. Stated
+  here because an unstated reading is what later gets called drift. Whether
+  physical neutrality is the stronger and intended precondition is a slice-E
+  question — it is the mirror of FM-5 and should be attacked with it.
+- **The spot leg's size ranges over `0..cap` rather than sitting at the
+  cap.** Pinned at the cap, "no more than" and "exactly" would be the same
+  predicate and the inequality in §7's own sentence would be unchecked
+  (checklist item 3). `s = 0` is the honest extreme: a perp reduction that
+  confirmed nothing authorizes no spot sale at all.
+- **`Held/Alert`'s resolution is one barrier, and the generation completes
+  at it.** FLAG-4's "resumes the remaining per-leg target" is abstracted to
+  a single resolution with `x ∈ 0..reserved` executed; a shortfall becomes a
+  genuine naked residual that §2's determined branch then compensates, which
+  is the composition working. Re-driving the remainder as a fresh leg is not
+  modeled.
+- **`TerminalFlatten`'s own orders are not modeled.** What is modeled is
+  that the generation ends and its reservation stops being counted; the
+  flatten's routing through the §6.7 contract is a different scenario's
+  legs.
+- **The perp leg's identity is abstracted to its remaining quantity.** Its
+  four-step finality contract is the same one barrier as `OrderFinal`, which
+  is what makes a partial confirmation (`PdPerpFinal` after a partial fill)
+  first-class — and `PC18` shows that is reached.
+
+### 8g. What slice C inherits
+
+Liveness `P1`–`P4` and their four negative controls, per §5. Two traps are
+already named for it:
+
+- **§7e's budget trap still stands**: budget exhaustion produces a `Settled`
+  stutter with a possibly-nonzero residual, so `P1`–`P4` must be conditioned
+  on the budget (model (b)'s `BOUND_CRASHES` is the precedent).
+- **`MAX_GEN` is a second such bound now.** A generation that cannot start
+  because the count is spent is a modeling terminal, not a claim that the
+  ladder stops; `P3` (a `Held/Alert` generation eventually resumes or enters
+  `TerminalFlatten`) must not read it as a stall.
+- **`gens` and `superseded` both gate `PdPlan`**, so a superseded behavior
+  never opens another generation. That is faithful (supersession quiesces
+  the ladder) but it means a liveness property about *later* generations is
+  vacuous after a supersession, and must say so.
+
+---
+
 ## RESUME HERE
 
-**Slice A is BUILT and VERIFIED** (§7 above). Next act is **slice B**: the
-reservation ledger's other two producers + the `PackageDelever` phases of
-SM §7, with `INV4`–`INV6`, in `docs/formal/AmbiguousOrder.tla`.
+**Slices A and B are BUILT and VERIFIED** (§7, §8 above). Next act is
+**slice C**: liveness `P1`–`P4`, each shipping with its negative control in
+the same slice (§5, and decision (2) below).
+
+**Before slice C, one thing is OWED and it is not optional: `FM-5`'s
+normative edit** (§8d). The model found a spec defect in SM §7's FLAG-3
+ruling composed with §2's reservation-aware sizing; the model encodes the
+sound reading and the negative control NC7 encodes the defective one, but
+`docs/state-machines.md` still says the unsound thing. §5's roster puts
+findings triage in slice E, so it is scheduled there — but until it lands,
+the two artifacts disagree and CLAUDE.md's standing rule ("treat the formal
+model as authoritative about the safety kernel's behaviour") is what
+resolves it. The wording to land is in §8d.
 
 Slice B's done-when (§5): green, **plus** the positive control that the
 unbroken model reaches the interesting states — extend

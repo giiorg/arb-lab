@@ -6,11 +6,21 @@
 #
 # Model (b) FenceTakeover: SM SS3/SS4/SS6 -- the fence/takeover/plan
 #   composition. 8 runs.
-# Model (a) AmbiguousOrder: SM SS2 -- the ambiguous-order classifier, the
-#   finality contract and the interval-floor generation. Slice A: 7 runs
-#   (nominal + NC1-NC6) plus 8 POSITIVE controls, which are expected to be
-#   VIOLATED: each names an interesting state, and a probe that PASSES is
-#   a coverage gap, not a success. See AmbiguousOrderCoverage.tla.
+# Model (a) AmbiguousOrder: SM SS2 composed with SM SS7 -- the
+#   ambiguous-order classifier, the finality contract, the interval-floor
+#   generation and PackageDelever's generations on one reservation ledger.
+#   Slices A+B: 14 runs (composed nominal + the SS2-only nominal + NC1-NC12)
+#   plus 20 POSITIVE controls, which are expected to be VIOLATED: each names
+#   an interesting state, and a probe that PASSES is a coverage gap, not a
+#   success. See AmbiguousOrderCoverage.tla.
+#
+#   AmbiguousOrder_SM2 is the SS2-ONLY configuration (MAX_GEN = 0). It is
+#   where INV1's persistent conjunct INV1b is checked -- that conjunct's
+#   premise is slice A's "no new counter-leg order appears mid-episode",
+#   which SS7's perp reduce legitimately breaks. It also reproduces slice A's
+#   recorded state graph exactly (25,514 / 5,169, depth 15), which is what
+#   says the slice-B refactor did not quietly change the object slice A
+#   verified.
 #
 # Requires: java (17+). Fetches a pinned tla2tools.jar on first run.
 set -u
@@ -112,14 +122,21 @@ SPECIFICATION Spec
 CONSTANTS
   NORD                     = 3
   MAXQ                     = 2
-  NPEND                    = 2
+  NPEND                    = 3
   MAX_DISPATCH             = 3
+  MAX_GEN                  = 2
   FLOOR_NEAREST_ZERO       = TRUE
   FLOOR_ONCE               = TRUE
   STRADDLE_GUARD           = TRUE
   BLIND_COMPENSATION       = FALSE
   CLASSIFY_ON_FILLS_ONLY   = FALSE
   RESERVATION_AWARE_SIZING = TRUE
+  RESERVE_AT_CREATION      = FALSE
+  SPOT_CAPPED_BY_PERP      = TRUE
+  PERP_FIRST               = TRUE
+  QUIESCE_BEFORE_SUPERSEDE = TRUE
+  RELEASE_ON_FINALITY      = TRUE
+  RELEASE_ON_SUPERSEDE     = TRUE
 $2
   $1
 EOF
@@ -148,19 +165,32 @@ r FenceTakeover FenceTakeover_NC5   failprop "P4_ArbitrationCompletes"
 
 echo "################ MODEL (a): AmbiguousOrder -- SM SS2 (slice A) #############"
 echo
-r AmbiguousOrder AmbiguousOrder     pass
+r AmbiguousOrder AmbiguousOrder      pass
+r AmbiguousOrder AmbiguousOrder_SM2  pass
 r AmbiguousOrder AmbiguousOrder_NC1 fail "INV1_NeverOvershootSign"
 r AmbiguousOrder AmbiguousOrder_NC2 fail "INV2_FloorIssuedAtMostOnce"
 r AmbiguousOrder AmbiguousOrder_NC3 fail "INV3_NoUncertainCompensation"
 r AmbiguousOrder AmbiguousOrder_NC4 fail "INV7_DeterminedIsReallyDetermined"
 r AmbiguousOrder AmbiguousOrder_NC5 fail "INV3_NoUncertainCompensation"
 r AmbiguousOrder AmbiguousOrder_NC6 fail "INV1_NeverOvershootSign"
+r AmbiguousOrder AmbiguousOrder_NC7  fail "INV4_ReservationLedgerSound"
+r AmbiguousOrder AmbiguousOrder_NC8  fail "INV5_PackageDeleverNeverNetShort"
+r AmbiguousOrder AmbiguousOrder_NC9  fail "INV5_PackageDeleverNeverNetShort"
+r AmbiguousOrder AmbiguousOrder_NC10 fail "INV6_SupersessionQuiescesFirst"
+r AmbiguousOrder AmbiguousOrder_NC11 fail "INV4_ReservationLedgerSound"
+r AmbiguousOrder AmbiguousOrder_NC12 fail "INV4_ReservationLedgerSound"
 
 echo "###### MODEL (a) POSITIVE CONTROLS -- each MUST be violated (reached) ######"
 echo
 for p in PC1_FloorNeverDispatched PC2_NeverTwoGenerations \
          PC3_SubtrahendAlwaysZero PC4_StraddleNeverReached \
-         PC5_FloorNeverRecursed PC6_NoShortSideFloor PC7_NoLongSideFloor; do
+         PC5_FloorNeverRecursed PC6_NoShortSideFloor PC7_NoLongSideFloor \
+         PC9_NoExposureSubtrahend PC10_NoFloorSubtrahend \
+         PC11_NoPkgSpotSubtrahend PC12_NeverThreeProducers \
+         PC13_PdNeverCompletes PC14_PdNeverHeld PC15_PdNeverInFlight \
+         PC16_NeverSupersededByEmergency PC17_NeverSupersededByFence \
+         PC18_PerpAlwaysFullyConfirmed PC19_PdNeverTerminalFlatten \
+         PC20_NeverTwoGenerations PC21_TransientAlwaysZero; do
   gen_probe_cfg "$p" INVARIANTS
   r AmbiguousOrderCoverage "$TOOLS_DIR/PC_$p" probe "$p"
 done
