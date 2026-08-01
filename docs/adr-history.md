@@ -1,6 +1,6 @@
 # ADR & Review History — Funding-Rate Arbitrage Platform
 
-**Status:** v0.9.19 (2026-08-01) — **the §12 post-kill fork is RULED: (c), the alt/dislocation niche — strategy #2 arrives early** (calibration design record §41r; ADR §3 gains the dated ruling block): the four pre-registered forks proved asymmetric under §41p's measured decomposition — (a) maker-entry numerically refuted standalone and retained as a standing tactic, (b) regime-selective declined as the corner the deployment sweep already bounded, (d) tuition declined as mispriced (assumed 60% utilization; measured 11.5%) — leaving (c) the one fork whose hypothesis the era has not refuted. **No core normative change:** §12's milestone-2 row gains the dated ruling sentence beside its kill sentence (an outcome record, like the kill), so the tagless total **stays fifty-four**; the ruling's two caveats (alt depth must be measured; §2.3's persistence-measured edge bar stands) are normative for the coming strategy-#2 scoping record, not core edits today. Previous: v0.9.18 (2026-08-01), milestone 2's economic-gate kill (§41p/§41q; ADR §3's verdict block; §8's latency clause the one core edit, total stayed fifty-four).
+**Status:** v0.9.20 (2026-08-01) — **strategy #2 is SCOPED and §12 is RE-SEQUENCED** (scoping design record §42; ADR §3 gains the dated scoping block): milestone 2b — screening over backfillable settled-funding history + the dislocation census + the ~8-symbol four-stream capture expansion + the `strategy/crossvenue` read-path + strategy #2's own pre-registered gate — now precedes the OMS, with milestones 3–6 hard-gated on the gate and roster item 7 narrowed to the execution half. **One core normative change** (§12's roster); the ADR §3 tagless table is untouched, so the tagless total **stays fifty-four** — the scoping block below is a dated prose block like the kill and ruling blocks it follows. The four §42f forks were ruled the same day: shortlist ~8, broad tier deferred to the measured census, §38f re-deferred dated at the compressed clock, roster edit signed off. Previous: v0.9.19 (2026-08-01) — **the §12 post-kill fork is RULED: (c), the alt/dislocation niche — strategy #2 arrives early** (calibration design record §41r; ADR §3 gains the dated ruling block): the four pre-registered forks proved asymmetric under §41p's measured decomposition — (a) maker-entry numerically refuted standalone and retained as a standing tactic, (b) regime-selective declined as the corner the deployment sweep already bounded, (d) tuition declined as mispriced (assumed 60% utilization; measured 11.5%) — leaving (c) the one fork whose hypothesis the era has not refuted. **No core normative change:** §12's milestone-2 row gains the dated ruling sentence beside its kill sentence (an outcome record, like the kill), so the tagless total **stays fifty-four**; the ruling's two caveats (alt depth must be measured; §2.3's persistence-measured edge bar stands) are normative for the coming strategy-#2 scoping record, not core edits today. Previous: v0.9.18 (2026-08-01), milestone 2's economic-gate kill (§41p/§41q; ADR §3's verdict block; §8's latency clause the one core edit, total stayed fifty-four).
 
 **Previous (v0.9.16, 2026-07-30):** the parity wiring slice (§39j slice C closed): one core edit — §3.5's `Envelope.Validate` clause narrowed to `IngressSeq`, the absence door §39m-5 deferred now open at its construct — plus the Profiles instruments-info measurement, both reasoned in the parity dispatcher design record (§39p-5, §39q).
 **Doc set:** normative core `build-spec.md` · venue facts `venue-profiles.md` · kernel machines `state-machines.md` · history/traceability `adr-history.md` · teaching companion `tutorial.md`.
@@ -252,6 +252,41 @@ Draft v0.7.1 (2026-07-19) — Codex adversarial rounds 1–4 (11 → 6 → 4 →
 | **The `Envelope` is authoritative for provenance; a normalized payload carries none.** §4's `StreamFunding` comment lists "source, venueSeq" among payload contents, and both are `Envelope` fields §3.5 defines for every stream — read literally it asks for two copies with nothing saying which wins. The unsafe direction is reachable without an implementer noticing they chose: **gap detection reads `VenueSeq` while freshness reads the timestamps**, so a payload disagreeing with its envelope gets those two questions answered from different sources, and a venue restamping an unchanged reading becomes a fresh observation with no gap — the silent stall §3.4's timer exists to catch. A payload carries no instrument either, since `SourceID` is the mailbox key | core §4 |
 | **`marketdata` does not publish `MarketView`; `engine/state` builds it.** §3.2's row said `marketdata` publishes an immutable `MarketView` while §3.3 and §3.2's own next row give that translation to `engine/state`. §3.3 wins: a context publishing a strategy-owned type would have to know cross-leg skew and the strategy's view shape, coupling the two across exactly the boundary §3.6 rule 1 and the read ports exist to keep — and it also needs the book path, which does not exist. Rejected: §3.2 winning, which would additionally reduce `engine/state` to a cache | core §3.2 |
 | **Rules 1 and 10 are enforced; rule 6 is the only deferral left, and rule 10's deferral named the wrong trigger.** `hexboundary` and `exhaustiveswitch` landed the session their subjects appeared rather than after the code they police. Rule 10 had waited on a **state machine**, while what actually made it buildable was the shared kernel's **eleven enum-likes**, which had existed for several slices — it found **13 silent fallthroughs** on its first real run, every one of them reachable the whole time. A deferral must name the *construct the analyzer reads*, not the feature that motivated it, and rule 6's was re-checked against that. Separately, and normative for any future gate: **rule 1's obvious positive control is an import cycle** — `application/` importing `infrastructure/` is refused by the type-checker before the analyzer runs, so the gate scores a pass without executing. Within one context Go's no-cycles rule already covers most of rule 1; where it earns its place is the edge Go cannot see (`engine/`, another context's infrastructure) | core §3.6 |
+
+**Strategy #2 scoped, §12 re-sequenced (v0.9.20, 2026-08-01) — milestone 2b before the OMS.**
+The §41r mandate turned into a roster edit the same day, on measured facts (scoping design
+record §42). The organizing observation is the **backfillability asymmetry**: settled funding
+history is free public REST on both venues, so candidate screening runs *now* with no capture
+dependency — while books and live-estimate streams in our own format are the un-backfillable
+half (§3.5 defines parity as replaying *our own* log), so §41r's "time-sensitive" pressure lands
+on the screened shortlist's streams, not on capturing broadly today. Measured universe
+(2026-08-01, both venues' public instrument endpoints): **466 both-venue USDT perps; 431
+same-grid pairs (332 at 4h — twice BTC's settlement frequency, doubling both revenue events and
+the per-settlement drag `R`), 35 mismatched-grid**; Binance's `fundingInfo` returned interval
+overrides for all 466, so the existing hourly overlay already records interval provenance
+venue-wide; same interval ≠ same phase, so screening pairs settlements by venue-published
+instants. **Rulings (all four §42f forks, 2026-08-01):** shortlist **~8 symbols** for the
+four-stream tier (~+5–9G/day derived; the one-day §32m-D measurement ritual re-runs within 48h);
+**no broad funding-only tier** until the dislocation census — computable from backfillable data —
+prices what breadth earns its disk; **§38f re-deferred, dated**, with the ~3×-compressed clock
+recorded (~3 months of local disk at the expanded rate); **the roster edit signed off**.
+**Rejected alternatives, with reasons:** per-alt diff evidence streams (890M/day each for a
+pipeline claim BTC's stream already holds); alt spot books ("optionality" at ~1G/day/symbol when
+§2.3 is perp-perp and the §38f clock is the scarce resource); a third venue (new transport
+protocol + a full profiles verification campaign for a universe the two-venue gate does not
+need — revisit only on a measured thin-space trigger); Binance's all-symbol `!markPrice@arr@1s`
+(~6G/day derived for all 530 symbols — strictly worse than per-symbol streams below ~500);
+proceeding to milestone 3 against a killed v1 edge (the roster's own preamble forbids it); a
+wholesale roster rewrite (milestones 3–6 are strategy-agnostic controls and survive unchanged —
+a minimal dated edit is auditable, a rewrite is drift wearing a redesign's clothes); running
+strategy #2 without a milestone row (the gate needs a pre-registered home in the core, or its
+kill authority is a promise in a side record); a second capture process for the new symbols (the
+writer's single-owner model and close-time manifest truth were designed for one process — two
+writers is §5.1's forbidden shape transplanted to the archive; the expansion is a config edit +
+an honest `process_restart` gap record). The gate's shape inherits the §41 discipline whole —
+procedure commit pins parameters, holdout declared before scoring, refusals are governance
+questions, kill authority real — with the two §41r caveats built in: measured alt depth and the
+persistence-measured edge bar.
 
 **Milestone-2 post-kill fork: RULED (v0.9.19, 2026-08-01) — (c), the alt/dislocation niche.**
 The decision the kill left open, taken the same day on the same record — and the record is what
