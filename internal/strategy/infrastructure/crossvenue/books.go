@@ -158,7 +158,11 @@ func WalkBinanceBookCosts(root string, days []ManifestDay, key capture.StreamKey
 	var cur *mdomain.BookSnapshot
 	var curRecv time.Time
 
-	err := scanStream(root, key, days, func() { cur = nil }, func(rec capture.Record) error {
+	err := scanStream(root, key, days, func(cont bool) {
+		if !cont {
+			cur = nil
+		}
+	}, func(rec capture.Record) error {
 		switch rec.Kind {
 		case capture.RecordKindGap:
 			cur = nil
@@ -223,7 +227,11 @@ func WalkBybitBookCosts(root string, days []ManifestDay, key capture.StreamKey, 
 	acc := NewBookAccumulator()
 	var lastRecv time.Time
 
-	err := scanStream(root, key, days, func() { acc.Drop() }, func(rec capture.Record) error {
+	err := scanStream(root, key, days, func(cont bool) {
+		if !cont {
+			acc.Drop()
+		}
+	}, func(rec capture.Record) error {
 		switch rec.Kind {
 		case capture.RecordKindGap:
 			acc.Drop()

@@ -78,7 +78,11 @@ func SampleBinanceEstimates(root string, days []ManifestDay, key capture.StreamK
 	var cur *held
 	var lastGrid time.Time
 
-	err := scanStream(root, key, days, func() { cur = nil }, func(rec capture.Record) error {
+	err := scanStream(root, key, days, func(cont bool) {
+		if !cont {
+			cur = nil
+		}
+	}, func(rec capture.Record) error {
 		switch rec.Kind {
 		case capture.RecordKindGap:
 			cur = nil
@@ -115,8 +119,12 @@ func SampleBinanceEstimates(root string, days []ManifestDay, key capture.StreamK
 // SampleBybitEstimates samples the tickers stream's live funding estimate
 // on the epoch grid. The ticker wire is absent-means-unchanged, so the
 // stream is consumed through the venue's own accumulator, restarted cold
-// at every file boundary and recorded gap — carrying ticker state across a
-// hole would silently hold a stale rate as fresh.
+// at every recorded gap and every DISCONTINUOUS file boundary — carrying
+// ticker state across a hole would silently hold a stale rate as fresh.
+// A living writer's rotation is not a hole (§45n-1): the walker proves it
+// from the Open record's continuity claim, and state carries across, which
+// is what keeps a snapshot-at-subscribe wire's coverage from collapsing to
+// the reconnect clusters §45m measured (~9%).
 func SampleBybitEstimates(root string, days []ManifestDay, key capture.StreamKey, p SampleParams) (EstimateSeries, error) {
 	if err := p.Validate(); err != nil {
 		return EstimateSeries{}, err
@@ -131,9 +139,11 @@ func SampleBybitEstimates(root string, days []ManifestDay, key capture.StreamKey
 	var lastGrid time.Time
 	state := venue.NewBybitTickerState()
 
-	err := scanStream(root, key, days, func() {
-		state = venue.NewBybitTickerState()
-		cur = nil
+	err := scanStream(root, key, days, func(cont bool) {
+		if !cont {
+			state = venue.NewBybitTickerState()
+			cur = nil
+		}
 	}, func(rec capture.Record) error {
 		switch rec.Kind {
 		case capture.RecordKindGap:

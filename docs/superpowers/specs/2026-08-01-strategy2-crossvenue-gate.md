@@ -618,11 +618,60 @@ everything else. SimParams grows per-symbol entry (ruling 4) and the two
 integrity rules (ruling 3) as declared parameters, so the exploration
 sim can exercise what the gate enforces.
 
+## §45o — slice D build record (session 62, 2026-08-01)
+
+**(a) The continuity carry (ruling §45n-1) is LANDED: 15/15 aimed
+mutations caught.** The mechanics, measured against the writer before a
+line was written: every file — rotation included — begins with an Open
+record; a living process's rotation writes the just-closed file's true
+last CaptureSeq into `PrevLastSeq` (writer.go's closeFile), while a
+fresh process always writes zero (it cannot know where the previous
+hour ended — verify's checkOpenContinuity documents this); and every
+genuine discontinuity writes a Gap record. So the carry predicate is
+"first record is an Open whose non-zero claim equals the previous
+file's last observed CaptureSeq", computed by the walker from the
+archive's own evidence — never from file adjacency — and handed to
+consumers as `onFile(cont bool)`. `capture.OpenPrevLastSeq` is the one
+new exported surface, so the payload schema stays owned by its package.
+
+Semantics choices worth their words: the `prev != 0` guard is
+load-bearing only on the walk's FIRST file (elsewhere a 1-based
+sequence can never equal zero), and the walker trace test observes
+verdicts directly, which is what makes the guard mutable; a
+record-less file signals cold explicitly, and a LATER matching claim
+cannot resurrect state that reset (the empty-file fixture); mid-file
+discontinuities stay the consumers' job — they already reset on Gap
+records, unchanged.
+
+**The checklist bit BEFORE the battery again (instances 6 and 7 for
+§45): both book walkers' COLD boundary arm had no fixture** — every
+existing book test was single-file, where the boundary reset is inert,
+so `if !cont {…}` → `if false {…}` would have SURVIVED on both venues.
+The §45m collapse shape one layer down: the carry tests alone could
+not pin the polarity. Both cold-boundary fixtures were added first,
+and both "never reset" mutants then died on exactly them (1 failing
+test each).
+
+The battery: walk.go 6/6 (zero-claim vacuous match, verdict mirrored,
+non-Open first-record read — killed as ErrArchiveCorrupt on data
+payloads, last-sequence never advancing, per-record signal firing,
+record-less arm), sample.go 4/4 and books.go 4/4 (both venues × both
+reset polarities — the §45n-1 mirror rule executed as fixtures, not
+remembered), capture 1/1 (claim reads as no-predecessor). Fixture
+discipline: continuity sequences start at 5 so "last observed
+sequence" cannot collapse into "record count"; the stale-claim fixture
+matches an OLDER file's end, separating "immediate predecessor" from
+"anything seen"; a carry crosses the manifested-day boundary, where a
+wrong walker would reset with the day loop. `make ci` green.
+
+**(b) The roster + gate verb + artifact: IN PROGRESS.**
+
 ## RESUME HERE
 
 **Slice C is CLOSED (§45m): code, batteries, oracles, 31/31 mutations,
-the labeled smoke. §45n: slice D's four forks are RULED (session 62).
-What remains, in order:**
+the labeled smoke. §45n: slice D's four forks are RULED (session 62);
+§45o(a): the continuity carry is LANDED, 15/15. What remains, in
+order:**
 
 1. **The §32m-D per-tier one-day figure, DUE BY 2026-08-03T11:13Z**
    (measurable from ~2026-08-02T11:13Z), landing as §44e in the §44

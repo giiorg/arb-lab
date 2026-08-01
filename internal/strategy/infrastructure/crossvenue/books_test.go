@@ -202,3 +202,157 @@ func TestWalkBybitBookCostsBreakAndReanchor(t *testing.T) {
 		t.Fatalf("broken-stretch boundary %+v, want a named refusal", b)
 	}
 }
+
+// The cold arm's own fixture (the carry tests' mirror — single-file
+// batteries leave the boundary reset inert, the §45m collapse shape one
+// layer down): a data-first file boundary is NOT a proven rotation, so
+// the held Binance book resets and the post-boundary instants skip.
+func TestWalkBinanceBookCostsFileBoundaryResets(t *testing.T) {
+	root := t.TempDir()
+	xB, xA := bookAFixture()
+	yB, yA := bookBFixture()
+	a := sampleBase.Add(59*time.Minute + 58*time.Second)
+	b := sampleBase.Add(1*time.Hour + 7*time.Second)
+	writeFixture(t, filepath_Join(root, bnBookRel("2026-07-30T10.arbcap")), false,
+		dataAt(a, bnDepthFrame(a, 10, xB, xA)))
+	writeFixture(t, filepath_Join(root, bnBookRel("2026-07-30T11.arbcap")), false,
+		dataAt(b, bnDepthFrame(b, 11, yB, yA)))
+	writeManifest(t, root, sampleDay,
+		bnBookRel("2026-07-30T10.arbcap"), bnBookRel("2026-07-30T11.arbcap"))
+	days, err := LoadManifestDays(root, BooksCutoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, err := WalkBinanceBookCosts(root, days, bnBookKeyFix, bnInstFix, bookP, abcQty(t, "2"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 11:00:00 and 11:00:05 sit inside slack of file 1's frame — only the
+	// cold boundary explains skipping them.
+	if len(cs.AskSlips) != 0 || cs.Skipped != 2 {
+		t.Fatalf("ask samples %d skipped %d, want 0 and 2", len(cs.AskSlips), cs.Skipped)
+	}
+}
+
+// The Bybit mirror: across an unproven boundary the accumulator drops, so
+// the continuing file's deltas are COLD (counted, never applied) and
+// nothing samples until a snapshot that never comes.
+func TestWalkBybitBookCostsFileBoundaryResets(t *testing.T) {
+	root := t.TempDir()
+	xB, xA := bookAFixture()
+	snap := sampleBase.Add(59*time.Minute + 50*time.Second)
+	d1 := sampleBase.Add(1*time.Hour + 3*time.Second)
+	d2 := sampleBase.Add(1*time.Hour + 9*time.Second)
+	writeFixture(t, filepath_Join(root, byBookRel("2026-07-30T10.arbcap")), false,
+		dataAt(snap, byBookSnapFrame(snap, 100, xB, xA)))
+	writeFixture(t, filepath_Join(root, byBookRel("2026-07-30T11.arbcap")), false,
+		dataAt(d1, byBookDeltaFrame(d1, 101, nil, [][2]string{{"101.00", "9"}})),
+		dataAt(d2, byBookDeltaFrame(d2, 102, nil, nil)),
+	)
+	writeManifest(t, root, sampleDay,
+		byBookRel("2026-07-30T10.arbcap"), byBookRel("2026-07-30T11.arbcap"))
+	days, err := LoadManifestDays(root, BooksCutoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, err := WalkBybitBookCosts(root, days, byBookKeyFix, byInstFix, bookP, abcQty(t, "2"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 10:59:55, 11:00:00 and 11:00:05 all skip: the book dropped at the
+	// boundary and both deltas run cold against no anchor.
+	if len(cs.AskSlips) != 0 || cs.Skipped != 3 {
+		t.Fatalf("ask samples %d skipped %d, want 0 and 3", len(cs.AskSlips), cs.Skipped)
+	}
+	if cs.ColdDeltas != 2 || cs.Breaks != 0 {
+		t.Fatalf("cold %d breaks %d, want 2 and 0", cs.ColdDeltas, cs.Breaks)
+	}
+}
+
+// The §45n-1 carry, Binance book arm: the held snapshot survives a living
+// rotation, so the instants right after the boundary walk it instead of
+// skipping — and a wanted instant there measures instead of refusing.
+func TestWalkBinanceBookCostsRotationCarries(t *testing.T) {
+	root := t.TempDir()
+	xB, xA := bookAFixture()
+	yB, yA := bookBFixture()
+	a := sampleBase.Add(59*time.Minute + 58*time.Second)
+	b := sampleBase.Add(1*time.Hour + 7*time.Second)
+	writeFixtureFrom(t, filepath_Join(root, bnBookRel("2026-07-30T10.arbcap")), false, 5,
+		openAt(sampleBase, 0),
+		dataAt(a, bnDepthFrame(a, 10, xB, xA)))
+	writeFixtureFrom(t, filepath_Join(root, bnBookRel("2026-07-30T11.arbcap")), false, 7,
+		openAt(b.Add(-7*time.Second), 6),
+		dataAt(b, bnDepthFrame(b, 11, yB, yA)))
+	writeManifest(t, root, sampleDay,
+		bnBookRel("2026-07-30T10.arbcap"), bnBookRel("2026-07-30T11.arbcap"))
+	days, err := LoadManifestDays(root, BooksCutoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wanted := []time.Time{sampleBase.Add(1*time.Hour + 5*time.Second)}
+	cs, err := WalkBinanceBookCosts(root, days, bnBookKeyFix, bnInstFix, bookP, abcQty(t, "2"), wanted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 11:00:00 and 11:00:05 walk book X across the carried boundary.
+	if len(cs.AskSlips) != 2 || cs.Skipped != 0 {
+		t.Fatalf("ask samples %d skipped %d, want 2 and 0", len(cs.AskSlips), cs.Skipped)
+	}
+	if cs.AskSlips[0].Decimal() != "0.005" || cs.AskSlips[1].Decimal() != "0.005" {
+		t.Fatalf("ask slips %s, %s — want book X both instants", cs.AskSlips[0].Decimal(), cs.AskSlips[1].Decimal())
+	}
+	bs := cs.AtWanted[wanted[0].UnixMilli()]
+	if !bs.OK {
+		t.Fatalf("boundary %+v, want a measured sample across the carry", bs)
+	}
+}
+
+// The §45n-1 carry, Bybit book arm: a delta-only continuing file keeps the
+// book — the delta FOLLOWS the carried u, so nothing is cold, nothing
+// breaks, and the post-boundary instants sample the reconstruction. Under
+// the per-file cold rule this exact stream measured nothing after the
+// boundary until a snapshot that never comes (§45m's ~9% mechanism).
+func TestWalkBybitBookCostsRotationCarries(t *testing.T) {
+	root := t.TempDir()
+	xB, xA := bookAFixture()
+	yB, _ := bookBFixture()
+	snap := sampleBase.Add(59*time.Minute + 50*time.Second)
+	d1 := sampleBase.Add(1*time.Hour + 3*time.Second)
+	d2 := sampleBase.Add(1*time.Hour + 9*time.Second)
+	writeFixtureFrom(t, filepath_Join(root, byBookRel("2026-07-30T10.arbcap")), false, 5,
+		openAt(sampleBase, 0),
+		dataAt(snap, byBookSnapFrame(snap, 100, xB, xA)))
+	// The delta rewrites the ask side to book Y's shape: it must DELETE
+	// book X's 101.00 level (size 0) — delta semantics update levels in
+	// place, they do not replace the book.
+	yAskDelta := [][2]string{{"100.00", "1"}, {"101.00", "0"}, {"103.00", "1"}}
+	writeFixtureFrom(t, filepath_Join(root, byBookRel("2026-07-30T11.arbcap")), false, 7,
+		openAt(d1.Add(-3*time.Second), 6),
+		dataAt(d1, byBookDeltaFrame(d1, 101, yB, yAskDelta)),
+		dataAt(d2, byBookDeltaFrame(d2, 102, nil, nil)),
+	)
+	writeManifest(t, root, sampleDay,
+		byBookRel("2026-07-30T10.arbcap"), byBookRel("2026-07-30T11.arbcap"))
+	days, err := LoadManifestDays(root, BooksCutoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, err := WalkBybitBookCosts(root, days, byBookKeyFix, byInstFix, bookP, abcQty(t, "2"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 10:59:55 and 11:00:00 walk book X (held across the boundary);
+	// 11:00:05 walks the book after the FOLLOWING delta rewrote its
+	// levels to Y — applied, not cold, only because u carried.
+	if cs.ColdDeltas != 0 || cs.Breaks != 0 || cs.Skipped != 0 {
+		t.Fatalf("cold %d breaks %d skipped %d, want all 0", cs.ColdDeltas, cs.Breaks, cs.Skipped)
+	}
+	if len(cs.AskSlips) != 3 {
+		t.Fatalf("ask samples %d, want 3", len(cs.AskSlips))
+	}
+	if cs.AskSlips[1].Decimal() != "0.005" || cs.AskSlips[2].Decimal() != "0.015" {
+		t.Fatalf("ask slips %s then %s — want X then the delta-updated Y",
+			cs.AskSlips[1].Decimal(), cs.AskSlips[2].Decimal())
+	}
+}

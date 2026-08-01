@@ -9,6 +9,7 @@ package crossvenue
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -34,9 +35,27 @@ func gapAt(recv time.Time) fixRec {
 	return fixRec{kind: capture.RecordKindGap, recv: recv, payload: `{}`}
 }
 
+// openAt is a rotation/connection Open record claiming prev as the
+// predecessor file's last CaptureSeq — zero is the writer's fresh-process
+// "no predecessor" sentinel (§45n-1's cold shape).
+func openAt(recv time.Time, prev uint64) fixRec {
+	return fixRec{kind: capture.RecordKindOpen, recv: recv,
+		payload: fmt.Sprintf(`{"prev_last_seq":%d}`, prev)}
+}
+
 // writeFixture writes one archive file from explicit records — recv
 // instants are the walkers' grid inputs, so the fixture controls them.
+// Sequences start at 1, a fresh stream's shape.
 func writeFixture(t *testing.T, path string, torn bool, recs ...fixRec) {
+	t.Helper()
+	writeFixtureFrom(t, path, torn, 1, recs...)
+}
+
+// writeFixtureFrom is writeFixture with an explicit starting CaptureSeq:
+// continuity fixtures need sequences that CONTINUE across files, and a
+// start above 1 also keeps "last observed sequence" distinguishable from
+// "record count" (the fixture-collapse checklist).
+func writeFixtureFrom(t *testing.T, path string, torn bool, start uint64, recs ...fixRec) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
@@ -46,7 +65,7 @@ func writeFixture(t *testing.T, path string, torn bool, recs ...fixRec) {
 	for i, r := range recs {
 		buf, err = capture.AppendRecord(buf, capture.Record{
 			Kind:       r.kind,
-			CaptureSeq: uint64(i + 1),
+			CaptureSeq: start + uint64(i),
 			RecvTime:   r.recv,
 			Mono:       time.Duration(i + 1),
 			Payload:    []byte(r.payload),
@@ -58,7 +77,7 @@ func writeFixture(t *testing.T, path string, torn bool, recs ...fixRec) {
 	if torn {
 		whole := len(buf)
 		buf, err = capture.AppendRecord(buf, capture.Record{
-			Kind: capture.RecordKindData, CaptureSeq: uint64(len(recs) + 1),
+			Kind: capture.RecordKindData, CaptureSeq: start + uint64(len(recs)),
 			RecvTime: recs[len(recs)-1].recv.Add(time.Second), Mono: time.Hour, Payload: []byte(`{}`),
 		})
 		if err != nil {
@@ -221,7 +240,13 @@ func TestScanStreamSkipsAbsentDayAndSignalsFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	var trace []string
-	err = scanStream(root, walkKey, days, func() { trace = append(trace, "file") }, func(rec capture.Record) error {
+	err = scanStream(root, walkKey, days, func(cont bool) {
+		if cont {
+			trace = append(trace, "file:carry")
+		} else {
+			trace = append(trace, "file:cold")
+		}
+	}, func(rec capture.Record) error {
 		if rec.Kind == capture.RecordKindData {
 			trace = append(trace, string(rec.Payload))
 		}
@@ -230,7 +255,8 @@ func TestScanStreamSkipsAbsentDayAndSignalsFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
-	want := []string{"file", "a", "file", "b"}
+	// Data-only files carry no Open record, so every boundary is cold.
+	want := []string{"file:cold", "a", "file:cold", "b"}
 	if len(trace) != len(want) {
 		t.Fatalf("trace %v, want %v", trace, want)
 	}
@@ -238,5 +264,101 @@ func TestScanStreamSkipsAbsentDayAndSignalsFiles(t *testing.T) {
 		if trace[i] != want[i] {
 			t.Fatalf("trace %v, want %v", trace, want)
 		}
+	}
+}
+
+// The §45n-1 continuity verdicts, every arm in one walk. Five files
+// across a manifested-day boundary; sequences start at 5 so "last
+// observed sequence" cannot collapse into "record count":
+//
+//	07-30 T22 (seqs 5..7):  Open claims 0    → cold (the walk's first file;
+//	                          an explicit zero claim must not vacuously match)
+//	07-30 T23 (seqs 8..9):  Open claims 7    → CARRY (a living rotation)
+//	07-31 T00 (seqs 10..11): Open claims 9   → CARRY (across the day boundary —
+//	                          the day loop is a place a wrong walker would reset)
+//	07-31 T01 (seqs 1..2):  Open claims 0    → cold (a restart's fresh writer)
+//	07-31 T02 (seqs 3..4):  Open claims 9    → cold (a stale claim matching an
+//	                          OLDER file's end, not the immediate predecessor's 2)
+func TestScanStreamContinuityVerdicts(t *testing.T) {
+	root := t.TempDir()
+	at := func(day string, h int) time.Time {
+		d, err := time.ParseInLocation("2006-01-02", day, time.UTC)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d.Add(time.Duration(h)*time.Hour + time.Second)
+	}
+	writeFixtureFrom(t, streamAbs(root, "2026-07-30", "2026-07-30T22.arbcap"), false, 5,
+		openAt(at("2026-07-30", 22), 0), dataAt(at("2026-07-30", 22), `a`), dataAt(at("2026-07-30", 22).Add(time.Second), `b`))
+	writeFixtureFrom(t, streamAbs(root, "2026-07-30", "2026-07-30T23.arbcap"), false, 8,
+		openAt(at("2026-07-30", 23), 7), dataAt(at("2026-07-30", 23), `c`))
+	writeFixtureFrom(t, streamAbs(root, "2026-07-31", "2026-07-31T00.arbcap"), false, 10,
+		openAt(at("2026-07-31", 0), 9), dataAt(at("2026-07-31", 0), `d`))
+	writeFixtureFrom(t, streamAbs(root, "2026-07-31", "2026-07-31T01.arbcap"), false, 1,
+		openAt(at("2026-07-31", 1), 0), dataAt(at("2026-07-31", 1), `e`))
+	writeFixtureFrom(t, streamAbs(root, "2026-07-31", "2026-07-31T02.arbcap"), false, 3,
+		openAt(at("2026-07-31", 2), 9), dataAt(at("2026-07-31", 2), `f`))
+	writeManifest(t, root, "2026-07-30",
+		streamRel("2026-07-30", "2026-07-30T22.arbcap"),
+		streamRel("2026-07-30", "2026-07-30T23.arbcap"))
+	writeManifest(t, root, "2026-07-31",
+		streamRel("2026-07-31", "2026-07-31T00.arbcap"),
+		streamRel("2026-07-31", "2026-07-31T01.arbcap"),
+		streamRel("2026-07-31", "2026-07-31T02.arbcap"))
+	days, err := LoadManifestDays(root, BooksCutoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var verdicts []bool
+	var data []string
+	err = scanStream(root, walkKey, days, func(cont bool) { verdicts = append(verdicts, cont) },
+		func(rec capture.Record) error {
+			if rec.Kind == capture.RecordKindData {
+				data = append(data, string(rec.Payload))
+			}
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	wantV := []bool{false, true, true, false, false}
+	if len(verdicts) != len(wantV) {
+		t.Fatalf("verdicts %v, want %v", verdicts, wantV)
+	}
+	for i := range wantV {
+		if verdicts[i] != wantV[i] {
+			t.Fatalf("verdicts %v, want %v", verdicts, wantV)
+		}
+	}
+	wantD := "abcdef"
+	if got := joinStrings(data); got != wantD {
+		t.Fatalf("data %q, want %q", got, wantD)
+	}
+}
+
+func joinStrings(ss []string) string {
+	out := ""
+	for _, s := range ss {
+		out += s
+	}
+	return out
+}
+
+// A malformed Open payload in a vouched file is integrity damage — the
+// continuity claim cannot be read, and guessing cold would hide it.
+func TestScanStreamRefusesMalformedOpen(t *testing.T) {
+	root := t.TempDir()
+	day := "2026-07-30"
+	at := time.Date(2026, 7, 30, 10, 0, 1, 0, time.UTC)
+	writeFixture(t, streamAbs(root, day, "2026-07-30T10.arbcap"), false,
+		fixRec{kind: capture.RecordKindOpen, recv: at, payload: `{`})
+	writeManifest(t, root, day, streamRel(day, "2026-07-30T10.arbcap"))
+	days, err := LoadManifestDays(root, BooksCutoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = scanStream(root, walkKey, days, nil, func(capture.Record) error { return nil })
+	if !errors.Is(err, ErrArchiveCorrupt) {
+		t.Fatalf("err %v, want ErrArchiveCorrupt", err)
 	}
 }

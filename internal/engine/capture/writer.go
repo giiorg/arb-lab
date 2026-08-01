@@ -147,6 +147,27 @@ type openPayload struct {
 	Provenance Provenance `json:"provenance"`
 }
 
+// OpenPrevLastSeq reads the continuity claim out of a RecordKindOpen
+// payload: the last CaptureSeq of the file this one continues, zero
+// meaning "no predecessor" — which is also what a fresh writer always
+// writes, since it cannot know where the previous hour ended without
+// reading that file (see verify's checkOpenContinuity).
+//
+// Exported for readers that must decide whether a rotation boundary is
+// the same connection: a non-zero claim equal to the predecessor's
+// observed last sequence is a living writer's rotation, the one file
+// boundary that is NOT a hole; zero or a mismatch is a restart or a
+// break. The crossvenue walkers key their carry-vs-cold rule on exactly
+// this (§45n-1) rather than duplicating the payload schema outside the
+// package that owns it.
+func OpenPrevLastSeq(payload []byte) (uint64, error) {
+	var op openPayload
+	if err := json.Unmarshal(payload, &op); err != nil {
+		return 0, fmt.Errorf("capture: open payload: %w", err)
+	}
+	return op.PrevLastSeq, nil
+}
+
 // closePayload is a RecordKindClose record's payload, §32g's {lastSeq,
 // recordCount, sha256}.
 //

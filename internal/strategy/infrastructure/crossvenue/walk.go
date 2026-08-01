@@ -118,12 +118,23 @@ func LoadManifestDays(root string, before time.Time) ([]ManifestDay, error) {
 // owns that ledger — so it is skipped; a file the day's manifest does not
 // vouch for, or a vouched file that fails to decode, refuses by name.
 //
-// onFile, when non-nil, fires before each file's first record: a file can
-// begin at a mid-connection rotation boundary, so a stateful consumer (the
-// ticker state, the book accumulator) must restart cold there rather than
-// carry state across a hole it cannot see (§39p-2's documented cold start).
-func scanStream(root string, key capture.StreamKey, days []ManifestDay, onFile func(), fn func(capture.Record) error) error {
+// onFile, when non-nil, fires before each file's first record with the
+// boundary's continuity verdict. cont is true iff the file's first record
+// is an Open whose non-zero PrevLastSeq equals the previous file's last
+// observed CaptureSeq — a living writer's rotation (§45n-1), the one file
+// boundary the framing records prove is NOT a hole, so a stateful
+// consumer (the ticker state, the book accumulator) may carry state
+// across it. Everything else is cold (cont=false): the walk's first
+// file, a restart's zero claim, a sequence mismatch, or a first record
+// that is not an Open. The verdict is computed from the archive's own
+// evidence, never from file adjacency — an absent hour between two
+// files fails the sequence check by itself. Mid-file discontinuities
+// stay the consumer's job: every one is a Gap record, which consumers
+// reset on (§39p-2's rule, narrowed by §45n-1 to the boundaries that
+// are actually holes).
+func scanStream(root string, key capture.StreamKey, days []ManifestDay, onFile func(cont bool), fn func(capture.Record) error) error {
 	dir := key.Dir(root)
+	var lastSeq uint64
 	for _, d := range days {
 		dayDir := filepath.Join(dir, d.Day[0:4], d.Day[5:7], d.Day[8:10])
 		entries, err := os.ReadDir(dayDir)
@@ -150,11 +161,37 @@ func scanStream(root string, key capture.StreamKey, days []ManifestDay, onFile f
 			if !d.Vouches(rel) {
 				return fmt.Errorf("file %s: %w", rel, ErrDayUnmanifested)
 			}
-			if onFile != nil {
-				onFile()
-			}
-			if err := scanFile(full, fn); err != nil {
+			first := true
+			err = scanFile(full, func(rec capture.Record) error {
+				if first {
+					first = false
+					cont := false
+					if rec.Kind == capture.RecordKindOpen {
+						prev, perr := capture.OpenPrevLastSeq(rec.Payload)
+						if perr != nil {
+							return fmt.Errorf("%s: %w: %w", rel, ErrArchiveCorrupt, perr)
+						}
+						// Zero is the writer's documented "no predecessor"
+						// sentinel — a fresh process cannot know where the
+						// previous hour ended — and on the walk's first file
+						// (lastSeq still 0) the guard is also what keeps an
+						// explicit zero claim from vacuously matching.
+						cont = prev != 0 && prev == lastSeq
+					}
+					if onFile != nil {
+						onFile(cont)
+					}
+				}
+				lastSeq = rec.CaptureSeq
+				return fn(rec)
+			})
+			if err != nil {
 				return err
+			}
+			if first && onFile != nil {
+				// A vouched file with zero records: signal it cold so no
+				// consumer carries state across an anomalous boundary.
+				onFile(false)
 			}
 		}
 	}

@@ -268,6 +268,119 @@ func TestSampleBybitFileBoundaryResets(t *testing.T) {
 	}
 }
 
+// The §45n-1 carry, Binance arm: a living rotation (Open claiming the
+// predecessor's last sequence) is NOT a hole, so the held estimate
+// survives the boundary and the instants after it sample — the exact
+// instants the cold rule skipped in TestSampleBinanceFileBoundaryResets.
+func TestSampleBinanceRotationCarriesEstimate(t *testing.T) {
+	wide := SampleParams{Every: 5 * time.Second, Slack: time.Minute}
+	root := t.TempDir()
+	a := sampleBase.Add(59*time.Minute + 58*time.Second)
+	b := sampleBase.Add(1*time.Hour + 7*time.Second)
+	writeFixtureFrom(t, filepath_Join(root, bnFundingRel("2026-07-30T10.arbcap")), false, 5,
+		openAt(sampleBase, 0),
+		dataAt(a, markFrame(a, "0.0001")))
+	writeFixtureFrom(t, filepath_Join(root, bnFundingRel("2026-07-30T11.arbcap")), false, 7,
+		openAt(b.Add(-7*time.Second), 6),
+		dataAt(b, markFrame(b, "0.0002")))
+	writeManifest(t, root, sampleDay,
+		bnFundingRel("2026-07-30T10.arbcap"), bnFundingRel("2026-07-30T11.arbcap"))
+	days, err := LoadManifestDays(root, BooksCutoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := SampleBinanceEstimates(root, days, bnFundingKeyFix, wide)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 11:00:00 and 11:00:05 read the 10:59:58 frame across the carried
+	// boundary — 2s and 7s old, both inside slack, both rate 0.0001.
+	if len(got.Points) != 2 || got.Skipped != 0 {
+		t.Fatalf("points %d skipped %d, want 2 and 0: %+v", len(got.Points), got.Skipped, got.Points)
+	}
+	for i, p := range got.Points {
+		if p.Rate.Decimal() != "0.0001" {
+			t.Fatalf("point %d rate %s, want the carried 0.0001", i, p.Rate.Decimal())
+		}
+	}
+}
+
+// An anomalous record-less file still signals its boundary cold, and a
+// LATER file whose Open claim happens to match the last sequence before
+// the empty file must not resurrect the estimate — the reset already
+// happened and stays.
+func TestSampleBinanceEmptyFileResets(t *testing.T) {
+	wide := SampleParams{Every: 5 * time.Second, Slack: time.Minute}
+	root := t.TempDir()
+	a := sampleBase.Add(59*time.Minute + 58*time.Second)
+	b := sampleBase.Add(2*time.Hour + 7*time.Second)
+	writeFixtureFrom(t, filepath_Join(root, bnFundingRel("2026-07-30T10.arbcap")), false, 5,
+		openAt(sampleBase, 0),
+		dataAt(a, markFrame(a, "0.0001")))
+	writeFixture(t, filepath_Join(root, bnFundingRel("2026-07-30T11.arbcap")), false) // header only
+	writeFixtureFrom(t, filepath_Join(root, bnFundingRel("2026-07-30T12.arbcap")), false, 7,
+		openAt(b.Add(-7*time.Second), 6),
+		dataAt(b, markFrame(b, "0.0002")))
+	writeManifest(t, root, sampleDay,
+		bnFundingRel("2026-07-30T10.arbcap"), bnFundingRel("2026-07-30T11.arbcap"),
+		bnFundingRel("2026-07-30T12.arbcap"))
+	days, err := LoadManifestDays(root, BooksCutoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := SampleBinanceEstimates(root, days, bnFundingKeyFix, wide)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Every instant between the files is skipped: the empty file's cold
+	// signal dropped the estimate, and the third file's matching claim
+	// cannot un-drop it.
+	if len(got.Points) != 0 {
+		t.Fatalf("points %+v, want none across the empty file", got.Points)
+	}
+	if got.Skipped == 0 {
+		t.Fatal("nothing skipped — the boundary instants were never considered")
+	}
+}
+
+// The §45n-1 carry, Bybit arm (the state-vs-anchor distinction again): a
+// funding DELTA in the continuing file emits against the CARRIED ticker
+// state — cold state would swallow it silently — and the sampled rate is
+// the delta's, proving the merge ran against the first file's snapshot.
+func TestSampleBybitRotationCarriesTickerState(t *testing.T) {
+	root := t.TempDir()
+	snap := sampleBase.Add(59*time.Minute + 50*time.Second)
+	news2 := sampleBase.Add(1*time.Hour + 3*time.Second)
+	tail2 := sampleBase.Add(1*time.Hour + 9*time.Second)
+	writeFixtureFrom(t, filepath_Join(root, byFundingRel("2026-07-30T10.arbcap")), false, 5,
+		openAt(sampleBase, 0),
+		dataAt(snap, tickerSnapshot(snap, "0.0001")))
+	writeFixtureFrom(t, filepath_Join(root, byFundingRel("2026-07-30T11.arbcap")), false, 7,
+		openAt(news2.Add(-3*time.Second), 6),
+		dataAt(news2, tickerFundingDelta(news2, "0.0004")),
+		dataAt(tail2, tickerChurn(tail2)),
+	)
+	writeManifest(t, root, sampleDay,
+		byFundingRel("2026-07-30T10.arbcap"), byFundingRel("2026-07-30T11.arbcap"))
+	days, err := LoadManifestDays(root, BooksCutoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := SampleBybitEstimates(root, days, byFundingKeyFix, sampleP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 10:59:55 and 11:00:00 find the snapshot 5s and 10s stale (skips);
+	// 11:00:05 reads the delta's 0.0004, 2s fresh — which exists as an
+	// emitting estimate ONLY because the ticker state crossed the boundary.
+	if len(got.Points) != 1 || got.Skipped != 2 {
+		t.Fatalf("points %d skipped %d, want 1 and 2: %+v", len(got.Points), got.Skipped, got.Points)
+	}
+	if got.Points[0].Rate.Decimal() != "0.0004" {
+		t.Fatalf("rate %s, want the delta's 0.0004 merged into carried state", got.Points[0].Rate.Decimal())
+	}
+}
+
 // The join keeps only instants BOTH venues sampled, oriented
 // Binance-minus-Bybit; one-sided instants are counted, not silently gone.
 func TestMergeDecisionPoints(t *testing.T) {
