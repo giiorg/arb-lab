@@ -111,6 +111,32 @@ func writeManifest(t *testing.T, root, day string, rels ...string) {
 	}
 }
 
+// appendManifest adds paths to an existing day's manifest, preserving
+// what it already vouches — a second symbol's streams join the day rather
+// than replacing it.
+func appendManifest(t *testing.T, root, day string, rels ...string) {
+	t.Helper()
+	path := filepath.Join(root, "v1", "_manifest", day+".json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m capture.Manifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range rels {
+		m.Entries = append(m.Entries, capture.ManifestEntry{Path: rel, Window: day + "T00:00:00Z"})
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // walkInst / walkKey name the fixture stream: a Bybit linear book stream,
 // arbitrary for the walker (scanStream reads paths, not wire bytes).
 var walkInst = ids.VenueInstrument{Venue: "bybit", Product: ids.ProductLinearPerp, Contract: ids.ContractLinear, Symbol: "ABCUSDT"}

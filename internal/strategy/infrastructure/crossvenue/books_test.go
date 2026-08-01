@@ -21,13 +21,17 @@ import (
 var bnBookKeyFix = capture.StreamKey{Source: events.SourceID{Instrument: bnInstFix, Stream: events.StreamBook}, Topic: "abcusdt@depth20@100ms"}
 var byBookKeyFix = capture.StreamKey{Source: events.SourceID{Instrument: byInstFix, Stream: events.StreamBook}, Topic: "orderbook.50.ABCUSDT"}
 
-func bnBookRel(name string) string {
-	return "v1/binance/linear_perp/linear/ABCUSDT/book/abcusdt%40depth20%40100ms/2026/07/30/" + name
+func bnBookRelSym(sym, name string) string {
+	return "v1/binance/linear_perp/linear/" + sym + "/book/" +
+		strings.ToLower(sym) + "%40depth20%40100ms/2026/07/30/" + name
 }
 
-func byBookRel(name string) string {
-	return "v1/bybit/linear_perp/linear/ABCUSDT/book/orderbook.50.ABCUSDT/2026/07/30/" + name
+func byBookRelSym(sym, name string) string {
+	return "v1/bybit/linear_perp/linear/" + sym + "/book/orderbook.50." + sym + "/2026/07/30/" + name
 }
+
+func bnBookRel(name string) string { return bnBookRelSym("ABCUSDT", name) }
+func byBookRel(name string) string { return byBookRelSym("ABCUSDT", name) }
 
 func levelsJSON(levels [][2]string) string {
 	parts := make([]string, len(levels))
@@ -37,19 +41,31 @@ func levelsJSON(levels [][2]string) string {
 	return "[" + strings.Join(parts, ",") + "]"
 }
 
+func bnDepthFrameSym(sym string, recv time.Time, u uint64, bids, asks [][2]string) string {
+	return fmt.Sprintf(`{"e":"depthUpdate","E":%d,"s":%q,"U":%d,"u":%d,"pu":%d,"b":%s,"a":%s}`,
+		recv.UnixMilli(), sym, u-5, u, u-6, levelsJSON(bids), levelsJSON(asks))
+}
+
+func byBookSnapFrameSym(sym string, recv time.Time, u uint64, bids, asks [][2]string) string {
+	return fmt.Sprintf(`{"topic":"orderbook.50.%s","type":"snapshot","ts":%d,"data":{"s":%q,"b":%s,"a":%s,"u":%d,"seq":%d}}`,
+		sym, recv.UnixMilli(), sym, levelsJSON(bids), levelsJSON(asks), u, u*10)
+}
+
+func byBookDeltaFrameSym(sym string, recv time.Time, u uint64, bids, asks [][2]string) string {
+	return fmt.Sprintf(`{"topic":"orderbook.50.%s","type":"delta","ts":%d,"data":{"s":%q,"b":%s,"a":%s,"u":%d,"seq":%d}}`,
+		sym, recv.UnixMilli(), sym, levelsJSON(bids), levelsJSON(asks), u, u*10)
+}
+
 func bnDepthFrame(recv time.Time, u uint64, bids, asks [][2]string) string {
-	return fmt.Sprintf(`{"e":"depthUpdate","E":%d,"s":"ABCUSDT","U":%d,"u":%d,"pu":%d,"b":%s,"a":%s}`,
-		recv.UnixMilli(), u-5, u, u-6, levelsJSON(bids), levelsJSON(asks))
+	return bnDepthFrameSym("ABCUSDT", recv, u, bids, asks)
 }
 
 func byBookSnapFrame(recv time.Time, u uint64, bids, asks [][2]string) string {
-	return fmt.Sprintf(`{"topic":"orderbook.50.ABCUSDT","type":"snapshot","ts":%d,"data":{"s":"ABCUSDT","b":%s,"a":%s,"u":%d,"seq":%d}}`,
-		recv.UnixMilli(), levelsJSON(bids), levelsJSON(asks), u, u*10)
+	return byBookSnapFrameSym("ABCUSDT", recv, u, bids, asks)
 }
 
 func byBookDeltaFrame(recv time.Time, u uint64, bids, asks [][2]string) string {
-	return fmt.Sprintf(`{"topic":"orderbook.50.ABCUSDT","type":"delta","ts":%d,"data":{"s":"ABCUSDT","b":%s,"a":%s,"u":%d,"seq":%d}}`,
-		recv.UnixMilli(), levelsJSON(bids), levelsJSON(asks), u, u*10)
+	return byBookDeltaFrameSym("ABCUSDT", recv, u, bids, asks)
 }
 
 var bookP = SampleParams{Every: 5 * time.Second, Slack: 60 * time.Second}
@@ -57,6 +73,17 @@ var bookP = SampleParams{Every: 5 * time.Second, Slack: 60 * time.Second}
 func abcQty(t *testing.T, s string) fixedpoint.Quantity {
 	t.Helper()
 	q, err := fixedpoint.ParseQuantity("ABC", s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return q
+}
+
+// defQty is the second sim symbol's candidate — the asset tag is the
+// symbol's own base, checked at runtime by fixedpoint.
+func defQty(t *testing.T, s string) fixedpoint.Quantity {
+	t.Helper()
+	q, err := fixedpoint.ParseQuantity("DEF", s)
 	if err != nil {
 		t.Fatal(err)
 	}

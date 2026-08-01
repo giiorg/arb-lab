@@ -12,6 +12,7 @@ package crossvenue
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,28 +32,42 @@ var byInstFix = ids.VenueInstrument{Venue: "bybit", Product: ids.ProductLinearPe
 var byFundingKeyFix = capture.StreamKey{Source: events.SourceID{Instrument: byInstFix, Stream: events.StreamFunding}, Topic: "tickers.ABCUSDT"}
 
 // The topic path segment is percent-encoded on disk (capture's
-// encodeSegment): "@" is %40.
-func bnFundingRel(name string) string {
-	return "v1/binance/linear_perp/linear/ABCUSDT/funding/abcusdt%40markPrice%401s/2026/07/30/" + name
+// encodeSegment): "@" is %40. Every builder here has a symbol-taking form
+// — the multi-symbol sim fixture needs a second world identical but for
+// its name — and an ABCUSDT-bound convenience form for the single-symbol
+// batteries.
+func bnFundingRelSym(sym, name string) string {
+	return "v1/binance/linear_perp/linear/" + sym + "/funding/" +
+		strings.ToLower(sym) + "%40markPrice%401s/2026/07/30/" + name
 }
 
-func byFundingRel(name string) string {
-	return "v1/bybit/linear_perp/linear/ABCUSDT/funding/tickers.ABCUSDT/2026/07/30/" + name
+func byFundingRelSym(sym, name string) string {
+	return "v1/bybit/linear_perp/linear/" + sym + "/funding/tickers." + sym + "/2026/07/30/" + name
 }
 
-func markFrame(recv time.Time, rate string) string {
-	return fmt.Sprintf(`{"e":"markPriceUpdate","E":%d,"s":"ABCUSDT","r":%q,"T":%d}`,
-		recv.UnixMilli(), rate, recv.Add(4*time.Hour).UnixMilli())
+func bnFundingRel(name string) string { return bnFundingRelSym("ABCUSDT", name) }
+func byFundingRel(name string) string { return byFundingRelSym("ABCUSDT", name) }
+
+func markFrameSym(sym string, recv time.Time, rate string) string {
+	return fmt.Sprintf(`{"e":"markPriceUpdate","E":%d,"s":%q,"r":%q,"T":%d}`,
+		recv.UnixMilli(), sym, rate, recv.Add(4*time.Hour).UnixMilli())
 }
 
+func tickerSnapshotSym(sym string, recv time.Time, rate string) string {
+	return fmt.Sprintf(`{"topic":"tickers.%s","type":"snapshot","data":{"symbol":%q,"markPrice":"1.00","fundingIntervalHour":"4","fundingCap":"0.005","nextFundingTime":"%d","fundingRate":%q,"bid1Price":"1.00"},"ts":%d}`,
+		sym, sym, recv.Add(4*time.Hour).UnixMilli(), rate, recv.UnixMilli())
+}
+
+func tickerChurnSym(sym string, recv time.Time) string {
+	return fmt.Sprintf(`{"topic":"tickers.%s","type":"delta","data":{"symbol":%q,"bid1Price":"1.01"},"ts":%d}`,
+		sym, sym, recv.UnixMilli())
+}
+
+func markFrame(recv time.Time, rate string) string { return markFrameSym("ABCUSDT", recv, rate) }
 func tickerSnapshot(recv time.Time, rate string) string {
-	return fmt.Sprintf(`{"topic":"tickers.ABCUSDT","type":"snapshot","data":{"symbol":"ABCUSDT","markPrice":"1.00","fundingIntervalHour":"4","fundingCap":"0.005","nextFundingTime":"%d","fundingRate":%q,"bid1Price":"1.00"},"ts":%d}`,
-		recv.Add(4*time.Hour).UnixMilli(), rate, recv.UnixMilli())
+	return tickerSnapshotSym("ABCUSDT", recv, rate)
 }
-
-func tickerChurn(recv time.Time) string {
-	return fmt.Sprintf(`{"topic":"tickers.ABCUSDT","type":"delta","data":{"symbol":"ABCUSDT","bid1Price":"1.01"},"ts":%d}`, recv.UnixMilli())
-}
+func tickerChurn(recv time.Time) string { return tickerChurnSym("ABCUSDT", recv) }
 
 func tickerFundingDelta(recv time.Time, rate string) string {
 	return fmt.Sprintf(`{"topic":"tickers.ABCUSDT","type":"delta","data":{"symbol":"ABCUSDT","fundingRate":%q},"ts":%d}`, rate, recv.UnixMilli())

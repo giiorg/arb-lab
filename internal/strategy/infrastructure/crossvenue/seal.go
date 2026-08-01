@@ -48,3 +48,22 @@ func sealSettled(rows []dcv.Settlement) (kept []dcv.Settlement, excluded int) {
 	}
 	return kept, excluded
 }
+
+// gateSettled is the seal's other face, reachable only through the
+// committed gate runner (§45o): evidence begins AT the settled cutoff
+// (§43b — a row at the instant is gate evidence, sealSettled's mirror
+// boundary) and ends strictly before the declared invocation bound, so
+// two gate runs days apart name different universes EXPLICITLY in their
+// artifacts rather than by when they happened to run. Pre-cutoff rows are
+// the contaminated era, excluded and counted like the exploration seal
+// excludes the clean one.
+func gateSettled(rows []dcv.Settlement, before time.Time) (kept []dcv.Settlement, excluded int) {
+	for _, r := range rows {
+		if !r.At.Before(SettledCutoff) && r.At.Before(before) {
+			kept = append(kept, r)
+			continue
+		}
+		excluded++
+	}
+	return kept, excluded
+}

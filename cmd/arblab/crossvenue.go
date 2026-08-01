@@ -143,10 +143,10 @@ type simParamsFile struct {
 	Symbols []struct {
 		Symbol string `json:"symbol"`
 		Qty    string `json:"qty"`
+		Entry  string `json:"entry"`
 	} `json:"symbols"`
 	SampleEvery string `json:"sample_every"`
 	Slack       string `json:"slack"`
-	Entry       string `json:"entry"`
 	ExitDivisor int    `json:"exit_divisor"`
 	MaxGap      string `json:"max_gap"`
 	Round       string `json:"round"`
@@ -162,6 +162,10 @@ type simParamsFile struct {
 	Resamples  int    `json:"resamples"`
 	Confidence string `json:"confidence"`
 	Seed       uint64 `json:"seed"`
+
+	// VoidImbalance mirrors the gate's §45n-3 episode-integrity rule so
+	// exploration can exercise what the gate enforces.
+	VoidImbalance bool `json:"void_imbalance"`
 }
 
 func loadSimParams(path string) (crossvenue.SimParams, error) {
@@ -192,11 +196,12 @@ func loadSimParams(path string) (crossvenue.SimParams, error) {
 	}
 
 	p := crossvenue.SimParams{
-		Label:       f.Label,
-		ExitDivisor: f.ExitDivisor,
-		MeanBlock:   f.MeanBlock,
-		Resamples:   f.Resamples,
-		Seed:        f.Seed,
+		Label:         f.Label,
+		ExitDivisor:   f.ExitDivisor,
+		MeanBlock:     f.MeanBlock,
+		Resamples:     f.Resamples,
+		Seed:          f.Seed,
+		VoidImbalance: f.VoidImbalance,
 	}
 	var err2 error
 	if p.Sample.Every, err2 = dur("sample_every", f.SampleEvery); err2 != nil {
@@ -212,9 +217,6 @@ func loadSimParams(path string) (crossvenue.SimParams, error) {
 		return crossvenue.SimParams{}, err2
 	}
 	if p.Period, err2 = dur("period", f.Period); err2 != nil {
-		return crossvenue.SimParams{}, err2
-	}
-	if p.Entry, err2 = rate("entry", f.Entry); err2 != nil {
 		return crossvenue.SimParams{}, err2
 	}
 	if p.BinanceFee, err2 = rate("binance_fee", f.BinanceFee); err2 != nil {
@@ -238,7 +240,11 @@ func loadSimParams(path string) (crossvenue.SimParams, error) {
 		if err != nil {
 			return crossvenue.SimParams{}, fmt.Errorf("params %s: qty for %s: %w", path, s.Symbol, err)
 		}
-		p.Symbols = append(p.Symbols, crossvenue.SymbolSpec{Symbol: s.Symbol, Qty: qty})
+		entry, err := rate("entry for "+s.Symbol, s.Entry)
+		if err != nil {
+			return crossvenue.SimParams{}, err
+		}
+		p.Symbols = append(p.Symbols, crossvenue.SymbolSpec{Symbol: s.Symbol, Qty: qty, Entry: entry})
 	}
 	for _, a := range f.Policy {
 		w, err := rate("policy weight", a.Weight)

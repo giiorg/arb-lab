@@ -664,14 +664,69 @@ matches an OLDER file's end, separating "immediate predecessor" from
 "anything seen"; a carry crosses the manifested-day boundary, where a
 wrong walker would reset with the day loop. `make ci` green.
 
-**(b) The roster + gate verb + artifact: IN PROGRESS.**
+**(b) The gate-facing parameter shape and the post-cutoff door are
+LANDED: 10/10 aimed mutations caught, one of them a REAL GAP found by a
+SURVIVED verdict.** What changed in code:
+
+- **`SymbolSpec` carries `Entry`** (ruling §45n-4) — the level is a
+  property of the symbol, not of the run, and `SimParams.Entry` is gone
+  rather than kept as a default beside it (a default would be the wrong
+  direction if somebody forgets a symbol's level).
+- **`SimParams.VoidImbalance`** (ruling §45n-3): an episode whose legs
+  end out of step is refused BY NAME (`end imbalance N`) and excluded
+  from the series, or reported-only when the rule is not declared. The
+  flag exists on the exploration params too, so exploration can exercise
+  exactly what the gate enforces.
+- **`RunGateSymbols` + `LoadManifestDaysWindow` + `gateSettled`** — the
+  procedure commit's one door through the §45f-2 seal, and the seal's
+  mirror image: archive days in `[BooksCutoff's day, before's day)`,
+  settled rows in `[SettledCutoff, before)`. Evidence begins AT the
+  settled cutoff here for the same reason it is excluded from
+  exploration there. The bound is a DECLARED argument, so two gate runs
+  days apart name different universes explicitly in their artifacts
+  rather than by when they happened to run; a bound not past the books
+  cutoff refuses with `ErrPostCutoffSealed`. It returns evidence plus
+  per-symbol series and composes no verdict — the ceiling must exclude
+  symbols BEFORE any portfolio statistic exists.
+
+**The SURVIVED mutant and what it found.** Aiming `spec.Entry` →
+`p.Symbols[0].Entry` survived: every sim fixture was SINGLE-SYMBOL, so
+"this spec's entry" and "the roster's first entry" were the same value —
+the fixture-collapse shape again (instance 8 for §45), this time in the
+`len(fixtures)==1` dimension rather than a boundary. The fix generalized
+the fixture builders by symbol and added a two-symbol walk over an
+IDENTICAL second world where only the declared level differs; the test
+asserts the two symbols' joined-point counts are equal, so "the worlds
+are the same" is checked rather than assumed. The mutant then died.
+Every other new claim was caught first time: the gate window's three day
+rules (start ignored, start off by one, unset start), the gate seal's two
+boundaries (at-cutoff kept, at-bound excluded), the door's two arms, and
+the void rule read both ways (flag without imbalance, imbalance without
+flag).
+
+**One honest consequence recorded, not repaired:** the committed
+`research/crossvenue/sims/s61-smoke-btc.params.json` is the schema of ITS
+own commit and the current CLI refuses it (`entry` moved inside
+`symbols`). It stays as written — it records what ran, and rewriting a
+trail file to satisfy a later binary is exactly the falsification the
+labeled-and-logged trail exists to prevent.
+
+**Still open in (b): the roster and the artifact** — the `Proc*`
+constants with rationale beside each (per-symbol entries and sizes,
+equal weights, the refusal-ceiling fraction, cadence/slack, exit
+divisor, max gap, round, fees, p90, period, bootstrap parameters, the
+dated sourced hurdle), the end rule and the refusal ceiling as pure
+domain judgements, and the `arblab crossvenue gate` verb carrying VCS
+binding, the dataset ledger, the write-once artifact and the detached
+attestation.
 
 ## RESUME HERE
 
-**Slice C is CLOSED (§45m): code, batteries, oracles, 31/31 mutations,
-the labeled smoke. §45n: slice D's four forks are RULED (session 62);
-§45o(a): the continuity carry is LANDED, 15/15. What remains, in
-order:**
+**Slice C is CLOSED (§45m). §45n: slice D's four forks are RULED
+(session 62). §45o: (a) the continuity carry is LANDED (15/15) and (b)'s
+first half — per-symbol entry, the imbalance void, and the post-cutoff
+gate door — is LANDED (10/10, one real gap found by a SURVIVED). What
+remains, in order:**
 
 1. **The §32m-D per-tier one-day figure, DUE BY 2026-08-03T11:13Z**
    (measurable from ~2026-08-02T11:13Z), landing as §44e in the §44
@@ -680,11 +735,45 @@ order:**
    integrity; the restart's gaps will show honestly). **This is §38f's
    named revisit point** (ruling §42f-3): re-argue off-host on the
    measured disk clock.
-2. **Slice D — the procedure commit**, its four forks now RULED (§45n).
-   In build order: **(a) the continuity carry** (ruling §45n-1: cold on
-   Gap records and CaptureSeq/`PrevLastSeq` discontinuity, not per
-   file — both venues' samplers AND book walkers, fixtures + aimed
-   mutations); **(b) the roster + gate verb + artifact**: params roster
+2. **Slice D — the procedure commit**, its four forks RULED (§45n),
+   (a) and half of (b) LANDED (§45o). **What is left is (b)'s second
+   half, and it is the whole remaining slice:** the `Proc*` roster with
+   rationale beside each constant, the end rule and refusal ceiling as
+   pure domain judgements, and `arblab crossvenue gate`. Concretely:
+
+   - **Roster constants** (a new `procedure_crossvenue.go` beside
+     `procedure.go`, that file's pattern): per-symbol entry levels from
+     §43d (KAITO 5bp; LAB/MMT/M/BCH 10bp; BEAT/SOON/ESPORTS 20bp) and
+     per-symbol candidate sizes (a stated USD-notional rule at the
+     §43-run price levels, lot-aligned on BOTH venues — Binance and
+     Bybit steps differ on KAITO and BCH, measured 2026-08-01 from the
+     ledgered `exchange_info`/`instruments`); equal weights 1/8
+     (§45n-2); `VoidImbalance` true (§45n-3) and the refusal-ceiling
+     fraction; sample cadence/slack; exit divisor 2 and the
+     nearest-minute pairing round (both the screening's committed
+     shapes, §43b); max gap; taker fees per venue (the 5bp/5.5bp
+     published base-tier cells the 21bp screening round trip used);
+     p90; the period grid; mean block, resamples, confidence, seed;
+     and the HURDLE as a dated sourced benchmark, never a literal
+     (core §2.1's rule — `ProcStandbyBenchmark`'s treasury.gov shape is
+     the precedent).
+   - **Two pure judgements with their own tests**: the end rule
+     (§45f-1 — ≥180 post-cutoff matched settlements per symbol, short
+     symbols refused BY NAME, never guessed) and the refusal ceiling
+     (§45n-3 — a symbol whose refused fraction exceeds the declared
+     bound is refused by name and leaves the portfolio BEFORE any
+     statistic exists). Fixture discipline is already named: put a
+     symbol EXACTLY at 180 and exactly at the ceiling.
+   - **`arblab crossvenue gate`**: `RunGateSymbols` + the ceiling +
+     the policy + the LCB against the hurdle, wrapped in
+     `ReadBuildRevision`/`CheckExecutionBinding`, a dataset ledger over
+     the store digests + manifest-day hashes the report already
+     carries, a write-once artifact and a detached attestation
+     (`driven.AttestationDoc`/`Bind` is the working precedent —
+     24h cooling delay, ledger, sign-off, out-of-band), and the
+     holdout declaration naming §43b (ruling §45f-4).
+
+   The older statement of the same item, kept for its detail: params roster
    with rationale (per-symbol best-E entries §45n-4, equal-weight
    policy §45n-2, EndImbalance void + refusal ceiling §45n-3, pairing
    round, exit divisor, max gap, sample cadence/slack, fees, p90,

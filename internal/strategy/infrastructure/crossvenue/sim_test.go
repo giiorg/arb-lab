@@ -34,6 +34,7 @@ package crossvenue
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -42,10 +43,40 @@ import (
 )
 
 func simFixtureRoot(t *testing.T, includeCloseBooks bool) (string, string) {
+	return simFixtureRootOpt(t, includeCloseBooks, true)
+}
+
+// simFixtureRootOpt adds the balanced/imbalanced settlement choice: with
+// balanced=false the bybit in-window print is dropped, so the window ends
+// one settlement out of step — the §45n-3 void's subject.
+func simFixtureRootOpt(t *testing.T, includeCloseBooks, balanced bool) (string, string) {
 	t.Helper()
 	root := t.TempDir()
 	rest := t.TempDir()
+	rel := writeSimStreams(t, root, "ABCUSDT", includeCloseBooks)
+	writeManifest(t, root, sampleDay, rel...)
+	// A post-cutoff manifest day: the enumeration bound must leave it
+	// unread, which the report's Days list makes visible.
+	writeManifest(t, root, "2026-08-02")
+	writeSimSettled(t, rest, "ABCUSDT", balanced)
+	return root, rest
+}
 
+// simWorldFor plants a SECOND symbol's identical world into an existing
+// fixture — same instants, same rates, same books — so a multi-symbol
+// walk varies nothing but the roster entry each spec declares.
+func simWorldFor(t *testing.T, root, rest, sym string) {
+	t.Helper()
+	rel := writeSimStreams(t, root, sym, true)
+	appendManifest(t, root, sampleDay, rel...)
+	writeSimSettled(t, rest, sym, true)
+}
+
+// writeSimStreams writes one symbol's four streams and returns their
+// root-relative paths. The scenario is the file header's; the symbol is
+// the only thing that varies.
+func writeSimStreams(t *testing.T, root, sym string, includeCloseBooks bool) []string {
+	t.Helper()
 	rel := []string{}
 	add := func(r string) string { rel = append(rel, r); return r }
 
@@ -57,17 +88,17 @@ func simFixtureRoot(t *testing.T, includeCloseBooks bool) (string, string) {
 		rate string
 	}{{4, "0.0002"}, {9, "0.0006"}, {19, "0.0002"}, {30, "0.0002"}} {
 		at := sampleBase.Add(time.Duration(f.off) * time.Second)
-		bnF = append(bnF, dataAt(at, markFrame(at, f.rate)))
+		bnF = append(bnF, dataAt(at, markFrameSym(sym, at, f.rate)))
 	}
-	writeFixture(t, filepath_Join(root, add(bnFundingRel("2026-07-30T10.arbcap"))), false, bnF...)
+	writeFixture(t, filepath_Join(root, add(bnFundingRelSym(sym, "2026-07-30T10.arbcap"))), false, bnF...)
 
 	// Bybit ticker: snapshot 0.0001 at :03, churn at :30 to advance the
 	// grid — every instant reads the held 0.0001 within the wide slack.
 	snapAt := sampleBase.Add(3 * time.Second)
 	churnAt := sampleBase.Add(30 * time.Second)
-	writeFixture(t, filepath_Join(root, add(byFundingRel("2026-07-30T10.arbcap"))), false,
-		dataAt(snapAt, tickerSnapshot(snapAt, "0.0001")),
-		dataAt(churnAt, tickerChurn(churnAt)),
+	writeFixture(t, filepath_Join(root, add(byFundingRelSym(sym, "2026-07-30T10.arbcap"))), false,
+		dataAt(snapAt, tickerSnapshotSym(sym, snapAt, "0.0001")),
+		dataAt(churnAt, tickerChurnSym(sym, churnAt)),
 	)
 
 	// Binance books: A at the open boundary, then a 38-sample B tail;
@@ -75,14 +106,14 @@ func simFixtureRoot(t *testing.T, includeCloseBooks bool) (string, string) {
 	aB, aA := bookAFixture()
 	bB, bA := bookBFixture()
 	f1 := sampleBase.Add(8 * time.Second)
-	bnB := []fixRec{dataAt(f1, bnDepthFrame(f1, 100, aB, aA))}
+	bnB := []fixRec{dataAt(f1, bnDepthFrameSym(sym, f1, 100, aB, aA))}
 	if includeCloseBooks {
 		for k := 0; k <= 38; k++ {
 			at := sampleBase.Add(time.Duration(18+5*k) * time.Second)
-			bnB = append(bnB, dataAt(at, bnDepthFrame(at, 110+uint64(k), bB, bA)))
+			bnB = append(bnB, dataAt(at, bnDepthFrameSym(sym, at, 110+uint64(k), bB, bA)))
 		}
 	}
-	writeFixture(t, filepath_Join(root, add(bnBookRel("2026-07-30T10.arbcap"))), false, bnB...)
+	writeFixture(t, filepath_Join(root, add(bnBookRelSym(sym, "2026-07-30T10.arbcap"))), false, bnB...)
 
 	// Bybit books: P anchors the boundaries (bid walk 0.04, ask 0.015);
 	// Q re-anchors at :22 and its heartbeat tail (bid 0.01, ask 0.06)
@@ -95,32 +126,33 @@ func simFixtureRoot(t *testing.T, includeCloseBooks bool) (string, string) {
 	d1 := sampleBase.Add(17 * time.Second)
 	s2 := sampleBase.Add(22 * time.Second)
 	byB := []fixRec{
-		dataAt(s1, byBookSnapFrame(s1, 100, pBids, pAsks)),
-		dataAt(d1, byBookDeltaFrame(d1, 101, nil, nil)),
-		dataAt(s2, byBookSnapFrame(s2, 200, qBids, qAsks)),
+		dataAt(s1, byBookSnapFrameSym(sym, s1, 100, pBids, pAsks)),
+		dataAt(d1, byBookDeltaFrameSym(sym, d1, 101, nil, nil)),
+		dataAt(s2, byBookSnapFrameSym(sym, s2, 200, qBids, qAsks)),
 	}
 	for k := 0; k <= 37; k++ {
 		at := sampleBase.Add(time.Duration(27+5*k) * time.Second)
-		byB = append(byB, dataAt(at, byBookDeltaFrame(at, 201+uint64(k), nil, nil)))
+		byB = append(byB, dataAt(at, byBookDeltaFrameSym(sym, at, 201+uint64(k), nil, nil)))
 	}
-	writeFixture(t, filepath_Join(root, add(byBookRel("2026-07-30T10.arbcap"))), false, byB...)
+	writeFixture(t, filepath_Join(root, add(byBookRelSym(sym, "2026-07-30T10.arbcap"))), false, byB...)
+	return rel
+}
 
-	writeManifest(t, root, sampleDay, rel...)
-	// A post-cutoff manifest day: the enumeration bound must leave it
-	// unread, which the report's Days list makes visible.
-	writeManifest(t, root, "2026-08-02")
-
-	// Settled prints: both venues at :15 (inside the window, hedged),
-	// plus a flanking pre-window row each, plus one POST-CUTOFF Binance
-	// row the seal must exclude and count.
+// writeSimSettled stores one symbol's settled prints: both venues at :15
+// (inside the window, hedged), a flanking pre-window row each, and one
+// POST-CUTOFF Binance row the seal must exclude and count.
+func writeSimSettled(t *testing.T, rest, sym string, balanced bool) {
+	t.Helper()
 	pre := sampleBase.Add(-4 * time.Hour)
 	in := sampleBase.Add(15 * time.Second)
 	sealed := SettledCutoff.Add(2 * time.Hour)
-	storeRaw(t, rest, "binance", "ABCUSDT", "2026-08-05",
+	storeRaw(t, rest, "binance", sym, "2026-08-05",
 		[2]string{ms(pre), "0.0005"}, [2]string{ms(in), "0.001"}, [2]string{ms(sealed), "0.009"})
-	storeRaw(t, rest, "bybit", "ABCUSDT", "2026-08-05",
-		[2]string{ms(pre), "0.0001"}, [2]string{ms(in), "0.0002"})
-	return root, rest
+	byRows := [][2]string{{ms(pre), "0.0001"}, {ms(in), "0.0002"}}
+	if !balanced {
+		byRows = byRows[:1] // no in-window bybit print: the legs end out of step
+	}
+	storeRaw(t, rest, "bybit", sym, "2026-08-05", byRows...)
 }
 
 func simParamsFixture(t *testing.T) SimParams {
@@ -133,9 +165,8 @@ func simParamsFixture(t *testing.T) SimParams {
 		return rate
 	}
 	return SimParams{
-		Symbols:     []SymbolSpec{{Symbol: "ABCUSDT", Qty: abcQty(t, "2")}},
+		Symbols:     []SymbolSpec{{Symbol: "ABCUSDT", Qty: abcQty(t, "2"), Entry: r("0.0004")}},
 		Sample:      SampleParams{Every: 5 * time.Second, Slack: 60 * time.Second},
-		Entry:       r("0.0004"),
 		ExitDivisor: 2,
 		MaxGap:      10 * time.Minute,
 		Round:       time.Minute,
@@ -221,6 +252,133 @@ func TestRunSimRefusesUnmeasuredBoundary(t *testing.T) {
 	}
 	if s.Episodes[0].Return != "" {
 		t.Fatalf("refused episode carries a return %q", s.Episodes[0].Return)
+	}
+}
+
+// Ruling §45n-3, both directions from ONE fixture — which is what makes
+// the flag's polarity checkable: the same imbalanced world scores under
+// report-only and refuses by name under the void rule. Asserting the
+// report-only arm also proves the fixture IS imbalanced; a balanced one
+// would pass the void assertion vacuously.
+// Ruling §45n-4's claim is per-SYMBOL, so it is only checkable with more
+// than one symbol in the walk: a single-symbol fixture makes "this spec's
+// entry" and "the roster's first entry" the same value, and the mutation
+// aimed at that distinction SURVIVED against exactly such a fixture until
+// this test existed. The second symbol's world is byte-identical in
+// signal to the first — only its declared entry level differs, and only
+// the per-spec read explains it opening no episode.
+func TestRunSimEntryIsPerSymbol(t *testing.T) {
+	root, rest := simFixtureRoot(t, true)
+	simWorldFor(t, root, rest, "DEFUSDT")
+
+	p := simParamsFixture(t)
+	r := func(s string) fixedpoint.Rate {
+		rate, err := fixedpoint.ParseRate(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rate
+	}
+	// The same world twice; ABCUSDT's level admits the 0.0005 signal,
+	// DEFUSDT's sits above it.
+	p.Symbols = append(p.Symbols, SymbolSpec{
+		Symbol: "DEFUSDT", Qty: defQty(t, "2"), Entry: r("0.0009")})
+	p.Policy = []dcv.Allocation{
+		{Symbol: "ABCUSDT", Weight: r("0.5")}, {Symbol: "DEFUSDT", Weight: r("0.5")}}
+
+	rep, err := RunSim(root, rest, p)
+	if err != nil {
+		t.Fatalf("sim: %v", err)
+	}
+	if len(rep.Symbols) != 2 {
+		t.Fatalf("symbols %d, want 2", len(rep.Symbols))
+	}
+	first, second := rep.Symbols[0], rep.Symbols[1]
+	if first.Symbol != "ABCUSDT" || second.Symbol != "DEFUSDT" {
+		t.Fatalf("roster order %s, %s", first.Symbol, second.Symbol)
+	}
+	// The shared world is what makes the comparison a control: both
+	// symbols see the same signal, so a difference in episodes can only
+	// come from the level each spec declares.
+	if second.Merge.Joined != first.Merge.Joined {
+		t.Fatalf("joined %d vs %d — the two worlds differ, so entry is not the only variable",
+			first.Merge.Joined, second.Merge.Joined)
+	}
+	if len(first.Episodes) != 1 {
+		t.Fatalf("first symbol episodes %d, want 1", len(first.Episodes))
+	}
+	if len(second.Episodes) != 0 {
+		t.Fatalf("second symbol episodes %+v, want none at its own higher entry", second.Episodes)
+	}
+}
+
+func TestRunSimVoidImbalanceBothWays(t *testing.T) {
+	root, rest := simFixtureRootOpt(t, true, false)
+
+	reportOnly := simParamsFixture(t)
+	rep, err := RunSim(root, rest, reportOnly)
+	if err != nil {
+		t.Fatalf("sim: %v", err)
+	}
+	s := rep.Symbols[0]
+	if s.Scored != 1 || s.RefusedN != 0 {
+		t.Fatalf("report-only: scored %d refused %d, want 1 and 0", s.Scored, s.RefusedN)
+	}
+	if s.Episodes[0].EndImbalance == 0 {
+		t.Fatal("fixture is balanced — the void rule would pass vacuously")
+	}
+
+	void := simParamsFixture(t)
+	void.VoidImbalance = true
+	rep, err = RunSim(root, rest, void)
+	if err != nil {
+		t.Fatalf("sim: %v", err)
+	}
+	s = rep.Symbols[0]
+	if s.Scored != 0 || s.RefusedN != 1 {
+		t.Fatalf("void: scored %d refused %d, want 0 and 1", s.Scored, s.RefusedN)
+	}
+	if !strings.Contains(s.Episodes[0].Refused, "imbalance") {
+		t.Fatalf("refusal %q does not name the imbalance", s.Episodes[0].Refused)
+	}
+	if s.Episodes[0].Return != "" || len(s.NonZeroReturns) != 0 {
+		t.Fatalf("voided episode still contributed: return %q series %+v",
+			s.Episodes[0].Return, s.NonZeroReturns)
+	}
+}
+
+// The void rule leaves a BALANCED episode alone — the guard reads the
+// imbalance, not the flag.
+func TestRunSimVoidImbalanceKeepsBalanced(t *testing.T) {
+	root, rest := simFixtureRoot(t, true)
+	p := simParamsFixture(t)
+	p.VoidImbalance = true
+	rep, err := RunSim(root, rest, p)
+	if err != nil {
+		t.Fatalf("sim: %v", err)
+	}
+	if s := rep.Symbols[0]; s.Scored != 1 || s.RefusedN != 0 {
+		t.Fatalf("scored %d refused %d, want the balanced episode scored", s.Scored, s.RefusedN)
+	}
+}
+
+// Entry is per symbol (§45n-4): raising THIS symbol's level above the
+// signal's peak opens no episode, which a shared-level reading could not
+// express per symbol.
+func TestRunSimPerSymbolEntry(t *testing.T) {
+	root, rest := simFixtureRoot(t, true)
+	p := simParamsFixture(t)
+	r, err := fixedpoint.ParseRate("0.0009") // the fixture's peak signal is 0.0005
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Symbols[0].Entry = r
+	rep, err := RunSim(root, rest, p)
+	if err != nil {
+		t.Fatalf("sim: %v", err)
+	}
+	if s := rep.Symbols[0]; len(s.Episodes) != 0 {
+		t.Fatalf("episodes %+v, want none above the raised entry", s.Episodes)
 	}
 }
 

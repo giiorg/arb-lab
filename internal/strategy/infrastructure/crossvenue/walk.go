@@ -68,6 +68,23 @@ func (d ManifestDay) Vouches(rel string) bool { return d.vouched[rel] }
 // §43b books cutoff here, which is what makes the post-cutoff seal
 // structural rather than remembered (§45f-2).
 func LoadManifestDays(root string, before time.Time) ([]ManifestDay, error) {
+	return loadManifestDays(root, "", before)
+}
+
+// LoadManifestDaysWindow enumerates the days in [from's UTC day, before's
+// UTC day) — the GATE's evidence window (§45o): from is the books cutoff,
+// so the walk begins on the first day holding gate evidence, and the
+// strict upper bound keeps the still-growing bound day out exactly as the
+// exploration walk does. Only the committed gate runner calls this past
+// the seal.
+func LoadManifestDaysWindow(root string, from, before time.Time) ([]ManifestDay, error) {
+	if from.IsZero() {
+		return nil, fmt.Errorf("strategy/crossvenue: manifest window start unset")
+	}
+	return loadManifestDays(root, from.UTC().Format("2006-01-02"), before)
+}
+
+func loadManifestDays(root, fromDay string, before time.Time) ([]ManifestDay, error) {
 	if before.IsZero() {
 		return nil, fmt.Errorf("strategy/crossvenue: manifest bound instant unset")
 	}
@@ -84,7 +101,7 @@ func LoadManifestDays(root string, before time.Time) ([]ManifestDay, error) {
 			continue
 		}
 		day := strings.TrimSuffix(name, ".json")
-		if day >= boundDay {
+		if day >= boundDay || day < fromDay {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(dir, name))

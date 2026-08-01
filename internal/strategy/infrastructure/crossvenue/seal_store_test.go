@@ -43,6 +43,71 @@ func TestSealSettledAtCutoffExcluded(t *testing.T) {
 	}
 }
 
+// The gate seal is the exploration seal's mirror, and every boundary is
+// pinned by a row sitting EXACTLY on it: at-cutoff is KEPT here (evidence
+// begins AT the instant — the same fact that excludes it above), and the
+// declared bound is strict, so a row at the bound belongs to the next
+// run's universe, not this one's.
+func TestGateSettledWindowBoundaries(t *testing.T) {
+	bound := SettledCutoff.Add(48 * time.Hour)
+	before := sealRow(t, SettledCutoff.Add(-time.Millisecond), "0.0001")
+	at := sealRow(t, SettledCutoff, "0.0002")
+	mid := sealRow(t, SettledCutoff.Add(time.Hour), "0.0003")
+	atBound := sealRow(t, bound, "0.0004")
+	past := sealRow(t, bound.Add(time.Hour), "0.0005")
+	kept, excluded := gateSettled([]dcv.Settlement{before, at, mid, atBound, past}, bound)
+	if len(kept) != 2 || !kept[0].At.Equal(at.At) || !kept[1].At.Equal(mid.At) {
+		t.Fatalf("kept %+v, want the at-cutoff and mid rows", kept)
+	}
+	if excluded != 3 {
+		t.Fatalf("excluded %d, want 3 (pre-cutoff, at-bound, past-bound)", excluded)
+	}
+}
+
+// The gate door refuses a bound that does not reach past the books
+// cutoff: such a call asks for gate evidence over a window holding none,
+// and answering it with an empty walk would read as a market with no
+// evidence rather than a misuse.
+func TestRunGateSymbolsRefusesBoundAtCutoff(t *testing.T) {
+	p := simParamsFixture(t)
+	if _, _, err := RunGateSymbols("", "", p, BooksCutoff); !errors.Is(err, ErrPostCutoffSealed) {
+		t.Fatalf("err %v, want ErrPostCutoffSealed at the cutoff itself", err)
+	}
+	if _, _, err := RunGateSymbols("", "", p, BooksCutoff.Add(-time.Hour)); !errors.Is(err, ErrPostCutoffSealed) {
+		t.Fatalf("err %v, want ErrPostCutoffSealed before the cutoff", err)
+	}
+}
+
+// The gate's day window is half-open on both ends against the same
+// manifest set: the books-cutoff day is IN (it holds the first gate
+// bytes), the day before it is out, and the bound day is out (still
+// growing). Only a fixture holding a manifest on each of those three days
+// can tell the three rules apart.
+func TestLoadManifestDaysWindowBounds(t *testing.T) {
+	root := t.TempDir()
+	for _, day := range []string{"2026-07-31", "2026-08-01", "2026-08-02", "2026-08-03"} {
+		writeManifest(t, root, day)
+	}
+	days, err := LoadManifestDaysWindow(root, BooksCutoff, time.Date(2026, 8, 3, 6, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(days) != 2 || days[0].Day != "2026-08-01" || days[1].Day != "2026-08-02" {
+		t.Fatalf("days %+v, want 08-01 and 08-02", days)
+	}
+}
+
+// An unset window start refuses rather than silently enumerating from the
+// beginning of the archive — the gate's universe is declared, never
+// defaulted.
+func TestLoadManifestDaysWindowRefusesUnsetStart(t *testing.T) {
+	root := t.TempDir()
+	writeManifest(t, root, "2026-08-01")
+	if _, err := LoadManifestDaysWindow(root, time.Time{}, BooksCutoff.Add(48*time.Hour)); err == nil {
+		t.Fatal("an unset window start was accepted")
+	}
+}
+
 // storeRaw plants one raw file with the given rows via the screening
 // schema, exactly as FetchSettled would have written it — each venue's
 // page in that venue's own dialect (bare array vs V5 envelope,

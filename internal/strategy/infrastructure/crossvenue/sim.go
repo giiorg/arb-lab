@@ -52,10 +52,15 @@ var (
 	ErrSimParamsInvalid = fmt.Errorf("strategy/crossvenue: sim parameters incomplete")
 )
 
-// SymbolSpec is one walked symbol and its committed candidate size.
+// SymbolSpec is one walked symbol, its committed candidate size, and its
+// committed entry level — per symbol by ruling §45n-4: the screening
+// ranked each symbol at its own best-of-four level and carried the
+// selection openly, and a common level would measure a different strategy
+// from the one the ranking evidenced.
 type SymbolSpec struct {
 	Symbol string
 	Qty    fixedpoint.Quantity
+	Entry  fixedpoint.Rate
 }
 
 // SimParams is the complete exploration procedure. Values are slice-D
@@ -66,10 +71,15 @@ type SimParams struct {
 	// Sample is the shared sampling procedure for signals and books.
 	Sample SampleParams
 
-	// Episode rules (dcv.Episodes' arguments).
-	Entry       fixedpoint.Rate
+	// Episode rules (dcv.Episodes' arguments; entry is per symbol).
 	ExitDivisor int
 	MaxGap      time.Duration
+
+	// VoidImbalance, when set (ruling §45n-3, the gate's rule), refuses an
+	// episode whose legs settled unequal counts inside its window instead
+	// of scoring it — on same-grid pairs an imbalanced end usually marks
+	// missing settled rows or a venue interval change, not economics.
+	VoidImbalance bool
 
 	// Round is the settlement pairing bucket (dcv.Pair's argument).
 	Round time.Duration
@@ -180,37 +190,10 @@ func RunSim(archiveRoot, restRoot string, p SimParams) (SimReport, error) {
 	if err != nil {
 		return SimReport{}, err
 	}
-
-	rep := SimReport{Label: p.Label}
-	for _, d := range days {
-		rep.Days = append(rep.Days, d.Day)
-		rep.DayHashes = append(rep.DayHashes, d.SHA256)
-	}
-
-	gridStart, err := time.ParseInLocation("2006-01-02", days[0].Day, time.UTC)
+	rep, series, err := runOver(archiveRoot, restRoot, p, days, sealSettled)
 	if err != nil {
-		return SimReport{}, fmt.Errorf("grid start: %w", err)
+		return SimReport{}, err
 	}
-	gridEnd, err := time.ParseInLocation("2006-01-02", days[len(days)-1].Day, time.UTC)
-	if err != nil {
-		return SimReport{}, fmt.Errorf("grid end: %w", err)
-	}
-	gridEnd = gridEnd.Add(24 * time.Hour)
-	periods := int(gridEnd.Sub(gridStart) / p.Period)
-	if gridStart.Add(time.Duration(periods) * p.Period).Before(gridEnd) {
-		periods++ // the trailing partial period holds its closes too
-	}
-
-	series := map[string][]fixedpoint.Rate{}
-	for _, spec := range p.Symbols {
-		sr, symSeries, err := runSymbol(archiveRoot, restRoot, days, spec, p, gridStart, periods)
-		if err != nil {
-			return SimReport{}, fmt.Errorf("symbol %s: %w", spec.Symbol, err)
-		}
-		rep.Symbols = append(rep.Symbols, sr)
-		series[spec.Symbol] = symSeries
-	}
-
 	rets, err := dcv.PortfolioReturns(p.Policy, series)
 	if err != nil {
 		return SimReport{}, fmt.Errorf("portfolio: %w", err)
@@ -224,8 +207,67 @@ func RunSim(archiveRoot, restRoot string, p SimParams) (SimReport, error) {
 	return rep, nil
 }
 
+// RunGateSymbols is the procedure commit's door through the §45f-2 seal:
+// it walks the POST-cutoff evidence window — archive days in
+// [BooksCutoff's day, before's day) and settled rows in [SettledCutoff,
+// before) — and returns the per-symbol evidence plus each symbol's period
+// series, leaving the verdict composition (ceiling, policy, portfolio
+// statistic, hurdle) to the committed gate runner, which must exclude
+// ceiling-refused symbols BEFORE any portfolio statistic exists. Nothing
+// else reaches past the seal; the exploration CLI has no path here.
+func RunGateSymbols(archiveRoot, restRoot string, p SimParams, before time.Time) (SimReport, map[string][]fixedpoint.Rate, error) {
+	if err := p.Validate(); err != nil {
+		return SimReport{}, nil, err
+	}
+	if !before.After(BooksCutoff) {
+		return SimReport{}, nil, fmt.Errorf("gate bound %s not after the books cutoff: %w",
+			before.Format(time.RFC3339), ErrPostCutoffSealed)
+	}
+	days, err := LoadManifestDaysWindow(archiveRoot, BooksCutoff, before)
+	if err != nil {
+		return SimReport{}, nil, err
+	}
+	return runOver(archiveRoot, restRoot, p, days, func(rows []dcv.Settlement) ([]dcv.Settlement, int) {
+		return gateSettled(rows, before)
+	})
+}
+
+func runOver(archiveRoot, restRoot string, p SimParams, days []ManifestDay,
+	seal func([]dcv.Settlement) ([]dcv.Settlement, int)) (SimReport, map[string][]fixedpoint.Rate, error) {
+	rep := SimReport{Label: p.Label}
+	for _, d := range days {
+		rep.Days = append(rep.Days, d.Day)
+		rep.DayHashes = append(rep.DayHashes, d.SHA256)
+	}
+
+	gridStart, err := time.ParseInLocation("2006-01-02", days[0].Day, time.UTC)
+	if err != nil {
+		return SimReport{}, nil, fmt.Errorf("grid start: %w", err)
+	}
+	gridEnd, err := time.ParseInLocation("2006-01-02", days[len(days)-1].Day, time.UTC)
+	if err != nil {
+		return SimReport{}, nil, fmt.Errorf("grid end: %w", err)
+	}
+	gridEnd = gridEnd.Add(24 * time.Hour)
+	periods := int(gridEnd.Sub(gridStart) / p.Period)
+	if gridStart.Add(time.Duration(periods) * p.Period).Before(gridEnd) {
+		periods++ // the trailing partial period holds its closes too
+	}
+
+	series := map[string][]fixedpoint.Rate{}
+	for _, spec := range p.Symbols {
+		sr, symSeries, err := runSymbol(archiveRoot, restRoot, days, spec, p, gridStart, periods, seal)
+		if err != nil {
+			return SimReport{}, nil, fmt.Errorf("symbol %s: %w", spec.Symbol, err)
+		}
+		rep.Symbols = append(rep.Symbols, sr)
+		series[spec.Symbol] = symSeries
+	}
+	return rep, series, nil
+}
+
 func runSymbol(archiveRoot, restRoot string, days []ManifestDay, spec SymbolSpec, p SimParams,
-	gridStart time.Time, periods int) (SymbolReport, []fixedpoint.Rate, error) {
+	gridStart time.Time, periods int, seal func([]dcv.Settlement) ([]dcv.Settlement, int)) (SymbolReport, []fixedpoint.Rate, error) {
 	sym := spec.Symbol
 	sr := SymbolReport{Symbol: sym}
 
@@ -256,8 +298,8 @@ func runSymbol(archiveRoot, restRoot string, days []ManifestDay, spec SymbolSpec
 	}
 	sr.Merge = mstats
 
-	// 2. Episodes.
-	windows, err := dcv.Episodes(points, p.Entry, p.ExitDivisor, p.MaxGap)
+	// 2. Episodes, at the symbol's own committed entry level (§45n-4).
+	windows, err := dcv.Episodes(points, spec.Entry, p.ExitDivisor, p.MaxGap)
 	if err != nil {
 		return SymbolReport{}, nil, err
 	}
@@ -287,8 +329,8 @@ func runSymbol(archiveRoot, restRoot string, days []ManifestDay, spec SymbolSpec
 	if err != nil {
 		return SymbolReport{}, nil, err
 	}
-	bnSettled, bnExcluded := sealSettled(bnRows)
-	bySettled, byExcluded := sealSettled(byRows)
+	bnSettled, bnExcluded := seal(bnRows)
+	bySettled, byExcluded := seal(byRows)
 	sr.SealedExcluded = bnExcluded + byExcluded
 
 	_, pstats, err := dcv.Pair(bnSettled, bySettled, p.Round)
@@ -375,6 +417,16 @@ func runSymbol(archiveRoot, restRoot string, days []ManifestDay, spec SymbolSpec
 			return SymbolReport{}, nil, fmt.Errorf("episode %s: %w", w.OpenAt.Format(time.RFC3339), err)
 		}
 		er.EndImbalance = ledger.EndImbalance
+
+		var refuse string
+		if p.VoidImbalance && ledger.EndImbalance != 0 {
+			// Ruling §45n-3: an imbalanced end voids the episode by name.
+			refuse = fmt.Sprintf("end imbalance %d", ledger.EndImbalance)
+			er.Refused = refuse
+			sr.RefusedN++
+			sr.Episodes = append(sr.Episodes, er)
+			continue
+		}
 
 		bnSlip, refuse, err := venueSlip(bnBooks, bnP90, w)
 		if err != nil {
