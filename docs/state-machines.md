@@ -1,6 +1,6 @@
 # Execution & Safety-Kernel State Machines — Funding-Rate Arbitrage Platform
 
-**Status:** v0.9.17 (2026-07-31) — set-version alignment, no change in this doc (v0.9.17 is the cashcarry decision core: §2.4's entry/exit math in `strategy/domain/cashcarry` plus the §40d fee-revision clauses in core §2.4 — nothing touches the safety kernel's machines).
+**Status:** v0.9.18 (2026-08-01) — set-version alignment, no change in this doc (v0.9.18 is milestone 2's economic-gate kill: the governed derivation refused on the real era and the gate fired by dated governance ruling — calibration design record §41p/§41q; nothing touches the safety kernel's machines). Previous: v0.9.17 (2026-07-31), the cashcarry decision core.
 **Doc set:** normative core `build-spec.md` · venue facts `venue-profiles.md` · kernel machines `state-machines.md` · history/traceability `adr-history.md` · teaching companion `tutorial.md`.
 **Role:** the safety kernel + execution state machines, re-expressed from converged core prose — state lists, transition tables, invariants, chaos cases; the core owns the requirements.
 **Normative status `[→ R1d-11]`:** the sections here are **incorporated by reference from the core's `[mechanism: State-Machines §N]` pointers** — each machine is the **normative mechanism** of the core requirement that points at it (never merely informative), while the requirement and its tags stay core-owned; on any conflict the core wins.

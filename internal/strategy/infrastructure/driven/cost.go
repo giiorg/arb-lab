@@ -79,11 +79,11 @@ type CostCalibration struct {
 	// LONGER assumption at decision time is what keeps it honest: a live
 	// system slower than the assumption refuses rather than flatters.
 	//
-	// [SPEC EDIT OWED] §8 demands MEASURED decision-to-arrival latency;
-	// this field is a declared upper-bound assumption. The owed clause (the
-	// §40d modeled-tier shape) authorizes the declared bound for milestone
-	// 2's $1K gate and requires a measured order-path latency before
-	// capital — lands at slice C's close (§41b family 3, §41j).
+	// [SPEC EDIT LANDED — v0.9.18] §8's milestone-2 authorization clause:
+	// the declared upper bound is authorized for the $1K gate (labeled
+	// declared-not-measured, refuse-if-slower at decision time), and a
+	// measured order-path latency distribution is a precondition of any
+	// capital tier (§41b family 3; landed at the §41q close).
 	Latency time.Duration
 
 	// Classifier is the frozen book-state classifier (§41b-ii-b): its code

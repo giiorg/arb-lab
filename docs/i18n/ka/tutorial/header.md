@@ -1,6 +1,6 @@
 # funding rate-ის არბიტრაჟის ბოტის შექმნა — სახელმძღვანელო
 
-**Status:** v0.9.17 (2026-07-31) — set-version alignment, no change in this doc (v0.9.17 is the cashcarry decision core; its pinned-ledger test now reproduces §3.9's worked figures in Go, so this tutorial's ledger is load-bearing for a third implementation — a change in the *status* of these numbers, not in their values).
+**Status:** v0.9.18 (2026-08-01) — set-version alignment, no change in this doc (v0.9.18 is milestone 2's economic-gate kill: the measured era confirmed the direction §3.9's worked ledger has predicted since v0.1 — the gate fired by dated governance ruling, calibration design record §41p/§41q; this tutorial's figures and their status are unchanged). Previous: v0.9.17 (2026-07-31), the cashcarry decision core.
 **Doc set:** normative core `build-spec.md` · venue facts `venue-profiles.md` · kernel machines `state-machines.md` · history/traceability `adr-history.md` · teaching companion `tutorial.md`.
 
 **აუდიტორია.** უფროსი ინჟინრები, რომლებსაც აქვთ სისტემების ძლიერი ალღო და დერივატივების შესახებ მცირე ან ნულოვანი გამოცდილება. ეს ტექსტი ასწავლის *რატომ*-ს; ხოლო ნორმატიული *რა უნდა აშენდეს* მოცემულია [`docs/build-spec.md`](./build-spec.md)-ში, რომელზეც ეს დოკუმენტი მიუთითებს როგორც **§spec**. თუ ეს ორი ოდესმე არ დაეთანხმება ერთმანეთს, უპირატესობა ენიჭება build-spec-ს.

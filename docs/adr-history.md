@@ -1,6 +1,6 @@
 # ADR & Review History — Funding-Rate Arbitrage Platform
 
-**Status:** v0.9.17 (2026-07-31) — the cashcarry decision core (strategy design record §40, slices A–C closed): **one core edit** — §2.4's cost sentence gains §40d's two fee-revision clauses (as-of composition with §3.5; the milestone-2 modeled-tier authorization), pre-registered at slice A's `ReferenceData` port and landed at slice C's close — reasoned with rejected alternatives in the strategy design record (§40d, §40n), so ADR §3 gains no row and the tagless total **stays fifty-four**. Stated here rather than left silent, because a total that merely fails to change is indistinguishable from a total nobody checked.
+**Status:** v0.9.18 (2026-08-01) — **milestone 2's economic gate FIRED** (calibration design record §41p/§41q; ADR §3 gains the dated verdict block): the governed derivation refused on the real era, the sensitivity diagnostic bounded the admissible space (best corner 11.5% utilization, 4 entries/3yr), and the user ruled the kill by governance rather than measuring the same verdict through a v2 ceremony. One core edit lands with the close — §8's pre-registered latency clause (declared upper bound authorized for the $1K gate, measured order-path latency before capital), the §40d modeled-tier shape carried by the slice's one marker — reasoned in the design record, so the tagless total **stays fifty-four**; §12's milestone-2 row gains its dated outcome sentence, an outcome record rather than a normative change. The §12 fork choice is the open user decision. Previous: v0.9.17 (2026-07-31), the cashcarry decision core (strategy design record §40) — §2.4's cost sentence gained §40d's two fee-revision clauses, ADR §3 gained no row.
 
 **Previous (v0.9.16, 2026-07-30):** the parity wiring slice (§39j slice C closed): one core edit — §3.5's `Envelope.Validate` clause narrowed to `IngressSeq`, the absence door §39m-5 deferred now open at its construct — plus the Profiles instruments-info measurement, both reasoned in the parity dispatcher design record (§39p-5, §39q).
 **Doc set:** normative core `build-spec.md` · venue facts `venue-profiles.md` · kernel machines `state-machines.md` · history/traceability `adr-history.md` · teaching companion `tutorial.md`.
@@ -252,6 +252,29 @@ Draft v0.7.1 (2026-07-19) — Codex adversarial rounds 1–4 (11 → 6 → 4 →
 | **The `Envelope` is authoritative for provenance; a normalized payload carries none.** §4's `StreamFunding` comment lists "source, venueSeq" among payload contents, and both are `Envelope` fields §3.5 defines for every stream — read literally it asks for two copies with nothing saying which wins. The unsafe direction is reachable without an implementer noticing they chose: **gap detection reads `VenueSeq` while freshness reads the timestamps**, so a payload disagreeing with its envelope gets those two questions answered from different sources, and a venue restamping an unchanged reading becomes a fresh observation with no gap — the silent stall §3.4's timer exists to catch. A payload carries no instrument either, since `SourceID` is the mailbox key | core §4 |
 | **`marketdata` does not publish `MarketView`; `engine/state` builds it.** §3.2's row said `marketdata` publishes an immutable `MarketView` while §3.3 and §3.2's own next row give that translation to `engine/state`. §3.3 wins: a context publishing a strategy-owned type would have to know cross-leg skew and the strategy's view shape, coupling the two across exactly the boundary §3.6 rule 1 and the read ports exist to keep — and it also needs the book path, which does not exist. Rejected: §3.2 winning, which would additionally reduce `engine/state` to a cache | core §3.2 |
 | **Rules 1 and 10 are enforced; rule 6 is the only deferral left, and rule 10's deferral named the wrong trigger.** `hexboundary` and `exhaustiveswitch` landed the session their subjects appeared rather than after the code they police. Rule 10 had waited on a **state machine**, while what actually made it buildable was the shared kernel's **eleven enum-likes**, which had existed for several slices — it found **13 silent fallthroughs** on its first real run, every one of them reachable the whole time. A deferral must name the *construct the analyzer reads*, not the feature that motivated it, and rule 6's was re-checked against that. Separately, and normative for any future gate: **rule 1's obvious positive control is an import cycle** — `application/` importing `infrastructure/` is refused by the type-checker before the analyzer runs, so the gate scores a pass without executing. Within one context Go's no-cycles rule already covers most of rule 1; where it earns its place is the edge Go cannot see (`engine/`, another context's infrastructure) | core §3.6 |
+
+**Milestone-2 economic gate: FIRED (v0.9.18, 2026-08-01).** The decision §12's milestone-2 row
+exists to force, taken on the day its machinery delivered the evidence. The governed derivation
+(calibration design record §41, slices A–C) refused on the real era — `ErrNoExcursions` from two
+byte-identical stamped clean-checkout invocations: at the pre-registered v1 procedure the entry
+clearing level (0.0016/settlement) sits at **1.8× the era's all-time maximum funding print**
+(3,381 settlements, 2023-01→2026-01), so the strategy never enters and the exit band has nothing
+to measure. The read-only sensitivity diagnostic (§41p + addendum) then **bounded the admissible
+space**: the clearing level is capital-scale-invariant to the ninth digit (every frame cost is
+proportional to notional), deployment moves only the hurdle-on-`C_allocated` term, and the best
+admissible corner — 98% deployment, 30-day minimum hold — reaches **11.5% utilization with 4
+entries in three years**, which §8's own LCB scoring could only score as a kill. **The user's
+dated ruling (§41q): kill by governance rather than a v2 ceremony that measures the same verdict**
+— milestone 2 closes with NO calibration artifact, no attestation, and step 5 unbuilt, exactly
+the "explicit pass/fail deliverable, not a vibe-check" §12 promised. Two consequences landed with
+the close: §8's pre-registered latency clause (declared bound authorized for the $1K gate,
+measured latency before capital — the marker's own text, so **ADR §3 gains no edit row for it**;
+reasoning in the design record) and §12's dated outcome sentence. **The §12 fork choice —
+maker-entry / regime-selective / alt-niche / tuition — is deliberately NOT taken here**; it is
+the open user decision, and §41q maps each fork onto the measured cost decomposition (≈39bp
+round trip + ≈3.2bp/settlement recurring drag at the committed frame) so the discussion starts
+from numbers rather than hope. The H1 holdout era (post-2026-02-01) remains unpolluted for any
+fork that revives a calibration.
 
 **Milestone-2 capture slice E (v0.9.14, 2026-07-30).** One edit, and it is the v0.9.13 rows-1/4 lesson repeating one session later: slice E's config test began asserting an **eighth** capture stream in `internal/` — the hourly `fundingInfo` REST overlay — while the core's two scope sentences stopped at seven. Caught by asking "does the core know this?" at the close, not by the marker grep, which by construction cannot see an unmarked claim.
 

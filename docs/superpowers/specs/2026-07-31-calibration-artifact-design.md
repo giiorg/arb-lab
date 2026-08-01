@@ -896,25 +896,64 @@ replay enters ZERO times — the conservative estimator (p25 with the adverse di
 shift) demands more than the raw print, so utilization is the honest column, and it is the
 column that stays small everywhere.
 
+### §41q — the kill ruling (session 53, 2026-08-01): milestone 2's economic gate FIRED, by governance, on the §41p record
+
+**The user's dated ruling (2026-08-01): KILL NOW, BY RULING.** Milestone 2's economic gate
+is ruled FIRED on the §41p diagnostic record: the calibration era is evidence-free at the
+committed procedure (clearing 1.8× the era's all-time funding maximum; zero of 3,381
+settlements ever cleared entry), and the bounded admissible space's best corner (98%
+deployment, 30-day minimum hold) reaches 11.5% utilization with 4 entries in three years —
+under §41's own scoring protocol a v2 ceremony could only deliver a measured kill. The
+ruling chose the ruling over the ceremony: **milestone 2 closes WITHOUT an artifact.** No
+calibration artifact exists or will be emitted under the v1 procedure; the attestation and
+the 24-hour delay are moot; step 5 (the scored replay) is dead — there is nothing left for
+it to score.
+
+**What the ruling deliberately does NOT decide:** core §12's milestone-2 row pre-registered
+exactly this failure ("that is the gate working as designed, not a surprise") and documents
+four forks — (a) the maker-entry tactic (≈−40% round-trip cost), (b) regime-selective
+deployment, (c) the alt/dislocation niche (strategy #2 early), (d) sub-hurdle returns
+consciously accepted as tuition — with the fork choice a USER decision. That choice is OPEN
+and is the next session's first question. Note for that discussion, from §41p's own numbers:
+the forks attack different terms of the decomposition — (a) shrinks A (the ~39bp round
+trip), (b) concedes utilization and prices the concession, (c) changes the funding
+distribution itself, (d) re-prices the hurdle — so the §41p table is the shared ground the
+fork discussion should start from.
+
+**Disposition of the slice's open items, per this ruling:**
+- **The §8 latency marker LANDS with this close** (the §40d modeled-tier shape,
+  pre-registered at §41 and three review rounds): the declared upper bound is authorized for
+  milestone 2's $1K gate; measured order-path latency is a precondition of capital. The
+  marker flips to `[SPEC EDIT LANDED — v0.9.18]`; marker grep returns to ZERO. Landed even
+  though the gate killed, because the spec must describe the code as built — the discipline
+  is "land before the slice closes", and the slice closes today, by kill.
+- **Core §12's milestone-2 row gains the dated outcome sentence** pointing here — the row
+  already contained its own failure prediction; the outcome lands where a reader of §12
+  would look for it.
+- **The seal (§41h: hybrid + Binance) is not reopened** — it governed a promotion that will
+  now not happen under v1; it stands as the record of what was sealed and when.
+- **The holdout era (H1: post-2026-02-01) remains untouched and SHOULD remain so** — if a
+  fork later revives a calibration, an unpolluted holdout is the one asset this ruling
+  preserves for it.
+- **Doc set bumps to v0.9.18** (this close). §41o "part 2" is this section and §41p —
+  the close happened, with a kill where the attestation would have been.
+
 ---
 
 ## RESUME HERE
 
-**THE GOVERNED RUN REFUSED ON THE REAL ERA (session 53, 2026-08-01, §41p): `ErrNoExcursions`
-at clearing 0.001603/settlement against an era whose maximum settled funding is 0.000881 —
-zero of 3,381 settlements ever cleared entry.** The refusal is deterministic (two stamped
-clean-checkout invocations, identical), no artifact exists, write-once was never reached. The
-user's dated ruling was DIAGNOSE FIRST; §41p records the sensitivity sweep: clearing is
-capital-scale-invariant, hold-length-dominated, and even a 30-day minimum hold yields 5.8%
-utilization with 2 entries in three years. **The open governance question is REVISE-VS-KILL:**
-a v2 §41e procedure commit (post-hoc, dated, openly recorded) versus recording the
-evidence-free era as kill-gate-shaped evidence. **Do not re-run the governed derivation, do
-not write the attestation, and do not land the §8 clause until the user rules.** The §8
-latency marker stays TAKEN (marker grep expects EXACTLY ONE). The seal (§41h: hybrid +
-Binance) stands — the diagnostic touched no holdout row. The capture rituals stand
-(session 53's verify: COVERAGE-only, 0 integrity findings). After the ruling, the docket is
-§41o part 2's unchanged: governed run (under whatever procedure the ruling names) → 24h
-delay → attestation → close (§8 clause, marker to ZERO, v0.9.18).
+**MILESTONE 2 IS CLOSED — THE ECONOMIC GATE FIRED (session 53, 2026-08-01, §41p/§41q,
+v0.9.18).** The governed derivation refused on the real era (`ErrNoExcursions`,
+deterministic, two stamped clean-checkout invocations); the sensitivity diagnostic bounded
+the admissible space (capital-scale-invariant clearing; best corner 11.5% utilization, 4
+entries/3yr); the user ruled the kill by governance rather than running a v2 ceremony to
+measure it. No calibration artifact exists; step 5 is dead; the §8 marker is LANDED; marker
+grep expects ZERO. **The open question — the FIRST thing to put to the user next session —
+is core §12's pre-registered fork choice: (a) maker-entry tactic, (b) regime-selective
+deployment, (c) alt/dislocation niche, (d) tuition. §41q's note maps each fork onto the
+§41p decomposition; start the discussion from that table.** The capture process and its
+rituals continue unchanged (the archive and the disk clock serve any fork). The H1 holdout
+era stays untouched. The §41h seal stands as a record, unreopened.
 
 ---
 
