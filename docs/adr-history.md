@@ -253,6 +253,31 @@ Draft v0.7.1 (2026-07-19) — Codex adversarial rounds 1–4 (11 → 6 → 4 →
 | **`marketdata` does not publish `MarketView`; `engine/state` builds it.** §3.2's row said `marketdata` publishes an immutable `MarketView` while §3.3 and §3.2's own next row give that translation to `engine/state`. §3.3 wins: a context publishing a strategy-owned type would have to know cross-leg skew and the strategy's view shape, coupling the two across exactly the boundary §3.6 rule 1 and the read ports exist to keep — and it also needs the book path, which does not exist. Rejected: §3.2 winning, which would additionally reduce `engine/state` to a cache | core §3.2 |
 | **Rules 1 and 10 are enforced; rule 6 is the only deferral left, and rule 10's deferral named the wrong trigger.** `hexboundary` and `exhaustiveswitch` landed the session their subjects appeared rather than after the code they police. Rule 10 had waited on a **state machine**, while what actually made it buildable was the shared kernel's **eleven enum-likes**, which had existed for several slices — it found **13 silent fallthroughs** on its first real run, every one of them reachable the whole time. A deferral must name the *construct the analyzer reads*, not the feature that motivated it, and rule 6's was re-checked against that. Separately, and normative for any future gate: **rule 1's obvious positive control is an import cycle** — `application/` importing `infrastructure/` is refused by the type-checker before the analyzer runs, so the gate scores a pass without executing. Within one context Go's no-cycles rule already covers most of rule 1; where it earns its place is the edge Go cannot see (`engine/`, another context's infrastructure) | core §3.6 |
 
+**Strategy #2's gate is code-complete (v0.9.23, 2026-08-01) — the procedure commit landed and the §45f-2 seal is lifted.**
+The cross-venue gate design record's slice D closed (§45p, commit `7ccadec`): the `Proc*` roster, the
+two admission judgements, the gate artifact schema, the runner and `arblab crossvenue gate` landed
+together, because parameters are only pre-registered if the code that may read post-cutoff evidence
+arrives with them. The roster's inputs are CHECKED against their sources rather than transcribed —
+entry levels against the committed `shortlist.json` on every run, sizes by one stated rule (250 USDT
+notional per leg, rounded up, lot-aligned on both venues, which at 4× is §8's $1K tier divided by the
+roster) with the venues' own ledgered filters verified where the raw tree is present. **Two numbers
+are deliberately READ rather than pinned:** §2.4 forbids hardcoded fee constants and §2.1 a hardcoded
+hurdle, and the committed reference revision already answers both, so the runner reads them as-of the
+declared bound and the assembly takes them as arguments — a roster carrying its own fee fields would
+assemble with them at zero, and a zero taker fee is a free round trip. **One normative change:** §2.1
+gains a clause permitting a reporting denominator other than `C_allocated` when it is explicitly
+declared and demonstrably at least `C_allocated` — the prohibition it qualifies names only smaller
+denominators (posted margin, leg-capital floor) because the risk it bounds is a flattered return, and
+this gate reports on the per-leg notional, which is the larger number at these sizes and applies no
+leverage uplift at all. The deviation and its clause landed in one commit; marker grep zero. The gate
+then REFUSED three times on first contact with the live archive, each a different guard: §41e's
+execution binding on a dirty tree, H2's manifest rule on the still-open capture hour (so a gate window
+can only span complete days), and finally the §45f-1 end rule by name — exit 2, no artifact written,
+because §45f-3's pre-declared portfolio means a thin symbol refuses the run rather than being dropped
+from it. That run also measured the continuity carry on live data at ~99.7% joined coverage against
+the ~9% ruling §45n-1 rejected. **The gate now waits on evidence, not code:** 180 matched post-cutoff
+settlements per symbol, with BCHUSDT binding at half the others' rate on its 8h grid.
+
 **Milestone 2b step 2 landed (v0.9.22, 2026-08-01) — the capture runs the shortlist.**
 The §42c expansion executed the same day the shortlist was measured (capture-expansion design
 record §44): 32 new sources — eight symbols × both venues' perp funding + perp books, every shape

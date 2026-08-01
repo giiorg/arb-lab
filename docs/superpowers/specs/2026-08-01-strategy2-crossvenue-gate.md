@@ -720,7 +720,335 @@ domain judgements, and the `arblab crossvenue gate` verb carrying VCS
 binding, the dataset ledger, the write-once artifact and the detached
 attestation.
 
+## §45p — slice D (b) SECOND HALF build record (session 63, 2026-08-01): THE PROCEDURE COMMIT LANDED, the seal is lifted
+
+**Commit `7ccadec`.** Slice D is complete and §45 is code-complete: the
+roster, the two admission judgements, the artifact schema, the gate runner
+and `arblab crossvenue gate` all landed together, because they are one
+claim — the parameters are only pre-registered if the code that reads
+post-cutoff evidence arrives with them.
+
+### The roster: what was READ rather than transcribed
+
+Two of the roster's inputs were verified against their sources instead of
+copied from prose, and both checks are permanent tests.
+
+**Entry levels** are compared on every run against the COMMITTED
+`research/screening/shortlist.json` `best_entry` field — the same field
+ruling §45n-4 cites. The test also asserts the roster spans **three**
+distinct levels, so a roster that collapsed to one modal level (the
+alternative §45n-4 rejected) cannot pass by matching a shortlist somebody
+also flattened.
+
+**Sizes** follow one stated rule: **250 USDT of notional per LEG**, at the
+§43-run prices, **rounded UP** to the step common to BOTH venues. Each
+term earns its place. 250 because eight symbols × two legs is 4,006 USDT
+gross, which at `ProcPerpLeverage` is **1,001 USDT of margin** — §8's $1K
+tier, so the size is the tier divided by the roster rather than a free
+parameter. Rounded up because a larger order walks deeper into the book,
+so the measured slippage overstates the trade the strategy would place.
+Common-step alignment because the position is one trade with two legs, and
+the steps genuinely differ on two names — **KAITO 0.1 (Binance) vs 1
+(Bybit), BCH 0.001 vs 0.01** — with Binance's BCHUSDT row demanding **20
+USDT** of notional against every other row's 5, which the 251.57 USDT this
+rule sizes clears. The battery pins the sizes as the SMALLEST aligned size
+clearing the target: alignment alone would admit a size ten times too
+large, which walks ten times deeper and would read as a crushing cost
+rather than an arithmetic slip.
+
+The venue filters and prices live in `research/screening/raw/`, which is
+git-ignored, so they are pinned in the test with their provenance and
+verified against the venues' own bytes only when that tree is present —
+and the skip **says so** rather than passing quietly. One distinction that
+data cannot check is recorded beside it: Binance serves both `LOT_SIZE`
+and `MARKET_LOT_SIZE`, and for all eight symbols the two step sizes are
+identical, so reading the wrong filter would agree here.
+
+### Two numbers are read, not pinned — and that is a spec requirement
+
+Core §2.4 forbids hardcoded fee constants ("no second copy of the number
+in another module") and §2.1 forbids a hardcoded hurdle in the same
+breath. The committed reference revision already carries both perp taker
+cells — `FeeRow` is keyed on (venue, product) with **no symbol column**,
+deliberately, because venue base-tier schedules are schedule-wide, so the
+binance/linear_perp and bybit/linear_perp rows are the fees for any linear
+perp on those venues — plus the dated treasury.gov hurdle, which has no
+symbol dimension at all. So the runner READS both as-of the declared bound
+and `ProcCrossVenueReference` names the revision.
+
+`ProcCrossVenueSimParams` takes the two fees as ARGUMENTS rather than
+carrying fee fields, which makes the read structural: the procedure cannot
+be assembled without having performed it. A roster with its own fee fields
+would assemble fine with them left at zero, and **a zero taker fee is a
+free round trip** — the flattering direction, computing the gate in our
+favour with nothing failing.
+
+### The denominator: a spec deviation TAKEN, and the clause landed the same commit
+
+The per-episode returns are rates on the per-leg **notional**. §2.1 says
+to report on `C_allocated`. The gate reports on the notional and applies
+**no leverage uplift**, so no leverage figure appears in the verdict
+arithmetic at all.
+
+That is a departure from §2.1's letter, and it was marked rather than
+absorbed — then discharged immediately. §2.1's prohibition names only
+*smaller* denominators (posted margin, the leg-capital floor) because the
+risk it bounds is a **flattered** return; at these sizes and
+`ProcPerpLeverage`, two legs post `notional/2` in margin and `C_allocated`
+adds only the rescue margin and the fee/slippage reserve, so the notional
+is the LARGER number. The figure understates return on `C_allocated`,
+making the hurdle comparison harder than §2.1 demands, never easier.
+
+**§2.1 gained the clause** permitting a denominator that is *explicitly
+declared* and *demonstrably at least* `C_allocated`, with the reasoning
+above. `ProcCrossVenueDenominator` is that declaration and it rides in
+every artifact. Marker grep **ZERO** — the deviation and its spec edit
+landed in one commit, so no marker was ever outstanding.
+
+### The refusal ceiling, and why a quarter
+
+Refusals are **not a random sample** of a symbol's episodes. An episode is
+refused when a boundary book is missing, thin or unmeasurable — and books
+go missing during stalls, reconnects and venue trouble, which are exactly
+the instants when crossing the spread costs most. The surviving set is
+therefore biased toward calm episodes, and the bias runs in the flattering
+direction. A quarter is where that stops being noise: a symbol scored on
+three-quarters of its episodes is still recognisably the symbol; one
+scored on half is not. The imbalance void feeds the same counter
+deliberately — an integrity void and a missing book are different faults
+with one consequence, and a ceiling counting only one of them would let
+the other thin the sample silently.
+
+### The interpretation this build had to take, stated so it is not reopened
+
+Rulings §45f-1 and §45n-3 both say a symbol is "refused BY NAME", and
+§45o said the ceiling "must exclude symbols BEFORE any portfolio statistic
+exists". Those admit two readings: drop the symbol and score the rest, or
+refuse the run.
+
+**This build refuses the RUN**, and writes no artifact. The reason is
+ruling §45f-3: the pass shape is a **pre-declared** portfolio. Dropping a
+symbol and scoring the survivors would score a portfolio nobody declared,
+selected by which symbol happened to be thin — and re-normalising the
+weights over the remainder is precisely the data-dependent choice the
+pre-declaration exists to forbid. The rejected §45f-3 alternative
+"all-must-clear" is a different question (about CLEARING the hurdle, not
+about having usable evidence), so nothing conflicts. §45o's "exclude
+before any statistic exists" is read as ordering — the check must run
+before the aggregate, so a bad symbol cannot be laundered into it.
+
+Consequences, both deliberate: both rules are evaluated for EVERY symbol
+in one walk (a gate naming one thin symbol per run would cost as many
+archive walks as there are thin symbols), and the artifact path stays
+**unburned** for the run that can score.
+
+### The battery, and the checklist's catch
+
+The collapse checklist ran BEFORE the battery, as always, and caught a
+defect in code written minutes earlier: `CheckRefusalCeiling` accepted a
+ceiling of exactly **1.0**, while its own rationale said "a rule that
+cannot refuse is not a rule" — a symbol whose every episode was refused
+sits at exactly one, so nothing exceeds the bound and every symbol passes,
+silently. The admissible range is now `[0,1)`, one exclusive; zero stays
+admissible for the opposite reason, because it CAN fire.
+
+Fixture parameters the checklist pinned, each because its absence made a
+real claim unreachable:
+
+- **Floors and ceilings VARY across cases.** A battery that only ever
+  passed 180 and 0.25 would pass identically against an implementation
+  that ignored its argument and read the roster constant — and the
+  parameter-is-wired claim is what the procedure commit rests on.
+- **Symbols vary**, so "the message names THIS symbol" and "the message
+  names a hardcoded symbol" are different assertions.
+- **The ceiling's exactly-at case uses exactly-representable counts** (2
+  of 8 against 0.25), so "exceeds" and "reaches" are separated by nothing.
+- **One ceiling case uses 1 of 3** — a fraction NOT representable at scale
+  9 — against 0.333333333 and again against 0.333333334. Those answers
+  differ, and they differ only if the comparison is exact. Without that
+  pair the cross-multiplication is untested, and an implementation that
+  divided into a `Rate` first gets one of them wrong whichever rounding
+  mode it picked.
+- **The artifact fixture carries TWO symbols and the faults sit on the
+  SECOND**, the cardinality lesson from §45o applied up front.
+- **The utilization fixture's series CONTAINS ZEROS.** On a series with no
+  idle periods, "divide by all periods" and "divide by the periods that
+  traded" are the same division — and that division is the entire reason
+  the gate's headline is utilization-adjusted. An implementation dividing
+  by trading periods would report a strategy in position a quarter of the
+  time as though always deployed, quadrupling the number the hurdle is
+  compared against.
+- **The verdict boundary is tested at equality**, both ways: an annualized
+  LCB exactly equal to the effective hurdle CLEARS, and the opposite
+  verdict on the same numbers must refuse.
+
+**22 aimed mutations: 20 caught, two NOBUILD re-aims, one SURVIVED.** The
+survivor diagnosed as a wrong mutant AND a real finding — `episodes < 0`
+substituted for `episodes == 0` changed no answer, because the counts rule
+above already forces both sides of the comparison to zero when there are
+no episodes. The `episodes == 0` early return could not fail, so it was
+not a guard; it was a second statement of the rule, free to drift from the
+first. It is gone, and the vacuous pass now falls out of the same
+comparison as every other answer.
+
+### Shared authorities, not second copies
+
+Three consolidations, each for the reason `Annualized`'s own doc comment
+already gives ("one implementation, both consumers, or the two
+annualization bases drift a few basis points apart"):
+
+- `cashcarry.EffectiveHurdle` is **exported**. The gate compares its bound
+  against this hurdle, and a second netting beside it would differ by
+  whichever of §2.1's three adjustments the copy forgot — silently, and in
+  whichever direction that adjustment ran.
+- `driven.ApprovedIdentity` + `BindIdentity` — approval is indifferent to
+  what an artifact contains, so one binding serves both artifact families.
+  A `Bind` written separately for each would be two chances to forget one
+  of the four comparisons, and each comparison alone is the whole check
+  for some tamper (a matching hash under a different ID approves a
+  rename; matching bytes under a different commit approve a rerun nobody
+  reviewed).
+- §41d's identity rule collapsed from **three spellings to one**
+  (`driven.ArtifactIDFromPath`). The attestation binds on that ID, so a
+  disagreement would refuse a correct approval or accept a wrong one.
+
+### The smoke: THREE refusals, all of them the machinery working
+
+The gate was run against the live archive, and it refused three times
+before it ran — each refusal a different guard, and all three worth
+recording because they are what the ceremony is FOR.
+
+1. **Dirty tree.** `strategy/driving: derivation build from a dirty tree`
+   — §41e's execution binding, refusing to produce a verdict from a
+   commit that does not exist. This is why the procedure commit had to
+   land before the smoke could run at all.
+2. **Unvouched archive file.** After committing: `archive file not
+   vouched by its day manifest` on the OPEN hour — H2's manifest rule,
+   because capture is still writing `2026-08-01T16.arbcap`. This is the
+   determinism concern `LoadManifestDays` documents, met in practice: a
+   gate window can only include COMPLETE days, so no valid window existed
+   on 2026-08-01, the same day the books cutoff falls on.
+3. **The end rule.** Run over a hardlinked scratch copy of the archive
+   with the open hour excluded (the live archive untouched, verified
+   after), the full path executed over real bytes and refused by name.
+
+The third run's evidence, which is the useful measurement:
+
+```
+gate "crossvenue-gate-v1" over 1 day(s) (2026-08-01..2026-08-01), evidence before 2026-08-02T00:00:00Z
+  symbol           matched    points  episodes   scored  refused   skipped
+  LABUSDT                4       286         0        0        0         0
+  BEATUSDT               4       286         0        0        0         0
+  KAITOUSDT              4       286         0        0        0         0
+  MMTUSDT                4       286         4        4        0         0
+  MUSDT                  4       264         0        0        0        22
+  SOONUSDT               4       286         0        0        0         0
+  ESPORTSUSDT            4       286         0        0        0         0
+  BCHUSDT                2       286         0        0        0         0
+  floor 180 matched settlements, refusal ceiling 0.25
+NOT SCOREABLE — LABUSDT: 4 matched settlements, floor 180; … (all eight named)   [exit 2]
+```
+
+Three things in that table are checks rather than output:
+
+- **The matched counts are the seal's arithmetic, verified.** The window
+  is `[2026-08-01T00:00Z, 2026-08-02T00:00Z)`; the 4h grid settles at 00,
+  04, 08, 12 — **4** — and BCH's 8h grid at 00, 08 — **2**. Both match
+  exactly, which is `gateSettled`'s boundaries confirmed on real venue
+  data rather than on fixtures.
+- **286 joined decision points against 287 available minutes** (the alt
+  sources begin at 11:13Z and the walk ends at 16:00Z) is **~99.7%**
+  coverage. That is §45o(a)'s continuity carry earning its keep on the
+  live archive: the coverage ruling §45n-1 rejected accepting was ~9%.
+- **MMTUSDT produced 4 episodes, all scored, none refused** — so the
+  episode machine, both venues' book walks, the cost composition and the
+  phase ledger all executed end to end on real post-cutoff bytes, not
+  only on fixtures.
+
+**No artifact was written**, which is the pre-declared-portfolio rule
+holding: the path stays unburned for the run that can score. Exit code
+**2** distinguishes "not yet scoreable" from a broken run (1), so a
+wrapper can retry without treating it as a failure.
+
+### What the gate now needs, and when
+
+Nothing in code. The gate needs **evidence**: 180 matched post-cutoff
+settlements per symbol, which is ~30 days on the 4h grid and ~60 on BCH's
+8h grid. BCHUSDT is therefore the binding symbol — it accumulates matched
+settlements at half the rate of the other seven, so the roster qualifies
+on **BCH's** clock, around **2026-09-30**, not on the majority's ~08-31.
+That is the end rule doing exactly what ruling §45f-1 chose it for: the
+date is computed from evidence, not declared.
+
+Between now and then the operational loop is `arblab crossvenue fetch`
+for the eight symbols, periodically, so the settled store accumulates the
+window the gate will read. The first such fetch ran this session (16
+identities, all `ok`).
+
 ## RESUME HERE
+
+**§45 IS CODE-COMPLETE. Slices A–C closed; slice D's four forks RULED
+(§45n); §45o landed (a) the continuity carry and (b)'s first half; §45p
+landed (b)'s SECOND HALF — the procedure commit (`7ccadec`), which lifts
+the §45f-2 seal.** There is no crossvenue code left to write for the gate.
+
+What remains is EVIDENCE and two dated obligations, in order:
+
+1. **The §32m-D per-tier one-day figure, DUE BY 2026-08-03T11:13Z**
+   (measurable from ~2026-08-02T11:13Z), landing as §44e in the §44
+   record — `du` split BTC-tier vs alt-tier against §42c's derived
+   ~0.6–1.1G/day/symbol, full-day verify over the measured day (0
+   integrity; the restart's gaps show honestly). **This is §38f's named
+   revisit point** (ruling §42f-3): re-argue off-host on the measured
+   disk clock. Note the archive stood at **9.4G** on 2026-08-01, which is
+   context for that argument, not the measurement itself.
+
+2. **Accumulate the gate's evidence, then run the gate.** The end rule
+   needs 180 matched post-cutoff settlements per symbol.
+   **BCHUSDT is the binding symbol** — it settles on the 8h grid while
+   the other seven settle on 4h, so it accrues matched settlements at
+   half their rate and the roster qualifies on BCH's clock, around
+   **2026-09-30** rather than the majority's ~08-31. The date is computed
+   from evidence by design (§45f-1), so treat that estimate as a
+   forecast, not a schedule: what decides is the `matched` column.
+
+   The loop until then:
+
+   - `arblab crossvenue fetch -symbols LABUSDT,BEATUSDT,KAITOUSDT,MMTUSDT,MUSDT,SOONUSDT,ESPORTSUSDT,BCHUSDT -cutoff <RFC3339>`
+     periodically, so the settled store accumulates the window. The store
+     is keyed by cutoff DAY and refuses to overwrite, so re-fetching on a
+     new day accumulates beside the old file rather than colliding. The
+     first fetch ran 2026-08-01T16:00Z, all 16 identities `ok`.
+   - `arblab crossvenue gate -before <RFC3339> -out <path>` to read the
+     evidence table any time. **Two operational facts learned in §45p's
+     smoke, both of them guards working rather than problems:** the tree
+     must be CLEAN (§41e's execution binding refuses a dirty build), and
+     `-before` must fall on a day AFTER the last complete archive day,
+     because the open hour is not yet vouched by its day manifest (H2).
+     A run that is not yet scoreable exits **2**, names every short
+     symbol with its counts, and writes NOTHING — the artifact path
+     stays unburned for the run that can score.
+
+3. **When the gate scores**, the artifact is written once and authorizes
+   nothing until a detached attestation binds it — `driven.AttestationDoc`
+   through `BindIdentity`, 24h cooling delay, sign-off and out-of-band
+   confirmation named. That approval is the point at which milestones 3–6
+   unlock or the fork is re-argued, and it is a USER decision under the
+   same kill discipline that produced milestone 2's kill.
+
+**One interpretation §45p had to take, recorded so it is not silently
+reopened:** a symbol failing either admission rule refuses the whole RUN
+rather than being dropped from the portfolio, because ruling §45f-3's
+pass shape is a PRE-DECLARED portfolio and scoring the survivors would
+score a portfolio nobody declared, chosen by which symbol happened to be
+thin. If that reading is wrong, it is a ruling to revisit with the user —
+not a bug to patch.
+
+The capture rituals stand (PID 8495, pgrep FIRST; QA binaries to the
+scratchpad, never over `bin/arblab` while capture runs; verify
+COVERAGE/0-integrity expected).
+
+## RESUME HERE (session 62 — HISTORICAL, superseded by §45p; slice D is now COMPLETE)
 
 **Slice C is CLOSED (§45m). §45n: slice D's four forks are RULED
 (session 62). §45o: (a) the continuity carry is LANDED (15/15) and (b)'s
