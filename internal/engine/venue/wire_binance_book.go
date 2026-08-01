@@ -55,12 +55,21 @@ type binanceSpotDepthWire struct {
 // binanceFuturesDepthWire is the futures partial-depth frame: the
 // depthUpdate event envelope around the same level arrays.
 type binanceFuturesDepthWire struct {
-	Event     string      `json:"e"`
-	EventTime int64       `json:"E"`
-	Symbol    string      `json:"s"`
-	FinalID   uint64      `json:"u"`
-	Bids      [][2]string `json:"b"`
-	Asks      [][2]string `json:"a"`
+	Event     string `json:"e"`
+	EventTime int64  `json:"E"`
+	Symbol    string `json:"s"`
+
+	// FirstID is declared ONLY to give the venue's "U" key an exact-match
+	// destination: encoding/json falls back to CASE-INSENSITIVE tag
+	// matching, so without this field the frame's "U" would route into
+	// FinalID and whichever key came LAST in the byte stream would win —
+	// the u-vs-U claim held by the venue's key order rather than by the
+	// type (found by a survived mutation, session 52). Nothing reads it.
+	FirstID uint64 `json:"U"`
+
+	FinalID uint64      `json:"u"`
+	Bids    [][2]string `json:"b"`
+	Asks    [][2]string `json:"a"`
 }
 
 // DecodeBinanceSpotDepth20 decodes one spot partial-depth frame.

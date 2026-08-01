@@ -19,7 +19,10 @@ import (
 	"time"
 
 	"github.com/giiorg/arb-lab/internal/engine/capture"
+	mdomain "github.com/giiorg/arb-lab/internal/marketdata/domain"
 	"github.com/giiorg/arb-lab/internal/platform/events"
+	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
+	"github.com/giiorg/arb-lab/internal/strategy/domain"
 	"github.com/giiorg/arb-lab/internal/strategy/infrastructure/driven"
 )
 
@@ -59,11 +62,11 @@ func runWorld(t *testing.T) (datasetsDir, archiveRoot, refPath string) {
 
 	// --- The kline pair: 48 hourly rows, constant basis (mark 10 over
 	// spot) so the adverse move's tail is the declared zero.
-	klinePage := func(base float64) json.RawMessage {
+	klinePage := func(open string) json.RawMessage {
 		var rows []string
 		for i := 0; i < 48; i++ {
 			at := start.Add(time.Duration(i) * time.Hour)
-			rows = append(rows, fmt.Sprintf(`[%d,"%0.2f"]`, at.UnixMilli(), base))
+			rows = append(rows, fmt.Sprintf(`[%d,"%s"]`, at.UnixMilli(), open))
 		}
 		return json.RawMessage("[" + joinRows(rows) + "]")
 	}
@@ -71,43 +74,67 @@ func runWorld(t *testing.T) (datasetsDir, archiveRoot, refPath string) {
 		"venue": "binance", "series": "spot_kline_1h", "symbol": "BTCUSDT",
 		"start": "2023-01-01T00:00:00Z", "end": "2023-01-02T23:00:00Z", "interval": "1h0m0s",
 		"fetched_at": "2026-08-01T00:00:00Z", "endpoint": "test",
-		"pages": []json.RawMessage{klinePage(30000)},
+		"pages": []json.RawMessage{klinePage("30000.00")},
 	})
 	writeRunDataset(t, datasetsDir, "binance", "mark_kline_1h.TEST.json", map[string]any{
 		"venue": "binance", "series": "mark_kline_1h", "symbol": "BTCUSDT",
 		"start": "2023-01-01T00:00:00Z", "end": "2023-01-02T23:00:00Z", "interval": "1h0m0s",
 		"fetched_at": "2026-08-01T00:00:00Z", "endpoint": "test",
-		"pages": []json.RawMessage{klinePage(30010)},
+		"pages": []json.RawMessage{klinePage("30010.00")},
 	})
 
-	// --- Family 2: day 2026-07-30. Books: 505 sample windows × 2 records
-	// (one at grid−100ms, the completion at grid+300ms), calm stratum
-	// (3 BTC/side, one-tick spread), starting 10:00.
+	// --- Family 2: day 2026-07-30, one record pair per 10s sample window
+	// (grid−100ms and grid+300ms). The §41i identical-leg suspect is
+	// answered by construction: the two LEGS carry different ladders, the
+	// perp's completion book VANISHES its best ask (so perp-ask slippage
+	// is positive while spot's is zero and perp-bid's is zero — leg AND
+	// side keying both visible in values), and each stream ends with a
+	// thin-book tail in the "normal" stratum: 500 spot instants (exactly
+	// MinEvidence — kept under <, dropped under <=) and 20 perp instants
+	// (dropped, the sub-minimum arm).
 	var rels []string
 	day := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
-	mkBookRecs := func(frame func(uint64, string, string) string) map[time.Time][]capture.Record {
+	type ladder struct{ bids, asks, thinBids, thinAsks, shiftedAsks string }
+	mkBookRecs := func(l ladder, thin int, frame func(uint64, string, string) string) map[time.Time][]capture.Record {
 		files := map[time.Time][]capture.Record{}
-		for i := 0; i < 505; i++ {
+		for i := 0; i < 505+thin; i++ {
 			grid := day.Add(time.Duration(i) * 10 * time.Second)
 			for n, off := range []time.Duration{-100 * time.Millisecond, 300 * time.Millisecond} {
 				at := grid.Add(off)
 				window := at.Truncate(time.Hour)
 				seq := uint64(i*2 + n + 1)
-				bids := fmt.Sprintf(`[["29999.90","1.5"],["29999.80","1.0"],["29999.70","0.5"]]`)
-				asks := fmt.Sprintf(`[["30000.00","1.5"],["30000.10","1.0"],["30000.20","0.5"]]`)
+				bids, asks := l.bids, l.asks
+				if i >= 505 {
+					bids, asks = l.thinBids, l.thinAsks
+				} else if n == 1 && l.shiftedAsks != "" {
+					asks = l.shiftedAsks
+				}
 				files[window] = append(files[window], dataRec(seq, at, frame(seq, bids, asks)))
 			}
 		}
 		return files
 	}
+	spotLadder := ladder{
+		bids:     `[["29999.90","1.5"],["29999.80","1.0"],["29999.70","0.5"]]`,
+		asks:     `[["30000.00","1.5"],["30000.10","1.0"],["30000.20","0.5"]]`,
+		thinBids: `[["29999.90","0.4"],["29999.80","0.4"]]`,
+		thinAsks: `[["30000.00","0.4"],["30000.10","0.4"]]`,
+	}
+	perpLadder := ladder{
+		bids:        `[["64266.60","3.0"],["64266.50","1.2"],["64266.40","0.8"]]`,
+		asks:        `[["64266.70","2.5"],["64266.80","1.5"],["64266.90","1.0"]]`,
+		thinBids:    `[["64266.60","0.5"],["64266.50","0.3"]]`,
+		thinAsks:    `[["64266.70","0.5"],["64266.80","0.3"]]`,
+		shiftedAsks: `[["64266.80","2.5"],["64266.90","1.5"],["64267.00","1.0"]]`,
+	}
 	spotKey := capture.StreamKey{Source: events.SourceID{Instrument: calibSpotInst, Stream: events.StreamBook}, Topic: "btcusdt@depth20@100ms"}
-	for window, recs := range mkBookRecs(func(seq uint64, bids, asks string) string {
+	for window, recs := range mkBookRecs(spotLadder, 500, func(seq uint64, bids, asks string) string {
 		return fmt.Sprintf(`{"lastUpdateId":%d,"bids":%s,"asks":%s}`, seq+1000, bids, asks)
 	}) {
 		rels = append(rels, writeArchiveFile(t, archiveRoot, spotKey, window, recs))
 	}
 	perpKey := capture.StreamKey{Source: events.SourceID{Instrument: calibPerpInst, Stream: events.StreamBook}, Topic: "btcusdt@depth20@100ms"}
-	for window, recs := range mkBookRecs(func(seq uint64, bids, asks string) string {
+	for window, recs := range mkBookRecs(perpLadder, 20, func(seq uint64, bids, asks string) string {
 		return fmt.Sprintf(`{"e":"depthUpdate","E":%d,"s":"BTCUSDT","u":%d,"b":%s,"a":%s}`,
 			time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC).UnixMilli(), seq+2000, bids, asks)
 	}) {
@@ -206,6 +233,10 @@ func TestRunEmitsLoadableGovernedArtifact(t *testing.T) {
 	if art.Doc.Procedure.Commit != "testrev0000" || art.Doc.Procedure.ExecutableSHA256 != runTestExeDigest {
 		t.Fatalf("procedure identity %+v not the executing build's", art.Doc.Procedure)
 	}
+	// The H1 boundary echo is the DECLARED instant, not a recomputation.
+	if art.Doc.Datasets.H1Boundary != "2026-02-01T00:00:00Z" {
+		t.Fatalf("h1 boundary echo = %q", art.Doc.Datasets.H1Boundary)
+	}
 	// The H2 enumeration: exactly the one manifested day before the freeze.
 	if len(art.Doc.Datasets.Manifests) != 1 || art.Doc.Datasets.Manifests[0].Day != "2026-07-30" {
 		t.Fatalf("manifests = %+v; want exactly 2026-07-30", art.Doc.Datasets.Manifests)
@@ -220,14 +251,46 @@ func TestRunEmitsLoadableGovernedArtifact(t *testing.T) {
 			t.Fatalf("history digest %s: %v", h.File, err)
 		}
 	}
-	// 12 cells: 2 legs × 2 sides × 3 candidates, all calm, all ≥ 500.
-	if len(art.Cost.Cells) != 12 {
-		t.Fatalf("cells = %d; want 12", len(art.Cost.Cells))
+	// 18 cells: calm 2 legs × 2 sides × 3 candidates (12) plus the spot
+	// "normal" thin tail (6, at EXACTLY MinEvidence — kept under <,
+	// dropped under <=); the perp normal tail (20 observations) is
+	// ABSENT. Leg and side keying are visible in VALUES: the perp's
+	// completion books vanish their best ask, so perp-ask calm cells are
+	// strictly positive while spot-ask and perp-bid stay zero.
+	if len(art.Cost.Cells) != 18 {
+		t.Fatalf("cells = %d; want 18 (12 calm + 6 spot normal at exactly min evidence)", len(art.Cost.Cells))
 	}
+	var sawSpotNormal, sawPerpAskPositive, sawPerpBidZero, sawSpotAskZero bool
 	for _, c := range art.Cost.Cells {
-		if c.Stratum != "calm" || c.Observations < ProcMinEvidence {
-			t.Fatalf("cell %+v: stratum/observations off", c)
+		if c.Observations < ProcMinEvidence {
+			t.Fatalf("cell %+v below min evidence survived", c)
 		}
+		sign, err := c.P90.Sign()
+		if err != nil {
+			t.Fatalf("cell p90: %v", err)
+		}
+		switch {
+		case c.Instrument == calibSpotInst && c.Stratum == "normal":
+			sawSpotNormal = true
+			if c.Observations != ProcMinEvidence {
+				t.Fatalf("spot normal cell observations = %d; want exactly %d", c.Observations, ProcMinEvidence)
+			}
+		case c.Instrument == calibPerpInst && c.Stratum == "normal":
+			t.Fatalf("perp normal cell survived with %d observations", c.Observations)
+		case c.Instrument == calibPerpInst && c.Stratum == "calm" && c.Side == "ask":
+			sawPerpAskPositive = sign > 0
+			if sign <= 0 {
+				t.Fatalf("perp calm ask p90 = %s; want positive (the vanished best)", c.P90)
+			}
+		case c.Instrument == calibPerpInst && c.Stratum == "calm" && c.Side == "bid":
+			sawPerpBidZero = sign == 0
+		case c.Instrument == calibSpotInst && c.Stratum == "calm" && c.Side == "ask":
+			sawSpotAskZero = sign == 0
+		}
+	}
+	if !sawSpotNormal || !sawPerpAskPositive || !sawPerpBidZero || !sawSpotAskZero {
+		t.Fatalf("keying assertions incomplete: spotNormal=%v perpAsk+=%v perpBid0=%v spotAsk0=%v",
+			sawSpotNormal, sawPerpAskPositive, sawPerpBidZero, sawSpotAskZero)
 	}
 	// The sample start is the first UTC day after the freeze.
 	if !art.Promotion.SampleStart.Equal(time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)) {
@@ -308,4 +371,107 @@ func TestRunRefusesExistingArtifact(t *testing.T) {
 	if _, err := cleanCalibrator().Run(cfg); !errors.Is(err, ErrArtifactExists) {
 		t.Fatalf("second run: %v, want ErrArtifactExists", err)
 	}
+}
+
+// checkDriftTail directly: the invariant compares RESULTING DRIFTS, not
+// raw shifts — two non-negative tails both freeze zero and pass however
+// they order; a merged tail freezing a LARGER margin than family 1's
+// refuses.
+func TestCheckDriftTailInvariant(t *testing.T) {
+	qp := func(q, s string) domain.QuantilePoint {
+		return domain.QuantilePoint{Q: procTestRate(t, q), Shift: procTestRate(t, s)}
+	}
+	tail := procTestRate(t, "0.05")
+	grid := func(shift string) []domain.QuantilePoint {
+		return []domain.QuantilePoint{qp("0.05", shift), qp("0.5", "0")}
+	}
+
+	// Family 1 more adverse than merged would ever be: fine.
+	if err := checkDriftTail(grid("-0.002"), grid("-0.001"), tail, 8*time.Hour); err != nil {
+		t.Fatalf("family-1-dominant tails refused: %v", err)
+	}
+	// Equal: fine.
+	if err := checkDriftTail(grid("-0.002"), grid("-0.002"), tail, 8*time.Hour); err != nil {
+		t.Fatalf("equal tails refused: %v", err)
+	}
+	// Both non-negative (one positive, one zero): both freeze ZERO drift —
+	// equivalent, must pass (the synthetic world's own case).
+	if err := checkDriftTail(grid("0.000002"), grid("0"), tail, 8*time.Hour); err != nil {
+		t.Fatalf("two zero-drift tails refused: %v", err)
+	}
+	// Merged strictly more adverse AND negative: the pinning would
+	// understate — refused by name.
+	if err := checkDriftTail(grid("-0.001"), grid("-0.002"), tail, 8*time.Hour); !errors.Is(err, ErrDriftTailDominated) {
+		t.Fatalf("dominated tail: %v, want ErrDriftTailDominated", err)
+	}
+}
+
+// frameCellP90: no cell for the declared (stratum, candidate) refuses by
+// name; with both sides present the WORSE side is drawn.
+func TestFrameCellSelection(t *testing.T) {
+	mkCell := func(side string, p90 string) driven.CostCell {
+		return driven.CostCell{
+			Instrument: calibSpotInst, Side: mdomain.BookSide(side), Stratum: ProcSurrogateStratum,
+			MaxQty: ProcCandidateQty, P90: procTestRate(t, p90),
+			Observations: ProcMinEvidence, Method: "m",
+		}
+	}
+	if _, err := frameCellP90(calibSpotInst, nil); !errors.Is(err, ErrFrameUnpriced) {
+		t.Fatalf("no cells: %v, want ErrFrameUnpriced", err)
+	}
+	got, err := frameCellP90(calibSpotInst, []driven.CostCell{mkCell("bid", "0.0001"), mkCell("ask", "0.0003")})
+	if err != nil {
+		t.Fatalf("selection: %v", err)
+	}
+	if got != procTestRate(t, "0.0003") {
+		t.Fatalf("frame p90 = %s; want the worse side's 0.0003", got)
+	}
+}
+
+// The procedure roster's internal coherence — the constraints that make
+// the frozen parameters CONSUMABLE: the drift tail and the decision
+// quantile must be grid members (EntryDriftFrom and ShiftAt both refuse
+// otherwise, but at derivation time, not commit time — this test moves
+// the refusal to the commit), the family-2 procedure must validate, and
+// the classifier's last rule must be the catch-all so every runtime book
+// classifies.
+func TestProcedureRosterCoherence(t *testing.T) {
+	if err := ProcFamily2.Validate(); err != nil {
+		t.Fatalf("family-2 procedure: %v", err)
+	}
+	if err := ProcImminent.Validate(); err != nil {
+		t.Fatalf("imminent procedure: %v", err)
+	}
+	inGrid := func(q string) bool {
+		want := procTestRate(t, q)
+		for _, g := range ProcResidualGrid {
+			if g == want {
+				return true
+			}
+		}
+		return false
+	}
+	if !inGrid(ProcEntryDriftTail.Decimal()) {
+		t.Fatalf("drift tail %s is not a grid member", ProcEntryDriftTail)
+	}
+	if !inGrid(ProcDecisionQuantile.Decimal()) {
+		t.Fatalf("decision quantile %s is not a grid member", ProcDecisionQuantile)
+	}
+	cl := ProcClassifier()
+	if err := cl.Validate(); err != nil {
+		t.Fatalf("classifier: %v", err)
+	}
+	last := cl.Rules[len(cl.Rules)-1]
+	if last.Spread.Lo.Kind != domain.BoundUnbounded || last.Spread.Hi.Kind != domain.BoundUnbounded ||
+		last.Depth.Lo.Kind != domain.BoundUnbounded || last.Depth.Hi.Kind != domain.BoundUnbounded {
+		t.Fatalf("last rule %q is not the catch-all; a runtime book could be unclassifiable", last.Name)
+	}
+	if ProcFamily2.Latency != ProcLatencyAssumedBound {
+		t.Fatal("the counterfactual walk-ahead and the declared latency bound have diverged")
+	}
+}
+
+func procTestRate(t *testing.T, s string) fixedpoint.Rate {
+	t.Helper()
+	return procRate(s)
 }

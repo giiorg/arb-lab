@@ -394,3 +394,150 @@ func TestLatencyStats(t *testing.T) {
 		t.Fatal("empty samples summarized")
 	}
 }
+
+// The pairing rule's EXPIRY arm, both sides of its boundary: a completion
+// book exactly AT due+slack completes (inclusive), one past it expires
+// the pending sample — <= and < separate here, and no other fixture
+// reaches this arm at all.
+func TestMeasureBooksExpiryBoundary(t *testing.T) {
+	mk := func(completionOffset time.Duration) (BookMeasurements, error) {
+		root := t.TempDir()
+		key := f2Key(t)
+		tA := f2Window.Add(9*time.Minute + 59*time.Second + 900*time.Millisecond)
+		// due = 10:00:00.250; slack 1s → boundary 10:00:01.250.
+		tC := f2Window.Add(10*time.Minute + 250*time.Millisecond + completionOffset)
+		recs := []capture.Record{
+			dataRec(1, tA, spotFrame(41, `[["99.90","1.0"]]`, `[["100.00","1.0"]]`)),
+			dataRec(2, tC, spotFrame(42, `[["99.90","1.0"]]`, `[["100.10","1.0"]]`)),
+		}
+		rel := writeArchiveFile(t, root, key, f2Window, recs)
+		writeManifest(t, root, f2Day, []string{rel})
+		days, err := LoadManifestDays(root, time.Date(2026, 8, 1, 6, 0, 0, 0, time.UTC))
+		if err != nil {
+			t.Fatalf("manifest days: %v", err)
+		}
+		return MeasureBooks(root, days, spotSpec(t), f2Params(t))
+	}
+
+	atBoundary, err := mk(time.Second) // exactly due+slack
+	if err != nil {
+		t.Fatalf("at boundary: %v", err)
+	}
+	if atBoundary.Pairs != 1 {
+		t.Fatalf("pairs at boundary = %d; want 1 (inclusive)", atBoundary.Pairs)
+	}
+	past, err := mk(time.Second + time.Millisecond) // one ms past
+	if err != nil {
+		t.Fatalf("past boundary: %v", err)
+	}
+	if past.Pairs != 0 || past.Skipped == 0 {
+		t.Fatalf("pairs past boundary = %d skipped %d; want 0 pairs, the expiry counted", past.Pairs, past.Skipped)
+	}
+}
+
+// The at-t freshness bound: a sampling instant whose newest book is older
+// than PairSlack takes no sample — otherwise a pre-stall book would price
+// an instant it did not see.
+func TestMeasureBooksStaleBookSkipsSample(t *testing.T) {
+	root := t.TempDir()
+	key := f2Key(t)
+	// Book 5s before the grid instant, next record after it: the 10:00:00
+	// sample must be skipped (5s > 1s slack).
+	tA := f2Window.Add(9*time.Minute + 55*time.Second)
+	tB := f2Window.Add(10*time.Minute + 2*time.Second)
+	recs := []capture.Record{
+		dataRec(1, tA, spotFrame(51, `[["99.90","1.0"]]`, `[["100.00","1.0"]]`)),
+		dataRec(2, tB, spotFrame(52, `[["99.90","1.0"]]`, `[["100.10","1.0"]]`)),
+	}
+	rel := writeArchiveFile(t, root, key, f2Window, recs)
+	writeManifest(t, root, f2Day, []string{rel})
+	days, err := LoadManifestDays(root, time.Date(2026, 8, 1, 6, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("manifest days: %v", err)
+	}
+	got, err := MeasureBooks(root, days, spotSpec(t), f2Params(t))
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if got.Pairs != 0 {
+		t.Fatalf("pairs = %d; want 0 — the at-t book was stale", got.Pairs)
+	}
+	if got.Skipped == 0 {
+		t.Fatal("the stale skip was not counted")
+	}
+}
+
+// The imminent slack arms, both of them: a settlement whose last frame
+// sits farther than RealizedSlack before the instant testifies to
+// nothing (samples dropped AND counted), and a sampling instant whose
+// newest frame is stale takes no sample.
+func TestMeasureImminentSlackArms(t *testing.T) {
+	root := t.TempDir()
+	key := f2Key(t)
+	settle1 := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	settle2 := time.Date(2026, 7, 30, 20, 0, 0, 0, time.UTC)
+	at := func(hh, mm, ss int) time.Time { return time.Date(2026, 7, 30, hh, mm, ss, 0, time.UTC) }
+	mk := func(seq uint64, rt time.Time, rate string, settle time.Time) capture.Record {
+		return dataRec(seq, rt, markFrame(rt.Add(-80*time.Millisecond).UnixMilli(), rate, settle.UnixMilli()))
+	}
+	recs := []capture.Record{
+		// An estimate sampled at 11:55:00, then a 5-minute silence: the
+		// period's last frame sits 4m40s before the settlement — realized
+		// testimony REFUSED, the sample dropped and counted. The frames
+		// at 11:58/11:59 instants are ABSENT (stale-estimate arm: the
+		// 11:57..11:59 grid instants take no sample).
+		mk(1, at(11, 54, 40), "0.00020000", settle1),
+		mk(2, at(11, 55, 20), "0.00020000", settle1),
+		// The flip arrives late; realized(12:00) = frame at 11:55:20 —
+		// 4m40s early, beyond the 60s slack.
+		mk(3, at(12, 0, 30), "0.00005000", settle2),
+	}
+	rel := writeArchiveFile(t, root, key, time.Date(2026, 7, 30, 11, 0, 0, 0, time.UTC), recs)
+	writeManifest(t, root, f2Day, []string{rel})
+	days, err := LoadManifestDays(root, time.Date(2026, 8, 1, 6, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("manifest days: %v", err)
+	}
+	got, err := MeasureImminent(root, days, key, ImminentParams{SampleEvery: time.Minute, RealizedSlack: time.Minute})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	// Two samples taken — 11:55:00 (20s fresh) and 11:56:00 (40s fresh);
+	// the 11:57..12:00 instants exceed the 60s bound and take NO sample.
+	// Both samples' settlement testimony sits 4m40s early → both dropped
+	// and counted, zero residuals.
+	if got.Estimates != 2 {
+		t.Fatalf("estimates = %d; want 2 (11:57+ instants are stale and take no sample)", got.Estimates)
+	}
+	if got.Unrealized != 2 || len(got.Residuals) != 0 {
+		t.Fatalf("unrealized = %d residuals = %d; want 2, 0 (stale realized testimony refused)",
+			got.Unrealized, len(got.Residuals))
+	}
+}
+
+// The at-t freshness bound is INCLUSIVE at exactly PairSlack: a book
+// precisely one slack old still prices its instant — > and >= separate
+// only here.
+func TestMeasureBooksFreshnessBoundaryInclusive(t *testing.T) {
+	root := t.TempDir()
+	key := f2Key(t)
+	tA := f2Window.Add(9*time.Minute + 59*time.Second) // exactly 1s before 10:00:00
+	tC := f2Window.Add(10*time.Minute + 300*time.Millisecond)
+	recs := []capture.Record{
+		dataRec(1, tA, spotFrame(61, `[["99.90","1.0"]]`, `[["100.00","1.0"]]`)),
+		dataRec(2, tC, spotFrame(62, `[["99.90","1.0"]]`, `[["100.10","1.0"]]`)),
+	}
+	rel := writeArchiveFile(t, root, key, f2Window, recs)
+	writeManifest(t, root, f2Day, []string{rel})
+	days, err := LoadManifestDays(root, time.Date(2026, 8, 1, 6, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("manifest days: %v", err)
+	}
+	got, err := MeasureBooks(root, days, spotSpec(t), f2Params(t))
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if got.Pairs != 1 {
+		t.Fatalf("pairs = %d; want 1 — a book exactly PairSlack old is fresh", got.Pairs)
+	}
+}

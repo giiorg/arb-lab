@@ -288,3 +288,27 @@ func TestMergeAdverseRefusals(t *testing.T) {
 		t.Fatalf("empty input: %v, want ErrNoResiduals", err)
 	}
 }
+
+// The rounding-mode fixture: every other ratio in this file terminates
+// before the ninth decimal, where half-even and truncate-toward-zero are
+// the same function — the fixture-too-small collapse. This pair's exact
+// ratio is 1.5e-9: half-even resolves the tie to the EVEN digit (2e-9);
+// truncation answers 1e-9. One mantissa of daylight, which is exactly
+// what a rounding-mode mutant needs to be visible.
+func TestCounterfactualSlippageRoundingTie(t *testing.T) {
+	at := slipBook(t, slipT0, 30,
+		[][2]string{{"3.999999990", "2.0"}},
+		[][2]string{{"4.000000000", "2.0"}})
+	later := slipBook(t, slipT0.Add(250*time.Millisecond), 31,
+		[][2]string{{"3.999999990", "2.0"}},
+		[][2]string{{"4.000000006", "2.0"}})
+
+	got, err := CounterfactualSlippage(at, later, mdomain.SideAsk, qty(t, "2.0"))
+	if err != nil {
+		t.Fatalf("slippage: %v", err)
+	}
+	// ref = 8.0; fill = 8.000000012; ratio = 1.5e-9 → half-even → 2e-9.
+	if want := rate(t, "0.000000002"); got != want {
+		t.Fatalf("slippage = %s, want %s (half-even resolves the tie upward to even)", got, want)
+	}
+}

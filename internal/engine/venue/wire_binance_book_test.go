@@ -51,6 +51,24 @@ func TestDecodeBinanceSpotDepth20(t *testing.T) {
 	}
 }
 
+// The u-vs-U claim must hold independent of KEY ORDER: encoding/json's
+// case-insensitive fallback would let "u" and "U" share a destination,
+// making the last key in the byte stream win — so a frame with "u" FIRST
+// must still answer u. (The survived-mutation finding: the wire struct
+// declares "U" its own field precisely so each key has an exact match.)
+func TestFuturesDepthPositionIndependentOfKeyOrder(t *testing.T) {
+	reordered := `{"e":"depthUpdate","E":1785471501803,"s":"BTCUSDT",` +
+		`"u":11177881916526,"pu":11177881911348,"U":11177881911418,` +
+		`"b":[["64266.60","10.287"]],"a":[["64266.70","5.100"]]}`
+	got, err := DecodeBinanceFuturesDepth20([]byte(reordered), baseBTC, quoteUSD)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.LastUpdateID != 11177881916526 {
+		t.Fatalf("LastUpdateID = %d, want u = 11177881916526 (key order must not matter)", got.LastUpdateID)
+	}
+}
+
 func TestDecodeBinanceFuturesDepth20(t *testing.T) {
 	got, err := DecodeBinanceFuturesDepth20([]byte(futuresDepthFrame), baseBTC, quoteUSD)
 	if err != nil {
