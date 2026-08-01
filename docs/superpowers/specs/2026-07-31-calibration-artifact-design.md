@@ -806,9 +806,89 @@ to ZERO, doc-set bump). **Watch on the real run:** the frame's clearing level wi
 recovered dips below it (`ErrNoExcursions`) or zero occupancy, that refusal is the governance
 working, and what an evidence-free era means is the USER'S question, not a number to invent.
 
+### §41p — the governed run REFUSED on the real era; the sensitivity diagnostic (session 53, 2026-08-01)
+
+**The governed derivation was attempted and the era refused it — the watch note's named case,
+live.** From a pristine clone at `95c0819` (VCS-stamped, `vcs.modified=false`, §41e binding
+passed), `arblab calibrate run -freeze 2026-08-01T07:30:00Z` ran TWICE and refused
+IDENTICALLY in ~22s each: `exit band: clearing 0.001602836 over 3381 rows: no recovered
+excursion to measure a band from` (`ErrNoExcursions`). The determinism claim held on the
+refusal path; no artifact bytes were written; write-once was never reached. Against the
+committed funding era (3,381 settlements, 2023-01→2026-01): median 0.000074, p99 0.000468,
+**maximum 0.000881** — zero settlements ever reached the clearing level, which sits at
+**1.8× the era's all-time maximum**. There are no dips below clearing because the series
+never got above it.
+
+**The user's dated ruling (2026-08-01): diagnose first, then decide** — a read-only
+sensitivity sweep over calibration-era data only, recorded here, before the revise-vs-kill
+question is answered. The sweep ran as a throwaway harness in the scratch clone (deliberately
+NOT committed: it mutates the Proc roster in-process, which is exactly what the committed tree
+must never contain; method recorded here instead). It mirrors `Run`'s own pipeline — same
+collectors, same `buildFrame`, same `ClearingLevel`/`ExitBandWidth`/`Occupancy` — varying
+only `ProcMinHoldSettlements` and the capital/candidate tier, on the committed datasets and
+the two closed archive days. No holdout row was touched; H1/H2/H3 stand.
+
+The measured table (clearing per settlement; era count at-or-above; utilization where the
+era yields evidence):
+
+| min hold | clearing | ≥clearing | band (ann.) | utilization | entries/3yr |
+|---|---|---|---|---|---|
+| 3 (24h, committed) | 0.001603 | 0/3381 | refused | — | — |
+| 6 (48h) | 0.000959 | 0/3381 | refused | — | — |
+| 9 (72h) | 0.000745 | 4/3381 | refused | — | — |
+| 21 (7d) | 0.000500 | 26/3381 | 0.162 | 0.0068 | 1 |
+| 45 (15d) | 0.000402 | 49/3381 | 0.108 | 0.0145 | 1 |
+| 90 (30d) | 0.000359 | 62/3381 | 0.126 | 0.0580 | 2 |
+
+**Three structural findings:**
+
+1. **The clearing level is capital-scale-invariant to the ninth digit.** Three tiers —
+   $1.5K/0.02 BTC (committed), $7.75K/0.1, $38.75K/0.5, capital and candidate scaled
+   together — produce byte-identical columns at every hold. Every cost the frame charges is
+   proportional to notional (fee bps, per-unit p90, the adverse-fill and basis RATES), so
+   the evidence-free era is a property of the strategy's economics on this venue/instrument/
+   era, NOT of the $1K probe tier. The "it's the small-capital tier" hypothesis is refuted.
+2. **The curve decomposes as round-trip-amortization plus recurring drag.** Fitting
+   clearing(h) = A/h + R over the six holds: A ≈ 0.0039 (the full round trip ≈ 39bp of
+   candidate notional, spread over the hold) and R ≈ 0.00032/settlement (hurdle excess +
+   frozen drift + adverse basis, all under the notional-vs-C_allocated scaling). Even with
+   the round trip fully amortized away (h→∞), the recurring floor alone (~3.2bp/settlement
+   ≈ 35% APR-equivalent at the frame's scaling) exceeds the era's p90 funding print.
+3. **Measured calm-stratum p90 slippage is ZERO to the ninth digit at every candidate**
+   (0.02/0.1/0.5 BTC; 6.5–8.0k observations per cell). Binance top-20 depth absorbs these
+   sizes without a walk — the frame's execution cost is fees, not book depth, which is why
+   finding 1 holds so exactly.
+
+**What the diagnostic does not say:** whether revising is justified. The conservative
+pre-registered choices (p25 decision quantile, conservative aggregation, outward dispersion
+merge) suppress entries BY DESIGN and their direction is stated in the §41 rationale; the
+sweep held all of them frozen. The open question — revise the procedure openly (a v2 §41e
+commit, post-hoc, dated) versus record the evidence-free era as kill-gate-shaped evidence —
+is the user's, pending below.
+
 ---
 
 ## RESUME HERE
+
+**THE GOVERNED RUN REFUSED ON THE REAL ERA (session 53, 2026-08-01, §41p): `ErrNoExcursions`
+at clearing 0.001603/settlement against an era whose maximum settled funding is 0.000881 —
+zero of 3,381 settlements ever cleared entry.** The refusal is deterministic (two stamped
+clean-checkout invocations, identical), no artifact exists, write-once was never reached. The
+user's dated ruling was DIAGNOSE FIRST; §41p records the sensitivity sweep: clearing is
+capital-scale-invariant, hold-length-dominated, and even a 30-day minimum hold yields 5.8%
+utilization with 2 entries in three years. **The open governance question is REVISE-VS-KILL:**
+a v2 §41e procedure commit (post-hoc, dated, openly recorded) versus recording the
+evidence-free era as kill-gate-shaped evidence. **Do not re-run the governed derivation, do
+not write the attestation, and do not land the §8 clause until the user rules.** The §8
+latency marker stays TAKEN (marker grep expects EXACTLY ONE). The seal (§41h: hybrid +
+Binance) stands — the diagnostic touched no holdout row. The capture rituals stand
+(session 53's verify: COVERAGE-only, 0 integrity findings). After the ruling, the docket is
+§41o part 2's unchanged: governed run (under whatever procedure the ruling names) → 24h
+delay → attestation → close (§8 clause, marker to ZERO, v0.9.18).
+
+---
+
+## RESUME HERE (superseded mid-session 53 — HISTORICAL)
 
 **SLICE C IS HALF-BUILT (session 52, 2026-08-01, §41o): the family-2 machinery, the procedure
 roster, and the real `Calibrator.Run` are BUILT and verified (23 mutations, one diagnosed into
