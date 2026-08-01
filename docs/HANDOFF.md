@@ -99,7 +99,7 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated session 58, 2026-08-01 — §45 SLICE A BUILT, the shortlist's bytes decode; §45f forks OPEN for the user; the §32m-D figure due by 2026-08-03T11:13Z)
+## START HERE (updated session 58, 2026-08-01 — §45 SLICE A BUILT + ALL FOUR §45f FORKS RULED; next: §45 slices B–D in order; the §32m-D figure due by 2026-08-03T11:13Z)
 
 **Branch `feat/milestone-1-foundation`.** Session 57 executed the §42c capture expansion: WS
 ceilings verified into the profiles first, the shortlist × four streams into
@@ -136,11 +136,13 @@ observation — luck of the tooling, not a guarantee).
    placement — a top-level `strategy/crossvenue` would be invisible to `hexboundary`), and
    `arblab crossvenue check` — **the live smoke ran same-session: all 40 streams decode, 0
    refusals over ~3.7M frames.** 19/19 aimed mutations caught (one SURVIVED diagnosed into
-   the wrong-day-fixture gap and fixed). **§45f's four forks are OPEN for the user** (evidence
-   end rule; exploration posture; pass shape; holdout shape); slice D — the procedure commit,
-   gate parameters pinned THERE with §43b as a named holdout input — is blocked on them;
-   slices B–C (domain math with oracles; walker measurement stages + sim CLI with the
-   post-cutoff seal in code) are fork-independent and build next.
+   the wrong-day-fixture gap and fixed). **All four §45f forks are RULED (user, same
+   session): end rule = ≥180 post-cutoff matched settlements per symbol; exploration =
+   in-repo pre-cutoff only, post-cutoff SEALED IN CODE; pass = pre-declared portfolio
+   policy at the LCB; holdout = the clean window IS the sample, §43b a named input.**
+   Next, in order: slice B (domain math with oracles), slice C (walker measurement stages
+   + sim CLI with the seal), slice D (the procedure commit — gate parameters pinned THERE).
+   Read §45, then its RESUME HERE.
 
 Constraints that carry over: H1 (post-2026-02-01 BTC) unpolluted; the §41h seal stands;
 maker-entry a standing tactic priced at the gate; no v2 of the v1 cash-and-carry procedure.

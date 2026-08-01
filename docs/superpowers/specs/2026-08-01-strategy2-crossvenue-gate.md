@@ -1,7 +1,8 @@
 # Strategy #2 crossvenue read-path, research sim & gate procedure — design (§45, 2026-08-01, session 58)
 
-**Status: DESIGN — slices A–C buildable now; slice D (the procedure commit) waits
-on the §45f forks.** Mandate: §42's RESUME item 3 and §44's RESUME item 2 — the
+**Status: RULED + SLICE A BUILT — all four §45f forks were ruled by the user
+2026-08-01 (same session, after slice A landed); slices B–D build in order,
+nothing waits on a decision.** Mandate: §42's RESUME item 3 and §44's RESUME item 2 — the
 `strategy/crossvenue` read-path, the research simulator, and the gate's
 procedure commit. Taken up while §44e's per-tier disk figure accumulates its
 measured day (the §37-preamble ordering principle: the figure is a one-command
@@ -154,27 +155,39 @@ post-cutoff data is the gate's evidence and the sim REFUSES to read it before
 the procedure commit exists — the seal is a guard in code from slice C, not a
 reminder.
 
-## §45f — the forks put to the user (the §42f pattern)
+## §45f — the forks and the rulings (user, 2026-08-01, session 58)
+
+All four were put to the user after slice A landed and RULED the same
+session, each as recommended; the alternatives stand recorded with their
+prices:
 
 1. **The end rule for the gate's evidence window** — the deterministic
    scoring trigger (§41's `PromotionIdentityDoc` lesson: never an
-   operator-declared date). Candidate shapes: N settled matched instants per
-   symbol on the capture clock (~4h grid → ~180 ≈ 30 days), or a fixed
-   calendar span. The ruling sets strategy #2's whole calendar.
-2. **Exploration posture** — recommended: pre-cutoff exploration runs live
-   in-repo, labeled and logged (the §41e informed-not-tuned audit trail),
-   post-cutoff sealed in code until the procedure commit. Alternative: §41p's
-   scratch-clone discipline for all exploration.
-3. **The pass shape** — per-symbol verdicts with a pre-registered portfolio
-   rule (recommended: the gate passes iff a pre-declared allocation policy
-   over the shortlist clears the hurdle at the LCB, so one hot symbol cannot
-   carry a dead portfolio and vice versa), vs. any-symbol-clears, vs.
-   all-must-clear.
-4. **Holdout shape inside the clean window** — recommended: the clean window
-   IS the promotion sample and the holdout discipline is the end-rule seal
-   plus §43b carried as a named input (matching v1's H1-by-era shape);
-   alternative: split the clean window again (costs half the already-scarce
-   evidence).
+   operator-declared date). **RULED: ≥180 post-cutoff matched settlements
+   per shortlisted symbol** (~30 days at the 4h grid — the same evidence
+   floor the screening ranked on). A symbol still short when the others
+   qualify is refused by name at scoring, never guessed. Rejected: a fixed
+   calendar span (30 or 45 days) — a capture outage could leave a symbol
+   thin while the calendar said go.
+2. **Exploration posture** — **RULED: in-repo on pre-cutoff data only,
+   labeled and logged** (the §41e informed-not-tuned audit trail);
+   post-cutoff reads are SEALED IN CODE until the procedure commit exists.
+   Rejected: §41p's scratch-clone-only discipline — cleaner separation, but
+   it loses the logged trail of what informed the parameters.
+3. **The pass shape** — **RULED: a pre-declared portfolio policy.** The
+   procedure commit declares an allocation policy over the shortlist; the
+   gate passes iff that portfolio's LCB net return clears the hurdle at
+   measured utilization, with per-symbol verdicts reported as evidence.
+   Rejected: any-symbol-clears (the deployable strategy becomes one alt —
+   concentration the gate never priced) and all-must-clear (one dead listing
+   kills a viable portfolio).
+4. **Holdout shape inside the clean window** — **RULED: the clean window IS
+   the promotion sample**; the holdout discipline is the end-rule seal plus
+   §43b carried as a named input (v1's H1-by-era shape). Parameters must be
+   pinned before ANY post-cutoff read, and ruling 2 makes that a refusal in
+   code, not a rule the operator remembers. Rejected: splitting the clean
+   window again — purer, but halves an already-scarce sample and delays the
+   earliest honest verdict.
 
 ## §45g — verification plan: suspects named before fixtures exist
 
@@ -277,13 +290,26 @@ green, marker grep zero.
 
 ## RESUME HERE
 
-Slice A is BUILT (§45j) and the shortlist's bytes are PROVEN to decode.
-**§45f's four forks are OPEN — put them to the user before slice D; slices
-B–C are fork-independent and build next, in order:** the domain math (§45i
-slice B: pairing, episodes, phase ledger, scoring statistic, depth-cost
-bound, oracles beside each), then the walker's measurement stages + sim CLI
-(slice C, with the post-cutoff seal in code). The capture rituals stand
-(PID 8495, verify COVERAGE/0-integrity — 2528 coverage findings over the full
-range is the expansion being honest: 2002 window_absent are pre-restart alt
-windows absent by construction). §44e's per-tier figure remains due by
-2026-08-03T11:13Z; its clock runs independently of this record.
+Slice A is BUILT (§45j), the shortlist's bytes are PROVEN to decode, and
+**all four §45f forks are RULED (user, 2026-08-01)** — nothing waits on a
+decision. Build in order:
+
+1. **Slice B — the domain math** (§45i): pairing, episodes, phase ledger,
+   the portfolio scoring statistic (ruling §45f-3 fixes its shape: a
+   pre-declared allocation policy scored at the LCB), depth-cost bound;
+   oracles beside each.
+2. **Slice C — the walker's measurement stages + sim CLI**, with the
+   post-cutoff seal IN CODE (ruling §45f-2) — the sim refuses post-cutoff
+   reads until the procedure commit exists; pre-cutoff exploration runs are
+   labeled and logged.
+3. **Slice D — the procedure commit**: params roster with rationale, VCS
+   binding, dataset ledger, write-once artifact + attestation, the holdout
+   declaration naming §43b (ruling §45f-4: the clean window IS the sample),
+   and the end rule (ruling §45f-1: ≥180 post-cutoff matched settlements
+   per symbol, short symbols refused by name).
+
+The capture rituals stand (PID 8495, verify COVERAGE/0-integrity — 2528
+coverage findings over the full range is the expansion being honest: 2002
+window_absent are pre-restart alt windows absent by construction). §44e's
+per-tier figure remains due by 2026-08-03T11:13Z; its clock runs
+independently of this record.
