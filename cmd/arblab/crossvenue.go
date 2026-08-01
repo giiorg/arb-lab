@@ -14,6 +14,8 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	dcv "github.com/giiorg/arb-lab/internal/strategy/domain/crossvenue"
 	"github.com/giiorg/arb-lab/internal/strategy/infrastructure/crossvenue"
+	"github.com/giiorg/arb-lab/internal/strategy/infrastructure/driven"
+	"github.com/giiorg/arb-lab/internal/strategy/infrastructure/driving"
 	"github.com/giiorg/arb-lab/internal/strategy/infrastructure/screening"
 )
 
@@ -313,5 +315,96 @@ func crossvenueSim(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "  portfolio: %d period(s), LCB %s\n", rep.Periods, rep.PortfolioLCB)
 	fmt.Fprintf(stdout, "  report: %s\n", *out)
+	return 0
+}
+
+// crossvenueGate is `arblab crossvenue gate`: the §45 procedure commit's
+// governed act. It is the only command on the far side of ruling §45f-2's
+// post-cutoff seal, and everything it needs to be trustworthy is in the
+// package it calls — the execution binding, the admission rules, the
+// write-once artifact. What lives HERE is only the operator's two
+// declarations and the rendering.
+//
+// -before is REQUIRED and never defaults to the clock, the same rule
+// `calibrate run`'s -freeze follows: a gate that stamped "now" would make
+// its own evidence window a function of when the command was typed, and two
+// runs days apart would name their universes only by implication.
+//
+// The evidence table prints whether or not a verdict was reached. A run
+// that refuses on the end rule is the EXPECTED outcome until the window
+// fills, and the operator's next question is always "how far off?" — which
+// is the matched-settlement column.
+func crossvenueGate(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("crossvenue gate", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	root := fs.String("root", "archive", "archive root (the directory holding v1/)")
+	rest := fs.String("rest", "research/crossvenue/rest", "settled-funding store root")
+	reference := fs.String("reference", driving.ProcCrossVenueReference, "committed reference revision (fees + hurdle)")
+	out := fs.String("out", "", "gate artifact output path (required; write-once)")
+	before := fs.String("before", "", "evidence bound, RFC3339 (required; evidence is read strictly before it)")
+	if err := fs.Parse(args); err != nil {
+		return 64
+	}
+	if *out == "" || *before == "" {
+		fmt.Fprintln(stderr, "crossvenue gate: -out and -before are required")
+		return 64
+	}
+	boundAt, err := time.Parse(time.RFC3339, *before)
+	if err != nil {
+		fmt.Fprintf(stderr, "crossvenue gate: -before %q: %v\n", *before, err)
+		return 64
+	}
+
+	res, runErr := driving.CrossVenueGate{}.Run(driving.GateConfig{
+		ArchiveRoot:   *root,
+		RestRoot:      *rest,
+		ReferencePath: *reference,
+		OutPath:       *out,
+		Before:        boundAt,
+	})
+
+	// The evidence table, whenever the walk got far enough to produce one.
+	if rep := res.Evidence.Report; len(rep.Symbols) > 0 {
+		fmt.Fprintf(stdout, "gate %q over %d day(s) (%s..%s), evidence before %s\n",
+			driving.ProcCrossVenueLabel, len(rep.Days), rep.Days[0], rep.Days[len(rep.Days)-1],
+			boundAt.UTC().Format(time.RFC3339))
+		fmt.Fprintf(stdout, "  %-14s %9s %9s %9s %8s %8s %9s\n",
+			"symbol", "matched", "points", "episodes", "scored", "refused", "skipped")
+		for _, s := range rep.Symbols {
+			fmt.Fprintf(stdout, "  %-14s %9d %9d %9d %8d %8d %9d\n",
+				s.Symbol, s.Pairing.Matched, s.Merge.Joined, len(s.Episodes),
+				s.Scored, s.RefusedN, s.BinanceSkipped+s.BybitSkipped)
+		}
+		fmt.Fprintf(stdout, "  floor %d matched settlements, refusal ceiling %s\n",
+			driving.ProcCrossVenueMatchedFloor, driving.ProcCrossVenueRefusalCeiling.Decimal())
+	}
+
+	if runErr != nil {
+		if errors.Is(runErr, driving.ErrGateSymbolsUnfit) {
+			// Not a failure of the gate — the gate refusing to score
+			// evidence that is not yet fit. Its own exit code so a wrapper
+			// can retry later without treating it as a broken run.
+			fmt.Fprintln(stderr, "crossvenue gate: NOT SCOREABLE —", runErr)
+			return 2
+		}
+		fmt.Fprintln(stderr, "crossvenue gate:", runErr)
+		return 1
+	}
+
+	v := res.Doc.Verdict
+	verdict := "DOES NOT CLEAR"
+	if v.Clears {
+		verdict = "CLEARS"
+	}
+	fmt.Fprintf(stdout, "\n  portfolio: %d period(s), LCB %s/period = %s annualized\n",
+		v.Periods, v.PortfolioLCB, v.AnnualizedLCB)
+	fmt.Fprintf(stdout, "  hurdle:    %s effective (published %s as of %s)\n",
+		v.Hurdle, v.HurdlePublished, v.HurdleAsOf)
+	fmt.Fprintf(stdout, "  VERDICT:   %s\n", verdict)
+	fmt.Fprintf(stdout, "  artifact:  %s\n    id %s\n    sha256 %s\n",
+		res.ArtifactPath, res.ArtifactID, res.Hash)
+	fmt.Fprintf(stdout, "\n  This artifact authorizes nothing until a detached attestation binds it\n"+
+		"  (%s cooling delay, sign-off and out-of-band confirmation named).\n",
+		driven.ApprovalDelay)
 	return 0
 }

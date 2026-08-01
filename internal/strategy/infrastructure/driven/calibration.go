@@ -441,8 +441,17 @@ func LoadArtifactFile(path string) (*Artifact, error) {
 	if err != nil {
 		return nil, fmt.Errorf("artifact file: %w", err)
 	}
-	id := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	return LoadArtifact(id, data)
+	return LoadArtifact(ArtifactIDFromPath(path), data)
+}
+
+// ArtifactIDFromPath is §41d's identity rule: an artifact's ID is its
+// file's basename without extension. One implementation because both
+// artifact families and the runner that writes them ask the same question,
+// and an identity derived two ways is an identity that can differ — the
+// attestation binds on it, so a disagreement would refuse an approval that
+// is actually correct, or accept one that is not.
+func ArtifactIDFromPath(path string) string {
+	return strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 }
 
 // VerifyPinned refuses an artifact whose recomputed hash disagrees with

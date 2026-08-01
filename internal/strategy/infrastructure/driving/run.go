@@ -421,12 +421,11 @@ func selfDigest() (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// strippedID is §41d's identity rule: the artifact file's basename
-// without extension.
-func strippedID(path string) string {
-	base := filepath.Base(path)
-	return base[:len(base)-len(filepath.Ext(base))]
-}
+// strippedID is §41d's identity rule, which driven owns: the artifact
+// file's basename without extension. Delegated rather than restated —
+// the attestation binds on this ID, so two spellings of it could refuse a
+// correct approval.
+func strippedID(path string) string { return driven.ArtifactIDFromPath(path) }
 
 // checkDriftTail enforces procedure.go's family-pinning invariant: the
 // DRIFT the family-1 tail freezes must not understate the drift the

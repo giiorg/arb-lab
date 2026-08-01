@@ -69,7 +69,7 @@ func Continue(in domain.DecisionInput) (domain.Decision, error) {
 	if err != nil {
 		return domain.Decision{}, fmt.Errorf("continue: %w", err)
 	}
-	hurdleRate, err := effectiveHurdle(in.Hurdle)
+	hurdleRate, err := EffectiveHurdle(in.Hurdle)
 	if err != nil {
 		return domain.Decision{}, fmt.Errorf("continue: %w", err)
 	}

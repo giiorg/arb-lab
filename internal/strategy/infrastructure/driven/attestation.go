@@ -180,10 +180,57 @@ func LoadAttestationFile(path string) (*Attestation, error) {
 	return LoadAttestation(data)
 }
 
-// Bind verifies the attestation approves exactly the loaded artifact: same
-// ID, same recomputed content hash, same procedure commit, same executable
-// digest. This is the runner-side check §41e names — the runner refuses to
-// score without an attestation that passes it.
+// ApprovedIdentity is what an attestation actually binds: the four fields
+// that together say WHICH bytes, produced by WHICH procedure, running as
+// WHICH executable, were approved. It is a value rather than a second
+// artifact type because approval is indifferent to what the artifact
+// contains — §41e's calibration artifact and §45's cross-venue gate
+// artifact are approved by the same act, and a Bind written separately for
+// each would be two chances to forget one of the four comparisons.
+type ApprovedIdentity struct {
+	// ID and ContentSHA256 name the approved bytes.
+	ID            string
+	ContentSHA256 string
+
+	// ProcedureCommit and ExecutableSHA256 are the execution binding the
+	// artifact recorded.
+	ProcedureCommit  string
+	ExecutableSHA256 string
+}
+
+// BindIdentity verifies the attestation approves exactly this identity: same
+// ID, same content hash, same procedure commit, same executable digest.
+// This is the runner-side check §41e names — a consumer refuses to act on an
+// artifact without an attestation that passes it.
+//
+// All four are compared, and each one alone is the whole check for some
+// tamper: a matching hash with a different ID approves a rename, a matching
+// ID with a different hash approves an edit, and matching bytes under a
+// different commit or executable approve a rerun nobody reviewed.
+func (at *Attestation) BindIdentity(id ApprovedIdentity) error {
+	if at == nil {
+		return fmt.Errorf("attestation: %w", domain.ErrUnset)
+	}
+	if at.Doc.ArtifactID != id.ID {
+		return fmt.Errorf("attestation names %q, artifact is %q: %w",
+			at.Doc.ArtifactID, id.ID, ErrAttestationMismatch)
+	}
+	if at.Doc.ArtifactSHA256 != id.ContentSHA256 {
+		return fmt.Errorf("attestation hash %s, artifact bytes hash %s: %w",
+			at.Doc.ArtifactSHA256, id.ContentSHA256, ErrAttestationMismatch)
+	}
+	if at.Doc.ProcedureCommit != id.ProcedureCommit {
+		return fmt.Errorf("attestation commit %s, artifact records %s: %w",
+			at.Doc.ProcedureCommit, id.ProcedureCommit, ErrAttestationMismatch)
+	}
+	if at.Doc.ExecutableSHA256 != id.ExecutableSHA256 {
+		return fmt.Errorf("attestation executable %s, artifact records %s: %w",
+			at.Doc.ExecutableSHA256, id.ExecutableSHA256, ErrAttestationMismatch)
+	}
+	return nil
+}
+
+// Bind is BindIdentity for the step-4 calibration artifact.
 func (at *Attestation) Bind(a *Artifact) error {
 	if at == nil {
 		return fmt.Errorf("attestation: %w", domain.ErrUnset)
@@ -191,21 +238,10 @@ func (at *Attestation) Bind(a *Artifact) error {
 	if a == nil {
 		return fmt.Errorf("artifact: %w", domain.ErrUnset)
 	}
-	if at.Doc.ArtifactID != a.Ref.ID {
-		return fmt.Errorf("attestation names %q, artifact is %q: %w",
-			at.Doc.ArtifactID, a.Ref.ID, ErrAttestationMismatch)
-	}
-	if at.Doc.ArtifactSHA256 != a.Ref.Hash {
-		return fmt.Errorf("attestation hash %s, artifact bytes hash %s: %w",
-			at.Doc.ArtifactSHA256, a.Ref.Hash, ErrAttestationMismatch)
-	}
-	if at.Doc.ProcedureCommit != a.Doc.Procedure.Commit {
-		return fmt.Errorf("attestation commit %s, artifact records %s: %w",
-			at.Doc.ProcedureCommit, a.Doc.Procedure.Commit, ErrAttestationMismatch)
-	}
-	if at.Doc.ExecutableSHA256 != a.Doc.Procedure.ExecutableSHA256 {
-		return fmt.Errorf("attestation executable %s, artifact records %s: %w",
-			at.Doc.ExecutableSHA256, a.Doc.Procedure.ExecutableSHA256, ErrAttestationMismatch)
-	}
-	return nil
+	return at.BindIdentity(ApprovedIdentity{
+		ID:               a.Ref.ID,
+		ContentSHA256:    a.Ref.Hash,
+		ProcedureCommit:  a.Doc.Procedure.Commit,
+		ExecutableSHA256: a.Doc.Procedure.ExecutableSHA256,
+	})
 }

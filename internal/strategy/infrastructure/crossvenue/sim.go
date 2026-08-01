@@ -148,6 +148,14 @@ type SymbolReport struct {
 	Pairing        dcv.PairStats
 	SealedExcluded int
 
+	// SettledFiles is the provenance of every stored fetch this symbol's
+	// settled series was assembled from. It is carried out of the walk
+	// rather than re-globbed by the gate's ledger because a second read
+	// could enumerate a different set — a fetch landing between the two
+	// would put a file in the ledger the scored numbers never saw, which
+	// is the one thing a dataset ledger exists to make impossible.
+	SettledFiles []StoredFile
+
 	BinanceBooks, BybitBooks CostSeries `json:"-"`
 
 	// The frozen distribution reads, decimal strings for the report.
@@ -321,14 +329,15 @@ func runSymbol(archiveRoot, restRoot string, days []ManifestDay, spec SymbolSpec
 	sr.BinanceBooks, sr.BybitBooks = bnBooks, byBooks
 
 	// 4. Settled truth, sealed.
-	bnRows, _, err := LoadSettled(restRoot, "binance", sym)
+	bnRows, bnFiles, err := LoadSettled(restRoot, "binance", sym)
 	if err != nil {
 		return SymbolReport{}, nil, err
 	}
-	byRows, _, err := LoadSettled(restRoot, "bybit", sym)
+	byRows, byFiles, err := LoadSettled(restRoot, "bybit", sym)
 	if err != nil {
 		return SymbolReport{}, nil, err
 	}
+	sr.SettledFiles = append(append([]StoredFile{}, bnFiles...), byFiles...)
 	bnSettled, bnExcluded := seal(bnRows)
 	bySettled, byExcluded := seal(byRows)
 	sr.SealedExcluded = bnExcluded + byExcluded

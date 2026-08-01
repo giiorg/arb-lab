@@ -49,11 +49,17 @@ func Annualized(perSettlement fixedpoint.Rate, interval time.Duration) (fixedpoi
 	return perSettlement.Mul(perYear, fixedpoint.RoundHalfEven)
 }
 
-// effectiveHurdle nets §2.1's recorded adjustments off the published rate:
+// EffectiveHurdle nets §2.1's recorded adjustments off the published rate:
 // annual − access cost − liquidity haircut − counterparty haircut. Declared
 // zeros leave the full paper yield — the harder gate, the committed
 // reference revision's own stated direction.
-func effectiveHurdle(h domain.HurdleBenchmark) (fixedpoint.Rate, error) {
+//
+// Exported for the same reason Annualized above is: strategy #2's gate
+// compares its portfolio bound against this hurdle, and a second netting
+// written beside it would differ from this one by whichever adjustment the
+// copy forgot — silently, and in whichever direction that adjustment ran.
+// One implementation, every consumer.
+func EffectiveHurdle(h domain.HurdleBenchmark) (fixedpoint.Rate, error) {
 	r, err := h.AnnualRate.Sub(h.AccessCost)
 	if err == nil {
 		r, err = r.Sub(h.LiquidityHaircut)

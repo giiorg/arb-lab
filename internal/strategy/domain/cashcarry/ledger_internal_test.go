@@ -85,7 +85,7 @@ func TestAnnualizedPins(t *testing.T) {
 }
 
 func TestEffectiveHurdleNetsAllThreeAdjustments(t *testing.T) {
-	got, err := effectiveHurdle(domain.HurdleBenchmark{
+	got, err := EffectiveHurdle(domain.HurdleBenchmark{
 		AnnualRate:          rate(t, "0.046"),
 		AccessCost:          rate(t, "0.001"),
 		LiquidityHaircut:    rate(t, "0.002"),

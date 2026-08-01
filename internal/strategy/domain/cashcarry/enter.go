@@ -157,7 +157,7 @@ func Enter(in domain.DecisionInput) (domain.Decision, error) {
 	if err != nil {
 		return domain.Decision{}, fmt.Errorf("enter: %w", err)
 	}
-	hurdleRate, err := effectiveHurdle(in.Hurdle)
+	hurdleRate, err := EffectiveHurdle(in.Hurdle)
 	if err != nil {
 		return domain.Decision{}, fmt.Errorf("enter: %w", err)
 	}
