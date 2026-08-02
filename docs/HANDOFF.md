@@ -80,8 +80,14 @@ observation, not a verified claim.
 
 **`run.sh` gained a `deadlock` verdict**, because a control that *stranded* the
 model and one that *caught* something are different claims — here the dead end
-**is** the finding, so it is named. Suite is now **53 model-(a) runs**; nominal
-**967,576 distinct, depth 30**.
+**is** the finding, so it is named. **`./run.sh AmbiguousOrder` — all 52
+model-(a) runs MATCH PREDICTIONS**; nominal **967,576 distinct, depth 30**. The
+suite is 60 with model (b), whose 8 runs were **not re-verified in this
+session's final state** — no `FenceTakeover*` file changed, and `run.sh`'s own
+edits are exercised by model (a)'s 52 (every verdict path including the new
+`deadlock` one). **Re-run `./run.sh` unfiltered to restore the full-suite
+claim** — a filtered run is not the suite result, and this note exists so the
+next session does not quote one as the other.
 
 **NEXT: slice E items 2, 3, 4** (§46 §11's RESUME HERE — model (b)'s five
 controls have never been asked the witness-degeneracy question; §7d's "never

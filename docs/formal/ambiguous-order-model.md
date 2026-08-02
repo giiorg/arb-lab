@@ -16,12 +16,14 @@ ledger. Finding tags continue model (b)'s series: this model's first is
 
 ## 1. What was checked, and the headline results
 
-Seven safety invariants and four temporal properties, over §2 composed with §7.
-`./run.sh` is **55 runs** — 8 for model (b) `FenceTakeover`, **47 for model (a)**:
-2 safety nominals + `NC1`–`NC12`, the liveness nominal + `NC13`–`NC16`, 24
-positive controls, and 4 control-witness probes. Every run is checked against a
-**recorded prediction**; a nominal that fails and a control that passes are both
-failures of the suite.
+**Eight** safety invariants and **five** temporal properties, over §2 composed
+with §7. `./run.sh` is **60 runs** — 8 for model (b) `FenceTakeover`, **52 for
+model (a)**: 2 safety nominals + `NC1`–`NC12` + `NC17` + `NC19`, the liveness
+nominal + `NC13`–`NC16` + `NC18`, 26 positive controls, and 4 control-witness
+probes. Every run is checked against a **recorded prediction**; a nominal that
+fails and a control that passes are both failures of the suite. Slice E added a
+fifth verdict, `deadlock`, because a control that **stranded** the model and one
+that **caught** something are different claims — see `NC19`.
 
 | | |
 |---|---|
@@ -514,8 +516,8 @@ about the held generation's own resolution and never mentions a later one.
 ## 6. How to run
 
 ```
-cd docs/formal && ./run.sh                 # the whole suite: 55 runs, both models
-cd docs/formal && ./run.sh AmbiguousOrder  # model (a) only: all 47
+cd docs/formal && ./run.sh                 # the whole suite: 60 runs, both models
+cd docs/formal && ./run.sh AmbiguousOrder  # model (a) only: all 52
 TLC_WORKERS=4 ./run.sh AmbiguousOrder      # capped — see below
 ```
 
