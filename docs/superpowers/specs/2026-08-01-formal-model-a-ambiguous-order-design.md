@@ -1023,15 +1023,83 @@ reason. Three things to carry into it:
 
 ---
 
+## 10. Slice D — BUILT (2026-08-02, session 68)
+
+`docs/formal/ambiguous-order-model.md`: the correspondence map, the full
+results, the honesty notes and the how-to-run. **The done-when is met** — all
+nine clauses of SM §2's Invariants section and all nine of SM §7's appear in
+the two Invariants tables, each either mapped to a construct or listed
+UNMODELED with a reason and a named owner. §2's Scope/States/Transitions and
+§7's States/Transitions have their own tables above them.
+
+### 10a. What the map surfaced that the build record did not
+
+**A correspondence gap in `Held/Alert`, and it is the map's own justification.**
+SM §7's transition row enters `Held/Alert` from **`PerpReduceInFlight` or
+`SpotReduceInFlight`**; the model has only `PdSpotHolds`, so **the perp leg
+cannot hold**. Slices B and C never noticed, and could not have: no invariant
+and no property is *about* the set of ways a state is entered, so nothing in
+the module reports a missing entry edge. Only a clause-by-clause reading does.
+
+It is defensible and it is recorded as a narrowing rather than absorbed: `Held`
+matters here because of what a held generation *holds*, and at the perp leg
+neither the unsold transient nor a nonzero reservation exists yet (`pdDone = 0`
+and the `"pkgspot"` entry carries the outstanding net intent, which is zero
+until the perp confirms). So the perp-side park is the harmless instance and
+`P3`/`NC15` are aimed at the one with content. **Carried to slice E**: whether
+a perp-side park has a hazard that reasoning misses — a generation stuck before
+its reservation grows still blocks the next one on §7's own "only after
+finality" gate, which is a liveness question no property here states.
+
+**The general form is worth keeping.** Invariants catch bad behaviours *inside*
+the model's world; **nothing inside a model can report that a spec clause never
+entered it**. That is why slice D's done-when is a totality condition over the
+*spec's* clause list rather than over the model's constructs — the direction of
+the map is what makes it capable of finding an omission, and it found one on
+its first pass.
+
+### 10b. Two claims the artifact refuses to make
+
+Both are places where a green model would otherwise read as evidence:
+
+- **"A pre-authorized panic-MARKET does not bypass the finality barrier"** is
+  listed UNMODELED *even though the model contains no bypass edge*. The absence
+  of a modeled bypass is not evidence that the implementation has none — a rule
+  of the form "there is no other path" cannot be checked by a model that
+  contains only the paths its author wrote. Writing "modeled: no such edge
+  exists" would have been the most comfortable line in the document and the
+  least honest.
+- **"Never a weaker cancel-ack-only variant"** is an abstraction boundary, not
+  a check: the four-step contract collapses to one barrier, so the model can
+  tell whether a barrier was *waited for* and cannot tell a correct barrier
+  from a weak one.
+
+### 10c. Also this session
+
+`CLAUDE.md` said `docs/formal/` holds *a* model of the fence/takeover
+composition and that it found **four** spec defects. Both were stale — two
+models, five defects. Corrected, with the pointer that the companion artifact
+is the entry point rather than the `.tla`.
+
+---
+
 ## RESUME HERE
 
-**Slices A, B and C are BUILT and VERIFIED** (§7, §8, §9 above). Next act is
-**slice D**: the companion artifact `docs/formal/ambiguous-order-model.md` —
-correspondence map (spec clause ↔ model construct), results table, honesty
-notes, how-to-run. **Done when** every clause in §2's and §7's Invariants
-sections is either mapped to a model construct or listed as deliberately
-unmodeled *with a reason*. §9f is the shortest statement of what it
-inherits.
+**Slices A, B, C and D are BUILT** (§7, §8, §9, §10 above). Next act is
+**slice E**: the adversarial round on the model itself — findings triaged,
+model defects fixed and re-verified, and **`FM-5`'s normative edit landed in
+`docs/state-machines.md`**.
+
+**Slice E's docket, assembled rather than to be re-derived:**
+
+1. **`FM-5`'s normative edit — not optional, wording in §8d.**
+2. **Model (b)'s five controls have never been asked the witness-degeneracy
+   question** (§9f). Model (b) is in scope for the adversarial round anyway.
+3. **§7d:** does "never issued twice" carry safety weight independent of the
+   reservation? NC2 issues a second floor with `overshoot` FALSE throughout.
+4. **§8f:** is *physical* neutrality the stronger and intended precondition for
+   opening a generation? It is FM-5's mirror and should be attacked with it.
+5. **§10a:** the perp-side `Held/Alert` park the model narrows away.
 
 **`FM-5`'s normative edit is still OWED, and it is not optional** (§8d). The
 model found a spec defect in SM §7's FLAG-3 ruling composed with §2's
@@ -1059,18 +1127,16 @@ generation's own legs are not `RecordDispatch`ed; **(5)** slice C's five in
 antecedent, and that a consequent stays narrow so each control names its own
 defect.
 
-**Two things slice D should say out loud, because they are the model's own
-best evidence** (§9d): `NC15` produces a state graph *identical* to the
-nominal one, so the defect it installs is invisible to every invariant in
-the module by arithmetic rather than by choice — that is the correspondence
-map's answer to "why is there a liveness section at all"; and `NC13`
-doubles as the control on the fairness set's own omissions.
+**The two things slice D had to say out loud, and did** (§9d): `NC15`
+produces a state graph *identical* to the nominal one, so the defect it
+installs is invisible to every invariant in the module by arithmetic rather
+than by choice — it is §1's headline in the artifact, and the answer to "why
+is there a liveness section at all"; and the witness-degeneracy question,
+which is the artifact's `W1`–`W4` subsection and carries model (b)'s unasked
+mirror with it.
 
-Carried forward for **slice E**, not to be resolved earlier: §7d's question
-about whether "never issued twice" carries safety weight independent of the
-reservation, and §8f's question about whether *physical* neutrality is the
-stronger and intended precondition for opening a generation (it is FM-5's
-mirror and should be attacked with it).
+Slice E's docket is the numbered list above; nothing on it is to be resolved
+earlier.
 
 Standing context: task **#154**. The §45 gate waits on evidence until
 ~2026-09-30 (task #152); the §32m-D disk figure is due 2026-08-03T11:13Z

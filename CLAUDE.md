@@ -19,9 +19,15 @@ recorded rather than left as drift.
 | `docs/tutorial.md` | Teaching companion (+ `tutorial.ka.md`, **generated** — never hand-edit). |
 | `docs/HANDOFF.md` | **Current state and what to do next. Start here.** |
 
-`docs/formal/` holds a TLA+ model of the fence/takeover/plan composition. It has
-found four spec defects (`FM-1`…`FM-4`) that four rounds of human and machine
-review did not. Treat it as authoritative about the safety kernel's behaviour.
+`docs/formal/` holds **two** TLA+ models: (b) `FenceTakeover`, the
+fence/takeover/plan composition, and (a) `AmbiguousOrder`, the §2 classifier and
+finality contract composed with §7's reservation ledger. Between them they have
+found **five** spec defects (`FM-1`…`FM-5`) that four rounds of human and machine
+review did not — and each model found its first on a composition, never on a
+machine reviewed alone. Treat them as authoritative about the safety kernel's
+behaviour. Each has a companion artifact (`fence-takeover-model.md`,
+`ambiguous-order-model.md`) mapping every spec clause to a construct or to a
+stated omission; **read the companion before the `.tla`.**
 
 Session decision records live in `docs/superpowers/specs/`. Each one records
 **why** a decision was taken *and the alternatives that were rejected*, so a
