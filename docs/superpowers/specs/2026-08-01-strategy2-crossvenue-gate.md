@@ -994,14 +994,16 @@ the §45f-2 seal.** There is no crossvenue code left to write for the gate.
 
 What remains is EVIDENCE and two dated obligations, in order:
 
-1. **The §32m-D per-tier one-day figure, DUE BY 2026-08-03T11:13Z**
-   (measurable from ~2026-08-02T11:13Z), landing as §44e in the §44
-   record — `du` split BTC-tier vs alt-tier against §42c's derived
-   ~0.6–1.1G/day/symbol, full-day verify over the measured day (0
-   integrity; the restart's gaps show honestly). **This is §38f's named
-   revisit point** (ruling §42f-3): re-argue off-host on the measured
-   disk clock. Note the archive stood at **9.4G** on 2026-08-01, which is
-   context for that argument, not the measurement itself.
+1. ~~**The §32m-D per-tier one-day figure, DUE BY 2026-08-03T11:13Z**~~
+   **DONE (2026-08-02, `11a18fd`) — §44e in the §44 record.** The measured
+   day is **11.165 GiB** (BTC tier 4.314, alt tier 6.852, per symbol 0.387
+   to 1.743) over 24 whole hours with every source `alive 60/60` and
+   verify **0 integrity**; §42c's derived ~0.6–1.1G/day/symbol is refuted
+   at both ends and in its premise. **§38f's named revisit point** (ruling
+   §42f-3) is discharged into a **live user decision** — 85 days to a full
+   local disk, and **this record's own gate lands at day 59** with ~678
+   GiB single-copy, which is the part that touches §45: the evidence wait
+   below is what spends the disk clock.
 
 2. **Accumulate the gate's evidence, then run the gate.** The end rule
    needs 180 matched post-cutoff settlements per symbol.
