@@ -10,6 +10,7 @@ Design record is **§49**
 **rewritten**, §6 step 7 gains a clause, §6's sequence diagram is corrected, §12
 milestone 3 gains its slice-B annotation, ADR §3 has the dated block.
 **`make ci` green, both modules; marker grep zero; 17 mutations, 17 kills.**
+**Landed in `7b20f93`, tree clean.**
 
 **What landed.** Deterministic `ClientOrderID` minting (a pure function of
 trade/leg/attempt), every leg's intent fsynced to the write-ahead journal before
