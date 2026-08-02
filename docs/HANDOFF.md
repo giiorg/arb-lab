@@ -7,6 +7,7 @@
 (`docs/superpowers/specs/2026-08-02-m3-slice-c1-signed-transport.md`); **`venue-profiles.md` gains a
 whole new §6**, core **§7.6 is corrected**, §12 milestone 3 gains its slice-C1 annotation, ADR §3 has
 the dated block. **`make ci` green both modules; marker grep zero; 18 mutations, 18 kills.**
+**Landed in `e1b3c78`, tree clean.**
 
 **SLICE C IS SPLIT BY LAYER, NOT BY VENUE — and the alternative is refuted in advance.** §47f's full
 slice C is 2–3× slices A and B. Splitting Binance-then-Bybit puts the two venues' clients in
