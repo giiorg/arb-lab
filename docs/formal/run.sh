@@ -9,13 +9,19 @@
 # Model (a) AmbiguousOrder: SM SS2 composed with SM SS7 -- the
 #   ambiguous-order classifier, the finality contract, the interval-floor
 #   generation and PackageDelever's generations on one reservation ledger.
-#   Slices A+B+C: 47 runs. 19 are the nominals and the negative controls
-#   (composed nominal + the SS2-only nominal + NC1-NC12, then the nominal
-#   LIVENESS config + NC13-NC16); 24 are POSITIVE controls, expected to be
-#   VIOLATED because each names an interesting state and a probe that PASSES
-#   is a coverage gap (see AmbiguousOrderCoverage.tla); and 4 are
-#   CONTROL-WITNESS probes (W1-W4), which ask of a control's own
+#   Slices A+B+C+E: 52 runs. 22 are the nominals and the negative controls
+#   (composed nominal + the SS2-only nominal + NC1-NC12 + NC17 + NC19, then
+#   the nominal LIVENESS config + NC13-NC16 + NC18); 26 are POSITIVE controls,
+#   expected to be VIOLATED because each names an interesting state and a
+#   probe that PASSES is a coverage gap (see AmbiguousOrderCoverage.tla);
+#   and 4 are CONTROL-WITNESS probes (W1-W4), which ask of a control's own
 #   counterexample whether it demonstrates the HARM or only the flag.
+#
+#   SLICE E added the SECOND PARK: SM SS7 enters Held/Alert from
+#   `PerpReduceInFlight` OR `SpotReduceInFlight` and slices A-D modeled only
+#   the second, so `HeldPerp`, P5, INV8, NC17 (the cause-blind exit -- model
+#   (b)'s Cx8-2 asked here for the first time), NC18 and probes PC25/PC26
+#   are that gap closed.
 #
 #   Slice C's four temporal properties run under LiveSpec (Spec + a fairness
 #   set argued action-by-action in the module). Fairness constrains
@@ -105,6 +111,17 @@ run() {
       if [ $rc -ne 0 ] && grep -q "Temporal properties were violated" "$out"; then
         echo "RESULT: VIOLATED $want (as predicted)"; return 0
       else echo "RESULT: UNEXPECTED (rc=$rc; wanted temporal violation of $want) -- see $out"; return 1; fi ;;
+    deadlock)
+      # SLICE E. A control whose predicted signature is a DEAD END -- the
+      # state has no successors at all. Kept as its own verdict rather than
+      # folded into `fail` for the reason NC15's config already draws out:
+      # a deadlock and an invariant violation are different claims, and a
+      # harness that accepts either would let a control that STRANDED the
+      # model read as a control that CAUGHT something. Here the dead end IS
+      # the finding (FM-6), so it is named.
+      if [ $rc -ne 0 ] && grep -q "Deadlock reached" "$out"; then
+        echo "RESULT: DEADLOCK (as predicted -- $want)"; return 0
+      else echo "RESULT: UNEXPECTED (rc=$rc; wanted a deadlock -- $want) -- see $out"; return 1; fi ;;
     probe)
       # POSITIVE control: the probe states the interesting state is NEVER
       # reached, so a violation is the GOOD outcome and a pass is a
@@ -160,6 +177,8 @@ CONSTANTS
   RECLASSIFY_AFTER_DEADLINE = TRUE
   HELD_RESUMES              = TRUE
   BLIND_RETRY               = FALSE
+  HELD_EXIT_CAUSE_BLIND     = FALSE
+  RECLASSIFY_ON_LEDGER_CHANGE = TRUE
 $2
   $1
 EOF
@@ -202,6 +221,14 @@ r AmbiguousOrder AmbiguousOrder_NC9  fail "INV5_PackageDeleverNeverNetShort"
 r AmbiguousOrder AmbiguousOrder_NC10 fail "INV6_SupersessionQuiescesFirst"
 r AmbiguousOrder AmbiguousOrder_NC11 fail "INV4_ReservationLedgerSound"
 r AmbiguousOrder AmbiguousOrder_NC12 fail "INV4_ReservationLedgerSound"
+# SLICE E -- the second park. NC17 is model (b)'s Cx8-2 asked of model (a):
+# a cause-blind park exit. INV8 is the isolating invariant (NC9 leaves it
+# green; see the config).
+r AmbiguousOrder AmbiguousOrder_NC17 fail "INV8_CompleteMeansLegsFinal"
+# NC19 is FM-6: classification on ORDER events only. Its signature is a
+# DEAD END, not a violated invariant -- see the config for why that is the
+# honest report and why no slice before E could have produced it.
+r AmbiguousOrder AmbiguousOrder_NC19 deadlock "FM-6 stale verdict, no admissible action"
 
 # SLICE C -- liveness. The nominal config checks P1-P4 under LiveSpec (the
 # fairness set), and each control below flips ONE constant and must produce a
@@ -213,6 +240,10 @@ r AmbiguousOrder AmbiguousOrder_NC13 failprop "P1_AmbiguousEventuallyClassified"
 r AmbiguousOrder AmbiguousOrder_NC14 failprop "P2_DeadlineExceededResolves"
 r AmbiguousOrder AmbiguousOrder_NC15 failprop "P3_HeldGenerationResumes"
 r AmbiguousOrder AmbiguousOrder_NC16 failprop "P4_FloorGenerationResolves"
+# SLICE E. NC18 is NC15's constant with P5 listed alone -- the same ruling
+# governs both parks, and a property whose sibling fails is an argument, not
+# evidence that IT bites.
+r AmbiguousOrder AmbiguousOrder_NC18 failprop "P5_HeldPerpGenerationResumes"
 
 echo "###### MODEL (a) POSITIVE CONTROLS -- each MUST be violated (reached) ######"
 echo
@@ -231,7 +262,8 @@ for p in PC1_FloorNeverDispatched PC2_NeverTwoGenerations \
          PC18_PerpAlwaysFullyConfirmed PC19_PdNeverTerminalFlatten \
          PC20_NeverTwoGenerations PC21_TransientAlwaysZero \
          PC22_ClsNeverAmbiguous PC23_ClsNeverDeadlineExceeded \
-         PC24_FloorNeverOutstanding; do
+         PC24_FloorNeverOutstanding \
+         PC25_PdNeverHeldPerp PC26_PerpParkAlwaysEmpty; do
   gen_probe_cfg "$p" INVARIANTS
   r AmbiguousOrderCoverage "$TOOLS_DIR/AmbiguousOrder_PC_$p" probe "$p"
 done

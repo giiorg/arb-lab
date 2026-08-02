@@ -1,6 +1,96 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-02, session 68): **FORMAL MODEL (a) SLICE D IS BUILT — `docs/formal/ambiguous-order-model.md` EXISTS AND ITS DONE-WHEN IS MET: ALL NINE CLAUSES OF SM §2's INVARIANTS AND ALL NINE OF SM §7's ARE EITHER MAPPED TO A MODEL CONSTRUCT OR LISTED UNMODELED WITH A REASON AND A NAMED OWNER.** Docs stay at v0.9.23 (marker grep **ZERO**); no model change, no re-run — slice D is documentation over slice C's committed results, so `run.sh` stays at 55 runs and every figure in the artifact is quoted from §46 §7b/§8b/§9b rather than re-measured. **`FM-5`'s normative edit is STILL OWED and is now item 1 of an assembled slice-E docket** (§46 §10's RESUME HERE). The build record is **§46 §10**. **THE MAP FOUND SOMETHING THE BUILD RECORD DID NOT, AND IT IS THE ARTIFACT'S OWN JUSTIFICATION: SM §7's transition row enters `Held/Alert` from `PerpReduceInFlight` OR `SpotReduceInFlight`, and the model has only `PdSpotHolds` — the perp leg cannot hold.** Slices B and C could not have noticed: no invariant and no property is *about* the set of ways a state is entered, so **nothing inside a model can report that a spec clause never entered it** — which is exactly why slice D's done-when is a totality condition over the SPEC's clause list rather than over the model's constructs. The narrowing is defensible (at the perp leg neither the unsold transient nor a nonzero reservation exists yet, so the perp-side park is the harmless instance) and is **recorded as a narrowing, carried to slice E**, not absorbed. **Two claims the artifact deliberately REFUSES to make**, both places a green model would otherwise read as evidence: "a pre-authorized panic-MARKET does not bypass the finality barrier" is listed UNMODELED *even though the model contains no bypass edge*, because the absence of a modeled bypass is not evidence that the implementation has none — a rule of the form "there is no other path" cannot be checked by a model containing only the paths its author wrote; and "never a weaker cancel-ack-only variant" is an abstraction boundary, since the four-step contract collapses to one barrier and the model can tell whether a barrier was *waited for* but not a correct barrier from a weak one. **Also: `CLAUDE.md` was stale** — it said `docs/formal/` holds *a* model of the fence/takeover composition which found **four** spec defects; it is two models and five, and the companion artifact is now named as the entry point rather than the `.tla`. **NEXT IS SLICE E**, the adversarial round, whose docket is assembled in §46 §10's RESUME HERE: (1) FM-5's normative edit; (2) model (b)'s five controls, never asked the witness-degeneracy question; (3) §7d's "never issued twice"; (4) §8f's physical-neutrality precondition (FM-5's mirror); (5) §10a's perp-side park. **Then the §32m-D per-tier figure, DUE 2026-08-03T11:13Z** (task #150) — the tightest clock on the board. Capture **PID 8495** healthy. **Start at `## START HERE` below.**
+## Status (2026-08-02, session 69): **SLICE E IS PART-DONE — `FM-5`'s NORMATIVE EDIT LANDED, AND BUILDING THE MISSING TRANSITION FOUND A SIXTH SPEC DEFECT, `FM-6`. DOCS ARE v0.9.24.**
+
+**Docket items 1 and 5 are CLOSED; items 2, 3 and 4 remain OPEN** (§46 §11, and
+its RESUME HERE). Marker grep **ZERO**; `make ci` green; capture **PID 8495**
+healthy and the 16-hour ritual verify came back **COVERAGE / 0 integrity**.
+
+**Item 1 — `FM-5`'s edit landed (§46 §11a).** The footprint is **wider than
+§8d prescribed**, deliberately: §8d named two sites, but SM §7's `Planned` row
+and its reserved-leg invariant both said "atomically reserved from creation"
+with **no amount attached**, which is the exact underdetermination `FM-5`
+exploits — landing only the two would have left the unsound reading literally
+available in the doc. **Then the reading pass caught the fix over-generalizing,
+which is the finding's own lesson recurring inside it:** the first wording said
+an entry is "zero before its **counterpart leg** has moved anything", true of a
+`PackageDelever` generation and **wrong of the other two producers** — an
+in-flight `IntervalFloorReduction` *is* its own reduction, so its entry is its
+full dispatched size, and zeroing it restores the very re-read the reservation
+prevents. The general statement, which all three satisfy: **an entry is the
+exposure change its reserving action has already COMMITTED and not yet
+REALIZED**; the producers differ only in *when* commitment happens.
+
+**Item 5 — the perp-side park, and it found `FM-6`.** Two things, in order.
+**(a) §10a's stated REASON for the narrowing was wrong**, and the model says so
+before any run: `PdPerpFill` fires while `pd = "PerpReduceInFlight"` and amends
+the ledger entry upward, so §2's own `PartiallyFilled` case puts a park *after*
+a partial fill — holding a **real net-long transient and a nonzero
+reservation**. `pdDone = 0` describes the park taken before any fill and no
+other. Probe **`PC26`** is violated, so the harmful shape is reachable. The
+narrowing's conclusion may have been tolerable; **its recorded argument was
+not, and a recorded justification is what a later session relies on instead of
+re-deriving.** **(b) Building the park DEADLOCKED the nominal model**, and the
+work was telling which of three things that was. HEAD's nominal is green at
+**6,729,250 / 832,179** (the recorded figure, to the digit), and the model with
+`PdPerpHolds` alone removed reproduces **the same figure** — so every other
+slice-E edit is behaviour-neutral and the park is the cause. Making
+`TerminalFlatten` actually flatten **did not** fix it, so it is not that stated
+abstraction either.
+
+**`FM-6` — a verdict goes stale because the LEDGER changed and no order did,
+and the spec's own wording names it.** §2 Scope said *"classification is a
+function of **two inputs** and re-runs when either changes"*. But the residual
+it gates on is `realized_delta − outstanding_reserved_reductions` — **THREE**
+inputs, and the third was absent from the re-run rule. The **subtrahend**
+decides the verdict exactly as the minuend does, and every producer moves it on
+events that are **not order events**. TLC's signature is a **DEAD END**, not a
+violated invariant: every counter-leg interval collapsed, the verdict still
+`DeadlineExceeded`, its one permitted action (the interval floor) spent by
+`FLOOR_ONCE`, a **determined naked residual** and dispatch budget in hand — and
+**nothing enabled**. **Normative edit LANDED in v0.9.24** (core §6 step 7, SM §2
+Scope, a new SM §7 invariant): three inputs, re-run on any; the machine may not
+wait for an order event when the **ledger alone** changed the residual — which
+is the argument §2 **already makes** for the cancel-with-zero-executions case,
+owed to the third input. Control **`NC19`**.
+
+**`FM-6` is `FM-5`'s sibling** — *the ledger must be backed when read* versus
+*a change to the ledger must be observed*; both are §2 trusting
+`outstanding_reserved_reductions` as an input it never re-derives.
+**And neither was findable before slice E, for a structural reason worth
+keeping: every other exit from a generation runs through `PerpReduceFinal`,
+which reclassifies — the perp-side park is the UNIQUE route that bypasses it.**
+SM §7 has carried that transition row since v0.9 and the model did not. The
+clause-by-clause map found the omission (§10a); **building it found the
+defect** (§11b). The map's justification, paid twice.
+
+**Also in item 5: model (b)'s `Cx8-2` was asked of model (a) for the first
+time.** A second park raises "is this two states wearing one name?", which
+model (b) already paid for — so `HeldPerp` is a **distinct state**, and `NC17`
+(`HELD_EXIT_CAUSE_BLIND`) is the cause-blind exit made explicit, caught by
+**`INV8`**. `INV8`'s phrasing was chosen for **isolation**: the tempting
+phrasing over the *authorization* would also be violated by `NC9`, showing that
+*something* objected rather than that *this rule* did. `P5` ships with `NC18`,
+which is `NC15`'s constant with `P5` listed alone — a property whose *sibling*
+fails is an argument, not evidence. **`P5`'s consequent carries a third
+disjunct `P3`'s does not**, and TLC is what said so: supersession is
+**admissible** from a perp-side park because §7's quiesce clause is scoped to
+"its **reserved second leg**", which does not exist yet there. Recorded as an
+observation, not a verified claim.
+
+**`run.sh` gained a `deadlock` verdict**, because a control that *stranded* the
+model and one that *caught* something are different claims — here the dead end
+**is** the finding, so it is named. Suite is now **53 model-(a) runs**; nominal
+**967,576 distinct, depth 30**.
+
+**NEXT: slice E items 2, 3, 4** (§46 §11's RESUME HERE — model (b)'s five
+controls have never been asked the witness-degeneracy question; §7d's "never
+issued twice"; §8f's physical-neutrality precondition). **Then the §32m-D
+per-tier figure, task #150, DUE 2026-08-03T11:13Z and measurable from
+2026-08-02T11:13Z** — the tightest clock on the board. **Start at
+`## START HERE` below.**
+
+## Status (2026-08-02, session 68 — HISTORICAL): **FORMAL MODEL (a) SLICE D IS BUILT — `docs/formal/ambiguous-order-model.md` EXISTS AND ITS DONE-WHEN IS MET: ALL NINE CLAUSES OF SM §2's INVARIANTS AND ALL NINE OF SM §7's ARE EITHER MAPPED TO A MODEL CONSTRUCT OR LISTED UNMODELED WITH A REASON AND A NAMED OWNER.** Docs stay at v0.9.23 (marker grep **ZERO**); no model change, no re-run — slice D is documentation over slice C's committed results, so `run.sh` stays at 55 runs and every figure in the artifact is quoted from §46 §7b/§8b/§9b rather than re-measured. **`FM-5`'s normative edit is STILL OWED and is now item 1 of an assembled slice-E docket** (§46 §10's RESUME HERE). The build record is **§46 §10**. **THE MAP FOUND SOMETHING THE BUILD RECORD DID NOT, AND IT IS THE ARTIFACT'S OWN JUSTIFICATION: SM §7's transition row enters `Held/Alert` from `PerpReduceInFlight` OR `SpotReduceInFlight`, and the model has only `PdSpotHolds` — the perp leg cannot hold.** Slices B and C could not have noticed: no invariant and no property is *about* the set of ways a state is entered, so **nothing inside a model can report that a spec clause never entered it** — which is exactly why slice D's done-when is a totality condition over the SPEC's clause list rather than over the model's constructs. The narrowing is defensible (at the perp leg neither the unsold transient nor a nonzero reservation exists yet, so the perp-side park is the harmless instance) and is **recorded as a narrowing, carried to slice E**, not absorbed. **Two claims the artifact deliberately REFUSES to make**, both places a green model would otherwise read as evidence: "a pre-authorized panic-MARKET does not bypass the finality barrier" is listed UNMODELED *even though the model contains no bypass edge*, because the absence of a modeled bypass is not evidence that the implementation has none — a rule of the form "there is no other path" cannot be checked by a model containing only the paths its author wrote; and "never a weaker cancel-ack-only variant" is an abstraction boundary, since the four-step contract collapses to one barrier and the model can tell whether a barrier was *waited for* but not a correct barrier from a weak one. **Also: `CLAUDE.md` was stale** — it said `docs/formal/` holds *a* model of the fence/takeover composition which found **four** spec defects; it is two models and five, and the companion artifact is now named as the entry point rather than the `.tla`. **NEXT IS SLICE E**, the adversarial round, whose docket is assembled in §46 §10's RESUME HERE: (1) FM-5's normative edit; (2) model (b)'s five controls, never asked the witness-degeneracy question; (3) §7d's "never issued twice"; (4) §8f's physical-neutrality precondition (FM-5's mirror); (5) §10a's perp-side park. **Then the §32m-D per-tier figure, DUE 2026-08-03T11:13Z** (task #150) — the tightest clock on the board. Capture **PID 8495** healthy. **Start at `## START HERE` below.**
 
 ## Status (2026-08-02, session 67 — HISTORICAL): **FORMAL MODEL (a) SLICE C IS BUILT AND VERIFIED — `P1`–`P4` ARE MODEL-CHECKED UNDER AN ARGUED FAIRNESS SET, AND ALL FOUR NEGATIVE CONTROLS BITE.** Docs stay at v0.9.23 (marker grep **ZERO**); no new spec defect, and **`FM-5`'s normative edit is still OWED at slice E** (wording in §46 §8d). The build record is **§46 §9** in `docs/superpowers/specs/2026-08-01-formal-model-a-ambiguous-order-design.md` — read it, then its RESUME HERE; **the next act is slice D**, the companion artifact `docs/formal/ambiguous-order-model.md`. **`run.sh` is now 55 runs (8 model (b) + 47 model (a))**: the nominal liveness config green on the same 6,729,250 / **832,179 distinct** graph at depth 30, **four** new negative controls each violating their predicted TEMPORAL property, **three** new positive controls for the liveness antecedents, and **four CONTROL-WITNESS probes** (`W1`–`W4`). **THE HEADLINE IS `NC15`: `HELD_RESUMES = FALSE` parks a `PackageDelever` generation in `Held` for ever — holding an unsold net-long transient and a reservation that subtracts from every later sizing — and its state graph is IDENTICAL to the nominal one, 832,179 distinct states to the digit.** Every invariant in the module is a state predicate, so every one of them stays green on it: no safety property could have caught it, and that is arithmetic about the state set rather than a claim about which invariants were chosen. **`NC13` is the second lesson: it doubles as the control on the FAIRNESS SET's own omissions** — `DeadlineBlows` is enabled in every `Ambiguous` state and its target satisfies `P1`'s consequent, so a fair `DeadlineBlows` would have discharged `P1` by assuming the degradation `P1` exists to survive. **§46 §8g's budget trap was answered by the properties' SUBJECT, not by an antecedent**: none of `P1`–`P4` asserts that a dispatch ever happens (both compensating-trade actions are deliberately unfair), so budget exhaustion falsifies nothing — the property that *would* have needed conditioning is "the residual is eventually flat", and it is not stated because it would be a claim about the model's bound rather than the spec. **`NC16` needed a STATE where slices A/B had an EDGE**: a blind retry that changes nothing observable is a STUTTERING step and weak fairness steps over stutter, so `pending[k].amb` is what makes the retry loop a fair lasso instead of a fill the fairness would have forced. **And the `W*` probes exist because two of the four witnesses were degenerate** — `NC13`'s and `NC16`'s both land at `budget = 0`, where the machine could not have compensated anything anyway, so the trace showed the stall and not its cost; `W2` reaches the harmful stall **two steps from `Init`** with the FULL budget intact (`realized = −1`, every interval collapsed, `cls = "Ambiguous"` for ever). `W1` is the same question §46 §8b asked of NC12 **by hand** in session 66, now a committed run — the session that adds the mirrors owes the original.
 
@@ -111,7 +201,58 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated session 68, 2026-08-02 — §46 SLICE D BUILT; next act is SLICE E)
+## START HERE (updated session 69, 2026-08-02 — §46 SLICE E PART-DONE, items 1 and 5 closed, `FM-6` found and landed; next are items 2, 3, 4)
+
+**Branch `feat/milestone-1-foundation`. Docs are v0.9.24.** Read
+**`docs/superpowers/specs/2026-08-01-formal-model-a-ambiguous-order-design.md`
+§11 (the slice-E record so far), then its RESUME HERE**, before anything else.
+The remaining docket is assembled there and is **not to be re-derived**.
+Task **#154**.
+
+**What closed this session:**
+
+1. ~~`FM-5`'s normative edit~~ — **LANDED, v0.9.24** (§11a). Wider footprint
+   than §8d prescribed, and the reading pass caught the first wording
+   over-generalizing from one producer to three. Read §11a before touching
+   the ledger clauses again.
+5. ~~§10a's perp-side park~~ — **BUILT, and it found `FM-6`** (§11b, §11c).
+   §10a's stated reason for the narrowing was wrong (`PC26` proves it), and
+   the park's construction produced a **deadlock** that is a real spec gap.
+
+**Still OPEN, in the order they were argued:**
+
+2. **Model (b)'s five controls have never been asked the witness-degeneracy
+   question** (§9f). Model (b) is in scope for the adversarial round anyway.
+   `W1`–`W4` are model (a)'s precedent for how to ask it.
+3. **§7d:** does "never issued twice" carry safety weight independent of the
+   reservation? `NC2` issues a second floor with `overshoot` FALSE throughout,
+   and §2's own counterexample for the rule assumes the reservation is *not*
+   counted — which the adjacent sentence requires it to be. **Do not resolve
+   it by weakening the spec.**
+4. **§8f:** is *physical* neutrality the stronger and intended precondition
+   for opening a generation? `PdPlan` guards on `TrueResidual = 0`, which is
+   **reservation-netted**, so a generation may open on a package that is
+   neutral *pending an in-flight reduction* rather than physically flat. It is
+   `FM-5`'s mirror and should be attacked with it.
+
+**Two things this session establishes that the remaining items should use.**
+First, **building a missing transition is a finding technique, not bookkeeping**
+— item 5 was carried as a correspondence tidy-up and produced `FM-6`. Items 3
+and 4 are questions about *guards*, and the same move applies: encode the other
+reading as a control and let TLC answer. Second, **a recorded justification is
+load-bearing**: §10a's reason was wrong while its conclusion was defensible,
+and nobody re-derives a recorded rejection ([[a-rejected-alternative-is-an-unchecked-claim]]).
+
+**Standing rituals, unchanged:** `pgrep -f "arblab capture run"` **FIRST**
+(PID 8495); **never rebuild over `bin/arblab` while capture runs**; cap
+`TLC_WORKERS` beside it (4 was used this session); marker grep
+`grep -rn "SPEC EDIT OWED" internal/ tools/` must be **zero**.
+
+**The clock:** task **#150**, the §32m-D per-tier one-day figure, is **due
+2026-08-03T11:13Z** and became **measurable at 2026-08-02T11:13Z**. It is the
+tightest deadline on the board and does not depend on slice E.
+
+## START HERE (updated session 68, 2026-08-02 — HISTORICAL — §46 SLICE D BUILT; superseded by session 69's slice-E items 1 and 5)
 
 **Branch `feat/milestone-1-foundation`. THE NEXT ACT IS §46 SLICE E — the
 adversarial round on the model itself.** Read

@@ -196,4 +196,37 @@ PC23_ClsNeverDeadlineExceeded == cls # "DeadlineExceeded"
 \* OUTSTANDING in the ledger, not merely counted as dispatched.
 PC24_FloorNeverOutstanding == ~FloorOutstanding
 
+(***************************************************************************)
+(* SLICE E -- the second park (SS46 SS10a, SS11b).                          *)
+(***************************************************************************)
+
+\* PC25 -- P5's antecedent, and NC17's: the PERP-side park is reached at all.
+\* SM SS7's transition row has entered Held/Alert from `PerpReduceInFlight`
+\* since v0.9 and slices A-D modeled only the spot side, so before this probe
+\* the state did not exist -- which is why no run could report it missing.
+PC25_PdNeverHeldPerp == pd # "HeldPerp"
+
+\* PC26 -- THE PROBE THAT DECIDES SS46 SS10a's ARGUMENT, and it is a fixture-
+\* collapse question asked of a narrowing rather than of a test.
+\*
+\* SS10a justified modeling only the spot-side park on the ground that a
+\* perp-side one is the HARMLESS instance: "at the perp leg neither the
+\* unsold transient nor a nonzero reservation exists yet (pdDone = 0, and the
+\* pkgspot entry carries the outstanding net intent, which is zero until the
+\* perp confirms)". That is true of the park taken BEFORE any fill and of no
+\* other. PdPerpFill fires while pd = "PerpReduceInFlight" and AMENDS the
+\* entry upward, so SS2's own `PartiallyFilled` case -- "explicitly means more
+\* fills possible" -- puts a park after it.
+\*
+\* This probe claims the harmful shape is unreachable: a perp-side park
+\* holding a REAL net-long transient AND a nonzero reservation. If it is
+\* VIOLATED, SS10a's stated reason for the narrowing is wrong -- not the
+\* narrowing's conclusion necessarily, but the argument offered for it, which
+\* is what a later session would rely on. A reason that does not hold is
+\* worse than none, because nobody re-derives a recorded justification.
+PC26_PerpParkAlwaysEmpty ==
+  ~ /\ pd = "HeldPerp"
+    /\ pdDone > 0
+    /\ PdReserved > 0
+
 ===============================================================================

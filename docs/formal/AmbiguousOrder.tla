@@ -215,7 +215,35 @@ CONSTANTS
   \* unrepresentable, and a control that leaves `vars` unchanged is a
   \* STUTTER, which weak fairness steps straight over. `pending[k].amb` is
   \* what makes the retry loop a fair lasso instead of a stutter.
-  BLIND_RETRY
+  BLIND_RETRY,
+  \* SLICE E. Nominal FALSE. SM SS7's Held/Alert is entered from EITHER leg,
+  \* and FLAG-4's exit is "eventual finality of the HELD LEG resumes the
+  \* remaining target" -- the held leg, not any leg. TRUE = negative control
+  \* NC17: the exit from a park is CAUSE-BLIND, so the reserved spot leg's
+  \* finality barrier also discharges a park whose PERP leg is the one that
+  \* is unresolved. This is model (b)'s Cx8-2 recreated deliberately in
+  \* model (a) -- "a park is two states wearing one name" -- and it is the
+  \* first time model (a) has been asked that question. It is checked by
+  \* INV8, and what it produces is a generation that reports SS6.7 FINALITY
+  \* with its perp reduction still live, which is the state SS7's own
+  \* "only after the prior generation reaches SS6.7 finality" gate reads.
+  HELD_EXIT_CAUSE_BLIND,
+  \* SLICE E -- `FM-6`. Nominal TRUE: a change to
+  \* `outstanding_reserved_reductions` re-triggers SS2's classification,
+  \* exactly as an order event does, because SS2's residual is
+  \* `realized_delta - outstanding_reserved_reductions` and the SUBTRAHEND
+  \* changes the verdict just as the minuend does. FALSE = negative control
+  \* NC19: classification rides on ORDER events only, which is what slices
+  \* A-D modeled and what SS2 says if read literally.
+  \*
+  \* Its signature is a DEADLOCK rather than an invariant or a temporal
+  \* violation, and that is the honest report: the state has NO successors.
+  \* A generation ends, the ledger changes, no order event accompanies it,
+  \* so the episode keeps a `DeadlineExceeded` verdict after its intervals
+  \* have collapsed -- and that verdict permits exactly one action, the
+  \* interval floor, which is already spent. Determined naked residual,
+  \* budget remaining, and nothing enabled.
+  RECLASSIFY_ON_LEDGER_CHANGE
 
 (***************************************************************************)
 (* Value domains. Deliberately generous: TypeOK is the CHECK that the      *)
@@ -246,9 +274,17 @@ Classes == { "Determined", "Ambiguous", "DeadlineExceeded" }
 \* PackageDelever generation phases, verbatim from SM SS7 States, plus
 \* "None" for "no active generation" (SS7's own transition table names that
 \* as a from-state).
+\* SLICE E: `HeldPerp` is a SECOND park, and it is a distinct state rather
+\* than a second way into `Held` -- deliberately, and the reason is model
+\* (b)'s Cx8-2 finding: "HeldIncident is two states wearing one name", where
+\* a cause-blind exit guard discharged BOTH parks and the defect was
+\* invisible to a green suite. SM SS7's transition row enters Held/Alert from
+\* `PerpReduceInFlight` OR `SpotReduceInFlight`; slices A-D modeled only the
+\* second (SS46 SS10a), so the mirror was never checked here. It is now:
+\* NC17 is the cause-blind exit, and it is a violation.
 PdPhases == { "None", "Planned", "PerpReduceInFlight", "PerpReduceFinal",
               "SpotReduceAuthorized", "SpotReduceInFlight", "Complete",
-              "Held", "TerminalFlatten" }
+              "Held", "HeldPerp", "TerminalFlatten" }
 
 \* The two superseding paths, kept DISTINCT rather than collapsed to a
 \* boolean: SM SS7 names them separately (core SS5.3's EmergencyClosePackage
@@ -559,6 +595,24 @@ Reclassify(o, p, d) ==
 \* reached).
 ReclassifyOnFinality(o, p, d) ==
   IF RECLASSIFY_ON_FINALITY THEN Reclassify(o, p, d) ELSE UNCHANGED epiVars
+
+\* SLICE E -- `FM-6`. The LEDGER half of the same re-classification clause.
+\*
+\* SS2's residual is `realized_delta - outstanding_reserved_reductions`, and
+\* re-classification in slices A-D rides on ORDER events alone. But the
+\* SUBTRAHEND is as capable of changing the verdict as the minuend is, and a
+\* generation ending changes it WITHOUT producing an order event. Until
+\* slice E that could not be observed, because every path out of a
+\* generation ran through PdPerpFinal, which reclassifies -- the perp-side
+\* park (SM SS7's own transition row, unmodeled until now) is the unique
+\* route that bypasses it.
+\*
+\* Nominal TRUE = the sound reading. FALSE = negative control NC19, the
+\* literal one, whose signature is a DEADLOCK: the episode's intervals have
+\* collapsed, its verdict is still `DeadlineExceeded`, the one action that
+\* verdict permits is spent, and no event will ever re-open one.
+ReclassifyOnLedgerChange(o, p, d) ==
+  IF RECLASSIFY_ON_LEDGER_CHANGE THEN Reclassify(o, p, d) ELSE UNCHANGED epiVars
 
 (***************************************************************************)
 (* Dispatch bookkeeping.                                                   *)
@@ -1008,8 +1062,15 @@ PdPerpFill(x) ==
 \* it -- that is an arbitration event, not a venue finality event -- and
 \* ReductionAmbiguous's is not either, which is what keeps NC13's stall
 \* attributable to the collapse-with-no-execution case PC8 names.
+\* SLICE E: `HeldPerp` is in the from-set for the same reason `Held` is in
+\* PdSpotFinal's -- FLAG-4 rules the park NONTERMINAL and "eventual finality
+\* of the held leg resumes the remaining target". Here the held leg IS the
+\* perp leg, so ITS barrier is the one that resumes. HELD_RESUMES = FALSE
+\* (NC15) takes this edge out too, which is the same reading applied to the
+\* same ruling: the control is about FLAG-4, not about which leg parked.
 PdPerpFinal ==
-  /\ pd = "PerpReduceInFlight"
+  /\ pd \in (IF HELD_RESUMES THEN { "PerpReduceInFlight", "HeldPerp" }
+                             ELSE { "PerpReduceInFlight" })
   /\ pdPerp' = 0
   /\ pd' = "PerpReduceFinal"
   /\ ReclassifyOnFinality(orders, 0, deadline)
@@ -1078,6 +1139,32 @@ PdSpotHolds ==
   /\ UNCHANGED epiVars
   /\ UNCHANGED histVars
 
+\* SLICE E: the OTHER entry into Held/Alert, which SM SS7's transition row
+\* has had all along and slices A-D did not model (SS46 SS10a's correspondence
+\* gap). The PERP leg is the deadline-exceeded/ambiguous one.
+\*
+\* SS10a justified the narrowing on the ground that a perp-side park is the
+\* HARMLESS instance -- "at the perp leg neither the unsold transient nor a
+\* nonzero reservation exists yet (pdDone = 0)". BUILDING IT SHOWS THAT
+\* REASONING IS WRONG, and the model itself is what says so: PdPerpFill fires
+\* while pd = "PerpReduceInFlight" and AMENDS the ledger entry upward, so a
+\* perp leg may partially fill and THEN go ambiguous -- which is SS2's own
+\* `PartiallyFilled` case ("explicitly means more fills possible"). Such a
+\* park holds a REAL net-long transient (realized raised by pdDone) AND a
+\* NONZERO reservation, and it blocks the next generation on SS7's
+\* "only after the prior generation reaches SS6.7 finality" gate. pdDone = 0
+\* is only the park taken BEFORE any fill; it is one instance, not the case.
+\*
+\* Unfair, exactly like PdSpotHolds: it is the degradation that creates P5's
+\* antecedent, and a fair one would assume the very degradation P5 survives.
+PdPerpHolds ==
+  /\ pd = "PerpReduceInFlight"
+  /\ pd' = "HeldPerp"
+  /\ UNCHANGED << orders, realized, pending, pdTarget, pdPerp, pdDone, pdSold,
+                  gens, superseded, budget >>
+  /\ UNCHANGED epiVars
+  /\ UNCHANGED histVars
+
 \* The reserved spot reduction reaches SS6.7 finality with x actually
 \* executed (x <= the reserved size; a partial fill's remainder is not
 \* re-sent -- SS7's "never blind-retries"). Reachable from SpotReduceInFlight
@@ -1087,9 +1174,19 @@ PdSpotHolds ==
 \* NONTERMINAL -- "eventual finality of the held leg resumes the
 \* generation". HELD_RESUMES = FALSE (NC15) takes it back out, which is the
 \* park read as terminal-pending-policy, and P3 is what notices.
+\* SLICE E: HELD_EXIT_CAUSE_BLIND (NC17) adds `HeldPerp` to the from-set --
+\* the reserved SPOT leg's barrier discharging a park whose PERP leg is the
+\* unresolved one. It is reachable rather than absurd because the "pkgspot"
+\* entry EXISTS from creation (FLAG-3), so PdPendIds is nonempty at HeldPerp
+\* and the guard below passes; under the nominal reading its amount is the
+\* outstanding net intent, so x ranges over 0..that. What it produces is a
+\* generation in `Complete` -- SS7's "the generation has reached SS6.7
+\* finality; only now is a next generation admissible" -- with its perp
+\* reduction still live. INV8 is what says so.
 PdSpotFinal(x) ==
-  /\ pd \in (IF HELD_RESUMES THEN { "SpotReduceInFlight", "Held" }
-                             ELSE { "SpotReduceInFlight" })
+  /\ pd \in ( (IF HELD_RESUMES THEN { "SpotReduceInFlight", "Held" }
+                               ELSE { "SpotReduceInFlight" })
+              \cup (IF HELD_EXIT_CAUSE_BLIND THEN { "HeldPerp" } ELSE {}) )
   /\ PdPendIds # {}
   /\ LET k == CHOOSE k \in PdPendIds : TRUE
      IN /\ x \in 0..pending[k].amt
@@ -1109,8 +1206,14 @@ PdSpotFinal(x) ==
 \* The flatten's OWN orders are not modeled (they are a different scenario's
 \* legs); what is modeled is that the generation ends and its reservation
 \* stops being counted. A stated abstraction, not a claim.
+\* SLICE E: FLAG-4's policy exit belongs to BOTH parks -- its ruling is about
+\* Held/Alert, and SM SS7 enters that from either leg. Leaving `HeldPerp` out
+\* would have stranded it whenever HELD_RESUMES is FALSE, and TLC would have
+\* reported NC15 as a DEADLOCK rather than as the temporal violation it is --
+\* the model objecting to the shape of the control instead of to the
+\* behaviour (the distinction NC15's own config note draws).
 PdTerminalFlatten ==
-  /\ pd = "Held"
+  /\ pd \in { "Held", "HeldPerp" }
   /\ pd' = "TerminalFlatten"
   /\ pending' = (IF PdPendIds = {} \/ ~RELEASE_ON_SUPERSEDE THEN pending
                  ELSE [pending EXCEPT ![CHOOSE k \in PdPendIds : TRUE] = DeadPend])
@@ -1123,12 +1226,16 @@ PdTerminalFlatten ==
 \* generation is a bounded attempt made ONLY AFTER the prior generation
 \* reaches SS6.7 finality"). The per-generation counters reset, which is also
 \* what makes INV5 a per-generation claim.
+\* SLICE E -- `FM-6`: this is where the generation, and therefore its ledger
+\* entry, is definitively gone, so this is where the residual SS2 reads
+\* changes with no order event to announce it. `p = 0` matches this action's
+\* own reset of pdPerp.
 PdEnds ==
   /\ pd \in { "Complete", "TerminalFlatten" }
   /\ pd' = "None"
   /\ pdTarget' = 0 /\ pdPerp' = 0 /\ pdDone' = 0 /\ pdSold' = 0
+  /\ ReclassifyOnLedgerChange(orders, 0, deadline)
   /\ UNCHANGED << orders, realized, pending, gens, superseded, budget >>
-  /\ UNCHANGED epiVars
   /\ UNCHANGED histVars
 
 \* SM SS7's two supersession rows: EmergencyClosePackage (core SS5.3) and the
@@ -1200,6 +1307,7 @@ Next ==
   \/ \E s \in QDom : PdAuthorizeSpot(s)
   \/ PdSubmitSpot
   \/ PdSpotHolds
+  \/ PdPerpHolds
   \/ \E x \in QDom : PdSpotFinal(x)
   \/ PdTerminalFlatten
   \/ PdEnds
@@ -1240,6 +1348,7 @@ Spec == Init /\ [][Next]_vars
 (*  - PdPlan -- a generation is opened by the liq-distance ladder, which   *)
 (*    is a decision and out of model.                                      *)
 (*  - PdSpotHolds -- the degradation that CREATES P3's antecedent.         *)
+(*  - PdPerpHolds -- the same, for P5. SLICE E.                           *)
 (*  - PdTerminalFlatten -- a policy branch (FLAG-4's "if completion is     *)
 (*    impossible"). If it were fair it would discharge P3 by itself, and   *)
 (*    P3 would be green with NC15's defect installed.                      *)
@@ -1498,6 +1607,31 @@ INV5_PackageDeleverNeverNetShort ==
 \* guard that prevents it.
 INV6_SupersessionQuiescesFirst == ~supersededWithLiveLeg
 
+(***************************************************************************)
+(* SLICE E invariant -- the second park (SS46 SS10a, SS11b).                 *)
+(***************************************************************************)
+
+\* SM SS7 `Complete`: "the generation has reached SS6.7 finality; ONLY NOW is
+\* a next generation admissible", and the transition table gates the next
+\* generation on exactly that. So a generation in `Complete` may not still
+\* have an executable perp reduction outstanding -- `Complete` is a claim
+\* about finality, and SS7's ladder READS it to decide whether to open
+\* another attempt.
+\*
+\* It is stated over the PERP leg's remaining quantity rather than over the
+\* phase history on purpose: the harm is executable quantity that a later
+\* generation's sizing cannot see, not the bookkeeping of which states were
+\* visited.
+\*
+\* ISOLATION, which is the part worth checking rather than assuming (the
+\* "a probe two gates can see" rule): NC9 (PERP_FIRST = FALSE) also produces
+\* a spot sale with no confirmed perp reduction, so an invariant phrased over
+\* the AUTHORIZATION would be violated by both controls and would show that
+\* something objected rather than that this rule did. This one stays GREEN
+\* under NC9 -- there the perp leg was never submitted, so pdPerp is 0 -- and
+\* is violated only by a park exited through the wrong leg's barrier.
+INV8_CompleteMeansLegsFinal == pd = "Complete" => pdPerp = 0
+
 \* Not in any nominal configuration. It exists to interrogate NC12's own
 \* witness: TLC reports the SHORTEST counterexample, and for the orphan
 \* clause that is an entry of amount ZERO -- which leaks a ledger slot but
@@ -1631,5 +1765,50 @@ P3_HeldGenerationResumes ==
 \* precisely because a blind retry spends no budget.
 P4_FloorGenerationResolves ==
   [] ( FloorOutstanding => <> ~FloorOutstanding )
+
+\* P5 -- SLICE E. FLAG-4's nonterminal ruling applied to the park SM SS7 has
+\* had all along and slices A-D did not model: Held/Alert is entered from
+\* `PerpReduceInFlight` OR `SpotReduceInFlight`, and the ruling is about the
+\* STATE, not about which leg parked. So the perp-side park must resolve on
+\* the same terms P3 demands of the spot-side one.
+\*
+\* Its consequent is P3's, deliberately: the claim is that THE GENERATION
+\* resolves, not merely that it leaves the park. A consequent of
+\* "PerpReduceFinal" would be discharged by the resume edge alone and would
+\* say nothing about whether the resumed generation then completes -- and
+\* SS7's ladder gates the next attempt on `Complete`, not on "unparked".
+\*
+\* Its evidence is NC15, which removes FLAG-4's resume edge from BOTH parks
+\* (the control is about the ruling, not about a leg) and NC17, which exits
+\* this park through the WRONG leg's barrier. Note that NC17 is a SAFETY
+\* violation (INV8) rather than a liveness one -- a cause-blind exit does not
+\* stall the generation, it resolves it WRONGLY, which is exactly why the
+\* park needed an invariant as well as a property.
+\* THE CONSEQUENT CARRIES A THIRD DISJUNCT AND P3's DOES NOT, and the
+\* asymmetry is a fact about the spec rather than a convenience. SM SS7's
+\* transition table ends an active generation THREE ways: resume-to-Complete,
+\* TerminalFlatten, and "*(any active state)* -> *(superseded -- generation
+\* ends)*" for EmergencyClosePackage / FenceReadyLost. P3 needs only two
+\* because supersession is BARRED from `Held`: SS7's rule is "cancelling its
+\* RESERVED SECOND LEG to SS6.7 finality first", `Held` is a state in which
+\* that leg is live, and QUIESCE_BEFORE_SUPERSEDE therefore blocks the edge.
+\*
+\* At a PERP-side park the reserved second leg does not exist yet, so the
+\* quiesce precondition has nothing to bind on and supersession IS
+\* admissible -- TLC found exactly that behaviour (PdPerpHolds -> Supersede
+\* -> stuttering) against the two-disjunct phrasing. Recorded rather than
+\* absorbed: SS7's quiesce clause is scoped to the reserved second leg, so a
+\* perp-side park is superseded WITHOUT it. That looks safe here -- Supersede
+\* drops the perp leg's remaining interval with OrderFinal's semantics and
+\* reclassifies, so no residual is stranded, and both superseding paths have
+\* their own quiesce barrier over all resting orders (core SS7.4) -- but the
+\* scoping is an observation this slice makes, not a claim it verifies.
+\*
+\* No vacuity in the added disjunct: Supersede requires `superseded = "none"`
+\* and sets `pd' = "None"`, and PdPlan requires `superseded = "none"`, so a
+\* generation can never REACH `HeldPerp` with the disjunct already true.
+P5_HeldPerpGenerationResumes ==
+  [] ( pd = "HeldPerp"
+         => <> (pd \in { "Complete", "TerminalFlatten" } \/ superseded # "none") )
 
 =============================================================================

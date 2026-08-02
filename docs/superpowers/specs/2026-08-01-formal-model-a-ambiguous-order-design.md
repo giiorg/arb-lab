@@ -1083,23 +1083,287 @@ is the entry point rather than the `.tla`.
 
 ---
 
+## 11. Slice E — the adversarial round (2026-08-02, session 69)
+
+Slice E's docket was assembled at the close of slice D and is worked in order.
+Item status is recorded as each closes, so an interrupted session resumes at the
+first open item rather than re-deriving the list.
+
+### 11a. Item 1 — `FM-5`'s normative edit: **LANDED (v0.9.24)**
+
+The edit is FLAG-3's *silence*, not its words. What the ruling left
+under-determined is the reservation's **amount**; the entry's existence at
+creation is kept exactly as ruled. Every site now says the entry carries the
+generation's **outstanding net intent** — zero before the perp leg has bought
+anything, amended as it confirms, back toward zero as the spot leg sells.
+
+**The footprint is wider than §8d prescribed, and deliberately so.** §8d named
+two sites ("§7's FLAG-3 ruling, and beside §2's reservation-aware sizing").
+Landing only those two would have left the unsound reading **still literally
+available** in the doc: SM §7's `Planned` row and its "reserved second leg vs
+the §2 classifier" invariant both say the transient is "atomically reserved from
+creation" with **no amount attached**, which is precisely the underdetermination
+`FM-5` exploits. A reader reaching either one first would re-derive the defect
+from text that had just been declared fixed. Sites edited:
+
+| Doc | Site | What it now says |
+|---|---|---|
+| `build-spec.md` | §6 step 7, `Determined residual` | the subtraction is unconditional, **therefore** every entry MUST be backed at the instant it is counted; entry carries outstanding net intent, never target |
+| `state-machines.md` | §7 `Planned` row | amount is **zero** at creation; amended as the perp leg confirms |
+| `state-machines.md` | §7 `SpotReduceAuthorized` row | what is first *fully amounted* here is the amount, the perp reduction now being confirmed |
+| `state-machines.md` | §7 `PerpReduceFinal →` action | the amount subtracted tracks confirmed fills and is zero before any |
+| `state-machines.md` | §7 Invariants | **new invariant**: "the reservation is exactly backed at every instant" |
+| `state-machines.md` | §7 FLAG-3 ruling | amended — words kept, silence closed, `NC7` named |
+| `state-machines.md` | §2 Reservation-aware sizing | the subtraction is unconditional, which is *why* entries must be backed; the asymmetry stated |
+| `adr-history.md` | §2 review records, §3 dated block + FM-5 row | model (a)'s companion artifact is its review record |
+| `docs/formal/ambiguous-order-model.md` | §1(1), §2 status | OWED → LANDED; the two artifacts no longer disagree |
+
+**The reading pass caught the edit over-generalizing — a second time the same
+trap, one level in.** The first wording said an entry carries "the reserving
+generation's outstanding net intent — **zero before its counterpart leg has
+moved anything**". That is exactly right for a `PackageDelever` generation and
+**wrong as a general rule**, because the ledger has **three** producers and only
+one of them has a counterpart leg. An in-flight `IntervalFloorReduction` *is*
+its own reduction: its order is dispatched and genuinely working, so its entry
+is its **full dispatched size** — zeroing it restores precisely the re-read of a
+still-in-flight floor as fresh naked exposure that the reservation exists to
+prevent. An `Armed` protective order carries its reserved leg allocation.
+
+The general statement, which all three satisfy: **an entry is the exposure
+change its reserving action has already COMMITTED and not yet REALIZED.** The
+producers differ only in *when* commitment happens — at perp confirmation for a
+generation, at dispatch for a floor, at arming for a protective order. Both
+normative sites now say this, and both name all three producers rather than
+generalizing from the one the finding came from.
+
+Worth stating plainly, because it is the finding's own lesson recurring inside
+its fix: **`FM-5` is a defect of underdetermined wording, and the first fix
+introduced a different underdetermination.** A rule derived from one instance
+reads as universal unless the other instances are named. The marker grep could
+never have seen this — nothing was mismarked — which is what the reading pass
+beside it is for.
+
+**Set-version alignment to v0.9.24** across all five documents.
+`state-machines.md` is **normatively changed for the first time since v0.9.4** —
+every version between was set-version alignment on that doc. The ADR §3 tagless
+table is untouched, so the tagless total **stays fifty-four** (`FM-5` is tagged,
+so it lands in a Finding → resolution table).
+
+**A drift found while bumping the versions, and fixed:** `adr-history.md`'s own
+Status line was **two versions behind** (v0.9.21) — v0.9.22 and v0.9.23 each
+added a dated §3 block and neither bumped it. Same class as session 64's HANDOFF
+entry-point drift: the *body* of the file was updated and the line readers key
+off was not, so the file misreported its own currency while being correct
+everywhere else. The convention is now stated in the file: a change that adds a
+§3 block bumps the Status line **in the same edit**.
+
+### 11b. Item 5 — the perp-side park: built, and it found `FM-6`
+
+Docket item 5 was the narrowing §10a recorded: SM §7's transition row enters
+`Held/Alert` from **`PerpReduceInFlight` or `SpotReduceInFlight`**, and slices
+A–D modeled only the second. It was carried as a question about whether the
+perp-side park hides a hazard. It does, and not the one the docket expected.
+
+**First: §10a's stated reason for the narrowing is wrong, and the model says so
+before any run.** §10a justified it thus — "at the perp leg neither the unsold
+transient nor a nonzero reservation exists yet (`pdDone = 0`, and the `pkgspot`
+entry carries the outstanding net intent, which is zero until the perp
+confirms)". But `PdPerpFill` fires *while* `pd = "PerpReduceInFlight"` and
+**amends the ledger entry upward**, so §2's own `PartiallyFilled` case —
+"explicitly means more fills possible" — puts a park *after* a partial fill.
+Such a park holds a **real net-long transient and a nonzero reservation**.
+`pdDone = 0` describes the park taken before any fill and no other.
+
+Probe **`PC26_PerpParkAlwaysEmpty`** asks exactly this — is a perp-side park
+with `pdDone > 0` and `PdReserved > 0` reachable? — and it is **VIOLATED**, so
+the harmful shape is reachable. The narrowing's *conclusion* may still have been
+tolerable; its *argument* was not, and a recorded justification is what a later
+session relies on instead of re-deriving. **`PC25_PdNeverHeldPerp`** is the
+plain antecedent probe (the park is reached at all) and is also violated.
+
+**Then the park was built, and the nominal model DEADLOCKED.** That is the
+finding, and the work was telling which of three things it was: an unfaithful
+new transition, an artifact of a stated abstraction, or a real gap. Two
+experiments settled it.
+
+1. **Is it new?** HEAD's nominal is green at **6,729,250 / 832,179** — the
+   recorded figure, to the digit. So the dead end is slice E's.
+2. **Which edit?** With `PdPerpHolds` removed from `Next` and *every other*
+   slice-E edit in place, the model reproduces **6,729,250 / 832,179** again.
+   So the widened `PdPerpFinal` / `PdTerminalFlatten` from-sets, `INV8` and the
+   new constant are behaviour-neutral, and the park alone is the cause.
+3. **Is it the `TerminalFlatten` abstraction?** §8f states that the flatten's
+   own orders are not modeled, which leaves the transient orphaned — the
+   obvious suspect. So the flatten was made to actually flatten
+   (`realized' = realized - (pdDone - pdSold)`). **It still deadlocks.** Not
+   the abstraction.
+
+#### `FM-6` — a verdict goes stale because the ledger changed and no order did
+
+The dead end's state, and every disjunct of `Next` is disabled in it:
+
+| Fact | Consequence |
+|---|---|
+| every counter-leg interval has **collapsed** (`q = 0` throughout) | the residual is determined in §2's own sense |
+| the verdict is still **`DeadlineExceeded`** | the last thing that could re-run the classifier was an *order* event |
+| `floorIssued` is spent (`FLOOR_ONCE`) | the one action that verdict permits is gone |
+| the residual is **nonzero** and `budget` is **not** spent | `Settled` needs one or the other; `IssueExposureReduction` and `PdPlan` need `Determined` |
+
+So: a **determined naked residual, dispatch budget in hand, and nothing
+enabled** — the package holds with an alert and no admissible action, for ever.
+
+**The defect.** §2's residual is
+`realized_delta − outstanding_reserved_reductions`, and re-classification is
+triggered by **order** events. But the **subtrahend** changes the verdict just
+as the minuend does, and **a `PackageDelever` generation ending changes the
+subtrahend without producing an order event.** Every other path out of a
+generation happens to run through `PerpReduceFinal`, which reclassifies — so
+the gap was invisible. The perp-side park is the *unique* route that leaves a
+generation without it. **The park does not cause the defect; it reveals one
+that was always reachable in the spec and was not reachable in the model.**
+
+**It is `FM-5`'s sibling, and the pair is worth naming together:** FM-5 is *the
+ledger must be backed at the instant it is read*; FM-6 is *a change to the
+ledger must be observed*. Both are the same underlying asymmetry — §2 treats
+`outstanding_reserved_reductions` as an input it can trust and never re-derives
+it, so the ledger's producers can put it wrong (FM-5) or move it silently
+(FM-6), and in neither case does the reader notice.
+
+**The resolution, and it is as narrow as FM-5's:** a change to
+`outstanding_reserved_reductions` is **itself a re-classification trigger**,
+exactly as an order event is. The model takes the sound reading nominally
+(`RECLASSIFY_ON_LEDGER_CHANGE`, applied at `PdEnds`, where the generation and
+its entry are definitively gone); the literal reading is **`NC19`**.
+
+**`NC19`'s signature is a DEADLOCK, and the harness gained a verdict for it.**
+`run.sh` had `pass` / `fail` / `failprop` / `probe`; a deadlock would have been
+scored by `fail` as an unexplained non-zero exit. It is now its own `deadlock`
+verdict, for the reason NC15's config already draws out — a control that
+*stranded* the model and a control that *caught* something are different
+claims, and a harness that accepts either lets the first read as the second.
+Here the dead end **is** the finding, so it is named rather than tolerated.
+
+**Status: `FM-6`'s normative edit is OWED**, and it is not covered by v0.9.24's
+FM-5 edit. Wording and sites are drafted in §11c below.
+
+#### Also in item 5: model (b)'s `Cx8-2` asked of model (a) for the first time
+
+Adding a second park raised a question this repo has already paid for once.
+Model (b)'s `Cx8-2` was "`HeldIncident` is two states wearing one name — SM §4
+gives the readiness park and the budget-exhaustion park *different* exits, and
+`ActHeldReentry`'s cause-blind guard exited both." SM §7 has the identical
+shape, and **model (a) had never been asked**, because until slice E it had
+only one park. This is the repo's "a fix applied in one place gets applied to
+its mirror" rule at model altitude.
+
+So `HeldPerp` is a **distinct state**, not a second way into `Held`, and
+`NC17` (`HELD_EXIT_CAUSE_BLIND`) is the cause-blind exit made explicit: the
+reserved **spot** leg's finality barrier discharging a park whose **perp** leg
+is the unresolved one. It is reachable rather than absurd precisely because of
+FLAG-3 — the `pkgspot` entry exists from creation, so the guard passes.
+
+Its invariant is **`INV8_CompleteMeansLegsFinal`** (`pd = "Complete" =>
+pdPerp = 0`), and the phrasing was chosen for **isolation**, which is the part
+worth checking rather than assuming. The tempting phrasing is over the
+*authorization* — but `NC9` (`PERP_FIRST = FALSE`) also produces a spot sale
+with no confirmed perp reduction, so that invariant would be violated by both
+controls and would show that *something* objected rather than that *this rule*
+did. `INV8` stays green under `NC9` (there the perp leg was never submitted, so
+`pdPerp` is 0) and is violated only by a park exited through the wrong leg's
+barrier.
+
+`P5_HeldPerpGenerationResumes` is FLAG-4 applied to the new park, and it ships
+with its own control in the same slice per §4's rule — **`NC18`**, which is
+`NC15`'s constant flip with `P5` listed alone. That it is the *same* constant is
+the point: FLAG-4's ruling is about the **state**, which §7 enters from either
+leg, so one flip removes the resume edge from both parks. `NC15` shows `P3`
+bites; `NC18` shows `P5` does. A property whose *sibling* fails is an argument,
+not evidence.
+
+### 11c. `FM-6`'s normative edit — the spec's own wording names the defect
+
+The clause is SM §2's **Scope** (core §6 step 7 is the normative owner):
+
+> **Classification is a function of two inputs and re-runs when either
+> changes `[→ R1d-3]`:** fills/position events move the *realized* delta;
+> order-lifecycle/finality events … collapse an order's *possible-delta
+> interval* …
+
+**Two inputs.** But the quantity the classifier gates on is
+`realized_delta − outstanding_reserved_reductions`, which has **three** —
+and the third is the one the re-run rule does not name. That is `FM-6` stated
+in the spec's own vocabulary: the ledger is an input to the classification and
+is absent from the list of things that re-trigger it.
+
+The producers move it on events that are **not order events** — a generation
+opening, its perp leg confirming (an amendment, per `FM-5`), a generation
+ending, a supersession, a floor retiring. Each changes the residual. The one
+the model reached is the generation ending, because that is the only one the
+perp-side park can arrive at without passing `PerpReduceFinal`.
+
+**Wording to land** (§6 step 7, mirrored in SM §2's Scope):
+
+> Classification is a function of **three** inputs and re-runs when **any**
+> changes: fills/position events move the *realized* delta; order-lifecycle /
+> finality events collapse an order's *possible-delta interval*; and **a
+> change to `outstanding_reserved_reductions` moves the subtrahend** — an
+> entry created, amended or retired by any of its producers (a
+> `PackageDelever` generation opening, amending as its perp leg confirms,
+> completing, terminal-flattening or being superseded; an
+> `IntervalFloorReduction` retiring; a protective order's leg reservation
+> released). The machine MUST NOT wait for an order event when the ledger
+> alone changed the residual, for the same reason it must not wait for the
+> next fill when order state alone became conclusive: **a generation ending
+> emits no fill and no order event, yet moves the residual by the whole
+> reserved amount.**
+
+The parallel in the last sentence is deliberate — §2 already carries exactly
+this argument for the cancel-with-zero-executions case ("a cancel confirmed
+with **zero** executions emits no fill and no position event, yet fully
+collapses that order's interval"). `FM-6` is that same sentence owed to the
+third input.
+
+**Status: OWED.** It is landed in the same session it was found, below
+§11d — the slice-close rule ("land it in the spec before the slice closes"),
+and the situation it avoids is the one `FM-5` sat in for three slices, where
+`docs/formal/` and `docs/state-machines.md` disagreed and CLAUDE.md's standing
+rule had to arbitrate.
+
+*Items 2, 3 and 4 remain open; see RESUME HERE.*
+
+---
+
 ## RESUME HERE
 
-**Slices A, B, C and D are BUILT** (§7, §8, §9, §10 above). Next act is
-**slice E**: the adversarial round on the model itself — findings triaged,
-model defects fixed and re-verified, and **`FM-5`'s normative edit landed in
-`docs/state-machines.md`**.
+**Slices A, B, C and D are BUILT** (§7, §8, §9, §10). **Slice E is PART-DONE**
+(§11): **items 1 and 5 are closed**, and item 5 produced **`FM-6`**, whose
+normative edit landed in the same session alongside `FM-5`'s. Docs are
+**v0.9.24**. **Items 2, 3 and 4 are open and are the next act.**
+
+**Two things established this session that the open items should use.** First,
+**building a missing transition is a finding technique, not bookkeeping** —
+item 5 was carried as a correspondence tidy-up and produced a spec defect that
+four rounds of review, four model slices, 55 runs and a clause-by-clause map had
+all passed over. Items 3 and 4 are questions about **guards**, and the same move
+applies: encode the other reading as a control and let TLC answer, rather than
+arguing it. Second, **a recorded justification is load-bearing and is not
+re-derived**: §10a's *reason* was wrong while its *conclusion* was defensible,
+and the probe that showed it (`PC26`) cost one line.
 
 **Slice E's docket, assembled rather than to be re-derived:**
 
-1. **`FM-5`'s normative edit — not optional, wording in §8d.**
+1. ~~**`FM-5`'s normative edit — not optional, wording in §8d.**~~ **LANDED
+   v0.9.24, 2026-08-02 — see §11a** (footprint wider than §8d prescribed, and
+   why).
 2. **Model (b)'s five controls have never been asked the witness-degeneracy
    question** (§9f). Model (b) is in scope for the adversarial round anyway.
 3. **§7d:** does "never issued twice" carry safety weight independent of the
    reservation? NC2 issues a second floor with `overshoot` FALSE throughout.
 4. **§8f:** is *physical* neutrality the stronger and intended precondition for
    opening a generation? It is FM-5's mirror and should be attacked with it.
-5. **§10a:** the perp-side `Held/Alert` park the model narrows away.
+5. ~~**§10a:** the perp-side `Held/Alert` park the model narrows away.~~
+   **BUILT, 2026-08-02 — see §11b/§11c. It found `FM-6`,** and it disproved
+   §10a's own stated reason for the narrowing (`PC26`).
 
 **`FM-5`'s normative edit is still OWED, and it is not optional** (§8d). The
 model found a spec defect in SM §7's FLAG-3 ruling composed with §2's

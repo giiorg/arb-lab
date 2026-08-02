@@ -44,10 +44,39 @@ sizing lets a generation book its **target** into the shared ledger at
 `Planned`, before its perp leg has bought anything. A package that is neutral
 then reads as *short* by that amount, and §2's determined branch buys back
 exactly the exposure the generation's own perp leg is about to buy. Section 2
-below. **Its normative edit is still OWED** (scheduled §46 slice E).
+below. **Its normative edit LANDED in v0.9.24** (§46 slice E, 2026-08-02):
+core §6 step 7 and SM §2/§7 now require every ledger entry to carry its
+generation's *outstanding net intent* rather than its target.
+
+**(1b) `FM-6` — a second spec defect, and the spec's own words name it.**
+§2 Scope said classification "is a function of **two inputs** and re-runs when
+either changes". The residual it gates on is
+`realized_delta − outstanding_reserved_reductions` — **three** inputs, and the
+third was missing from the re-run rule. So the **subtrahend**, which decides the
+verdict exactly as the minuend does, moves on events that are **not order
+events**: a generation opening, amending as its perp leg confirms, completing,
+terminal-flattening, being superseded. TLC's signature is a **DEAD END**, not a
+violated invariant — every interval collapsed, the verdict still
+`DeadlineExceeded`, its one permitted action (the interval floor) spent, a
+**determined naked residual** with dispatch budget in hand, and **nothing
+enabled**. Control **`NC19`**. Normative edit landed v0.9.24.
+
+**`FM-6` is `FM-5`'s sibling**: *the ledger must be backed when it is read*
+versus *a change to the ledger must be observed* — the same asymmetry, once in
+the value and once in its freshness, both because §2 treats
+`outstanding_reserved_reductions` as an input it never re-derives.
+
+**And neither was findable before slice E built the perp-side park**, for a
+reason worth keeping: **every other exit from a generation runs through
+`PerpReduceFinal`, which reclassifies.** The perp-side `Held/Alert` park is the
+unique route that bypasses it. SM §7 has carried that transition row since v0.9;
+the model did not. §4's clause-by-clause map found the omission, and *building*
+it found the defect — the map's own justification, paid twice.
 
 **(2) `NC15`'s state graph is identical to the nominal one — 832,179 distinct
-states, to the digit.** `HELD_RESUMES = FALSE` parks a `PackageDelever`
+states, to the digit** (a pre-slice-E figure; the nominal graph is **967,576**
+distinct at depth 30 since the second park was added, and `NC15`'s equality
+argument is unchanged — the control only *removes* a transition)**.** `HELD_RESUMES = FALSE` parks a `PackageDelever`
 generation in `Held` for ever, holding an unsold net-long transient and a
 reservation that subtracts from every later sizing. The control only *removes*
 a transition, so its reachable set is a **subset** of the nominal one — and an
@@ -63,12 +92,14 @@ section at all".
 ## 2. `FM-5` — the reservation may be counted before its counterpart exists
 
 **Status: found by this model (slice B, session 66); NC7 encodes the defective
-reading; the model encodes the sound one. THE NORMATIVE EDIT TO
-`docs/state-machines.md` IS OWED and scheduled for §46 slice E.** Until it
-lands, `docs/formal/` and `docs/state-machines.md` disagree about §7's FLAG-3,
-and CLAUDE.md's standing rule resolves it: *treat the formal model as
-authoritative about the safety kernel's behaviour.* The exact wording to land is
-in §46 §8d.
+reading; the model encodes the sound one. THE NORMATIVE EDIT LANDED IN v0.9.24
+(§46 slice E, 2026-08-02)** — core §6 step 7, SM §2's reservation-aware sizing,
+and SM §7's `Planned` / `SpotReduceAuthorized` rows, its `PerpReduceFinal`
+action, a new "exactly backed at every instant" invariant and the **amended
+FLAG-3 ruling**. `docs/formal/` and `docs/state-machines.md` **now agree**; the
+window in which CLAUDE.md's standing rule ("treat the formal model as
+authoritative about the safety kernel's behaviour") had to resolve a live
+disagreement between them is closed. The wording that landed is §46 §8d's.
 
 **The composition.** SM §7 FLAG-3 (resolved v0.9): *"The reservation stays
 generation-scoped **from creation**, not first made here; the §2 classifier
@@ -174,7 +205,7 @@ exhaustive rather than illustrative.
 | `SpotReduceAuthorized` — a **durable journal record** on perp finality `[→ R1d-F3]` (FLAG-3) | `PdAuthorizeSpot(s)`, `s ∈ 0..SpotCap`. The **durability** of the record is UNMODELED (no crash/recovery in this model); what is modeled is the **ordering** it exists to guarantee — no spot dispatch before perp finality — which is `PERP_FIRST` + `SpotCap`, controls `NC9` and `NC8` |
 | `SpotReduceInFlight` — "**sells no more spot than the confirmed perp reduction**" | `PdSubmitSpot`; `SpotCap == IF SPOT_CAPPED_BY_PERP ∧ pd = "PerpReduceFinal" THEN pdDone ELSE pdTarget`. **The spot leg's size ranges over `0..cap` rather than sitting at the cap** — pinned at the cap, "no more than" and "exactly" would be the same predicate and §7's own inequality would be unchecked |
 | `Complete` — "only now is a next generation admissible" | `PdSpotFinal(x)` → `Complete`; `PdEnds` returns `pd` to `"None"` and resets the per-generation counters, which is what makes `INV5` a **per-generation** claim. `PC13` (reached), `PC20` (a second generation starts) |
-| `Held/Alert` — "a leg that is deadline-exceeded/ambiguous **holds and alerts, never blind-retries or blind-flattens**" | `PdSpotHolds` → `pd = "Held"`. There is **no retry edge out of `Held`** — the only exits are `PdSpotFinal` (resume) and `PdTerminalFlatten`, and `Supersede` is blocked from `Held` by `QUIESCE_BEFORE_SUPERSEDE` nominally. `PC14` shows it is entered. **Modeled for the SPOT leg only**, though SM §7's transition row admits `PerpReduceInFlight` **or** `SpotReduceInFlight` → `Held/Alert` — see the note below |
+| `Held/Alert` — "a leg that is deadline-exceeded/ambiguous **holds and alerts, never blind-retries or blind-flattens**" | **BOTH entries modeled as of slice E.** Spot leg: `PdSpotHolds` → `pd = "Held"` (`PC14`). Perp leg: `PdPerpHolds` → `pd = "HeldPerp"` (`PC25`). There is **no retry edge out of either**. `HeldPerp` is a **distinct state, not a second way into `Held`** — model (b)'s `Cx8-2` ("a park is two states wearing one name") applied to its mirror here; the cause-blind exit is control **`NC17`**, caught by **`INV8`**. Exits: `Held` → `PdSpotFinal` / `PdTerminalFlatten`, with `Supersede` blocked by `QUIESCE_BEFORE_SUPERSEDE`; `HeldPerp` → `PdPerpFinal` / `PdTerminalFlatten` / **`Supersede`, which is NOT blocked** — §7's quiesce clause is scoped to "its **reserved second leg**", which does not exist yet at a perp-side park. That asymmetry is recorded, not absorbed (§46 §11b). **Slices A–D modeled the spot side only, and building the other one found `FM-6`** — §2 below |
 | `Held/Alert` is **nonterminal** — eventual finality resumes the remaining target `[→ R1d-F4]` (FLAG-4) | `PdSpotFinal` from `Held`, gated by `HELD_RESUMES`. This is **`P3`**, and **`NC15`** is the control — the run whose state graph is identical to the nominal one |
 | `TerminalFlatten` — "its terminal full-flatten routes through the same §6.7 finality contract, not a blind market dump" | `PdTerminalFlatten` (`Held → TerminalFlatten`), releasing the generation's reservation. **The flatten's own orders are UNMODELED**: what is modeled is that the generation ends and its reservation stops being counted; the flatten's legs are a different scenario's. `PC19` shows the state is entered |
 | Supersession rows — `EmergencyClosePackage` (core §5.3) and `FenceReadyLost` (core §7.4) each "supersede and quiesce any active generation (cancelling its reserved second leg to §6.7 finality **first**)" | `Supersede(path)` for both paths, `PC16`/`PC17` showing **each separately** fires — the sign-mirror lesson applied to paths. Dropping the in-flight perp leg's remaining interval is *quiescence, not amnesia*: it is `OrderFinal`'s semantics, and everything the leg executed is already in `realized` |
