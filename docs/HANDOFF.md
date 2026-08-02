@@ -80,11 +80,12 @@ original grounds.
 
 **First act, in order:**
 
-1. **§38f's destination is a live user decision** — §44e states the measured
-   case and recommends a **≥2 TB** target now. It has been deferred twice, both
-   times against derived numbers; this is the first time it is being put with a
-   measured one. Nothing else is blocked on it, and everything is at risk from
-   it.
+1. **§38f's destination is a live user decision (task #158)** — §44e states the
+   measured case and recommends a **≥2 TB** target now. It has been deferred
+   twice, both times against derived numbers; this is the first time it is
+   being put with a measured one. Nothing else is blocked on it, and everything
+   is at risk from it. If it is taken, the remaining work is one rsync line and
+   one verify run, both already proven against §38's second-root fixture.
 2. **Task #153 — the hourly `restart_boundary` on `fundingInfo`** is now cheap
    to rule on and has a measured weight (24 of 50 findings on a clean day,
    multiplying with every REST-overlay source added). The three options and the
@@ -93,7 +94,12 @@ original grounds.
 3. **Task #152 waits on the clock, not on work** — gate evidence accumulates
    until BCHUSDT's 180 matched post-cutoff settlements (~2026-09-30), then
    `arblab crossvenue gate`. Periodic `crossvenue fetch` keeps it fed.
-4. **Formal model (a) is at a clean stopping point** (slice F closed, suite
+4. **Task #159 is a CARRIED TODO with a trigger, not a due date** — raise the
+   nine Binance `depth20` sources' `first_data_timeout` 10 s → 30 s **at the
+   next restart that happens for another reason**, never for this alone.
+   Reasoning and the measured exposure are in §44e; the config change is two
+   minutes, the restart is the expensive part.
+5. **Formal model (a) is at a clean stopping point** (slice F closed, suite
    75/75 from one unfiltered invocation). `FM-8`'s candidate 2 remains
    unrefuted and unadopted — see session 71's block.
 
