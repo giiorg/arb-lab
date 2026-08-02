@@ -14,13 +14,31 @@
 # Model (a) AmbiguousOrder: SM SS2 composed with SM SS7 -- the
 #   ambiguous-order classifier, the finality contract, the interval-floor
 #   generation and PackageDelever's generations on one reservation ledger.
-#   Slices A+B+C+E: 55 runs. 23 are the nominals and the negative controls
-#   (composed nominal + the SS2-only nominal + NC1-NC12 + NC17 + NC19 + NC20,
-#   then the nominal LIVENESS config + NC13-NC16 + NC18); 28 are POSITIVE
-#   controls, expected to be VIOLATED because each names an interesting state
-#   and a probe that PASSES is a coverage gap (see AmbiguousOrderCoverage.tla);
-#   and 4 are CONTROL-WITNESS probes (W1-W4), which ask of a control's own
-#   counterexample whether it demonstrates the HARM or only the flag.
+#   Slices A+B+C+E+F: 61 runs. 27 are the nominals and the negative controls
+#   (composed nominal + the SS2-only nominal + NC1-NC12 + NC17 + NC19 + NC20
+#   + NC21 + NC22 + P6, then the nominal LIVENESS config + NC13-NC16 + NC18
+#   + NC23); 29 are POSITIVE controls, expected to be VIOLATED because each names an
+#   interesting state and a probe that PASSES is a coverage gap (see
+#   AmbiguousOrderCoverage.tla); and 5 are CONTROL-WITNESS probes (W1-W5),
+#   which ask of a control's own counterexample whether it demonstrates the
+#   HARM or only the flag.
+#
+#   SLICE F encodes `FM-8`'s ruling (SM SS7 v0.9.25: "no naked residual" is a
+#   STANDING condition, not only an entry test) and is four runs: NC21, the
+#   PRE-RULING world, which must violate INV9; NC22, the landed transition
+#   row read LITERALLY, which must violate INV10; PC29, which says SS7's
+#   new third supersession row FIRES in the nominal model -- without it, a
+#   green INV9 is equally consistent with a guard doing work and with a rule
+#   nothing ever exercises; and W5, which asks NC21's own witness whether it
+#   reaches the money (a NONZERO spot leg sent on the dissolved premise) or
+#   only the flag. Plus P6, which is the FIX'S OWN JUSTIFICATION converted
+#   into a run: FM-9's resolution rests on the premise being a quantity the
+#   generation cannot move, and FM-7 is this repo's evidence for what happens
+#   to a justification nobody re-derives. And NC23, which is a control on this
+#   slice's OWN first answer: the premise-lost row was first left OUT of the
+#   fairness set, with a reason, and the nominal liveness config refuted it --
+#   a generation halted forever on a dissolved premise, P5 violated. NC23 is
+#   that refutation kept as a run instead of as a war story.
 #
 #   SLICE E added NC20 (SS7d: does "never issued twice" carry safety weight
 #   independent of the reservation? It PASSES the complete graph, so the rule
@@ -50,7 +68,7 @@
 #   says the slice-B refactor did not quietly change the object slice A
 #   verified.
 #
-# 69 runs in total (14 + 55). A FILTERED run is not the suite result -- the
+# 75 runs in total (14 + 61). A FILTERED run is not the suite result -- the
 # summary line says so, and prose downstream must not launder one into the
 # other.
 #
@@ -204,6 +222,9 @@ CONSTANTS
   BLIND_RETRY               = FALSE
   HELD_EXIT_CAUSE_BLIND     = FALSE
   RECLASSIFY_ON_LEDGER_CHANGE = TRUE
+  PREMISE_IS_STANDING       = TRUE
+  PREMISE_NETS_OWN_LEGS     = TRUE
+  PREMISE_SUPERSESSION_FAIR = TRUE
 $2
   $1
 EOF
@@ -277,6 +298,21 @@ r AmbiguousOrder AmbiguousOrder_NC19 deadlock "FM-6 stale verdict, no admissible
 # checked invariant at all. Non-vacuity is free -- INV2 IS `floorCount <=
 # 1`, so NC2's violation already proves double issuance is reached here.
 r AmbiguousOrder AmbiguousOrder_NC20 pass
+# SLICE F -- FM-8's ruling encoded. NC21 is the PRE-RULING world (the
+# precondition as an entry guard alone, which is how slices A-E modeled it),
+# and it must violate INV9. NC22 is the landed transition row read LITERALLY
+# -- a control on the SPEC'S OWN SENTENCE, not on an invented defect -- and
+# it must violate INV10. One invariant each: with two listed, TLC halts on
+# whichever is shallower and the other is never demonstrated (the I2 defect
+# slice E found in model (b)).
+r AmbiguousOrder AmbiguousOrder_NC21 fail "INV9_GenerationNeverAdvancesOnLostPremise"
+r AmbiguousOrder AmbiguousOrder_NC22 fail "INV10_PremiseSupersessionOnlyOnRealLoss"
+# P6 is FM-9's FIX ARGUING FOR ITSELF, converted into a run: the trigger's
+# quantity is the right one BECAUSE the generation cannot move it, and that
+# claim is otherwise prose in three documents. FM-7 is what an unre-derived
+# justification costs. Nominal constants -- it is a claim about the model's
+# own arithmetic.
+r AmbiguousOrder AmbiguousOrder_P6 pass
 
 # SLICE C -- liveness. The nominal config checks P1-P4 under LiveSpec (the
 # fairness set), and each control below flips ONE constant and must produce a
@@ -292,6 +328,12 @@ r AmbiguousOrder AmbiguousOrder_NC16 failprop "P4_FloorGenerationResolves"
 # governs both parks, and a property whose sibling fails is an argument, not
 # evidence that IT bites.
 r AmbiguousOrder AmbiguousOrder_NC18 failprop "P5_HeldPerpGenerationResumes"
+# SLICE F. NC23 is a control on THIS SLICE'S OWN FIRST ANSWER: the
+# premise-lost supersession was first left OUT of the fairness set, with a
+# reason, and the nominal liveness config refuted it. Without this run that
+# refutation is a session anecdote and a later reader tidying the fairness set
+# finds no objection -- FM-7's lesson applied to a mistake made here.
+r AmbiguousOrder AmbiguousOrder_NC23 failprop "P5_HeldPerpGenerationResumes"
 
 echo "###### MODEL (a) POSITIVE CONTROLS -- each MUST be violated (reached) ######"
 echo
@@ -313,7 +355,8 @@ for p in PC1_FloorNeverDispatched PC2_NeverTwoGenerations \
          PC24_FloorNeverOutstanding \
          PC25_PdNeverHeldPerp PC26_PerpParkAlwaysEmpty \
          PC27_GenNeverOpenedOverReservedExposure \
-         PC28_GenPremiseNeverEvaporates; do
+         PC28_GenPremiseNeverEvaporates \
+         PC29_PremiseLostNeverSupersedes; do
   gen_probe_cfg "$p" INVARIANTS
   r AmbiguousOrderCoverage "$TOOLS_DIR/AmbiguousOrder_PC_$p" probe "$p"
 done
@@ -334,6 +377,11 @@ r AmbiguousOrder AmbiguousOrder_W1 probe "NoNonzeroOrphan"
 r AmbiguousOrder AmbiguousOrder_W2 probe "NoStrandedNakedResidual"
 r AmbiguousOrder AmbiguousOrder_W3 probe "NoStrandedNakedResidual"
 r AmbiguousOrder AmbiguousOrder_W4 probe "NoStuckFloorSubtrahend"
+# SLICE F. Asked of NC21 in the session that built it, rather than three
+# slices later -- which is the only change slice E's finding actually asks
+# for. Its probe lives in the coverage module because it reads a flag no
+# invariant does.
+r AmbiguousOrderCoverage AmbiguousOrder_W5 probe "W5_NoSpotLegSentOnLostPremise"
 
 # A filtered run is NOT the suite result. Say so in the summary line, so a
 # partial green can never be quoted as the whole one.

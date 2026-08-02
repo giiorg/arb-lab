@@ -293,4 +293,56 @@ PC28_GenPremiseNeverEvaporates ==
     /\ realized # 0
     /\ TrueReserved = 0
 
+(***************************************************************************)
+(* SLICE F -- the non-vacuity evidence for `FM-8`'s fix, and it is the      *)
+(* first thing to run after it, not the last.                              *)
+(*                                                                         *)
+(* INV9 is green under the nominal constants BY CONSTRUCTION: the guard     *)
+(* blocks precisely the step the flag would record. So a green INV9 is      *)
+(* consistent with the fix working AND with the premise never dissolving at *)
+(* all in this model -- a rule nothing ever exercises, which is the model   *)
+(* form of this repo's nine recorded fixture collapses. PC29 is what        *)
+(* separates them.                                                        *)
+(***************************************************************************)
+
+\* PC29 -- SM SS7's THIRD supersession row fires at all. Violated = the
+\* standing obligation is DISCHARGED somewhere in the nominal model, so
+\* INV9's greenness is a guard doing work rather than a subject that never
+\* occurs.
+\*
+\* Note which claim this is and which it is not. That the row fires says the
+\* premise dissolves under a live generation, which is FM-8's finding
+\* reproduced against the FIXED model. Whether it fires only when the
+\* premise REALLY dissolved is INV10's claim, and whether the generation
+\* was stopped before it acted is INV9's -- three separate runs, because a
+\* config that listed them together would report whichever halts first.
+PC29_PremiseLostNeverSupersedes == superseded # "PremiseLost"
+
+(***************************************************************************)
+(* SLICE F -- the CONTROL-WITNESS probe, asked of NC21 the session it was   *)
+(* built rather than three slices later.                                   *)
+(*                                                                         *)
+(* NC21's counterexample advances the generation by SUBMITTING ITS PERP     *)
+(* LEG one step after the premise dissolved -- and that is the CHEAPEST     *)
+(* advance in the ladder, which is exactly the shape slice E found to be    *)
+(* systematic in model (b): breadth-first search returns the surrogate      *)
+(* before the harm, every time. A perp buy on a package that is short is    *)
+(* not obviously costly; it may even be the right direction by accident.    *)
+(*                                                                         *)
+(* The money is one leg further on. This asks, under NC21's own constants,  *)
+(* whether the machine reaches the SECOND leg -- authorizing and sending    *)
+(* REAL SPOT -- on the dissolved premise. That is a spot sale sized from a  *)
+(* neutrality that stopped holding, which is SS7's "sells no more spot than *)
+(* the confirmed perp reduction" resting on a package the reduction no      *)
+(* longer describes.                                                       *)
+(*                                                                         *)
+(* AND THE QUANTITY IS IN THE FLAG, because the first version of this probe *)
+(* was answered by a spot leg of size ZERO -- the perp leg had confirmed    *)
+(* nothing, so SpotCap was 0 and the machine authorized an empty sale. That *)
+(* is W1's finding (an ORPHAN of amount zero leaks a slot and subtracts     *)
+(* nothing) reappearing on the probe written to avoid exactly this, one     *)
+(* slice later. The shortest counterexample is the empty one, always.      *)
+(***************************************************************************)
+W5_NoSpotLegSentOnLostPremise == ~premiseAdvancedToSpot
+
 ===============================================================================

@@ -1,38 +1,46 @@
-# Formal model (a) — AmbiguousOrder: correspondence map, results, FM-5
+# Formal model (a) — AmbiguousOrder: correspondence map, results, FM-5…FM-9
 
 Companion artifact for `docs/formal/AmbiguousOrder.tla`. Its design record is
 **§46** in `docs/superpowers/specs/2026-08-01-formal-model-a-ambiguous-order-design.md`
-(built across slices A/B/C in sessions 65–67); this file is the reader-facing
+(slices A–F, sessions 65–71); this file is the reader-facing
 half: what the model claims, which spec clause each claim came from, what it
 deliberately does **not** claim, and how to re-run it.
 
 The subject is `docs/state-machines.md` **§2** (ambiguous-order classifier +
 finality contract) **composed with §7** (`PackageDelever` generations and
 reserved reductions) on the one shared `outstanding_reserved_reductions`
-ledger. Finding tags continue model (b)'s series: this model's first is
-**`FM-5`**.
+ledger. Finding tags continue model (b)'s series: this model's are
+**`FM-5`** through **`FM-9`**, and **every one of the five is a defect in that
+composition** — none is a property of either machine read alone.
 
 ---
 
 ## 1. What was checked, and the headline results
 
-**Eight** safety invariants and **five** temporal properties, over §2 composed
-with §7. `./run.sh` is **60 runs** — 8 for model (b) `FenceTakeover`, **52 for
-model (a)**: 2 safety nominals + `NC1`–`NC12` + `NC17` + `NC19`, the liveness
-nominal + `NC13`–`NC16` + `NC18`, 26 positive controls, and 4 control-witness
-probes. Every run is checked against a **recorded prediction**; a nominal that
-fails and a control that passes are both failures of the suite. Slice E added a
-fifth verdict, `deadlock`, because a control that **stranded** the model and one
-that **caught** something are different claims — see `NC19`.
+**Ten** safety invariants and **five** temporal properties, over §2 composed
+with §7. `./run.sh` is **75 runs** — 14 for model (b) `FenceTakeover`, **61 for
+model (a)**: 2 safety nominals + `NC1`–`NC12` + `NC17` + `NC19`–`NC22` + `P6`,
+the liveness nominal + `NC13`–`NC16` + `NC18` + `NC23`, 29 positive controls,
+and 5 control-witness probes. Every run is checked against a **recorded
+prediction**; a nominal that fails and a control that passes are both failures
+of the suite. Slice E added a fifth verdict, `deadlock`, because a control that
+**stranded** the model and one that **caught** something are different claims —
+see `NC19`.
+
+All figures below are from a **single unfiltered invocation** on 2026-08-02
+(slice F), which reported **ALL 75 RUNS MATCH PREDICTIONS**. That distinction is
+kept because `run.sh` prints a `FILTERED … NOT the full suite` line for a
+reason: a result assembled from several invocations is not a suite result.
 
 | | |
 |---|---|
-| Nominal (composed, safety) | **PASS** — 6,729,250 states generated / **832,179 distinct**, depth 30, no deadlock, ~8 s |
-| Nominal (`_Live`, liveness) | **PASS** — same graph, `P1`–`P4` green, ~4 min |
-| Nominal (`_SM2`, `MAX_GEN = 0`) | **PASS** — 25,514 / **5,169**, depth 15 — slice A's recorded graph **to the digit** |
-| Negative controls | **16 of 16 VIOLATED**, each on its predicted invariant or temporal property |
-| Positive controls | **24 of 24 VIOLATED** — each names a state the model must reach, phrased as the negative claim, so a *pass* is a coverage gap |
-| Control-witness probes | **4 of 4 REACHED** |
+| Nominal (composed, safety) | **PASS** — 8,066,455 states generated / **976,541 distinct**, depth 29, **0 left on queue**, no deadlock |
+| Nominal (`_Live`, liveness) | **PASS** — same graph, `P1`–`P5` green |
+| Nominal (`_SM2`, `MAX_GEN = 0`) | **PASS** — 25,514 / **5,169**, depth 15 — slice A's recorded graph **to the digit**, which is what says six slices of change never altered the §2 object underneath |
+| `_P6` (action property) | **PASS** — same graph, **0 left on queue** — the generation cannot move its own premise (§2b) |
+| Negative controls | **21 of 21** on their predicted signature — invariant, temporal property or deadlock. (`NC20` is the exception that proves it: it is a control predicted to **PASS**, and does) |
+| Positive controls | **29 of 29 VIOLATED** — each names a state the model must reach, phrased as the negative claim, so a *pass* is a coverage gap |
+| Control-witness probes | **5 of 5 REACHED** (model (b)'s six as well) |
 
 Toolchain: Java 25, `tla2tools.jar` v1.7.4 pinned by SHA-256, TLC 2.19,
 `-lncheck final`.
@@ -75,10 +83,10 @@ unique route that bypasses it. SM §7 has carried that transition row since v0.9
 the model did not. §4's clause-by-clause map found the omission, and *building*
 it found the defect — the map's own justification, paid twice.
 
-**(2) `NC15`'s state graph is identical to the nominal one — 832,179 distinct
-states, to the digit** (a pre-slice-E figure; the nominal graph is **967,576**
-distinct at depth 30 since the second park was added, and `NC15`'s equality
-argument is unchanged — the control only *removes* a transition)**.** `HELD_RESUMES = FALSE` parks a `PackageDelever`
+**(2) `NC15`'s state graph is identical to the nominal one — 976,541 distinct
+states, to the digit** (re-measured on the slice-F model; the *generated* counts
+differ, 7,891,109 against 8,066,455, because the edge multiplicities differ —
+the **distinct** counts are what the argument is about)**.** `HELD_RESUMES = FALSE` parks a `PackageDelever`
 generation in `Held` for ever, holding an unsold net-long transient and a
 reservation that subtracts from every later sizing. The control only *removes*
 a transition, so its reachable set is a **subset** of the nominal one — and an
@@ -144,6 +152,109 @@ control.
 
 ---
 
+## 2b. `FM-8` and `FM-9` — a precondition checked once, and a trigger that includes its own subject
+
+These are one story in two halves, and the second half exists **because the
+first was fixed**: `FM-9` is a defect in the clause that resolved `FM-8`, found
+by encoding it.
+
+**`FM-8` — the premise outlives the entry.** §7's *"the package has no naked
+residual"* was enforced **only as an entry guard** (`PdPlan`), on §2's
+reservation-netted residual. A reservation can be **released without executing**
+— §2 row 4 says a reduction whose *own* result comes back ambiguous "never
+blind-retries; its own ambiguous result routes through this same §6.7 finality
+contract", which releases its ledger entry and re-enters the exposure as an
+unresolved order. `PC27` reaches the netted-but-physically-short opening at **3
+steps**; `PC28` reaches the dissolution at **4** — a live generation over a
+package physically short, no longer `Determined`, **with nothing reserved
+against it**. Not a model artifact: the release is exactly what §2 mandates.
+What is missing is anything that tells the *generation*. Invisible to every
+invariant here, because `INV5` polices the generation's **own legs** and never
+the premise it opened under. **Ruled by the user 2026-08-02** — the standing
+precondition — and landed in v0.9.25.
+
+**`FM-9` — the trigger names a quantity the generation itself moves.** The
+landed row said the trigger is *"the §2 classifier leaves `Determined` for this
+hedge group"*. But the generation's **own perp reduction is an
+exposure-changing order on that group**: `PdSubmitPerp` reclassifies with the
+leg's interval in the sum, so `cls` leaves `Determined` on the generation's
+**first step** — and §7 *depends* on that, since it is how §2 refuses every
+compensating trade while the leg is live. Control **`NC22`** encodes the
+sentence literally and is **VIOLATED in 4 states with no external event at
+all**:
+
+| | |
+|---|---|
+| 1 | `Init` — `realized = 0`, `cls = "Determined"`, nothing outstanding, ledger empty. **The package is physically flat** |
+| 2 | `PdPlan` — a generation opens; the premise is perfect under either reading |
+| 3 | `PdSubmitPerp` — the generation submits **its own** perp leg; `cls → "Ambiguous"` |
+| 4 | `Supersede("PremiseLost")` — the row fires on an **intact** premise; `realized` is still `0` |
+
+Nothing happened to the package. **A spurious abort is not bookkeeping**: §7's
+generations exist because the perp short is nearing liquidation, so cancelling
+one cancels the mechanism that was reducing the risk, and does it with a
+reserved leg out.
+
+**The quantity that is actually the premise**, and the reason it is the right
+one:
+
+```
+PdOwnRealized   == pdDone - pdSold
+PremiseResidual == (realized - PdOwnRealized) - (TrueReserved - PdReserved)
+PremiseIntact   == PremiseResidual = 0 /\ ReportedDetermined(orders, 0)
+```
+
+It is the entry test with this generation's own transient and its own ledger
+entry removed from **both sides of the same subtraction** — so at entry it *is*
+`TrueResidual`, and it is **invariant under every step of the generation's own
+ladder**: `PdPerpFill` raises `realized` by `x` and amends the entry by `x`,
+`PdAuthorizeSpot` and `PdSpotFinal` move `pending` and the transient together.
+That invariance is **`FM-5`'s fix restated as a quantity**, and it is what makes
+the premise move only when something *external* moves it.
+
+**Three findings, one family.** `FM-5`: an entry read **before its backing
+exists**. `FM-8`: an entry's **premise outliving it**. `FM-9`: a rule evaluated
+on a quantity that **includes its own subject**. All three are §2 and §7
+disagreeing about what the shared ledger means, and none was visible to any
+invariant phrased over the ledger.
+
+**And the fix's own justification is a run, not a paragraph.** That
+`PremiseResidual` is a quantity the generation cannot move is the *reason* the
+netted reading is the right one — so it is checked as an action property,
+`P6_GenerationCannotMoveItsOwnPremise == [][PdOwnStep ⇒ PremiseResidual' =
+PremiseResidual]_vars`, **PASSING over the complete graph** (7,923,475 /
+976,541 / **0 left on queue**). It is a **conservation law**: every ledger
+change the generation makes is to its own entry and every realized change is
+its own transient, so both subtractions cancel. `FM-7` is why this is a run
+rather than a sentence — a recorded justification nobody re-derives is the
+thing that later retires a rule doing real work.
+
+**Two boundaries of the standing obligation, both drawn by runs that FAILED.**
+The first encoding guarded *all three* of the generation's decision steps and
+left the new supersession row **out of the fairness set**, with a written
+reason. The nominal liveness config refused both: guarded, `PdSubmitSpot`
+stutters a generation at `SpotReduceAuthorized` over a package that is
+**physically flat and `Determined`** (blocking a step that commits nothing
+strands the reserved leg — `INV6`'s harm one step earlier); unfair, a
+generation halts at `PerpReduceFinal` on a genuinely dissolved premise with the
+dispatch budget spent, `P5` violated. Both are normative in SM §7 now, and the
+second is kept as control **`NC23`** — same constants, **same 976,541-state
+graph**, one fairness conjunct removed — because otherwise the refutation of a
+*written, reasoned* design note survives only as an anecdote.
+
+**What is checked, and what each run is evidence for.** `INV9` (the standing
+obligation, read from a flag written at the generation's decision steps) with
+control `NC21` — the pre-ruling world, entry guard alone. `INV10` (the row
+never fires on an intact premise) with control `NC22` — **the spec's own
+sentence**, which is a first for either model. `PC29` says the new row **fires**
+at all, without which `INV9`'s greenness would be equally consistent with a rule
+nothing exercises. `W5` says `NC21`'s harm reaches a **nonzero spot sale** on
+the dissolved premise — its first version was answered by a sale of size
+**zero**, which is `W1`'s own finding landing on the probe written to avoid that
+class.
+
+---
+
 ## 3. Correspondence map
 
 Notation: SM clause → model construct. **"UNMODELED"** = deliberately out of
@@ -201,7 +312,8 @@ exhaustive rather than illustrative.
 | SM row / rule | Model |
 |---|---|
 | `Planned` — "a generation is created" carrying "**explicit per-leg target positions**"; the intended net-long transient is "an **atomically reserved part of the fenced generation**" from creation | `PdPlan(t)`: `pd' = "Planned"`, `pdTarget' = t`, and a `"pkgspot"` ledger entry created **at this step under both readings** — what they disagree about is its **amount** (`RESERVE_AT_CREATION`: nominal = outstanding net intent, i.e. **zero** until the perp confirms; `NC7` = the target, which is `FM-5`). One target number: both legs share it, because the package is neutral at entry |
-| `Planned` entry precondition — reduce leverage "on a **still-neutral** package"; "the package has **no naked residual**" | `PdPlan`'s guards `cls = "Determined" ∧ TrueResidual = 0`. **This is a reading and is marked as one** (§5): "no naked residual" is evaluated on §2's *reservation-netted* residual, which admits a package neutral **pending an in-flight reduction** rather than physically flat. Whether *physical* neutrality is the stronger intended precondition is a **slice-E question** — it is FM-5's mirror |
+| `Planned` entry precondition — reduce leverage "on a **still-neutral** package"; "the package has **no naked residual**" | `PdPlan`'s guards `cls = "Determined" ∧ TrueResidual = 0`. The reservation-netted reading is **retained and is now normative** (v0.9.25): a reserved reduction genuinely does offset the exposure it reduces, so the guard admitting a package neutral *pending an in-flight reduction* is correct. **What slice E found is that it is not sufficient alone** — `PC27` reaches the netted-but-physically-short opening at 3 steps, `PC28` reaches its dissolution at 4, and that is **`FM-8`**. The precondition is a **standing** condition as of v0.9.25; the row below is its enforcement |
+| **Standing precondition `[→ FM-8, FM-9]`** — "'no naked residual' is a **standing** condition, not only an entry test": the premise leaving the state the generation opened under **supersedes** it, quiescing the reserved second leg to §6.7 finality first | The third supersession path, `Supersede("PremiseLost")`, enabled on `PREMISE_IS_STANDING ∧ PdActive ∧ PremiseDissolved` and reusing `Supersede` unmodified — which is what the ruling's "policed by the same invariant rather than a new one" means, encoded. `PREMISE_IS_STANDING = FALSE` is **`NC21`**, the pre-ruling world, and it violates `INV9`. **Which quantity the trigger reads is `FM-9`** — see the invariants table and §2b |
 | `PerpReduceInFlight` — the perp-short reduction is submitted **first**, "which itself relieves the liq risk" `[→ R1b-1]` | `PdSubmitPerp` (guarded by `PERP_FIRST`), setting `pdPerp`. The submission makes the residual `Ambiguous` — **that is the composition doing its work**: §2 now refuses every compensating trade until this leg reaches finality. Its interval is `[0, pdPerp]` (a buy-to-reduce raises delta only), and it enters `SumHi` |
 | `PerpReduceFinal` — the perp reduction confirmed **to finality** (§2) | `PdPerpFinal`, the **same barrier** as `OrderFinal`. `PdPerpFill(x)` moves `pdDone`; a partial confirmation is first-class and `PC18` shows it is reached |
 | `SpotReduceAuthorized` — a **durable journal record** on perp finality `[→ R1d-F3]` (FLAG-3) | `PdAuthorizeSpot(s)`, `s ∈ 0..SpotCap`. The **durability** of the record is UNMODELED (no crash/recovery in this model); what is modeled is the **ordering** it exists to guarantee — no spot dispatch before perp finality — which is `PERP_FIRST` + `SpotCap`, controls `NC9` and `NC8` |
@@ -210,7 +322,7 @@ exhaustive rather than illustrative.
 | `Held/Alert` — "a leg that is deadline-exceeded/ambiguous **holds and alerts, never blind-retries or blind-flattens**" | **BOTH entries modeled as of slice E.** Spot leg: `PdSpotHolds` → `pd = "Held"` (`PC14`). Perp leg: `PdPerpHolds` → `pd = "HeldPerp"` (`PC25`). There is **no retry edge out of either**. `HeldPerp` is a **distinct state, not a second way into `Held`** — model (b)'s `Cx8-2` ("a park is two states wearing one name") applied to its mirror here; the cause-blind exit is control **`NC17`**, caught by **`INV8`**. Exits: `Held` → `PdSpotFinal` / `PdTerminalFlatten`, with `Supersede` blocked by `QUIESCE_BEFORE_SUPERSEDE`; `HeldPerp` → `PdPerpFinal` / `PdTerminalFlatten` / **`Supersede`, which is NOT blocked** — §7's quiesce clause is scoped to "its **reserved second leg**", which does not exist yet at a perp-side park. That asymmetry is recorded, not absorbed (§46 §11b). **Slices A–D modeled the spot side only, and building the other one found `FM-6`** — §2 below |
 | `Held/Alert` is **nonterminal** — eventual finality resumes the remaining target `[→ R1d-F4]` (FLAG-4) | `PdSpotFinal` from `Held`, gated by `HELD_RESUMES`. This is **`P3`**, and **`NC15`** is the control — the run whose state graph is identical to the nominal one |
 | `TerminalFlatten` — "its terminal full-flatten routes through the same §6.7 finality contract, not a blind market dump" | `PdTerminalFlatten` (`Held → TerminalFlatten`), releasing the generation's reservation. **The flatten's own orders are UNMODELED**: what is modeled is that the generation ends and its reservation stops being counted; the flatten's legs are a different scenario's. `PC19` shows the state is entered |
-| Supersession rows — `EmergencyClosePackage` (core §5.3) and `FenceReadyLost` (core §7.4) each "supersede and quiesce any active generation (cancelling its reserved second leg to §6.7 finality **first**)" | `Supersede(path)` for both paths, `PC16`/`PC17` showing **each separately** fires — the sign-mirror lesson applied to paths. Dropping the in-flight perp leg's remaining interval is *quiescence, not amnesia*: it is `OrderFinal`'s semantics, and everything the leg executed is already in `realized` |
+| Supersession rows — `EmergencyClosePackage` (core §5.3), `FenceReadyLost` (core §7.4) and, since v0.9.25, **premise-lost** each "supersede and quiesce any active generation (cancelling its reserved second leg to §6.7 finality **first**)" | `Supersede(path)` for **all three**, `PC16`/`PC17`/`PC29` showing **each separately** fires — the sign-mirror lesson applied to paths. The first two are **external arbitration events** and are enabled against any active generation, because nothing here decides when a liquidation policy or a fence arbitration fires; the third is **triggered by state**, so it carries its own guard in `Next`. Dropping the in-flight perp leg's remaining interval is *quiescence, not amnesia*: it is `OrderFinal`'s semantics, and everything the leg executed is already in `realized` |
 | The escalation ladder that reaches `PackageDelever` (liq-distance breach → top-up → failure) | **UNMODELED** — `PdPlan`'s enabling is a nondeterministic event. See §7 Invariants below and §5 |
 
 ### SM §7 — Invariants (every clause)
@@ -228,24 +340,35 @@ exhaustive rather than illustrative.
 | **Completes the target on a determined leg failure** — "never buying the spot back to restore neutrality *and* the original notional (that would re-arm the same liq breach and loop)" | **Partially modeled, and this is where `FM-5` bites.** `PdSpotFinal(x)` admits `x ∈ 0..reserved`, so a shortfall becomes a genuine naked residual that §2's determined branch then compensates — the composition working. **Re-driving the remainder as a fresh leg is UNMODELED** (§46 §8f). The forbidden buy-back is exactly what `NC7` produces from the *ledger* side: a phantom short read off an unbacked reservation makes §2 buy back what the generation is about to buy |
 | **Not an `ExposureReduction`** — "the package has **no naked residual**, so an `ExposureReduction` would either no-op (delta ≈ 0) or, by reducing a single leg, *create* a naked leg during the rally" | `PdPlan`'s entry guard (`cls = "Determined" ∧ TrueResidual = 0`) is §7's own precondition, encoded rather than assumed: a generation opened over an unresolved or nonzero residual is a different scenario §7 does not specify, and letting the model open one would manufacture violations of properties nobody claimed. The **reading** it embeds is marked in §5 |
 | **Ambiguous top-up result ⇒ re-query first** — the durable journaled `MarginOp` (local op ID, intended delta, before-state + watermark, fsynced before dispatch), resolved by **per-venue evidence** (Binance `positionMargin/history` match; Bybit `positionIM` delta vs before-state), never a point lookup, never a blind delta retry; same-position ops serialized; `MarginOpStatus` carries a first-class `Ambiguous` `[→ R1d-6, Cx5-4]` | **UNMODELED in full, per §46 §2, and the reason is worth stating precisely:** the venue-specific halves are **Profiles facts**, and a model encoding them would be checking a **transcription, not a behaviour**. The part of the clause that *has* state — an ambiguous op resolved by evidence rather than by a blind retry — is present one level down and in the same shape: a generation **leg** whose result is ambiguous holds (`PdSpotHolds`) and a reduction generation's ambiguous result routes back through the contract (`ReductionAmbiguous`) instead of being re-sent (`NC16`). So the *hazard class* is checked; the margin-op instance of it is not. Owners: `docs/venue-profiles.md` §4 and the §9 integration cases |
-| **Supersession quiesces the reserved leg first** — both paths "cancel/quiesce the generation's reserved second leg **to §6.7 finality first**" | `INV6_SupersessionQuiescesFirst == ¬supersededWithLiveLeg`, where the flag is written **unconditionally** from the state at the supersession and `QUIESCE_BEFORE_SUPERSEDE ⇒ ¬PdLegLive` is the guard that prevents the bad one. Relaxing the guard (**`NC10`**) therefore **sets the flag** rather than hiding the event — the same shape as `RecordDispatch`. `PdLegLive == pd ∈ {"SpotReduceInFlight", "Held"}` is precisely what the two rows require to be quiesced |
+| **Supersession quiesces the reserved leg first** — **all three** paths "cancel/quiesce the generation's reserved second leg **to §6.7 finality first**" | `INV6_SupersessionQuiescesFirst == ¬supersededWithLiveLeg`, where the flag is written **unconditionally** from the state at the supersession and `QUIESCE_BEFORE_SUPERSEDE ⇒ ¬PdLegLive` is the guard that prevents the bad one. Relaxing the guard (**`NC10`**) therefore **sets the flag** rather than hiding the event — the same shape as `RecordDispatch`. `PdLegLive == pd ∈ {"SpotReduceInFlight", "Held"}` is precisely what the rows require to be quiesced. **The third path reuses this unchanged**, which is the encoded form of the ruling's "given no separate discipline: it is the same obligation, so a separate rule would be a second place for it to drift" |
+| **"No naked residual" is a STANDING condition `[→ FM-8]`** — the generation MUST NOT continue on a premise that has stopped holding, and MUST NOT be abandoned without quiescing | `INV9_GenerationNeverAdvancesOnLostPremise == ¬premiseAdvanced`. **A rule about EVENTS, not a state predicate, and that is the claim rather than a weakening**: the dissolved state is *legal* for as long as the quiesce obligation above takes, so `PdActive ⇒ PremiseIntact` would forbid the window §7 mandates and could be satisfied only by violating `INV6`. The flag is written at the generation's **decision** steps (`PdSubmitPerp`, `PdAuthorizeSpot`, `PdSubmitSpot`); venue events and both parks are untouched, being what the window is made of. Control **`NC21`**; non-vacuity **`PC29`**; and **`W5`** says NC21's harm reaches a **nonzero spot sale**, not just a flag |
+| **The trigger's quantity `[→ FM-9]`** — the premise is the entry test re-evaluated **net of this generation's own legs** | `PremiseResidual == (realized − (pdDone − pdSold)) − (TrueReserved − PdReserved)`, with `PremiseIntact == PremiseResidual = 0 ∧ ReportedDetermined(orders, 0)`. **It is invariant under every step of the generation's own ladder** — `FM-5`'s fix stated as a quantity — so it moves only when something external does. `INV10_PremiseSupersessionOnlyOnRealLoss == ¬supersededOnIntactPremise` polices the other direction: the row never fires on an intact premise. Its control **`NC22`** is **the v0.9.25 sentence read literally** (`cls ≠ "Determined"`), which aborts a generation on a physically flat package 4 states from `Init` — §2b |
 | **Escalate, don't wait** — "a slow top-up under stress … gets a pre-authorized fallback" (core §7.1) | **UNMODELED** — a latency-budget policy, and there is no clock here. `PdPlan`'s enabling is nondeterministic, which is the model's way of saying the trigger is the environment's |
 
-**One correspondence gap this map surfaced, recorded here rather than absorbed.**
-SM §7's transition row enters `Held/Alert` from **either** in-flight leg
-(`PerpReduceInFlight` **or** `SpotReduceInFlight`); the model has only
-`PdSpotHolds`, so **the perp leg cannot hold**. The reason it is defensible:
-`Held` matters to this model because of what a held generation *holds* — an
-unsold net-long transient and a reservation that subtracts from every later
-sizing — and at the perp leg neither exists yet (`pdDone = 0`, and the
-`"pkgspot"` entry carries the outstanding net intent, which is zero until the
-perp confirms). So the perp-side park is the *harmless* instance of the state,
-and `P3`/`NC15` are aimed at the one with content. But it is a **narrowing of
-the spec row, not a coincidence of it**, and a slice-E round should ask whether
-a perp-side park has a hazard this reasoning misses — a generation stuck before
-its reservation grows still blocks the next generation on §7's own
-"only after finality" gate, which is a liveness question no property here
-states.
+**The one correspondence gap this map surfaced is CLOSED, and closing it is the
+best evidence the map has for existing.** SM §7's transition row enters
+`Held/Alert` from **either** in-flight leg (`PerpReduceInFlight` **or**
+`SpotReduceInFlight`); through slice D the model had only `PdSpotHolds`, so the
+perp leg could not hold. The narrowing came with an argument — `Held` matters
+because of what a held generation *holds*, an unsold transient and a nonzero
+reservation, and at the perp leg neither exists yet (`pdDone = 0`) — so the
+perp-side park looked like the *harmless* instance.
+
+**Slice E built it, and the argument was wrong.** `PdPerpFill` fires while
+`pd = "PerpReduceInFlight"` and amends the ledger entry **upward**, so a perp
+leg may partially fill and *then* go ambiguous — §2's own `PartiallyFilled`
+case. Such a park holds a real net-long transient **and** a nonzero
+reservation. `pdDone = 0` is the park taken *before* any fill: one instance, not
+the case. Probe `PC26` is what says so, and it cost one line. Building the
+transition then found **`FM-6`** (§1b), a spec defect four review rounds, four
+model slices and 55 runs had passed over.
+
+**The lesson is the general one and it is why this section is a totality
+condition over the SPEC's clauses rather than over the model's constructs:**
+no invariant and no property in a model is *about* the set of ways a state is
+entered, so **nothing inside a model can report that a spec clause never
+entered it**. And **the reason a thing was narrowed away is itself an unchecked
+claim** — nobody re-derives it, so it ages into a fact.
 
 ### Where the model is stricter than the spec sentence
 
@@ -261,29 +384,47 @@ fourth (`P4`, checked in a **narrower** form) is argued in §5.
 
 ## 4. Results in full
 
-### Nominals and negative controls (19 runs)
+### Nominals and negative controls (27 runs)
+
+Figures from the single unfiltered slice-F invocation (2026-08-02). `left = 0`
+means the state graph was **exhausted**, not truncated.
 
 | Run | Constant flipped | Predicted | Result |
 |---|---|---|---|
-| nominal (composed, safety) | — | pass, all seven invariants | **PASS** — 6,729,250 / **832,179 distinct**, depth 30, no deadlock, ~8 s |
+| nominal (composed, safety) | — | pass, all ten invariants | **PASS** — 8,066,455 / **976,541**, depth 29, 0 left |
 | `_SM2` (`MAX_GEN = 0`) | — | pass, incl. `INV1b` | **PASS** — 25,514 / **5,169**, depth 15 |
-| `_Live` (nominal liveness) | — | pass, `P1`–`P4` + all seven invariants | **PASS** — same graph, ~4 min |
-| `NC1` | `FLOOR_NEAREST_ZERO = FALSE` | `INV1` | **VIOLATED** |
-| `NC2` | `FLOOR_ONCE = FALSE` | `INV2` | **VIOLATED** |
-| `NC3` | `BLIND_COMPENSATION = TRUE` | `INV3` | **VIOLATED** |
-| `NC4` | `CLASSIFY_ON_FILLS_ONLY = TRUE` | `INV7` | **VIOLATED** |
-| `NC5` | `STRADDLE_GUARD = FALSE` | `INV3` | **VIOLATED** |
-| `NC6` | `RESERVATION_AWARE_SIZING = FALSE` | `INV1` | **VIOLATED** |
-| `NC7` | `RESERVE_AT_CREATION = TRUE` | `INV4` | **VIOLATED — this is `FM-5`** |
-| `NC8` | `SPOT_CAPPED_BY_PERP = FALSE` | `INV5` | **VIOLATED** |
-| `NC9` | `PERP_FIRST = FALSE` | `INV5` | **VIOLATED** |
-| `NC10` | `QUIESCE_BEFORE_SUPERSEDE = FALSE` | `INV6` | **VIOLATED** |
-| `NC11` | `RELEASE_ON_FINALITY = FALSE` | `INV4` | **VIOLATED** |
-| `NC12` | `RELEASE_ON_SUPERSEDE = FALSE` | `INV4` | **VIOLATED** (+ deadlock — a second, independent signature) |
-| `NC13` | `RECLASSIFY_ON_FINALITY = FALSE` | `P1` | **VIOLATED** — 7,101,314 / 930,385 |
-| `NC14` | `RECLASSIFY_AFTER_DEADLINE = FALSE` | `P2` | **VIOLATED** — 3,597,110 / 460,997 |
-| `NC15` | `HELD_RESUMES = FALSE` | `P3` | **VIOLATED** — 6,600,882 / **832,179** |
-| `NC16` | `BLIND_RETRY = TRUE` | `P4` | **VIOLATED** — 10,787,270 / 1,352,785 |
+| `_Live` (nominal liveness) | — | pass, `P1`–`P5` | **PASS** — same graph |
+| `_P6` (action property) | — | pass | **PASS** — same graph; the generation cannot move its own premise |
+| `NC1` | `FLOOR_NEAREST_ZERO = FALSE` | `INV1` | **VIOLATED** — depth 3 |
+| `NC2` | `FLOOR_ONCE = FALSE` | `INV2` | **VIOLATED** — depth 5 |
+| `NC3` | `BLIND_COMPENSATION = TRUE` | `INV3` | **VIOLATED** — depth 2 |
+| `NC4` | `CLASSIFY_ON_FILLS_ONLY = TRUE` | `INV7` | **VIOLATED** — at the initial predicate |
+| `NC5` | `STRADDLE_GUARD = FALSE` | `INV3` | **VIOLATED** — depth 3 |
+| `NC6` | `RESERVATION_AWARE_SIZING = FALSE` | `INV1` | **VIOLATED** — depth 3 |
+| `NC7` | `RESERVE_AT_CREATION = TRUE` | `INV4` | **VIOLATED — this is `FM-5`** — depth 2 |
+| `NC8` | `SPOT_CAPPED_BY_PERP = FALSE` | `INV5` | **VIOLATED** — depth 5 |
+| `NC9` | `PERP_FIRST = FALSE` | `INV5` | **VIOLATED** — depth 3 |
+| `NC10` | `QUIESCE_BEFORE_SUPERSEDE = FALSE` | `INV6` | **VIOLATED** — depth 8 |
+| `NC11` | `RELEASE_ON_FINALITY = FALSE` | `INV4` | **VIOLATED** — depth 3 |
+| `NC12` | `RELEASE_ON_SUPERSEDE = FALSE` | `INV4` | **VIOLATED** — depth 3 (+ deadlock, a second independent signature) |
+| `NC13` | `RECLASSIFY_ON_FINALITY = FALSE` | `P1` | **VIOLATED** — 8,452,635 / 1,075,558 |
+| `NC14` | `RECLASSIFY_AFTER_DEADLINE = FALSE` | `P2` | **VIOLATED** — 4,231,485 / 528,920 |
+| `NC15` | `HELD_RESUMES = FALSE` | `P3` | **VIOLATED** — 7,891,109 / **976,541** — the nominal's distinct count **to the digit** |
+| `NC16` | `BLIND_RETRY = TRUE` | `P4` | **VIOLATED** — 13,208,498 / 1,626,079 |
+| `NC17` | `HELD_EXIT_CAUSE_BLIND = TRUE` | `INV8` | **VIOLATED** — depth 5 |
+| `NC18` | `HELD_RESUMES = FALSE`, `P5` alone | `P5` | **VIOLATED** — 7,891,109 / 976,541 |
+| `NC19` | `RECLASSIFY_ON_LEDGER_CHANGE = FALSE` | **deadlock** | **DEADLOCK — this is `FM-6`** — depth 12 |
+| `NC20` | `NC2`'s constants, `INV2` removed | **pass** | **PASS** — 8,948,671 / 1,093,953, **0 left** — this is `FM-7` |
+| `NC21` | `PREMISE_IS_STANDING = FALSE` | `INV9` | **VIOLATED** — depth 5 — the pre-ruling world; **this is the run that says `FM-8`'s hole closes** |
+| `NC22` | `PREMISE_NETS_OWN_LEGS = FALSE` | `INV10` | **VIOLATED — this is `FM-9`** — **depth 4, no external event** |
+| `NC23` | `PREMISE_SUPERSESSION_FAIR = FALSE` | `P5` | **VIOLATED** — same 976,541 graph, one fairness conjunct removed |
+
+**Three of these are controls on a DECISION rather than on a defect**, which is
+worth noticing as a pattern: `NC20` encodes a rule whose *justification* was
+suspect (and passes), `NC22` encodes **the spec's own sentence** (and fails),
+and `NC23` encodes **this slice's own first answer** (and fails). A suite that
+can only express "somebody typed the wrong constant" cannot check the reasoning
+that produced the constants.
 
 **Every violation was read, not merely counted** — a violation by the wrong
 mechanism is the formal-methods twin of `mutate.sh`'s `PANIC!!`: a kill, but not
@@ -316,7 +457,7 @@ quietly change the object slice A verified. The same discipline model (b)
 supplies by reproducing its v0.9.4 counts across sessions, applied *within* one
 model.
 
-### Positive controls — 24 probes, all VIOLATED (i.e. all reached)
+### Positive controls — 29 probes, all VIOLATED (i.e. all reached)
 
 `AmbiguousOrderCoverage.tla` holds them, each phrased as the **negative** claim,
 so **a TLC violation is the good outcome and a pass is a coverage gap**.
@@ -338,6 +479,10 @@ so **a TLC violation is the good outcome and a pass is a coverage gap**.
 | `PC20` | a **second** generation is started |
 | `PC21` | the intended net-long transient is actually **nonzero** |
 | `PC22` / `PC23` / `PC24` | `Ambiguous`, `DeadlineExceeded`, and a floor generation **outstanding** — the liveness antecedents (`P3`'s was already `PC14`) |
+| `PC25` / `PC26` | the **perp-side** park is entered, and it is entered holding a **nonzero** transient — `PC26` is the probe that disproved §46 §10a's own stated reason for narrowing that row away |
+| `PC27` | a generation is opened over a package that is reservation-netted neutral but **physically exposed** — §8f's question, answered on the model |
+| `PC28` | that generation's premise then **evaporates** — **this is `FM-8`**, and it is still REACHED under the fixed model, because the dissolved state is legal for as long as the quiesce obligation takes |
+| `PC29` | SM §7's **third supersession row fires** — without it a green `INV9` would be equally consistent with a rule nothing exercises |
 
 Three of these were named by the **fixture-collapse checklist before the model
 ran**, and each pins a parameter that would otherwise collapse a distinction the
@@ -350,7 +495,7 @@ transient always zero makes both of `INV5`'s conjuncts trivially true).
 — a three-producer ledger in which just one producer is ever nonzero would pass
 `PC3` while §46 §2.1's entire argument for modeling §2 with §7 went unexercised.
 
-### Control-witness probes — 4 runs
+### Control-witness probes — 5 runs
 
 **A control's witness deserves the same fixture-collapse question a fixture
 does.** TLC reports *a* counterexample, not the most harmful one, and the
@@ -377,6 +522,23 @@ here. `NC15` needed no probe — its park is harmful on its face.
 this question.** That is recorded as a slice-E debt (§46 §9f), not done here —
 but the session that generalizes a check is the session that can see where else
 it applies.
+
+
+**Slice F added `W5`, asked of `NC21` in the session that built it** — which is
+the only change slice E's finding actually calls for. `NC21`'s counterexample
+advances the generation by submitting its **perp** leg, the cheapest advance in
+the ladder. `W5` asks for the money instead, under `NC21`'s own constants, and
+is **REACHED**: a spot sale of 1 against a package short 1 with nothing
+reserved, the generation **deepening** the naked short it was opened to be
+neutral toward.
+
+**And `W5` had to be asked twice.** Its first version was violated by a spot
+authorization of size **ZERO** — the perp leg had confirmed nothing, so
+`SpotCap` was 0. A decision correctly flagged by `INV9`, moving no money. That
+is `W1`'s own finding (an orphaned entry of amount zero leaks a slot and
+subtracts nothing) reappearing on the probe written to avoid that class, one
+slice later. **The quantity had to go into the flag**: the shortest
+counterexample is the empty one, always.
 
 ### Liveness: the fairness set, and what is left out of it
 
@@ -467,11 +629,18 @@ about the held generation's own resolution and never mentions a later one.
   distinct episode must plainly be allowed its own floor — a global reading would
   leave a second incident with no admissible safe action for ever. **A reading,
   stated, because an unstated reading is what later gets called drift.**
-- **A generation may open on a package that is neutral *pending an in-flight
-  reduction*, not necessarily physically flat.** `PdPlan` evaluates §7's "no
-  naked residual" on §2's reservation-netted residual. Also a reading; whether
-  *physical* neutrality is the stronger and intended precondition is a **slice-E
-  question**, and it is `FM-5`'s mirror — they should be attacked together.
+- ~~**A generation may open on a package that is neutral *pending an in-flight
+  reduction*, not necessarily physically flat** — a reading; whether *physical*
+  neutrality is the stronger and intended precondition is a slice-E question.~~
+  **NO LONGER A READING: ASKED, ANSWERED, AND THE ANSWER WAS WORSE THAN THE
+  QUESTION.** Slice E's probes reached both the opening (`PC27`, 3 steps) and
+  its dissolution (`PC28`, 4 steps), which is **`FM-8`** — §7's precondition was
+  enforced *only at entry*. The reservation-netted reading is **retained** and
+  the entry guard is unchanged; what v0.9.25 added is that the precondition is
+  **standing**, and what slice F added is the encoding, its controls, and
+  **`FM-9`** — the quantity the standing trigger must read (§2b). Left here
+  struck through rather than deleted, because a limit that turned out to be a
+  defect is the most useful kind of entry in this list.
 - **The straddling branch's "de-minimis only" latitude is not modeled.** The
   model dispatches nothing there, so `INV3`'s straddle clause is checked against
   "no floor", not against "nothing larger than de-minimis". That is unmodeled
@@ -507,17 +676,19 @@ about the held generation's own resolution and never mentions a later one.
 - **Named refinement candidates**, if this model is ever extended: the
   watermark's partial order (so "never a weaker cancel-ack-only variant" becomes
   checkable), the protective-order leg reservation as a fourth ledger producer,
-  crash/recovery over the durable `SpotReduceAuthorized` record, and **a
-  perp-side `Held/Alert` park** (§3's correspondence-gap note — the model
-  narrows SM §7's row to the spot leg).
+  and crash/recovery over the durable `SpotReduceAuthorized` record. (The
+  **perp-side `Held/Alert` park** that stood here as a candidate was BUILT in
+  slice E, and building it found `FM-6` — see §3. That is the entry in this
+  list's favour: a named refinement candidate is a **deferred finding**, not a
+  wish.)
 
 ---
 
 ## 6. How to run
 
 ```
-cd docs/formal && ./run.sh                 # the whole suite: 60 runs, both models
-cd docs/formal && ./run.sh AmbiguousOrder  # model (a) only: all 52
+cd docs/formal && ./run.sh                 # the whole suite: 75 runs, both models
+cd docs/formal && ./run.sh AmbiguousOrder  # model (a) only: all 61
 TLC_WORKERS=4 ./run.sh AmbiguousOrder      # capped — see below
 ```
 
@@ -539,7 +710,7 @@ configs otherwise hold every core for ~30 minutes. Cap it (4 is what sessions
 65–67 used) whenever the capture is running.
 
 **The filter argument is an extended regex on the config *tag*, and the
-namespace is what makes it honest.** `./run.sh AmbiguousOrder` selects all 47
+namespace is what makes it honest.** `./run.sh AmbiguousOrder` selects all 61
 model-(a) runs because **every** model-(a) config tag lives inside the
 `AmbiguousOrder_` namespace — **including the coverage probes, whose configs the
 script generates**. They did not always: they were written as `PC_*`, outside

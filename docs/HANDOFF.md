@@ -1,6 +1,164 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-02, session 70): **§46 SLICE E IS COMPLETE — ALL FIVE DOCKET ITEMS CLOSED, AND ITEMS 2/3/4 PRODUCED `FM-7` AND `FM-8` — BOTH NORMATIVE EDITS LANDED (`FM-8` BY USER RULING IN-SESSION; ITS MODEL ENCODING IS OWED, TASK #156). DOCS ARE v0.9.25.**
+## Status (2026-08-02, session 71): **SLICE F IS BUILT — `FM-8`'s RULING IS ENCODED AND CHECKED, THE HOLE IS SHOWN TO CLOSE, AND ENCODING IT FOUND `FM-9`. DOCS ARE v0.9.26.**
+
+**The one thing slice E left open is closed, and there is now a run that says
+so.** `NC21` — the **pre-ruling world**, §7's precondition as an entry guard
+alone, which is exactly how slices A–E modeled it — **violates `INV9`**, the
+new standing obligation. The constant *is* the ruling and nothing else differs
+from nominal, so the control isolates it. `PC29` shows the new third
+supersession row **actually fires** in the nominal model, without which a green
+`INV9` would be equally consistent with a rule nothing exercises. `W5` shows
+the pre-ruling harm reaches a **nonzero spot sale** on the dissolved premise —
+`NC21`'s own witness only reached `PdSubmitPerp`, the cheapest advance.
+
+**`FM-9` — and it is a defect in the clause that landed LAST SESSION.** SM §7's
+new row stated its trigger as *"the §2 classifier leaves `Determined` for this
+hedge group"*. **The generation's own perp reduction is an exposure-changing
+order on that group**, so submitting it drives the classifier out of
+`Determined` by itself — and **§7 depends on that**, because it is how §2
+refuses every compensating trade while the leg is live. Read literally, the row
+fires on the generation's own machinery. Control **`NC22`** encodes **the
+spec's own sentence** — the first negative control in either model aimed at
+one — and reaches the abort **4 states from `Init` with no external event at
+all**: `realized = 0`, nothing outstanding, ledger empty, a generation opened
+on a **physically flat** package and cancelled one step later by itself. A
+spurious abort is not bookkeeping: §7's generations exist because the perp
+short is nearing liquidation, so cancelling one cancels the mechanism that was
+reducing the risk, with a reserved leg still out.
+
+**The fix, landed v0.9.26: the trigger is the entry test re-evaluated NET OF
+THE GENERATION'S OWN LEGS** — its unsold transient out of the realized delta,
+its own ledger entry out of `outstanding_reserved_reductions`, both sides of
+the same subtraction. **The RULING IS UNTOUCHED**: standing-vs-entry was not
+reopened, and what the model supplied is the quantity that makes it coherent.
+
+**`FM-9` is the third finding in one family, and naming the family is the
+point.** `FM-5`: an entry read **before its backing exists**. `FM-8`: an
+entry's **premise outliving it**. `FM-9`: a rule evaluated on a quantity that
+**includes its own subject**. All three are §2 and §7 disagreeing about what
+the shared ledger means; none was visible to any invariant phrased over the
+ledger, for §8e's reason — *an invariant built on the ledger cannot audit the
+ledger*.
+
+**`P6` is the transferable move: the fix's own justification is now a run.**
+`FM-9`'s resolution rests on one claim — the netted premise is a quantity **the
+generation cannot move**. That was about to live as prose in three documents,
+and `FM-7` is this repo's evidence for what that costs (a justification nobody
+re-derives ages into a fact, and a reader who checks it and finds it false
+retires a rule doing real work). It is now the action property
+`[][PdOwnStep ⇒ PremiseResidual' = PremiseResidual]_vars`, **PASSING over the
+complete graph** (7,923,475 generated / 976,541 distinct / **0 left on
+queue**). It turns out to be a conservation law: every ledger change the
+generation makes is to **its own** entry and every realized change is **its
+own** transient, so both subtractions cancel — `FM-5`'s fix showing up as
+arithmetic.
+
+**Three process facts this slice paid for.**
+**(1) The witness-degeneracy question needed asking TWICE.** `W5`'s first
+version was violated by a spot authorization of size **ZERO** (the perp leg had
+confirmed nothing, so `SpotCap` was 0) — correctly flagged by `INV9`, moving no
+money. That is **`W1`'s own finding** — an orphaned entry of amount zero leaks
+a slot and subtracts nothing — landing on the probe written to avoid that exact
+class, one slice later. The quantity had to go **into the flag**.
+**(2) `UNCHANGED` over a bare variable name failed three times in one
+session** — `RecordDispatch`, then `Settled` (via `vars`), then `Supersede`.
+The module's own comment already said the two-group split exists for this
+reason; the groups did not extend themselves to new members. Fixed by making
+the new flags a **group** (`advHist`).
+**(3) The regression evidence is `SM2`, not the nominal run.** Slice F adds an
+action and three variables, so the composed graph necessarily grows;
+`AmbiguousOrder_SM2` (`MAX_GEN = 0`) has no generation, so its graph must be
+**unchanged** — and it reproduces slice A's **25,514 / 5,169** to the digit.
+
+**THE SUITE IS 75 RUNS AND `ALL 75 RUNS MATCH PREDICTIONS` FROM A SINGLE
+UNFILTERED INVOCATION** (2026-08-02, `TLC_WORKERS=4`). That also discharges the
+debt session 70 left: its 69/69 was assembled from two invocations and was
+recorded as such. Nominal graph **8,066,455 generated / 976,541 distinct**,
+depth 29, **0 left on queue**.
+
+**The check that mattered most, and it is not the nominal:** all **40** probes
+are still REACHED (29 positive controls + 5 model-(a) witness probes + model
+(b)'s 6). The standing guard blocks the generation's decisions while the premise
+is dissolved, so it *could* have made previously-reachable states unreachable —
+buying safety by quietly deleting coverage, which a green nominal cannot
+distinguish from a working fix. It did not.
+
+**`NC15`'s identical-graph claim survives slice F**, re-measured: 7,891,109
+generated / **976,541 distinct** against the nominal's 8,066,455 / **976,541** —
+the generated counts differ, the distinct counts match to the digit, and the
+distinct count is what the argument is about. (A stale `.out` from the previous
+suite made this look broken mid-session; the liveness controls run *after*
+`Live` in the runner, so their files still held session-70 figures. **Read
+figures only from a completed invocation.**)
+
+**`NC20`'s figures moved** (8,948,671 / 1,093,953 against v0.9.25's 8,770,801 /
+1,086,199) because slice F changed the state graph. `FM-7`'s conclusion is
+re-established, not weakened; v0.9.25's numbers are left as measured then rather
+than rewritten, because they record what that release checked.
+
+Capture **PID 8495** healthy throughout; `TLC_WORKERS=4` beside it; marker grep
+**ZERO**; `bun test` **16/16** after the tutorial header bump was re-assembled
+(the v0.9.24 i18n trap, checked this time rather than discovered).
+
+### The two boundaries of the standing obligation, both drawn by FAILED runs
+
+**Neither was designed; the nominal liveness config found both, and the second
+refuted a considered design note written earlier the same session.**
+
+**(1) It does not cover sending an already-authorized leg.** The first encoding
+guarded all three of the generation's decision steps. `AmbiguousOrder_Live`
+stuttered at 16 states: a generation buys 1 perp, authorizes **zero** spot
+(releasing its ledger entry, so the transient becomes a genuine naked
+residual), §2 correctly compensates it, and the package ends **physically flat
+and `Determined`** while the generation sits at `SpotReduceAuthorized` unable
+to finish. Blocking a step that **commits nothing** buys no safety and costs
+termination — worse, it *strands* the reserved leg, which is `INV6`'s harm one
+step earlier.
+
+**(2) The obligation must be DISCHARGED, not merely admissible.** The module
+carried a reasoned comment saying the premise-lost supersession was
+*"deliberately NOT in the fairness set"*. Re-running `Live` returned a 20-state
+behaviour stuttering at `PerpReduceFinal`: a reduction's own ambiguous result
+had released its entry (**`FM-8`'s exact scenario**), the premise was genuinely
+dissolved, `PdAuthorizeSpot` was correctly blocked, the **dispatch budget was
+spent** so §2 could not compensate either — and the one action that could end
+it was available and never taken. **`P5` violated.** *A standing obligation
+nothing is obliged to discharge is not a standing obligation.*
+
+**Both are kept as RUNS, not as this paragraph.** `NC23`
+(`PREMISE_SUPERSESSION_FAIR = FALSE`) removes exactly the one fairness
+conjunct — same constants, **same 976,541-state graph**, only the behaviours
+differ — and violates `P5`. Without it the refutation is a session anecdote and
+a later reader tidying the fairness set finds a reasoned comment and no
+objection: `FM-7`'s failure mode aimed at a mistake **this slice made itself**.
+Same move as `P6`, one layer out.
+
+**The analogy that produced the wrong note, named so it is not repeated:**
+`EmergencyClosePackage` and `FenceReadyLost` are **external arbitration
+events** — nothing here decides when they fire, so leaving them unfair is
+honest. The premise-lost row is a **machine obligation triggered by state**,
+which is exactly why it needed its own guard in `Next` while the other two are
+enabled unconditionally. It belongs beside the machine's other protocol steps.
+**Both boundaries are NORMATIVE and landed in SM §7**, because an implementer
+would hit each one: refusing the authorized leg strands it, and "we check it on
+the next event" is a real stuck state.
+
+**What the fairness-set rule costs, stated honestly.** §9a's rule — *the
+omissions are the theorem* — makes leaving an action out the safe default, and
+it is right. But a **wrong** omission does not show up as a weaker property; it
+shows up as an **outright failure**, and only if some property's subject can
+reach the stalled state. Both of these were caught by the one run in the suite
+whose job is to notice that the machine can still finish. No invariant, no
+probe and none of the 29 positive controls would have found either.
+
+**Still available, still not refuted: `FM-8`'s candidate 2** (tighten `PdPlan`
+to physical `realized = 0`). It was not adopted because it does not close the
+class on its own, which is a different claim from being wrong — and `FM-7`'s
+shape (two independent mechanisms, either surviving a defect in the other)
+argues for eventually having both. Slice F gives no new evidence either way.
+
+## Status (2026-08-02, session 70 — HISTORICAL): **§46 SLICE E IS COMPLETE — ALL FIVE DOCKET ITEMS CLOSED, AND ITEMS 2/3/4 PRODUCED `FM-7` AND `FM-8` — BOTH NORMATIVE EDITS LANDED (`FM-8` BY USER RULING IN-SESSION; ITS MODEL ENCODING IS OWED, TASK #156). DOCS ARE v0.9.25.**
 
 **`FM-8` was RULED by the user in-session and its normative edit LANDED; what
 remains is the MODEL ENCODING (task #156, slice F, sketch in §46 §11f).**

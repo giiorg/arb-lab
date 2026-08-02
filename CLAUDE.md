@@ -22,12 +22,25 @@ recorded rather than left as drift.
 `docs/formal/` holds **two** TLA+ models: (b) `FenceTakeover`, the
 fence/takeover/plan composition, and (a) `AmbiguousOrder`, the §2 classifier and
 finality contract composed with §7's reservation ledger. Between them they have
-found **five** spec defects (`FM-1`…`FM-5`) that four rounds of human and machine
+found **nine** spec defects (`FM-1`…`FM-9`) that four rounds of human and machine
 review did not — and each model found its first on a composition, never on a
 machine reviewed alone. Treat them as authoritative about the safety kernel's
 behaviour. Each has a companion artifact (`fence-takeover-model.md`,
 `ambiguous-order-model.md`) mapping every spec clause to a construct or to a
 stated omission; **read the companion before the `.tla`.**
+
+Three of model (a)'s five are **one family**, and knowing the family is what
+makes the next one findable: `FM-5` — a ledger entry read **before its backing
+exists**; `FM-8` — an entry's **premise outliving it**; `FM-9` — a rule
+evaluated on a quantity that **includes its own subject**. All three are §2 and
+§7 disagreeing about what the shared ledger means, and none was visible to any
+invariant, because §46 §8e's rule bites: **an invariant built on the ledger
+cannot audit the ledger.** Two more habits came out of the same slices and are
+cheap: **encode the rejected reading as a control and let TLC answer** rather
+than arguing it (this is how `FM-6`, `FM-7`, `FM-8` and `FM-9` were each
+settled), and **when a fix's correctness rests on a claim about a quantity,
+make it an action property instead of a paragraph** — `P6` is that, and `FM-7`
+is what a recorded-but-never-re-derived justification costs.
 
 Session decision records live in `docs/superpowers/specs/`. Each one records
 **why** a decision was taken *and the alternatives that were rejected*, so a

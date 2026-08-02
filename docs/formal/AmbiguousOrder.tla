@@ -243,7 +243,47 @@ CONSTANTS
   \* have collapsed -- and that verdict permits exactly one action, the
   \* interval floor, which is already spent. Determined naked residual,
   \* budget remaining, and nothing enabled.
-  RECLASSIFY_ON_LEDGER_CHANGE
+  RECLASSIFY_ON_LEDGER_CHANGE,
+
+  \* --- SLICE F: `FM-8`'s ruling (SM SS7, v0.9.25) -----------------------
+  \* Nominal TRUE: "the package has no naked residual" is a STANDING
+  \* condition and not only an entry test, so while a generation is active
+  \* the premise it opened under is re-evaluated, and losing it SUPERSEDES
+  \* the generation (quiescing the reserved second leg to SS6.7 finality
+  \* first, exactly as SS7's other two superseding paths do).
+  \*
+  \* FALSE = negative control NC21, which is the PRE-`FM-8` world: the
+  \* precondition is an ENTRY GUARD alone, checked once by PdPlan and never
+  \* again. That is the model as it stood through slices A-E, and `PC28` is
+  \* its witness -- a live generation over a package physically short, no
+  \* longer `Determined`, with nothing reserved against it.
+  PREMISE_IS_STANDING,
+  \* Nominal TRUE: the premise is evaluated NET OF THE GENERATION'S OWN
+  \* LEGS -- what the package's naked residual and classification would be
+  \* if this generation were not running. FALSE = negative control NC22:
+  \* the landed transition row read LITERALLY, "the SS2 classifier leaves
+  \* `Determined` for this hedge group", on the classifier's actual verdict.
+  \*
+  \* The two readings are not a modeling preference. The generation's own
+  \* perp reduction IS an exposure-changing order on the hedge group -- it
+  \* enters SS2's interval algebra and makes the residual Ambiguous while it
+  \* is live, which is the composition SS7 DEPENDS on (it is how SS2 refuses
+  \* every compensating trade until the leg reaches finality). So under the
+  \* literal reading the trigger fires on the generation's OWN first step,
+  \* and what it reports is not a premise that dissolved.
+  PREMISE_NETS_OWN_LEGS,
+  \* Nominal TRUE: the standing obligation must be DISCHARGED, not merely
+  \* admissible -- SM SS7 says the generation IS superseded, not MAY BE, so
+  \* the row sits in the fairness set beside the machine's other protocol
+  \* steps. FALSE = negative control NC23.
+  \*
+  \* This constant exists because the FIRST DRAFT LEFT THE ROW UNFAIR, with
+  \* a recorded reason, and the nominal liveness config refuted it. Without
+  \* the run the refutation is a session anecdote, and a later reader
+  \* tidying the fairness set would find no objection -- which is `FM-7`'s
+  \* lesson (nobody re-derives a recorded justification) applied to this
+  \* slice's own mistake. NC23 keeps it re-derivable.
+  PREMISE_SUPERSESSION_FAIR
 
 (***************************************************************************)
 (* Value domains. Deliberately generous: TypeOK is the CHECK that the      *)
@@ -291,7 +331,13 @@ PdPhases == { "None", "Planned", "PerpReduceInFlight", "PerpReduceFinal",
 \* and core SS7.4's FenceReadyLost arbitration), and a single flag would let
 \* one path be reachable while the other is dead code with the coverage
 \* probe still green.
-SupPaths == { "none", "EmergencyClosePackage", "FenceReadyLost" }
+\* SLICE F adds the THIRD, `FM-8`'s: the generation's entry premise has
+\* dissolved. Kept distinct for the same reason the first two are -- it is a
+\* separate row in SM SS7's table with a separate trigger, and collapsing it
+\* into either would make the probe that says it fires say nothing about
+\* which one did.
+SupPaths == { "none", "EmergencyClosePackage", "FenceReadyLost",
+              "PremiseLost" }
 
 VARIABLES
   \* --- The hedge group's unresolved counter-legs (SM SS2 `Ambiguous`) ---
@@ -385,6 +431,34 @@ VARIABLES
   \* NOT reached finality. Written unconditionally from the state at the
   \* supersession, exactly like the SS2 history flags above.
   supersededWithLiveLeg,
+  \* --- SLICE F: `FM-8`'s two flags --------------------------------------
+  \* INV9: a generation was ADVANCED BY MACHINE DECISION while the premise
+  \* it opened under had dissolved. Written unconditionally at each such
+  \* decision from the state before it, exactly like the flags above -- so
+  \* NC21, which relaxes the guard, SETS the flag rather than hiding the
+  \* step.
+  \*
+  \* It is a flag and not a state predicate, and that is the whole shape of
+  \* the claim: the harm is NOT the dissolved state EXISTING. A premise can
+  \* dissolve under a generation whose reserved leg is live, and SS7 then
+  \* requires that leg to reach SS6.7 finality FIRST -- so a legal quiesce
+  \* window contains exactly the state a naive invariant would flag. What
+  \* is forbidden is the machine CHOOSING to go further in it.
+  premiseAdvanced,
+  \* The same event restricted to the SECOND LEG's decisions. Not read by
+  \* any invariant: it exists to answer the witness-degeneracy question of
+  \* NC21 (probe W5). TLC reports A counterexample, not the most harmful
+  \* one, and NC21's is the CHEAPEST advance -- submitting the perp leg one
+  \* step after the premise dissolved. This asks whether the machine can get
+  \* all the way to AUTHORIZING AND SENDING REAL SPOT on the dissolved
+  \* premise, which is where the money is.
+  premiseAdvancedToSpot,
+  \* INV10: the premise-lost supersession fired on a generation whose
+  \* premise was INTACT. Written from the net-of-own-legs quantities, never
+  \* from the constant under test -- the Impl/True split applied to a
+  \* control: an invariant that read PREMISE_NETS_OWN_LEGS would move with
+  \* the reading it is checking and NC22 would pass.
+  supersededOnIntactPremise,
   \* --- Bound bookkeeping ------------------------------------------------
   budget
 
@@ -392,7 +466,8 @@ vars == << orders, realized, pending, cls, deadline, floorIssued, floorCount,
            overshoot, longReduced, shortReduced,
            dispatchedWhileAmbiguous, nonFloorInDeadline, floorWhileStraddling,
            pd, pdTarget, pdPerp, pdDone, pdSold, gens, superseded,
-           supersededWithLiveLeg,
+           supersededWithLiveLeg, premiseAdvanced, premiseAdvancedToSpot,
+           supersededOnIntactPremise,
            budget >>
 
 \* The SS2 flags and the SS7 flag are kept as two groups so a SS7 action can
@@ -402,7 +477,15 @@ vars == << orders, realized, pending, cls, deadline, floorIssued, floorCount,
 sm2Hist  == << overshoot, longReduced, shortReduced,
                dispatchedWhileAmbiguous, nonFloorInDeadline,
                floorWhileStraddling >>
-histVars == << sm2Hist, supersededWithLiveLeg >>
+\* SLICE F. The advance flags are their own group for the reason the whole
+\* two-group split exists: a site that names them individually can leave one
+\* unassigned, and this file collected that error THREE TIMES in one session
+\* -- once per site that writes a sibling flag by hand. TLC refuses the
+\* successor state, so it is loud rather than silent; it is still a failure
+\* at the wrong moment.
+advHist  == << premiseAdvanced, premiseAdvancedToSpot >>
+pdHist   == << supersededWithLiveLeg, advHist, supersededOnIntactPremise >>
+histVars == << sm2Hist, pdHist >>
 epiVars  == << cls, deadline, floorIssued, floorCount >>
 pdVars   == << pd, pdTarget, pdPerp, pdDone, pdSold, gens, superseded >>
 
@@ -646,11 +729,14 @@ RecordDispatch(amt, kind) ==
                                   \/ (cls = "DeadlineExceeded" /\ kind # "floor"))
   /\ floorWhileStraddling'     = (floorWhileStraddling
                                   \/ (kind = "floor" /\ Straddles))
-  \* The SS7 flag is written by Supersede alone. Named here rather than at
-  \* the two call sites so that adding a third dispatching action cannot
-  \* leave it unassigned -- which is not a silent failure (TLC refuses the
-  \* successor state outright) but is a failure at the wrong moment.
-  /\ UNCHANGED supersededWithLiveLeg
+  \* The SS7 flags are written by SS7's own actions alone. Named here rather
+  \* than at the two call sites so that adding a third dispatching action
+  \* cannot leave one unassigned -- which is not a silent failure (TLC
+  \* refuses the successor state outright) but is a failure at the wrong
+  \* moment. SLICE F: `pdHist` is a GROUP for exactly that reason -- adding
+  \* FM-8's two flags as bare names left them unassigned here, and TLC said
+  \* so on the first run.
+  /\ UNCHANGED pdHist
 
 FreePend  == { k \in PendIds : ~pending[k].active }
 FreeOrder == { i \in OrderIds : orders[i].q = 0 }
@@ -692,6 +778,8 @@ Init ==
   /\ pd = "None" /\ pdTarget = 0 /\ pdPerp = 0
   /\ pdDone = 0 /\ pdSold = 0 /\ gens = 0
   /\ superseded = "none" /\ supersededWithLiveLeg = FALSE
+  /\ premiseAdvanced = FALSE /\ premiseAdvancedToSpot = FALSE
+  /\ supersededOnIntactPremise = FALSE
   /\ cls = (IF ReportedDetermined(orders, 0) THEN "Determined" ELSE "Ambiguous")
   /\ floorIssued = FALSE /\ floorCount = 0
   /\ overshoot = FALSE
@@ -964,6 +1052,105 @@ PdActive  == pd \notin { "None", "Complete", "TerminalFlatten" }
 \* quiesced to SS6.7 finality FIRST.
 PdLegLive == pd \in { "SpotReduceInFlight", "Held" }
 
+(***************************************************************************)
+(* SLICE F -- `FM-8`'s PREMISE, and which quantity it is.                  *)
+(*                                                                         *)
+(* PdPlan's two entry conjuncts ARE the premise: `cls = "Determined"` and   *)
+(* `TrueResidual = 0`. SM SS7 now says they are a STANDING condition, so    *)
+(* the model needs them re-evaluated while a generation runs -- and the     *)
+(* moment you try, you have to answer a question the clause does not:       *)
+(* EVALUATED ON WHAT?                                                      *)
+(*                                                                         *)
+(* Both conjuncts are moved by the generation's OWN legs, by design:        *)
+(*                                                                         *)
+(*   - `cls` leaves "Determined" at PdSubmitPerp, because the perp reduce   *)
+(*     is an exposure-changing order on the hedge group and enters SS2's    *)
+(*     interval algebra. SS7 REQUIRES this -- it is how SS2 refuses every   *)
+(*     compensating trade while the leg is live.                           *)
+(*   - `TrueResidual` moves whenever the generation deliberately sells back *)
+(*     less than it bought (PdAuthorizeSpot with s < the transient), which  *)
+(*     is SS7's own "no more spot than the CONFIRMED perp reduction" and is *)
+(*     the SAFE direction (net-long, never net-short -- INV5).             *)
+(*                                                                         *)
+(* So the premise is the entry guard evaluated NET OF THE GENERATION'S OWN  *)
+(* LEGS: what the package's residual and classification would be if this    *)
+(* generation were not running. That quantity is INVARIANT under every one  *)
+(* of the generation's own actions -- PdPerpFill raises `realized` and      *)
+(* amends the entry by the same x, PdAuthorizeSpot and PdSpotFinal move     *)
+(* `pending` and the transient together -- which is the `FM-5` fix working, *)
+(* stated as a quantity. It therefore moves ONLY when something external    *)
+(* moves it, which is exactly what "the premise dissolved" means.          *)
+(***************************************************************************)
+
+\* The generation's own net contribution to the realized delta: perp bought,
+\* spot not yet sold back.
+PdOwnRealized   == pdDone - pdSold
+
+\* The package's naked residual with this generation's own legs removed from
+\* BOTH sides of SS2's subtraction. At entry (pdDone = pdSold = PdReserved =
+\* 0) it is exactly `TrueResidual`, which is what makes this the entry guard
+\* re-evaluated rather than a new rule.
+PremiseResidual == (realized - PdOwnRealized) - (TrueReserved - PdReserved)
+
+\* The classifier's verdict with the generation's own perp leg removed --
+\* `ReportedDetermined` is asked what it would report at p = 0. It is the
+\* REPORTED verdict rather than the true one because that is what the
+\* machine acts on, and because NC4's defect must stay visible here too.
+PremiseDetermined == ReportedDetermined(orders, 0)
+
+\* The premise, intact. Read by INV10 and by the supersession's flag write,
+\* NEVER through PREMISE_NETS_OWN_LEGS -- an invariant that moved with the
+\* reading it is checking would let NC22 pass.
+PremiseIntact == PremiseResidual = 0 /\ PremiseDetermined
+
+\* What the machine treats as premise loss. The constant is read HERE, in
+\* the guard, and nowhere an invariant can see.
+PremiseDissolved ==
+  IF PREMISE_NETS_OWN_LEGS THEN ~PremiseIntact ELSE cls # "Determined"
+
+\* SS7's standing obligation as a GUARD on the generation's own protocol
+\* steps. Attached to the steps that COMMIT NEW EXPOSURE -- submitting the
+\* perp leg, authorizing a spot sale -- and NOT to:
+\*
+\*   - venue events (fills, finality) or the parks, because those are what a
+\*     quiesce window is MADE of, and forbidding them would strand the
+\*     reserved leg, which is the harm INV6 exists for;
+\*   - `PdSubmitSpot`, which COMMITS NOTHING NEW: the amount was fixed at
+\*     authorization and the entry is already in the shared ledger, so
+\*     sending it is the completion of a decision already taken. Refusing to
+\*     send it is exactly the strand INV6 forbids, one step earlier.
+\*
+\* THE LAST EXCLUSION WAS FOUND BY A RUN, NOT BY DESIGN, and it is the
+\* nominal LIVENESS config that found it. With `PdSubmitSpot` guarded, TLC
+\* returned a 16-state behaviour ending in STUTTERING: a generation buys 1
+\* perp, authorizes ZERO spot (which RELEASES its ledger entry, so its
+\* transient becomes a genuine naked residual), SS2's determined branch
+\* correctly compensates that residual, and the package ends PHYSICALLY FLAT
+\* and `Determined` -- while the generation sits at `SpotReduceAuthorized`
+\* unable to finish, because the premise reads dissolved and the premise-lost
+\* supersession is deliberately unfair. Blocking a step that commits nothing
+\* buys no safety and costs termination.
+PremiseOK == PREMISE_IS_STANDING => ~PremiseDissolved
+
+\* The flag write those same steps share. It reads `PremiseIntact` -- the
+\* net quantity -- and NOT `PremiseDissolved`, so neither constant can move
+\* what the invariant means. Same discipline as ImplReserved/TrueReserved:
+\* the guard computes on the implementation's reading, the flag records the
+\* truth, and a control cannot corrupt its own judge.
+\* `toSpot` marks the SECOND LEG's decisions FOR A NONZERO QUANTITY, for
+\* W5's question alone. The nonzero part is not fussiness -- it is this
+\* file's own W1 finding applied to its newest probe. W5's first witness
+\* authorized a spot leg of size ZERO (the perp leg had confirmed nothing,
+\* so SpotCap was 0): a decision taken on a dissolved premise, correctly
+\* flagged by INV9, that moves no money. Asking the money question means
+\* the quantity has to be in the flag, because the shortest counterexample
+\* will always be the empty one.
+AdvancesGeneration(toSpot) ==
+  /\ premiseAdvanced' = (premiseAdvanced \/ ~PremiseIntact)
+  /\ premiseAdvancedToSpot' =
+       (premiseAdvancedToSpot \/ (toSpot /\ ~PremiseIntact))
+  /\ UNCHANGED << sm2Hist, supersededWithLiveLeg, supersededOnIntactPremise >>
+
 \* The spot leg's size cap. SM SS7: "sells no more spot than the CONFIRMED
 \* perp reduction". An authorization taken before perp finality (NC9) has
 \* no confirmed quantity in existence, so the generation's target is all
@@ -1016,12 +1203,13 @@ PdPlan(t) ==
 \* this leg reaches finality.
 PdSubmitPerp ==
   /\ pd = "Planned"
+  /\ PremiseOK
   /\ pd' = "PerpReduceInFlight"
   /\ pdPerp' = pdTarget
   /\ Reclassify(orders, pdTarget, deadline)
   /\ UNCHANGED << orders, realized, pending, pdTarget, pdDone, pdSold,
                   gens, superseded, budget >>
-  /\ UNCHANGED histVars
+  /\ AdvancesGeneration(FALSE)
 
 \* The perp reduction executes x. Buying to reduce a short RAISES delta, so
 \* this is where the intended net-LONG transient is created.
@@ -1094,6 +1282,7 @@ PdPerpFinal ==
 \* commitment is the double-count INV4 forbids.
 PdAuthorizeSpot(s) ==
   /\ pd \in (IF PERP_FIRST THEN {"PerpReduceFinal"} ELSE {"Planned", "PerpReduceFinal"})
+  /\ PremiseOK
   /\ s \in 0..SpotCap
   /\ pd' = "SpotReduceAuthorized"
   /\ \/ /\ PdPendIds # {}
@@ -1109,10 +1298,15 @@ PdAuthorizeSpot(s) ==
   /\ UNCHANGED << orders, realized, pdTarget, pdPerp, pdDone, pdSold,
                   gens, superseded, budget >>
   /\ UNCHANGED epiVars
-  /\ UNCHANGED histVars
+  /\ AdvancesGeneration(s > 0)
 
 \* SM SS7: "submit the reserved spot reduction". A zero-size authorization
 \* has nothing to submit and the generation is done.
+\* SLICE F: deliberately NOT guarded by PremiseOK, and the reason is in
+\* PremiseOK's own comment -- this step commits nothing new (the amount was
+\* fixed at authorization, the entry is already in the shared ledger), so
+\* refusing it strands the reserved leg instead of preventing anything. The
+\* nominal LIVENESS config is what established that: guarded, it stutters.
 PdSubmitSpot ==
   /\ pd = "SpotReduceAuthorized"
   /\ pd' = (IF PdPendIds = {} THEN "Complete" ELSE "SpotReduceInFlight")
@@ -1261,6 +1455,13 @@ Supersede(path) ==
   \* further executions), and everything it DID execute is already in
   \* `realized`.
   /\ Reclassify(orders, 0, deadline)
+  \* SLICE F. The same shape one row down: written UNCONDITIONALLY from the
+  \* state at the supersession, so a reading that fires the row spuriously
+  \* SETS the flag rather than being absorbed. `PremiseIntact` is the
+  \* net-of-own-legs quantity, never the constant -- see AdvancesGeneration.
+  /\ supersededOnIntactPremise' =
+       (supersededOnIntactPremise \/ (path = "PremiseLost" /\ PremiseIntact))
+  /\ UNCHANGED advHist
   /\ UNCHANGED << orders, realized, gens, budget >>
   /\ UNCHANGED sm2Hist
 
@@ -1311,7 +1512,22 @@ Next ==
   \/ \E x \in QDom : PdSpotFinal(x)
   \/ PdTerminalFlatten
   \/ PdEnds
-  \/ \E p \in SupPaths \ {"none"} : Supersede(p)
+  \* The first two rows are EXTERNAL arbitration events: enabled against any
+  \* active generation, because nothing in this model decides when a
+  \* liquidation policy or a fence arbitration fires.
+  \/ \E p \in SupPaths \ {"none", "PremiseLost"} : Supersede(p)
+  \* --- SLICE F: the THIRD row, `FM-8`'s -----------------------------------
+  \* Unlike the other two this one is TRIGGERED BY STATE, so it carries its
+  \* own guard. `PdActive` and not `pd # "None"`: a generation already at
+  \* Complete/TerminalFlatten has reached SS6.7 finality and there is nothing
+  \* left to supersede.
+  \*
+  \* It IS in the fairness set, and the other two are not -- see `Fairness`.
+  \* The first draft said the opposite, with a reason, and the nominal
+  \* liveness config refuted it: control NC23 is that refutation, kept as a
+  \* run.
+  \/ (PREMISE_IS_STANDING /\ PdActive /\ PremiseDissolved
+      /\ Supersede("PremiseLost"))
   \/ Settled
 
 Spec == Init /\ [][Next]_vars
@@ -1381,6 +1597,38 @@ Fairness ==
   \* the finality promise and not a policy assumption.
   /\ WF_vars(\E x \in QDom : PdSpotFinal(x))
   /\ WF_vars(PdEnds)
+  \* SLICE F. SM SS7's THIRD supersession row, and it is in this set while the
+  \* other two are deliberately OUT -- which is not an inconsistency but the
+  \* same distinction `Next` already draws. `EmergencyClosePackage` and
+  \* `FenceReadyLost` are EXTERNAL ARBITRATION EVENTS: nothing in this model
+  \* decides when a liquidation policy or a fence arbitration fires, so
+  \* assuming they eventually do would be assuming away the environment. The
+  \* premise-lost row is a MACHINE OBLIGATION triggered by state -- the spec
+  \* says the generation IS superseded, not MAY BE -- so it belongs beside
+  \* the machine's other protocol steps above.
+  \*
+  \* IT WAS LEFT OUT ON THE OPPOSITE ARGUMENT AND THE NOMINAL LIVENESS RUN
+  \* REFUTED IT. The reasoning was that fairness here would hand P3/P5 an exit
+  \* their own premises do not contain. What TLC returned instead was a
+  \* 20-state behaviour STUTTERING at `PerpReduceFinal`: a reduction's own
+  \* ambiguous result had released its ledger entry (`FM-8`'s exact
+  \* scenario), so the premise was genuinely dissolved, `PdAuthorizeSpot` was
+  \* correctly blocked, the dispatch budget was spent so SS2 could not
+  \* compensate either -- and the one action that could end it was admissible
+  \* and never taken. P5 violated. A standing obligation nothing is obliged
+  \* to discharge is not a standing obligation.
+  \*
+  \* P3 is unaffected by construction rather than by luck: in `Held` the
+  \* reserved leg is live, so QUIESCE_BEFORE_SUPERSEDE blocks this action
+  \* outright and P3's consequent (`Complete`/`TerminalFlatten`) admits no
+  \* supersession anyway.
+  \* NC23 removes exactly this conjunct and nothing else, so what it
+  \* demonstrates is attributable to the fairness and not to a state change:
+  \* the two models have the SAME state graph, and only the behaviours
+  \* differ.
+  /\ (PREMISE_SUPERSESSION_FAIR =>
+        WF_vars(PREMISE_IS_STANDING /\ PdActive /\ PremiseDissolved
+                /\ Supersede("PremiseLost")))
 
 LiveSpec == Spec /\ Fairness
 
@@ -1399,6 +1647,9 @@ TypeOK ==
   /\ gens \in 0..MAX_GEN
   /\ superseded \in SupPaths
   /\ supersededWithLiveLeg \in BOOLEAN
+  /\ premiseAdvanced \in BOOLEAN
+  /\ premiseAdvancedToSpot \in BOOLEAN
+  /\ supersededOnIntactPremise \in BOOLEAN
   /\ cls \in Classes
   /\ deadline \in BOOLEAN
   /\ floorIssued \in BOOLEAN
@@ -1631,6 +1882,86 @@ INV6_SupersessionQuiescesFirst == ~supersededWithLiveLeg
 \* under NC9 -- there the perp leg was never submitted, so pdPerp is 0 -- and
 \* is violated only by a park exited through the wrong leg's barrier.
 INV8_CompleteMeansLegsFinal == pd = "Complete" => pdPerp = 0
+
+(***************************************************************************)
+(* SLICE F invariants -- `FM-8`'s ruling, and the reading it is ruled in.   *)
+(***************************************************************************)
+
+\* INV9 -- SM SS7 (v0.9.25): "'no naked residual' is a STANDING condition,
+\* not only an entry test." The generation MUST NOT continue on a premise
+\* that has stopped holding.
+\*
+\* THE FORM IS THE CLAIM. It is not `PdActive => PremiseIntact`, and that is
+\* not a weakening: the dissolved state is REACHABLE and LEGAL for as long as
+\* SS7's own quiesce obligation takes -- the reserved second leg must reach
+\* SS6.7 finality FIRST, so a window in which the premise is gone and the
+\* generation still exists is exactly what the spec MANDATES. A state
+\* predicate would flag the quiesce window and the harm alike and could only
+\* be satisfied by a model that violated INV6. What is forbidden is the
+\* machine taking the generation FURTHER -- submitting a leg, authorizing a
+\* sale -- and that is an event, so the invariant reads a flag written at it.
+\*
+\* Same reasoning as INV6, one row down, which is why FM-8's ruling gave the
+\* third supersession row no discipline of its own.
+INV9_GenerationNeverAdvancesOnLostPremise == ~premiseAdvanced
+
+\* INV10 -- the premise-lost supersession never fires on a generation whose
+\* premise is INTACT.
+\*
+\* This is not a restatement of INV9 and it is not defence in depth: it
+\* polices the OTHER direction, and it exists because the landed transition
+\* row names a quantity the generation itself moves. Superseding a live
+\* generation is not free -- SS7's generations exist because the perp short
+\* is nearing liquidation, so a spurious abort cancels the very mechanism
+\* that was reducing the risk, and does it while a reserved leg is out.
+\*
+\* NC22 is the control, and note what it is a control ON: not a defect
+\* somebody might implement, but the LITERAL READING OF THE SPEC'S OWN
+\* SENTENCE. If it is violated, the sentence names the wrong quantity.
+INV10_PremiseSupersessionOnlyOnRealLoss == ~supersededOnIntactPremise
+
+(***************************************************************************)
+(* SLICE F -- the FIX'S OWN JUSTIFICATION, checked rather than recorded.    *)
+(*                                                                         *)
+(* `FM-9`'s resolution rests on one claim: that the premise, evaluated net  *)
+(* of the generation's own legs, is a quantity THE GENERATION ITSELF CANNOT *)
+(* MOVE. If that is false the fix is wrong, because the trigger would then  *)
+(* fire on the generation's own behaviour for a second time and the whole   *)
+(* finding would have been mis-diagnosed.                                   *)
+(*                                                                         *)
+(* It is stated as an argument in three places (SM SS7, the companion, the  *)
+(* design record) and an argument is exactly what `FM-7` says not to leave  *)
+(* lying about: NOBODY RE-DERIVES A RECORDED JUSTIFICATION. So it is an     *)
+(* ACTION property here, and TLC re-derives it on every run.               *)
+(*                                                                         *)
+(* Non-vacuity costs no run: every action in `PdOwnStep` is already shown   *)
+(* REACHED by an existing probe -- PC13 (Complete), PC14/PC25 (both parks), *)
+(* PC15 (in flight), PC18 (partial perp confirmation), PC21 (a nonzero      *)
+(* transient), PC20 (a second generation).                                 *)
+(***************************************************************************)
+
+\* Every step the GENERATION itself takes. PdEnds and Supersede are out on
+\* purpose: both END the generation, and the quantity is only defined
+\* against a live one -- their resets are the scope closing, not the
+\* generation moving its own premise.
+PdOwnStep ==
+  \/ \E t \in 1..MAXQ : PdPlan(t)
+  \/ PdSubmitPerp
+  \/ \E x \in QDom \ {0} : PdPerpFill(x)
+  \/ PdPerpFinal
+  \/ \E s \in QDom : PdAuthorizeSpot(s)
+  \/ PdSubmitSpot
+  \/ PdSpotHolds
+  \/ PdPerpHolds
+  \/ \E x \in QDom : PdSpotFinal(x)
+
+\* P6 -- the generation cannot move its own premise. Every ledger change it
+\* makes is to ITS OWN entry (counted in PdReserved) and every realized
+\* change is ITS OWN transient (counted in PdOwnRealized), so both
+\* subtractions cancel. That is `FM-5`'s fix -- "the reservation is exactly
+\* backed at every instant" -- showing up as a conservation law.
+P6_GenerationCannotMoveItsOwnPremise ==
+  [][ PdOwnStep => PremiseResidual' = PremiseResidual ]_vars
 
 \* Not in any nominal configuration. It exists to interrogate NC12's own
 \* witness: TLC reports the SHORTEST counterexample, and for the orphan
