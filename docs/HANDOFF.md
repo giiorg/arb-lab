@@ -1,6 +1,107 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-02, session 72): **THE §32m-D PER-TIER DISK FIGURE IS MEASURED — TASK #150 IS CLOSED THREE HOURS INSIDE ITS DEADLINE, AND §38f's OFF-HOST DECISION IS BACK WITH THE USER ON A MEASURED CLOCK. DOCS ARE v0.9.27.**
+## Status (2026-08-02, session 73): **MILESTONE 3 IS ADMITTED BEFORE STRATEGY #2's GATE — THE ROSTER IS UNBLOCKED FOR ~2 MONTHS OF FOUNDATION WORK, AND THE GROUND FOR IT WAS ALREADY IN THE RECORD THAT REJECTED IT. DOCS ARE v0.9.28.**
+
+**No code changed. This was a ruling session.** Record is **§47**
+(`docs/superpowers/specs/2026-08-02-milestone-3-pre-gate-ruling.md`); core §12
+gains **three** dated annotations; ADR §3 has the dated block.
+
+**THE FINDING: §42d's rejected alternative (i) is refuted by §42d's rejected
+alternative (ii), one sentence below it.** (i) rejected *"proceed to milestone 3
+now"* because the OMS would be **"built 'on spec' for a strategy whose economics
+are unmeasured"**. (ii) rejected a roster rewrite because **"milestones 3–6 are
+strategy-agnostic controls and survive unchanged"** — and (ii) is the
+load-bearing claim of the whole post-kill re-sequencing, the reason the roster
+was annotated rather than rewritten. If they survive a *complete strategy
+replacement*, a gate verdict cannot invalidate milestone 3. **Neither rejection
+had ever been read against the other.** The core sides with (ii) twice — §3.1
+(*same pipeline **regardless of strategy***) and §1.1 (the single-writer OMS is
+***"foundational, not tiered"***) — and **the practice had already departed from
+the rule**: formal model (a) IS milestone 3's named safety kernel, and sessions
+68–71 built it pre-gate. The operative rule was never "no milestone-3 work"; it
+was "no milestone-3 work **in Go**", which no record defends.
+
+**The partition is by INVALIDATION, not by milestone number — so milestone 4
+splits.** Admitted: **milestone 3 in full**, plus milestone 4's
+strategy-agnostic half (`Fence`, `FenceReady`, kill-switch ladder, `audit` —
+admitted, *not scheduled*; §12's canary-concurrent language still governs it).
+Still hard-gated: **milestone 4's leg-shape-dependent half** (§1.1's $1K tier
+names *"the Binance perp and both spot IOC legs"* — **cash-and-carry's** shape,
+not perp-perp), and **milestones 5, 6, 7**. **The gate's kill authority over
+live capital is UNTOUCHED — construction order moves, promotion order does
+not.** No live capital, no mainnet keys, no promotion.
+
+**The residual risk is project mortality, not rework, and it is priced (§47d),
+not argued away.** If strategy #2's gate also fires the project stops — base
+rate **1 fired of 1 run**. Against it: nothing built is strategy-specific, so a
+*third* strategy inherits all of it; the work converts `FM-1`…`FM-9` from prose
+into checked claims; and the wait is not free at 11.165 GiB/day with the gate at
+day 59 of an 85-day disk, on the roster's **longest-lead item**.
+
+**TWO SCOPE FINDINGS (§47e), both of which change milestone 3's real size and
+neither visible from §12's text.** (1) **Milestone 1's `engine/venue`
+account/order half was NEVER DELIVERED** — the package is market data only; no
+signed REST client, no `Place`, no `OrderByClientID`, no `Fills`. §12 records
+milestone 1 complete. This is a normative claim the code silently does not
+satisfy, and the `SPEC EDIT OWED` grep is **structurally blind** to an unmarked
+one. (2) **`ports.Journal` HAS NO ADAPTER** — so §5.3's fsync-before-network
+crash boundary, the most safety-critical ordering in the OMS, **is today proven
+only against a test fake**. `module.go` is honest about the write repository
+being unwired; the journal's absence is the same shape one layer down and was
+stated nowhere.
+
+## START HERE (updated session 73, 2026-08-02 — the roster is unblocked; slice A is the first buildable work in two months)
+
+**Branch `feat/milestone-1-foundation`. Docs are v0.9.28.**
+
+**First act, in order:**
+
+1. **Read §47 before writing code** — specifically §47f (the seven-slice plan)
+   and §47c (the boundary). The boundary is the part a later session can
+   silently widen: *admitted* is not *scheduled*, and milestone 4's
+   strategy-agnostic half is admitted but out of this workstream.
+2. **Slice A — the durable hash-chained journal (task #160).** It is first by
+   dependency, not preference: every recovery claim in milestone 3 reads what
+   it wrote, so building recovery on the test fake would prove the recovery
+   logic and nothing about the durability under it. Oracle discipline applies —
+   an **independent replayer**, per `fixedpoint`/`ids`. **Collapse checklist
+   BEFORE the mutations:** a chain of length 1 makes "verify against the
+   previous record" and "verify against the first" the same predicate.
+3. **Slice E is the payoff and it lands fifth, not first.** Its three inputs
+   are produced by A–D; §47g (v) records why building it against fakes was
+   rejected. **Read `docs/formal/ambiguous-order-model.md` §3's correspondence
+   map before the `.tla` and before the Go.** §46/§8e's rule comes with it: an
+   invariant built on the ledger cannot audit the ledger — the hazard transfers
+   to the Go unchanged.
+4. **§38f is STILL a live user decision (task #158)** — untouched by this
+   ruling and now the only clock-bound item. ≥2 TB recommended; 85 days to a
+   full disk, gate at day 59.
+5. **Tasks #152 (gate evidence, ~2026-09-30), #153 (the hourly
+   `restart_boundary`, 24 of 50 findings) and #159 (the `depth20` timeout,
+   trigger-bound to the next restart) are unchanged by this ruling.**
+
+**Standing rituals, unchanged:** `pgrep -f "arblab capture run"` **FIRST**
+(PID 8495, config `1c362feffe4a`); **never rebuild over `bin/arblab` while
+capture runs** — this now bites harder, because milestone 3 is the first
+workstream in months that builds binaries routinely; cap `TLC_WORKERS` (4);
+marker grep `grep -rn "SPEC EDIT OWED" internal/ tools/` must be **zero**;
+never edit a `.tla` or `run.sh` mid-run; a full-day verify costs ~27 minutes at
+99% of one core — not beside TLC, and read figures only from a **completed**
+invocation.
+
+**Doc-set landing is COMPLETE, including the Georgian.** All seven docs are
+stamped v0.9.28. The generated `docs/tutorial.ka.md` was assembled with
+**`node docs/i18n/tools/assemble.mjs`** after syncing its source fragment
+`docs/i18n/ka/tutorial/header.md` — source first, then assemble, which is
+session 63's recorded order and produced the expected one-line diff.
+**Carry the tool's location, because it is not where you will look for it:**
+it lives under `docs/i18n/tools/`, **not** in `tools/`, and **no `make` target
+invokes it** — searching `Makefile` and `tools/` finds nothing and reads as
+"the generator does not exist", which is how a forbidden hand-edit gets
+rationalized. Task **#167** is the remaining half: give it a `make` target so
+the next bump cannot strand it.
+
+## Status (2026-08-02, session 72 — HISTORICAL): **THE §32m-D PER-TIER DISK FIGURE IS MEASURED — TASK #150 IS CLOSED THREE HOURS INSIDE ITS DEADLINE, AND §38f's OFF-HOST DECISION IS BACK WITH THE USER ON A MEASURED CLOCK. DOCS ARE v0.9.27.**
 
 **The figure: 11.165 GiB for the measured day — BTC tier 4.314, alt tier 6.852,
 per shortlisted symbol 0.387 (MUSDT) to 1.743 (BEATUSDT).** Record is
@@ -74,7 +175,7 @@ the real rate — the rsync line is unchanged, the sizing is not: **≥2 TB**, n
 than at a third deferral.** Compression and retention stay refused on §38g's
 original grounds.
 
-## START HERE (updated session 72, 2026-08-02 — task #150 CLOSED; the only clock-bound item left is a user decision)
+## START HERE (session 72, 2026-08-02 — HISTORICAL, superseded by session 73's above; task #150 CLOSED)
 
 **Branch `feat/milestone-1-foundation`. Docs are v0.9.27.**
 
