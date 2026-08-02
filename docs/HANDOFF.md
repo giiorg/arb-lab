@@ -1,35 +1,84 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## ⚠ IN FLIGHT (2026-08-02, session 77): **SLICE C2a's CODE IS COMPLETE AND GREEN; ITS DOCS ARE NOT. START AT §51h.**
+## Status (2026-08-03, session 78): **MILESTONE 3 SLICE C2a IS LANDED AND CLOSED — THE ORDER WRITE PATH EXISTS, AND ONE VENUE STATES A REFUSAL INSIDE A SUCCESS STATUS. DOCS ARE v0.9.32.**
 
-**Read `docs/superpowers/specs/2026-08-02-m3-slice-c2a-write-path.md` first — §51h
-is the exact remaining list, and nothing on it is discovery.** Docs are still
-stamped **v0.9.31**; the bump to v0.9.32 is part of what is owed.
+**Code changed** (landed in the WIP commit `e152141`, docs completed this session).
+New: `internal/engine/venue/order{,_binance,_bybit}.go` + `order_test.go`,
+`transport/envelope.go` + `envelope_internal_test.go`,
+`internal/oms/infrastructure/driven/ordergateway.go`. Changed:
+`ports.OrderPlacer.Place` and `Dispatcher.Dispatch` take §7.6's shed class,
+`Deps.Placer` → `Deps.VenueOrders`, `ratelimit.Cost.Validate` corrected,
+`transport.ClassifyStatus` unexported. Design record is **§51**
+(`docs/superpowers/specs/2026-08-02-m3-slice-c2a-write-path.md`).
+**`venue-profiles.md` gains a whole new §7**; core **§4, §5.3, §6 step 6 and §7.6**
+are all edited; §12's milestone 3 gains its slice-C2a annotation; ADR §3 has the
+dated block. **`make ci` green both modules; marker grep ZERO; 20 mutations, 20
+kills.**
 
-**State of the tree:** `make ci` green both modules, 20 mutations / 20 kills,
-committed as a **mid-slice WIP** commit. The slice is **NOT closed**:
-`grep -rn "SPEC EDIT OWED" internal/ tools/` returns **2**, deliberately, and
-both are this slice's owed spec edits (§4/§5.3/§7.6 and §6 step 6).
+**THE FINDING: a hazard written down for one INPUT is not covered for the others.**
+Bybit answers a **refused** request with **HTTP 200** and a `retCode` (verified
+live, no credential needed), so C1's status-only classifier read a rejection as an
+acceptance. The worse outcome is one step on: a refusal body carries no `orderId`,
+so the ack decode fails, and `ClassifyAckDecodeFailure` calls a failed decode after
+a 2xx **`EffectApplied`** — an **explicit venue rejection** recorded as an order
+that **definitely exists**, collapsing §5.3's two evidence classes into their
+opposite. **Profiles §6 had already described this exact seam** for Bybit's
+zero-length 401 body, and the second instance landed anyway. The fix composes a
+per-venue envelope reader with the status classifier **with a direction** — a body
+may contradict a success status, never soften a failure one — and its general arm
+(an error body beside a 2xx with no venue rule for the code → `EffectUnknown`) is
+reachable and tested on **Binance**, not on the venue that motivated it.
 
-**What landed in code.** `engine/venue` gains the order write path
-(`order.go`, `order_binance.go`, `order_bybit.go`); `transport` gains
-`envelope.go`; `oms/infrastructure/driven` gains the real ACL adapter
-(`ordergateway.go`), so `module_test.go` no longer fakes the port.
-`ports.OrderPlacer.Place` and `Dispatcher.Dispatch` gain §7.6's shed class;
-`Deps.Placer` became `Deps.VenueOrders`; `ratelimit.Cost.Validate` was corrected.
+**FINDING 2: §7.6's shed classes had NO CARRIER, and it is now three spec sections.**
+The class is a property of the §5.3 **command**; neither the `Order` aggregate nor
+its projection records which command that was. Both defaults are unsafe and
+unequally so — `Opening` sheds a **flatten** during exactly the incident the
+reserve exists for. §5.3's new command→class table is **total over the command
+set**, and `Opening` holds **exactly one command**. **One row was NOT settled by
+the design record and is decided here: `CloseTrade` → `Safety`**, on §7.6's own
+"monitoring outranks new exposure" argument — shedding an exit at the ~70% ceiling
+makes the governor the reason a now-negative carry cannot be stood down. Reopen it
+deliberately if that reads wrong. **The better long-term shape is recorded and not
+taken**: a field on the `Order` aggregate naming its originating command would also
+decide §5.3's `stop-opening` exemption — one carrier, two rules — and is a §5.1
+aggregate change reaching the journal codec, the planner and recovery.
 
-**Three findings, all in §51:** (1) **Bybit answers a REFUSED request with HTTP
-200**, so C1's status-only classifier read a rejection as an acceptance — and via
-`ClassifyAckDecodeFailure` it would have recorded an explicit venue rejection as
-`EffectApplied`, an order that definitely exists. (2) **§7.6's shed classes have
-no carrier anywhere** — not on `domain.Order`, not on `ports.OrderRecord` — and
-neither possible default is safe. (3) **Binance documents `POST /fapi/v1/order`
-as weight ZERO**, which `Cost.Validate`'s zero-is-unusable rule refused: a
-documented venue zero meeting a default written for forgotten fields.
+**FINDING 3: a documented venue ZERO met the zero-is-unusable default.** Binance
+documents `POST /fapi/v1/order` as *"0 on IP rate limit"* while spot's is
+*"Weight: 1"*, so the truthful cost for the most important endpoint in the system
+was the one `Cost.Validate` refused. The argument survived, its subject did not:
+the check is now *"charges no dimension a caller fills in"*. **Where the venue
+publishes a zero, this repo's rule inverts**, and the collision is invisible
+because both readings are "a zero in a required field".
 
-**Slice C2 was split again, user-accepted:** C2a = the write path (this), C2b =
-the read path (**task #172**), which carries an open question recorded at the
-split — the query methods have no consumer until slice D declares one.
+**Closed: `ids.ClientOrderID`'s standing pre-milestone-3 assumption.** Both venues'
+id rules verified, the minted format inside both with **one character of
+headroom**, and the rules **differ** (`.` legal on Binance, illegal on Bybit) —
+which is what gave the tests a discriminating fixture.
+
+**THE READING PASS FOUND ONE, AND IT IS FINDING 3's OWN CONSEQUENCE — task #173.**
+`Governor.decide` walks the **profile's** declared budgets and takes each one's
+dimension from the cost, so **a dimension the profile declares no `Limit` for is
+silently uncounted** — no error, no refusal, no metric. Harmless while every
+metered endpoint charged weight; **finding 3 is what made it reachable**, because
+accepting the documented zero made futures new-order **the one call whose entire
+cost rides on a single dimension**. A Binance profile with weight budgets and no
+order-count budget charges *nothing* per futures order, forever, against a venue
+that bans on order counts. **Nothing is broken today** — no production
+`ratelimit.Profile` exists anywhere (the app roots are `capture` and `sim`) — so
+the trigger is named as the **construct**, per the deferral rule: the first
+production profile. §7.6 states the requirement from this release; #173 builds it.
+**Carry the shape:** the fix was right and it **relocated the premise** onto a
+different object that nothing checks — `FM-5`'s family at the config layer, and
+invisible to the marker grep because the clause is *absent*, not departed from.
+
+**START HERE: slice C2b is task #172 — the order READ path** (`OrderByClientID`,
+`Fills`, the Bybit history fallback). It carries one open question recorded at the
+split: **those query methods have no consumer in `oms` until slice D declares one**
+(the schema-field-frozen-before-its-consumer shape), so whether C2b keeps its own
+number or folds into slice D (#163) is a decision to take when the read path is
+next — **the ports are declared with their consumer either way**. Task **#171**
+still gates any real Bybit order: `BybitSigner` has no offline oracle.
 
 ---
 

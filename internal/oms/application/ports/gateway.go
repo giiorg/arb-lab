@@ -40,8 +40,8 @@ type OrderPlacer interface {
 	//
 	// # The Urgency argument, and why the order cannot supply it
 	//
-	// [SPEC EDIT OWED] §4's signature is Place(Order) (Ack, error), with no
-	// second argument. It cannot stay that way, and the reason is that §7.6's
+	// [SPEC EDIT LANDED — v0.9.32] §4's signature was Place(Order) (Ack, error),
+	// with no second argument. It could not stay that way, and §7.6's
 	// shed classes have NO CARRIER anywhere in this system: the class of an
 	// order is a property of the §5.3 COMMAND that produced it — OpenTrade
 	// creates exposure, ExposureReduction and EmergencyClosePackage remove it —
@@ -60,7 +60,9 @@ type OrderPlacer interface {
 	// its originating command. It is the better long-term shape — the same fact
 	// also decides §5.3's `stop-opening` exemption, which likewise has no
 	// carrier — and it is a §5.1 aggregate change that reaches the journal
-	// codec, the planner and recovery. Owed to the spec as §4 + §5.3 + §7.6.
+	// codec, the planner and recovery. Landed as §4's Place signature, §5.3's
+	// command→class table and §7.6's carrier paragraph; the rejected field is
+	// recorded there too, so a later slice reopens it deliberately.
 	Place(o domain.Order, u Urgency) (Ack, error)
 }
 

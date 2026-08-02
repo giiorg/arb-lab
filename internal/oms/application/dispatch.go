@@ -206,9 +206,11 @@ type Outcome struct {
 // projection is the thing that broke.
 // # The urgency argument is the caller's, and it is checked BEFORE the fsync
 //
-// [SPEC EDIT OWED] §6 step 6 describes this method as taking the order alone.
-// ports.OrderPlacer.Place records why the §7.6 shed class has to travel with it
-// and why no default is available; what this method adds is WHERE it is refused.
+// [SPEC EDIT LANDED — v0.9.32] §6 step 6 described this method as taking the
+// order alone; it now states the argument and, more to the point, WHERE it is
+// refused. ports.OrderPlacer.Place records why the §7.6 shed class has to travel
+// with the call and why no default is available; what this method adds is the
+// side of the fsync the refusal must land on.
 // An invalid class must fail above the AppendState below, because that fsync is
 // the commitment to call Place exactly once: refusing after it would leave a
 // durable authorization for an order nothing ever sent, which §5.3 then resolves

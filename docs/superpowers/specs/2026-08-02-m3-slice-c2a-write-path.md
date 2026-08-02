@@ -1,11 +1,11 @@
 # §51 — M3 slice C2a: the order write path, and the venue that refuses inside a success
 
-**Date:** 2026-08-02 · **Session:** 77 · **Docs:** v0.9.31 (**bump to v0.9.32 is OWED — see §51h**)
-**Task:** #162 (re-scoped again) · **Opens:** #172 · **Status: CODE COMPLETE, DOCS INCOMPLETE.**
+**Date:** 2026-08-02 (code) / 2026-08-03 (docs) · **Sessions:** 77–78 · **Docs:** v0.9.32
+**Task:** #162 (re-scoped again) · **Opens:** #172 · **Status: COMPLETE — code and docs.**
 
-> **This record is written mid-slice, deliberately.** The code is landed, green
-> and bite-checked; the documentation half is not done, and §51h is the exact
-> remaining list. Read §51h first if you are picking this up.
+> **This record was written mid-slice, deliberately**, with §51h as the exact
+> remaining list. §51h is now a **closing report** rather than a to-do: it records
+> what landed where, and the one item that turned out not to be transcription.
 
 ---
 
@@ -282,45 +282,68 @@ and would pass against a client that sent everything to whichever host it had.
 
 ---
 
-## §51h — WHAT REMAINS (read this first)
+## §51h — CLOSING REPORT (was: what remains)
 
-Code is complete and green. **The documentation half is not done.** Nothing here
-is discovery — it is transcription of what §51a–§51g already settled.
+**Completed 2026-08-03, session 78.** Every item below landed. `make ci` green
+both modules; **marker grep `internal/ tools/` returns ZERO**; docs are v0.9.32
+across all seven.
 
-1. **Land the two `[SPEC EDIT OWED]` markers.** `grep -rn "SPEC EDIT OWED"
-   internal/ tools/` currently returns **2**, and must return **0** before the
-   slice closes:
-   - `internal/oms/application/ports/gateway.go:43` — §4's `OrderGateway.Place`
-     signature gains the shed class; §5.3 gains the command→class mapping; §7.6
-     gains the statement that the class has a carrier. See §51c.
-   - `internal/oms/application/dispatch.go:209` — §6 step 6's `Dispatch` takes it
-     and validates it **above** the fsync.
+1. **Both `[SPEC EDIT OWED]` markers converted to `[SPEC EDIT LANDED — v0.9.32]`.**
+   `ports/gateway.go` → core **§4** (the `Place(Order, Urgency)` signature and
+   the paragraph on why nothing it could read carries the class) + **§5.3** (the
+   command→class table) + **§7.6** (the carrier paragraph).
+   `application/dispatch.go` → **§6 step 6**, which now fixes *where* an invalid
+   class is refused: above the fsync, because refusing after it leaves a durable
+   authorization for an order nothing ever sent.
+2. **`venue-profiles.md` §7 written** — the shape-asymmetry table, both
+   parameter tables, `newOrderRespType`, both id rules with Binance SPOT's
+   stated assumption, the per-endpoint costs incl. the futures zero, the
+   HTTP-200-with-`retCode` transcripts, Bybit's default-deny code table, and the
+   testnet hosts. **The three hosts were re-probed 2026-08-03** rather than
+   transcribed; all three still answer 200, and the table carries both dates.
+3. **Core spec:** §4 (signature + carrier + host-per-family), §5.3 (the table),
+   §6 step 6, §7.6 (the carrier), §12's slice-C2a annotation. **Plus one section
+   §51h did not anticipate — see item 7.**
+4. **`adr-history.md` §3** dated block landed, newest-first above §50's.
+5. **`HANDOFF.md`** — the ⚠ IN FLIGHT block is replaced by the closing status.
+6. **v0.9.32 across all seven docs**, Georgian regenerated from
+   `docs/i18n/ka/tutorial/header.md` via `assemble.mjs` (127,674 bytes written).
+7. **THE READING PASS WAS NOT TRANSCRIPTION, AND IT FOUND ONE — task #173.**
 
-   Convert both markers to `[SPEC EDIT LANDED — v0.9.32]` in the code, the
-   convention `oms/domain/fill.go` uses.
-2. **Write `venue-profiles.md` §7 — "The order submission surface"**, the
-   verification pass this slice ran. It owes: both venues' create-order paths and
-   parameter tables; the `newOrderRespType` enum/default asymmetry (§51f); the
-   `newClientOrderId` / `orderLinkId` published rules **and the note that Binance
-   SPOT publishes neither, so the futures rule is applied to it as a stated
-   assumption**; the per-endpoint costs incl. the futures **zero** (§51d); the
-   three testnet base hosts, all three probed alive 2026-08-02
-   (`demo-fapi.binance.com`, `testnet.binance.vision`, `api-testnet.bybit.com`) —
-   **`testnet.binance.vision` is the Binance SPOT base and was recorded nowhere**;
-   the HTTP-200-with-`retCode` fact with both live probe transcripts (§51b); and
-   Bybit's `create-order` limit of 10/s with the note that **the HTTP status
-   accompanying `retCode 10006` is NOT documented**, which is why it is
-   classified in both the status arm and the code table.
-3. **Core spec:** §4 (Place signature + the host-per-family consequence), §5.3
-   (command→class), §7.6 (the carrier), §12's milestone-3 slice-C2a annotation.
-4. **`adr-history.md` §3** dated block.
-5. **`HANDOFF.md`** status + START HERE.
-6. **Version bump to v0.9.32 across all seven docs**, then regenerate the
-   Georgian: edit `docs/i18n/ka/tutorial/header.md` **first**, then run
-   `node docs/i18n/tools/assemble.mjs`. (Still no make target — task #167.)
-7. **Reading pass** beside the marker grep, per the standing rule: the grep
-   cannot see an unmarked claim.
+### §51h-1 — What the reading pass found, and why the marker grep could not
 
-**Standing rituals unchanged.** Capture is PID **8495**, alive throughout this
-session; never rebuild over `bin/arblab` while it runs. `make ci` runs `-race`
+**A `Cost` charging a dimension the profile declares no `Limit` for is silently
+uncounted.** `Governor.decide` walks the **profile's** declared windows and takes
+each one's dimension from the cost, so a dimension with no window is never
+visited: no error, no refusal, no metric. A governor that counts nothing admits
+everything.
+
+That was harmless while every metered endpoint charged weight. **§51d is what
+made it reachable.** Correcting `Cost.Validate` to accept Binance's documented
+`POST /fapi/v1/order` weight of **zero** was right — and it made that endpoint
+**the one call in this system whose entire cost rides on a single dimension**. A
+Binance profile declaring weight budgets but no order-count budget therefore
+charges *literally nothing* per futures order, admitted forever, against a venue
+that meters `X-MBX-ORDER-COUNT-10S`/`-1M` and bans on them.
+
+**Nothing is broken today, and the reason matters:** no production
+`ratelimit.Profile` is constructed **anywhere** — the only app roots are
+`capture` and `sim`, neither of which trades. So this is the *consumer is absent*
+category, the same as C1's §7.6 alert finding (#170), and it is recorded with its
+**trigger named as the construct rather than the feature**, per §3.6's deferral
+rule: **the first production `ratelimit.Profile`**. §7.6 states the requirement
+normatively from this release; #173 builds the refusal.
+
+**The shape is why this is worth carrying.** The §51d fix was correct and it
+**moved the safety of the zero onto a claim about a different object** — that the
+profile counts orders — which nothing anywhere checks. It is the `FM-5` family at
+the configuration layer: *a validator cannot audit the thing it is validated
+against*, and the tell is that fixing a validator did not change what the
+validator's output would be checked against. **A correction that relocates a
+premise is exactly as much of a finding as a defect**, and the marker grep is
+blind to it for the standing reason — the clause is *absent* rather than
+departed from.
+
+**Standing rituals unchanged.** Capture is PID **8495**, alive throughout both
+sessions; never rebuild over `bin/arblab` while it runs. `make ci` runs `-race`
 and `go test` does not.
