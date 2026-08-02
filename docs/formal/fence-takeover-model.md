@@ -1,13 +1,13 @@
 # Formal model (b) — FenceTakeover: correspondence map, results, FM-1/-2/-3/-4
 
-**Date:** 2026-07-20, updated 2026-07-21 (Cx6) and 2026-07-25 (Cx7, then Cx8) · **Model:** `FenceTakeover.tla` (TLA+, checked with TLC 2.19 / tla2tools v1.7.4) · **Doc set at modeling time:** v0.9 → **found FM-1, resolved in v0.9.1**; a **Codex adversarial round on the model itself (Cx6-1…6, all valid) + its liveness re-verification (found FM-2)** → v0.9.2; a **round-2 attempt (Cx7) found FM-3 + three model/verification defects (Cx7-1/-2/-3)** but died on an upstream outage before producing a verdict → v0.9.3; the **genuine independent round-2 (Cx8) then returned NO-SHIP with two MAJOR findings — FM-4 + Cx8-2, both counterexample-backed** → **v0.9.4**
+**Date:** 2026-07-20, updated 2026-07-21 (Cx6), 2026-07-25 (Cx7, then Cx8) and **2026-08-02 (model (a)'s slice E item 2 — the control-witness round, W1–W6; no module behaviour changed, two prose claims corrected)** · **Model:** `FenceTakeover.tla` (TLA+, checked with TLC 2.19 / tla2tools v1.7.4) · **Doc set at modeling time:** v0.9 → **found FM-1, resolved in v0.9.1**; a **Codex adversarial round on the model itself (Cx6-1…6, all valid) + its liveness re-verification (found FM-2)** → v0.9.2; a **round-2 attempt (Cx7) found FM-3 + three model/verification defects (Cx7-1/-2/-3)** but died on an upstream outage before producing a verdict → v0.9.3; the **genuine independent round-2 (Cx8) then returned NO-SHIP with two MAJOR findings — FM-4 + Cx8-2, both counterexample-backed** → **v0.9.4**
 **Status:** companion artifact — `state-machines.md` (SM) stays normative; on any disagreement the SM/core wins and the model is wrong. Design: `docs/superpowers/specs/2026-07-20-formal-model-b-fence-takeover-design.md`. Round records: the Cx6 and Cx7 addenda in `docs/review/2026-07-20-10-…-FM-1-record.md`.
 
 ## 1. What was checked, and the headline results
 
 The model composes SM §3 (FenceReadyLost arbitration), SM §4 (actuator takeover), SM §6 (EmergencyPlan lifecycle) with an adversarial environment: bot/signer/actuator crashes and restarts (unbounded in the safety configs), health-dimension flapping, watchdog false positives (partition abstraction), venue fill/cancel races and late fills, and operator actions.
 
-Counts below are for the **v0.9.4 module revision** (the commit stamping this doc v0.9.4) `[→ Cx6-6, Cx7, Cx8]`; all **eight** runs match predictions (**≈32 min** total on 18 cores — up from ≈20 min at v0.9.3, and the increase is almost entirely one line item: `_Live2` alone is **23 min 15 s** because it now checks **five** temporal properties over its graph. Everything else is noise — nominal 1 s, `_Live` 8 min 04 s, NC5 4 s. TLC's temporal phase is single-threaded, so **each added liveness property is a direct, roughly linear wall-clock cost**, while an added *invariant* is nearly free. That is the standing trade for keeping regression properties permanently in the suite; it is worth paying, but it should be paid deliberately).
+Counts below are for the **v0.9.4 module revision** (the commit stamping this doc v0.9.4) `[→ Cx6-6, Cx7, Cx8]`, plus the **six control-witness probes added in slice E** (2026-08-02), which add no actions or constants and so change no run above; all **fourteen** runs match predictions (**≈32 min** total on 18 cores — up from ≈20 min at v0.9.3, and the increase is almost entirely one line item: `_Live2` alone is **23 min 15 s** because it now checks **five** temporal properties over its graph. Everything else is noise — nominal 1 s, `_Live` 8 min 04 s, NC5 4 s. TLC's temporal phase is single-threaded, so **each added liveness property is a direct, roughly linear wall-clock cost**, while an added *invariant* is nearly free. That is the standing trade for keeping regression properties permanently in the suite; it is worth paying, but it should be paid deliberately).
 
 | Run | Config | Expectation | Result | States (generated / distinct) |
 |---|---|---|---|---|
@@ -19,6 +19,74 @@ Counts below are for the **v0.9.4 module revision** (the commit stamping this do
 | NC3 unfenced action at `$1K`+ | `_NC3.cfg` | violate I1 | **VIOLATED I1** (8 states) | — |
 | NC4 no trade-terminality (**FM-1**) | `_NC4.cfg` | violate I2/I3 | **VIOLATED I3** (11 states) | — |
 | **NC5 no arbitration snapshot (FM-4)** `[→ FM-4]` | `_NC5.cfg` | violate **P4** | **VIOLATED P4** (13 states) | 2,020,916 / 297,712 |
+| **W1** does NC1's witness show the harm? | `_W1.cfg` | **REACHED** | **REACHED** (bot write post-latch over live exposure) | — |
+| **W2** does NC2's? | `_W2.cfg` | **REACHED** | **REACHED** at 5 states — NC2's own trace **+1 fill** | — |
+| **W3** does NC3's? | `_W3.cfg` | **REACHED** | **REACHED** at 8 states — **both** writers landed, both close orders live | — |
+| **W4** does NC4's? | `_W4.cfg` | **REACHED** | **REACHED** at 11 states (exposure re-admitted; coverage still intact) | — |
+| **W5** does NC5's? | `_W5.cfg` | **REACHED** | **REACHED** at 6 states — un-arbitrated strand on a **naked** package | — |
+| **W6** FM-1's *full* cost `[→ FM-1]` | `_W6.cfg` | **REACHED** | **REACHED** at 12 states — NC4's trace **+1 fill** | — |
+
+### The control-witness round (slice E item 2, 2026-08-02)
+
+Model (a) has asked its controls since slice C whether their counterexamples
+demonstrate the **harm** or only the **flag**. Model (b)'s five had never been
+asked, and NC1–NC4 predate the question entirely. All six probes were
+**REACHED**: every control's stated harm is real, and TLC had simply been
+reporting a shallower witness.
+
+**The degeneracy was systematic, not four accidents.** Every invariant here can
+be tripped two ways — by a cheap *surrogate* for exposure (an order sitting
+live, unfilled) or by exposure itself — and the surrogate is always exactly one
+`VEntryFill` closer to `Init`. Breadth-first search returns it every time.
+Three of the four safety witnesses end `pos = "flat"`, `hadExposure = FALSE`.
+
+**NC3 is the exception, and not by luck:** `ActCanaryUnfencedClose` carries
+`pos ≠ "flat"` in its own guard, so no witness of it can be flat. A control
+whose harmful precondition is a **guard of the action it enables** cannot have a
+degenerate witness in that dimension — which is the general form, and the
+property the other three lack.
+
+**Two suite defects this surfaced, both invisible from a green run:**
+
+1. **`I2_HostIndependentCoverage` had never been violated by any run.** It is
+   listed in exactly two configs (NC2, NC4) and both report `I3` — because TLC
+   halts at the first violation, so a shallower `I3` **ends the search before
+   the `I2` state exists to be found**. The configs' "I2 or I3" wording is what
+   made it invisible. W2 and W6 now demonstrate it under both controls.
+2. **The prose in this artifact carried harm the runs never showed.** §1's NC2
+   line said "the entry *then fills* into a coverage hole" and §2's FM-1 trace
+   said "→ I3, **then I2**". NC4 never violates I2, and both traces stop before
+   any fill. The claims were *true about the system* — W6 proves it — and that
+   is exactly why four review rounds passed over them: a false claim gets
+   challenged, while a true claim resting on a run that did not show it reads as
+   verified. Both sentences are now scoped to what their run reports, with the
+   probe that supplies the rest named beside them.
+
+**What separates every degenerate witness from its harm is a fill** — the one
+event in this system no component gets to decline. A control that stops at "the
+flag flipped" is reporting a state the venue can convert into the real damage
+unilaterally. That is the argument for why "shortest counterexample" and
+"adequate evidence" are different things, and it generalizes past this model.
+
+**W6 exists because W4's trace was read.** W4 was REACHED, and reading it showed
+W4 to be only *half* of NC4's claim: exposure re-admitted, `plan` still
+`"active"`, coverage intact. `ActDeactivate` guards on `actuatedFlat ∧ plan =
+"active" ∧ actReadyOK` and on **nothing about position**, so the stale record
+re-drives the tombstone straight over the re-admitted exposure — reached at 12
+states, NC4's committed 11-state trace plus one `VEntryFill`. **A probe being
+violated says the state is reachable; only the trace says whether it is the harm
+the control names.**
+
+**And one prediction was wrong, which is why these are runs and not sentences.**
+W2 was written claiming the tombstone-over-exposure state was reachable *only*
+through `BotDeactivate`'s `botCloseLive` disjunct — the issuance-gated bug
+proper. It is not: the witness tombstones a **flat** package whose entry is
+still live, then lets the entry fill. The `botCloseLive` disjunct is not
+exercised even by the probe. What that says about `I3` is the useful part:
+**`I3`'s `NoLiveOrders` conjunct is not tidiness beside `I2`, it forbids the
+precursor of an `I2` violation.** A terminal declared while any order is live is
+one uncontrolled venue event away from exposure under a tombstoned plan. `I2`
+is not decoration — `I3` is what keeps it green.
 
 **NC5 is a new *kind* of negative control** — the first that proves a *temporal property* bites rather than an invariant. It exists because this round's two predecessors both failed the same way: Cx7-2 found a convergence property that had been vacuous for branch 1 for a whole round, and Cx7-3 found a completion path with no capability property over it. A green liveness run proves only that the property was not violated; without a control that makes it fail on demand, "green" and "vacuous" are indistinguishable from the outside. `run.sh` gained a `failprop` expectation mode for it (TLC does not name the violated property, so NC5's config lists exactly one).
 
@@ -29,13 +97,13 @@ Checked invariants (nominal): **I1** never-two-writers (no bot write lands post-
 Negative-control traces (the model catches the documented hazards — each reproduces a specific spec warning):
 
 - **NC1** (`DURABLE_LATCH = FALSE`): Replicate → SignerCrash → WatchdogFire → **ActLatch** → **SignerRestart (epoch forgotten)** → a **bot entry submit lands while the actuator is fenced-active** → two writers (7 states). Verbatim SM §4: "a transiently-crashed signer could restart mid-takeover and restore two writers." *(The v0.9.2 run reported an 8-state witness of the same violation whose landing write was a protection **cancel** — the Cx6-4 instrumentation observing exactly the write class it was added for. Both are valid; see the note above on worker nondeterminism.)*
-- **NC2** (`EVIDENCE_GATED = FALSE`): Replicate → EntrySubmit → **BotDeactivate on issuance evidence** → tombstone with the entry order still live (I3); the entry then fills into a coverage hole. The Cx5-1/R1d-F7 gate, shown load-bearing in 4 steps.
+- **NC2** (`EVIDENCE_GATED = FALSE`): Replicate → EntrySubmit → **BotDeactivate on issuance evidence** → tombstone with the entry order still live (I3). The Cx5-1/R1d-F7 gate, shown load-bearing in 4 steps. **The run stops there** — `pos = "flat"`, `hadExposure = FALSE`; the fill into the coverage hole is **W2**, one step further on (5 states), and until slice E it was prose rather than a trace.
 - **NC3** (`CANARY_UNFENCED = TRUE`): Replicate → Entry → WatchdogFire → **ActLatchFail** → VEntryFill (late fill) → **unfenced actuator close lands** → I1 (7 states). The §7.4 tier rationale: the canary regime claims no single-writer safety — which is exactly why the `$1K`+ floor is read-only + manual.
 - **NC4** (`TRADE_TERMINALITY = FALSE`): the **FM-1** counterexample — §2 below.
 
 ## 2. FM-1 — the finding this model surfaced against v0.9 (resolved v0.9.1)
 
-**Trace (11 steps, minimal):** Replicate → WatchdogFire (host-silence; the entry never opened) → ActLatch → QuiesceDone → ReconcileDone → **ActMarkFlat** (durable `ActuatedFlat`) → **ActCrash** (the exact R1d-F7 window between `ActuatedFlat` and `Deactivate`) → **OpClearIncident** (spec-legal: the R1d-F6 clearance preconditions are the branch's terminal outcome *flat/reconciled* + propagation test — the plan tombstone is **not** among them) → **BotEntrySubmit under the same still-`Active` plan** (§6's "ack required before the entry submits" is satisfied by the *old* ack) → **ActDeactivate** — the stale re-driven tombstone lands **under live fresh exposure** → I3, then I2: open exposure with no `ListActive`-visible plan. The actuator would never protect that exposure. Host-independent coverage — the property the whole §6 lifecycle exists for — is broken by the composition of three individually-correct rules (R1d-F7 re-drive × R1d-F6 clearance × §6 ack-before-entry).
+**Trace (11 steps, minimal):** Replicate → WatchdogFire (host-silence; the entry never opened) → ActLatch → QuiesceDone → ReconcileDone → **ActMarkFlat** (durable `ActuatedFlat`) → **ActCrash** (the exact R1d-F7 window between `ActuatedFlat` and `Deactivate`) → **OpClearIncident** (spec-legal: the R1d-F6 clearance preconditions are the branch's terminal outcome *flat/reconciled* + propagation test — the plan tombstone is **not** among them) → **BotEntrySubmit under the same still-`Active` plan** (§6's "ack required before the entry submits" is satisfied by the *old* ack) → **ActDeactivate** — the stale re-driven tombstone lands, and the entry it re-admitted is still live → **I3**. *(Precisely: this run violates I3 and halts; `pos` is still `"flat"` and NC4 **never violates I2**. The step that makes the exposure real — and with it the I2 violation this paragraph is about — is one `VEntryFill` further on, which is **W6**, reached at 12 states in slice E. The reasoning below was right about the system for four review rounds while resting on a trace that stopped short of showing it.)* The harm, now demonstrated: open exposure with no `ListActive`-visible plan. The actuator would never protect that exposure. Host-independent coverage — the property the whole §6 lifecycle exists for — is broken by the composition of three individually-correct rules (R1d-F7 re-drive × R1d-F6 clearance × §6 ack-before-entry).
 
 **Why it is a spec gap, not a model artifact:** nothing in core §7.4 / SM §3/§4/§6 (v0.9) states what becomes of a trade the takeover ran to completion evidence on. The bot-side close is terminal by construction (§6 step 9 sequences close finality → `Deactivate` → lease), but the actuator-side flatten leaves the trade's disposition unstated: the plan is still `Active`, the ack is still valid, and no rule forbids the cleared bot from re-admitting exposure under it while the tombstone re-drive is still owed.
 
@@ -175,6 +243,7 @@ Notation: SM row → model action(s). "OOS" = deliberately out of scope with the
 - **Green runs prove only what the properties say (Cx7).** Two of Cx7's four findings were escapes the *suite* could not see: a completion path with no capability property over it (Cx7-1/-3), and a liveness property whose escape hatch certified the very stall it should have caught (FM-3/Cx7-2) — the suite was 7/7 green over both. The standing lesson recorded with the round: **exit and resumption paths are the blind spot.** Cx6 hardened every entrance (latch gate, branch guards, write gates); Cx7's holes were "how do you get out of `held`" and "how do you get back in after a crash" — and, at the meta level, "how does a property let itself off the hook".
 - Liveness is a conditional claim: an eventually-stable environment (`EnvStabilizes`), finitely many crashes (`CRASH_BUDGET = 2`), + the stated fairness (operator eventually acts — including the FM-2 dismissal of false alarms and the halt-first manual procedure). Safety runs have **unbounded** crashes. **Fairness minimality (Cx6 close-out):** arbitration/branch fairness is **WF, not SF** — in the `EnvStabilizes` suffix those guards are persistent-until-fired (within an incident, `latched` is monotone; un-latch = clearance = resolution), so the claims hold under the *weaker* assumption (the stronger theorem); SF is retained only where genuinely load-bearing — `ActLatch` (the latch↔unavail phase alternation keeps its enabling intermittent even in a stable environment) and the five operator actions (windows made intermittent by position/order/phase dynamics). Checking uses `run.sh`'s `-lncheck final` (one liveness pass over the completed graph; TLC's default periodic passes over the growing graph made these configs impractically slow).
 - I5 (tombstone permanence) is discharged by the port contract, not checked — see the SM §6 map row.
+- **A control's verdict and a control's evidence are different claims (slice E item 2).** Every NC here reports the invariant it was predicted to violate, and for four rounds that was read as the hazard being demonstrated. It is not: TLC returns *a* counterexample, and where a hazard has a cheap surrogate one step shallower than the real thing, breadth-first search returns the surrogate every time. The witness probes W1–W6 are the standing answer, and the rule they encode is: **when a control's config comment names a harm, the harm is a run or it is a hypothesis.** The two places this artifact narrated past its own traces (§1's NC2 line, §2's FM-1 trace) are marked in place rather than quietly corrected, because the failure mode is the prose being *right* — a wrong claim gets challenged, a true one resting on a run that did not show it does not.
 
 ## 5. How to run
 
@@ -182,6 +251,8 @@ Notation: SM row → model action(s). "OOS" = deliberately out of scope with the
 cd docs/formal && ./run.sh
 ```
 
-Fetches `tla2tools.jar` v1.7.4 (SHA-256 pinned) into gitignored `.tools/`, then runs all **eight** configs and checks each against its prediction (nominal safety + both liveness configs must pass; NC1–4 must fail on the predicted invariant; **NC5 must fail on the predicted temporal property**). Requires Java 17+. Full outputs land in `.tools/*.out`. **≈32 min** on 18 cores; the `_Live2` config dominates at 23 min (five temporal properties over its graph).
+Fetches `tla2tools.jar` v1.7.4 (SHA-256 pinned) into gitignored `.tools/`, then runs all **fourteen** configs and checks each against its prediction (nominal safety + both liveness configs must pass; NC1–4 must fail on the predicted invariant; **NC5 must fail on the predicted temporal property**; **W1–W6 must each be VIOLATED — they state the harmful state is never reached, so a PASS is the failure**). Requires Java 17+. Full outputs land in `.tools/*.out`. **≈32 min** on 18 cores; the `_Live2` config dominates at 23 min (five temporal properties over its graph).
+
+**Clear `.tools/states-*` before a full unfiltered run.** TLC keeps one `-metadir` per config and never reclaims them, so the suite accumulates them across sessions — measured 2026-08-02 at **12 GB over 114 directories**, and a full run under that pressure killed `_Live2`'s JVM with **SIGBUS in an mmap'd `arraycopy`** as the temporal phase started. The tell that it is environmental rather than a model regression: the *safety* phase had already reproduced this artifact's recorded graph exactly (1,705,418 / 249,936), and the crash is a JVM fault rather than a violated property. `rm -rf .tools/states-*` is safe and loses nothing — the `.out` files are the results, the metadirs are scratch — and it took the directory from 12 GB to 3.2 MB. Worth doing as a matter of course beside a long-running market-data capture, where disk is the shared resource that cannot be re-fetched.
 
 **Reviewer-authored probes — `docs/formal/probes/`** (not part of `run.sh`). The Cx8 round's two properties, written by the independent reviewer rather than by this model's author, kept under version control for exactly that reason. `ExhaustedHeldEventuallyParks` **passes** on the current module and is the independent confirmation of Cx8-2; `LostEventuallyLeaves` **still fails by design** on a benign watchdog-park trace (§2d's scoping correction). Read `probes/README.md` before running them — the failure is expected and must not be "fixed" into the model.

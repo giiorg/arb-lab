@@ -229,4 +229,68 @@ PC26_PerpParkAlwaysEmpty ==
     /\ pdDone > 0
     /\ PdReserved > 0
 
+(***************************************************************************)
+(* SLICE E item 4 -- SS8f's question about WHICH NEUTRALITY opens a         *)
+(* generation. PC27/PC28 below, and they must be read in that order.        *)
+(*                                                                         *)
+(* PdPlan guards on `TrueResidual = 0`, and TrueResidual is `realized -     *)
+(* TrueReserved` -- RESERVATION-NETTED. So the guard admits a package that  *)
+(* is neutral PENDING AN IN-FLIGHT REDUCTION rather than physically flat,   *)
+(* while core SS5.3 says PackageDelever reduces leverage "on a STILL-       *)
+(* NEUTRAL package" and SS7's invariants say "the package has NO NAKED      *)
+(* RESIDUAL". SS8f recorded that as a READING and deferred the question of  *)
+(* whether physical neutrality is the stronger and intended precondition.   *)
+(* It is FM-5's mirror: FM-5 was a reservation COUNTED BEFORE ITS BACKING   *)
+(* EXISTED; this is a reservation counted AS IF ALREADY REALIZED, when it   *)
+(* may never realize.                                                      *)
+(*                                                                         *)
+(* Neither probe can settle whether the spec MEANS the stronger reading --  *)
+(* that is a spec question. What they settle is whether the two readings    *)
+(* are DISTINGUISHABLE on this model, and whether the state that            *)
+(* distinguishes them can lose its premise. Asked in this order because a   *)
+(* negative on PC27 closes item 4 by itself: if the guard never admits a    *)
+(* physically-exposed package, then "reservation-netted" and "physical" are *)
+(* the same predicate here and the model has been silently checking the     *)
+(* strong reading all along. That is the fixture-collapse tell at model     *)
+(* altitude -- a parameter pinned to the value that collapses the           *)
+(* distinction the code makes -- and it would mean four slices of runs said *)
+(* nothing about SS8f either way.                                          *)
+(***************************************************************************)
+
+\* PC27 -- is a generation EVER opened over a package that is
+\* reservation-netted neutral but PHYSICALLY exposed? `pd = "Planned"` with
+\* both legs still at zero is the instant after PdPlan fired, so `realized #
+\* 0` there means the guard passed on `realized = TrueReserved # 0`: real
+\* exposure, exactly offset by somebody else's in-flight reduction.
+\*
+\* If this is NOT violated, the weak guard has never once admitted anything
+\* the strong guard would have refused, and SS8f's question is moot ON THIS
+\* MODEL -- which is itself the answer, and a different one from "the weak
+\* guard is fine".
+PC27_GenNeverOpenedOverReservedExposure ==
+  ~ /\ pd = "Planned"
+    /\ pdDone = 0
+    /\ pdSold = 0
+    /\ realized # 0
+
+\* PC28 -- the harm shape, and the reason PC27 alone would not settle it. A
+\* generation opened on a netted-neutral package has borrowed its premise
+\* from a reservation it does not own. Reservations are RELEASED as well as
+\* realized -- on finality, and on supersession (RELEASE_ON_SUPERSEDE) --
+\* and a release is not an execution. So this asks for the state where the
+\* premise has evaporated underneath a live generation: real exposure
+\* (`realized # 0`), nothing reserved against it any more (TrueReserved =
+\* 0, which includes the generation's own entry still being zero because its
+\* perp leg has bought nothing), and the generation still running.
+\*
+\* No existing invariant covers this. INV5 polices the generation's OWN legs
+\* (`pdSold <= pdDone`), not the package premise it was opened under, so a
+\* green nominal run says nothing about it -- which is why this is a probe
+\* and not an invariant flip. If reached, SS8f's deferred question has a
+\* concrete witness and the answer is owed by the SPEC, not by the model.
+PC28_GenPremiseNeverEvaporates ==
+  ~ /\ PdActive
+    /\ realized # 0
+    /\ TrueReserved = 0
+
 ===============================================================================

@@ -1105,6 +1105,149 @@ I7_EscalateOnly ==
   /\ fenceCtl = "manual"   => branchMax = 2
   /\ fenceCtl = "takeover" => branchMax = 3
 
+(***************************************************************************)
+(* CONTROL-WITNESS PROBES W1-W5 [SLICE E item 2].                          *)
+(*                                                                         *)
+(* Model (a) asked its four controls whether their counterexamples show    *)
+(* the HARM or only the FLAG (its W1-W4). Model (b)'s five controls had    *)
+(* never been asked, and they are the older ones -- NC1-NC4 predate the    *)
+(* question entirely. This is that mirror, which is CLAUDE.md's rule about *)
+(* applying a fix to its symmetric case.                                   *)
+(*                                                                         *)
+(* Reading the four committed witnesses first is what set these probes,    *)
+(* and it found a BIAS rather than four separate accidents. Every          *)
+(* invariant here can be tripped two ways: by a cheap SURROGATE for        *)
+(* exposure -- an order sitting live, unfilled -- or by exposure itself.   *)
+(* The surrogate is always exactly one VEntryFill closer to Init, so TLC's *)
+(* breadth-first search returns it every time. Three of the four witnesses *)
+(* end with `pos = "flat"` and `hadExposure = FALSE`:                      *)
+(*                                                                         *)
+(*   NC1  bot write lands post-latch, actuator in quiesce, NO actuator     *)
+(*        order live, package flat and never exposed -- the flag with no   *)
+(*        second writer and nothing at stake.                              *)
+(*   NC2  claims "premature tombstone with open exposure"; the witness     *)
+(*        tombstones a FLAT package and takes BotDeactivate's `pos =       *)
+(*        "flat"` disjunct -- NOT the `botCloseLive` disjunct, which is    *)
+(*        the issuance-gated bug the control is named for. The mechanism   *)
+(*        is not exercised at all.                                         *)
+(*   NC4  traverses FM-1's route exactly (ActMarkFlat, crash, clearance,   *)
+(*        re-admission under the stale plan) and then STOPS one step       *)
+(*        early: the re-admitted entry never fills, so the coverage FM-1   *)
+(*        is about was never under live exposure.                          *)
+(*                                                                         *)
+(* NC3 is the exception, and NOT by luck: ActCanaryUnfencedClose carries   *)
+(* `pos # "flat"` in its own guard, so no witness of it can be flat. A     *)
+(* control whose harmful precondition is a GUARD of the action it enables  *)
+(* cannot have a degenerate witness in that dimension -- which is the      *)
+(* general form of the thing, and the reason W3 asks about the second      *)
+(* writer instead.                                                         *)
+(*                                                                         *)
+(* THE MASKING THIS EXPOSED, which is a suite defect and not a witness     *)
+(* one: NC2 and NC4 each list TWO invariants, and BOTH report I3. TLC      *)
+(* halts at the first violation it reaches, so a shallower I3 violation    *)
+(* ENDS the search before the deeper I2 one exists to be found -- and      *)
+(* `I2_HostIndependentCoverage` has therefore never been violated by any   *)
+(* run in this suite. It is listed twice and demonstrated never: a control *)
+(* that has never been observed to fail is decoration, which is NC5's own  *)
+(* stated lesson about liveness properties, arriving one invariant over.   *)
+(* The config comments' "I2 or I3" wording is what made it invisible.      *)
+(* W2 answers it: `tombstone /\ pos # "flat"` IS an I2 violation, so if    *)
+(* W2 is reached under NC2's own constants then I2 bites and only search   *)
+(* order hid it.                                                           *)
+(*                                                                         *)
+(* Polarity as everywhere else in this repo: each probe states the         *)
+(* harmful state is NEVER reached, so a TLC VIOLATION is the GOOD outcome  *)
+(* and a PASS means the control cannot demonstrate its own stated harm.    *)
+(* Each config lists EXACTLY ONE of these and none of I1-I8 -- the NC5     *)
+(* attribution discipline, and here it is also load-bearing for the        *)
+(* SEARCH: an I-invariant left in the list would halt at the shallow       *)
+(* violation and mask the probe, which is the very defect above.           *)
+(***************************************************************************)
+
+\* W1 [-> NC1]. NC1's witness lands a bot write while the actuator is in
+\* quiesce with the package flat, never exposed, and no actuator order in
+\* flight. SM SS4's warning is about a partitioned bot writing against a
+\* takeover that is working REAL exposure; this asks whether that state is
+\* reachable at all under a non-durable latch.
+W1_NoPostLatchWriteOverExposure ==
+  ~ (botLandedPostLatch /\ pos # "flat")
+
+\* W2 [-> NC2]. The tombstone over genuinely open exposure -- the harm the
+\* config's own comment claims and its witness does not show. It is
+\* simultaneously an I2_HostIndependentCoverage violation (pos # "flat"
+\* with plan # "active"), which is how the masking above gets an answer.
+\*
+\* REACHED at depth 5, and the route is NOT the one predicted when this
+\* probe was written -- worth keeping, because the correction is the
+\* finding. The prediction was that only BotDeactivate's `botCloseLive`
+\* disjunct could get here (the issuance-gated bug proper). The actual
+\* witness is NC2's own 4-state trace plus ONE step: tombstone the flat
+\* package while its entry order is still live, then let the entry FILL.
+\* The `botCloseLive` disjunct is not exercised even by the probe.
+\*
+\* What that says about I3, and it is the useful part: I3's `NoLiveOrders`
+\* conjunct is not a tidiness requirement sitting beside I2, it FORBIDS
+\* THE PRECURSOR of an I2 violation. A terminal declared while any order is
+\* live is a state one uncontrolled venue event away from exposure under a
+\* tombstoned plan -- and that event is a fill, which no component of this
+\* system gets to decline. So the reason I2 has never been violated in this
+\* suite is not that it is decoration; it is that I3 catches the state
+\* before the venue can turn it into an I2 violation. W2 is the run that
+\* shows what I3 is buying.
+W2_NoTombstoneOverExposure ==
+  ~ (plan = "tombstone" /\ pos # "flat")
+
+\* W3 [-> NC3]. Exposure is guaranteed by the action's guard, so the open
+\* question is the OTHER half of SS7.4's tier rationale: the canary regime
+\* "claims no single-writer safety". The strongest form of that claim is
+\* both writers landing writes in one behaviour -- I1's two conjuncts true
+\* together. NC3's witness has actLandedUnfenced alone, which shows an
+\* un-latched actuator write, not two writers.
+W3_NoTwoWritersBothLanded ==
+  ~ (actLandedUnfenced /\ botLandedPostLatch)
+
+\* W4 [-> NC4]. FM-1's stated cost is that the stale re-driven tombstone
+\* "kills host-independent coverage UNDER LIVE EXPOSURE". NC4 re-admits the
+\* exposure and the trace ends before it fills. This asks for the fill:
+\* exposure open on a trade whose ActuatedFlat evidence is already durably
+\* recorded.
+W4_NoExposureAfterActuatedFlat ==
+  ~ (actuatedFlat /\ pos # "flat")
+
+\* W6 [-> NC4]. W4 was REACHED and its trace then showed W4 to be only HALF
+\* of FM-1's stated cost, which is why this exists: NC4's claim is that the
+\* re-admission happens AND "the stale re-driven tombstone then kills
+\* host-independent coverage under live exposure". W4 gives the
+\* re-admission (actuatedFlat with the entry filled) and leaves `plan =
+\* "active"` -- coverage intact. The tombstone half is unproven.
+\*
+\* It should be reachable from exactly there, because ActDeactivate guards
+\* on `actuatedFlat /\ plan = "active" /\ actReadyOK` and on NOTHING about
+\* position: the durable flat evidence is the whole authorization, so once
+\* TRADE_TERMINALITY stops barring re-admission the record is stale and the
+\* tombstone re-drives over live exposure. That reading is what this run
+\* is for; W2's mispredicted route is the reason it is a run and not a
+\* sentence.
+W6_NoStaleTombstoneOverExposure ==
+  ~ (actuatedFlat /\ plan = "tombstone" /\ pos # "flat")
+
+\* W5 [-> NC5]. The one witness that already shows its harm: NC5 lassos
+\* un-arbitrated with pos = "neutral" and hadExposure, so "strands with
+\* exposure open" is verified by its own trace. The residual question is
+\* the one NC13/NC16 raised in model (a) -- is the WORST version reachable?
+\* A stranded NEUTRAL package is hedged and bleeding funding; a stranded
+\* NAKED one is directional and unbounded, and it is the state SM SS3's
+\* arbitration exists to get out of.
+\*
+\* LIMIT, stated because the probe cannot close it: this is REACHABILITY of
+\* the naked un-arbitrated state, which is necessary but not sufficient for
+\* a naked STRAND. Same bound as model (a)'s W2/W3 and for the same reason
+\* -- a probe runs under Spec, and fairness constrains behaviours, never
+\* which states exist.
+W5_NoNakedUnarbitratedStrand ==
+  ~ (fenceCtl = "lost" /\ branchMax = 0 /\ botUp /\ actPhase = "standby"
+     /\ incidentActive /\ pos = "naked")
+
 \* Liveness (LiveSpec only): every incident eventually resolves to operator
 \* clearance -- through wind-down, takeover-to-flat, HeldIncident + manual
 \* kill, or the fence-unavailable floor + manual kill -- given the stated

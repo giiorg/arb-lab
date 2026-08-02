@@ -1329,16 +1329,285 @@ and the situation it avoids is the one `FM-5` sat in for three slices, where
 `docs/formal/` and `docs/state-machines.md` disagreed and CLAUDE.md's standing
 rule had to arbitrate.
 
-*Items 2, 3 and 4 remain open; see RESUME HERE.*
+### 11d. Item 2 — model (b)'s five controls, asked the witness question
+
+Model (a) has asked its controls since slice C whether their counterexamples
+demonstrate the **harm** or only the **flag** (`W1`–`W4`, §9c). Model (b)'s five
+had never been asked, and `NC1`–`NC4` predate the question entirely. Six probes
+were built (`FenceTakeover_W1`–`W6`), and **all six were REACHED**: every
+control's stated harm is real, and TLC had simply been reporting a shallower
+witness. Model (b) is now 14 runs.
+
+**The numbering restarts per model on purpose.** `W1`–`W6` here are model (b)'s
+and are selected by the `FenceTakeover_` prefix, exactly as both models already
+carry an `NC1`–`NC5`. The prefix is the namespace, and it is the thing
+`./run.sh FenceTakeover` filters on — the lesson the coverage probes paid for
+when `PC_*` sat outside the namespace its own model owned.
+
+**The degeneracy was systematic, not four accidents, and the mechanism is
+general.** Every invariant in model (b) can be tripped two ways: by a cheap
+**surrogate** for exposure — an order sitting live, unfilled — or by exposure
+itself. The surrogate is always exactly one `VEntryFill` closer to `Init`, so
+breadth-first search returns it every time. Three of the four safety witnesses
+end `pos = "flat"` with `hadExposure = FALSE`.
+
+| Control | Its witness showed | Its probe reached |
+|---|---|---|
+| `NC1` | bot write post-latch, actuator in `quiesce`, **no** actuator order live, package flat and never exposed | `W1` — the same write with live exposure |
+| `NC2` | tombstone over a **flat** package, via `BotDeactivate`'s `pos = "flat"` disjunct — **not** the `botCloseLive` one that *is* the issuance-gated bug | `W2` at 5 states: NC2's own trace **+1 fill** |
+| `NC3` | real exposure, actuator close in flight, one writer | `W3` at 8 states: **both** writers landed, **both** close orders live |
+| `NC4` | FM-1's route exactly, then the re-admitted entry **never fills** | `W4` (exposure back, coverage intact) and `W6` at 12 states — NC4's trace **+1 fill** |
+| `NC5` | **already harmful**: lassos un-arbitrated with `neutral` + `hadExposure` | `W5` at 6 states: the same strand on a **naked** package |
+
+**`NC3` is the exception and not by luck**, which is the transferable part:
+`ActCanaryUnfencedClose` carries `pos ≠ "flat"` in its own guard, so no witness
+of it can be flat. **A control whose harmful precondition is a *guard of the
+action it enables* cannot have a degenerate witness in that dimension.** That is
+the structural property the other three lack, and it is a design lever — a
+control built on an action whose guard *is* the harm needs no witness probe.
+
+**Two suite defects this surfaced, neither visible from a green run.**
+
+**(1) `I2_HostIndependentCoverage` had never been violated by any run in the
+suite.** It is listed in exactly two configs, `NC2` and `NC4`, and **both report
+`I3`** — because TLC halts at the first violation, so a shallower `I3` violation
+*ends the search before the `I2` state exists to be found*. The configs' own
+"I2 or I3" wording is what made it invisible: an expectation phrased as a
+disjunction cannot notice that one disjunct never fires. `W2` and `W6` now
+demonstrate it under both controls. **The rule this yields:** a config listing
+more than one invariant is not checking both — it is checking whichever is
+shallower, and the other is decoration until something reaches it. Every other
+config in both models lists exactly one for *attribution*; this is the same
+discipline owed for a second reason, **search depth**, and the probes therefore
+list one invariant and none of `I1`–`I8`.
+
+**(2) This artifact's prose carried harm its runs never showed.**
+`fence-takeover-model.md` §1 said NC2's "entry *then fills* into a coverage
+hole"; §2's FM-1 trace said "→ I3, **then I2**". `NC4` never violates `I2`, and
+both traces stop before any fill. **The claims were true about the system** —
+`W6` proves it at depth 12 — **and that is precisely why four review rounds
+passed over them.** A false claim gets challenged; a true claim resting on a run
+that did not show it reads as verified. Both sentences are now scoped to what
+their run reports, with the probe supplying the rest named beside them, and the
+correction is marked in place rather than made quietly.
+
+**What separates every degenerate witness from its harm is a fill** — the one
+event in this system no component gets to decline. A control that stops at "the
+flag flipped" is reporting a state the venue can convert into the real damage
+unilaterally. That is the argument for why *shortest counterexample* and
+*adequate evidence* are different things.
+
+**And one prediction was wrong, which is the reason these are runs.** `W2` was
+written claiming the tombstone-over-exposure state was reachable *only* through
+`BotDeactivate`'s `botCloseLive` disjunct. It is not: the witness tombstones a
+**flat** package whose entry is still live, then lets the entry fill; the
+`botCloseLive` disjunct is not exercised even by the probe. What that yields is
+better than the prediction was: **`I3`'s `NoLiveOrders` conjunct is not tidiness
+beside `I2`, it forbids the *precursor* of an `I2` violation.** A terminal
+declared while any order is live is one uncontrolled venue event away from
+exposure under a tombstoned plan. `I2` is not decoration — `I3` is what keeps it
+green. **`W6` likewise exists only because `W4`'s trace was read**: `W4` was
+REACHED and showed itself to be half of NC4's claim (exposure re-admitted,
+`plan` still `"active"`). A probe being violated says the state is reachable;
+only the trace says whether it is the harm the control names.
+
+### 11e. Item 3 — §7d's "never issued twice", and `FM-7`
+
+**§7d's reading was taken off a truncated search, and item 2 is what exposed
+it.** §7d reported that `NC2`'s counterexample leaves `overshoot` FALSE
+throughout, concluding the flat rule looked like belt-and-braces over the
+reservation. But `NC2` lists `TypeOK` and `INV2` only, and **`INV2` is exactly
+`floorCount <= 1`** — so TLC halts at the first second-dispatch state and
+explores nothing beyond it. `overshoot` was not merely FALSE there; **it was
+never a checked invariant in that run at all.** "No overshoot was reported" and
+"no overshoot exists" are different claims, and only the second answers §7d.
+This is item 2's defect arriving in model (a), which is why the mirror rule is a
+standing one.
+
+**`NC20` is the honest experiment**: `NC2`'s constants exactly, `INV2` removed,
+`INV1_NeverOvershootSign` listed alone. **Non-vacuity cost no run** — since
+`INV2` *is* `floorCount <= 1`, `NC2` violating it already proves the
+double-issuance state is reached under these same constants, so a pass here is a
+real answer and not an unreached branch.
+
+**Result: PASS, over the complete graph — 8,770,801 generated, 1,086,199
+distinct, 0 left on queue.** Double issuance cannot overshoot the sign while
+reservation-aware sizing is working. §7d's reading survives a full search.
+
+**`FM-7` — a rule whose stated justification assumes what the adjacent sentence
+forbids.** SM §2's interval-floor rule says the floor is "never issued twice
+(else, for `[0.4, 1.0]`, two uncertain `0.4` reductions could reach `-0.4` and
+defeat the proof)". That counterexample **requires the reservation not to be
+counted**, and the neighbouring sentence requires it to be. So the offered
+justification is unsound *even though the rule is right*: `NC20` says the harm
+it describes cannot occur under the sizing the spec mandates.
+
+**The rule stays. The justification is what is defective**, and the docket said
+so before the run: *do not resolve it by weakening the spec*. The danger is
+specific and this project has already been bitten by it once this slice —
+**nobody re-derives a recorded justification** (§10a, and
+[[a-rejected-alternative-is-an-unchecked-claim]]). A later reader who checks the
+`[0.4, 1.0]` story against reservation-aware sizing will find it does not hold,
+and the natural next move is to drop a rule whose reason has evaporated. The
+rule must therefore carry a reason that is *true*.
+
+**Wording to land** (SM §2's interval-floor rule, replacing the parenthetical):
+
+> …and is **never issued twice**. This is **defence in depth, deliberately
+> retained**: under reservation-aware sizing a second floor cannot reach the
+> opposite sign, because the first is already netted out of the subtrahend —
+> formally checked, `NC20`, full graph, no violation. The rule is kept because
+> the proof it protects rests on *two* independent mechanisms and the
+> single-issue rule is the one that survives a defect in the other: if the
+> reservation is ever not counted — the `FM-5` failure mode, an entry that is
+> not backed at the instant it is read — a second uncertain reduction *does*
+> reach the opposite sign. The historical parenthetical (`[0.4, 1.0]`, two
+> uncertain `0.4` reductions reaching `-0.4`) describes exactly that world and
+> is retained **as the statement of what this rule protects against**, not as a
+> hazard reachable under the sizing this document mandates.
+
+That wording does the thing the finding is about: it keeps the rule, makes its
+reason true, and names the *other* mechanism whose failure the rule covers — so
+the two rules are visibly a pair rather than one looking redundant beside the
+other.
+
+### 11f. Item 4 — §8f's neutrality question, and `FM-8`
+
+§8f recorded a **reading**: `PdPlan` guards on `TrueResidual = 0`, and
+`TrueResidual` is `realized − TrueReserved` — **reservation-netted** — so the
+guard admits a package neutral *pending an in-flight reduction* rather than
+physically flat, while core §5.3 says `PackageDelever` reduces leverage "on a
+**still-neutral** package" and §7's invariants say "the package has **no naked
+residual**". Two probes, asked in that order because a negative on the first
+would have closed the item by itself.
+
+**`PC27` — REACHED at depth 3.** `IssueExposureReduction` → `PdPlan`, ending
+`realized = −2`, `pd = "Planned"`, both legs zero. The generation opened on a
+package that is **physically short 2**, exactly offset by somebody else's
+reserved reduction. So the two readings are **distinguishable on this model**,
+and four slices of green runs were not silently checking the strong one. (Had
+`PC27` passed, that would have been the model-altitude form of the fixture
+collapse — a guard whose two readings are the same predicate because nothing
+ever varies the parameter that separates them.)
+
+**`PC28` — REACHED at depth 4, and this is `FM-8`.** One step further:
+`ReductionAmbiguous`. The offsetting reduction's **own result comes back
+ambiguous**, its ledger entry is released, and the state is `realized = −1`,
+`TrueReserved = 0`, `cls = "Ambiguous"`, `pd = "Planned"` — **a live generation
+over a package that is physically short and no longer even determined, with
+nothing reserved against it.**
+
+**One correction to the landed wording, caught by re-reading the witness after
+the edit — and it is `FM-5`'s fix-mistake a third time.** The first draft of
+the new §7 invariant said the reservation can be released "when an
+`IntervalFloorReduction`'s own result comes back ambiguous". `PC28`'s witness
+uses an ordinary **`ExposureReduction`** (`Pend(amt, "exposure", TRUE)`), and
+`ReductionAmbiguous` guards on `kind # "pkgspot"` — so **every** reduction
+owning a ledger entry can release un-executed, and only §7's own spot leg is
+excluded. Naming one producer would have repeated exactly what §11a records
+about `FM-5`'s own fix: a rule derived from one of three producers reads as
+universal. The clause now states the general case and names the witness's
+actual producer.
+
+**It is not a model artifact**, which was checked before the finding was
+written: `ReductionAmbiguous` is faithful to SM §2 row 4 — "it never
+blind-retries — its own ambiguous result routes through this same §6.7 finality
+contract" — and the spec **itself** releases the reservation there, the exposure
+re-entering as an unresolved order contributing an interval. The release is
+correct. What is missing is anything that tells the *generation*.
+
+**`FM-8` is `FM-5`'s mirror, as §8f predicted it would be.** `FM-5`: an entry
+counted **before its backing exists**. `FM-8`: an entry's **premise outliving
+the entry**. Both are §7 and §2 disagreeing about what the shared ledger means,
+and both are invisible to every invariant in the module — **`INV5` polices the
+generation's own legs (`pdSold <= pdDone`), never the package premise it was
+opened under**, which is why a green nominal run says nothing here and why this
+is a probe rather than an invariant flip.
+
+**The deeper half, which §8f did not ask.** §8f asked *which neutrality*. `PC28`
+says the more consequential question is *when it is checked*: §7's "no naked
+residual" is enforced **once, as an entry guard**, and nothing re-evaluates it.
+Even under the strong (physical) reading, a precondition checked only at entry
+can be falsified the instant afterwards. Tightening `PdPlan` to `realized = 0`
+would refuse `PC27`'s witness — but it is a fix to the *guard*, and the defect
+is that the guard is the only enforcement.
+
+**Status: RULED by the user, 2026-08-02 — candidate 1, the standing
+precondition. The normative edit is LANDED in v0.9.25; the MODEL ENCODING AND
+ITS CONTROL ARE OWED (slice F).** That split is deliberate and is stated so a
+later session does not mistake one for the other: the *ruling* is a design
+decision and belongs in the spec the moment it is made, but **the run that
+shows the hole closes has not been performed**, and this slice's own repeated
+lesson is that a fix argued is not a fix checked. What landed in SM §7:
+
+- **a third supersession row** — the §2 classifier leaving `Determined` for the
+  hedge group supersedes an active generation, quiescing the reserved second
+  leg to §6.7 finality first, exactly as the other two do;
+- **a new invariant** stating that "no naked residual" is a **standing**
+  condition and not only an entry test, with the reason the *stronger entry
+  guard would not have sufficed* (candidate 2 below) written into it;
+- **the existing quiesce invariant widened to all three paths** rather than
+  given a fourth of its own — the obligation is identical, so a separate rule
+  would be a second place for it to drift.
+
+**What slice F owes**, sketched here so it is not re-derived: a
+`PREMISE_IS_STANDING` constant (nominal TRUE) gating a `Supersede("premise")`
+enabled on `PdActive /\ cls # "Determined"`; `PC28` **flips polarity** — it
+becomes an invariant of the fixed model rather than a positive control, and
+`NC21` (`PREMISE_IS_STANDING = FALSE`) is the control that must violate it.
+Note the encoding subtlety before writing it: the harm is not the state
+existing *transiently* — a legal quiesce window contains it — so the invariant
+must be read from a flag written at the event, which is exactly the shape
+`INV6_SupersessionQuiescesFirst` already uses (`supersededWithLiveLeg`, read
+from the flag, never from the guard). Reusing `Supersede(path)` unmodified is
+what makes the ruling cheap to encode; that it *is* cheap is evidence for the
+ruling, not proof of it.
+
+**The two candidates as they stood, kept because a rejected alternative is an
+unchecked claim** ([[a-rejected-alternative-is-an-unchecked-claim]]):
+
+1. **Standing precondition + existing machinery.** The classifier leaving
+   `Determined` while a generation is live becomes a **supersession trigger**,
+   quiesced to §6.7 finality exactly as §7's other two are (`EmergencyClosePackage`,
+   `FenceReadyLost`) and policed by the `INV6` that already exists. Reuses §7's
+   own mechanism; costs a generation that would often have been fine.
+2. **Physical neutrality at entry.** `PdPlan` requires `realized = 0`, not
+   `TrueResidual = 0`. Smaller edit, closes `PC27`'s route, and does **not**
+   close the general case — a floor issued after the generation opens can still
+   move the package underneath it.
+
+Candidate 1 is the stronger reading and the one that answers what `PC28` found;
+candidate 2 answers only what §8f asked. **Candidate 1 was ruled.** The
+argument that decided it is worth keeping, because it is the reason candidate 2
+looked adequate and is not: **candidate 2 refuses `PC27`'s witness and leaves
+the defect** — a generation may open on a genuinely physically-flat package and
+have a floor issued underneath it a step later, at which point the same
+dissolution occurs with the same consequence. Tightening the entry guard moves
+the witness; it does not remove the class. The distinguishing question was never
+*which* neutrality but *when* it is checked, and only a standing obligation
+answers that.
+
+Candidate 2 is nonetheless **not refuted as a hardening** — it was not adopted
+because it does not close the hole *on its own*, which is a different claim from
+being wrong. If slice F's runs show the standing obligation is expensive in some
+way the model can see, "both" is still available and is the shape `FM-7` argued
+for one finding earlier: two independent mechanisms, either surviving a defect
+in the other.
 
 ---
 
 ## RESUME HERE
 
-**Slices A, B, C and D are BUILT** (§7, §8, §9, §10). **Slice E is PART-DONE**
-(§11): **items 1 and 5 are closed**, and item 5 produced **`FM-6`**, whose
-normative edit landed in the same session alongside `FM-5`'s. Docs are
-**v0.9.24**. **Items 2, 3 and 4 are open and are the next act.**
+**Slices A, B, C, D and E are BUILT** (§7–§11). **Slice E's docket is
+COMPLETE — all five items closed** (§11a–§11f), and it produced **three
+findings**: `FM-6` (item 5, edit landed), **`FM-7`** (item 3, wording ready in
+§11e) and **`FM-8`** (item 4, **needs a ruling, not a wording** — §11f).
+
+**The one thing slice E does not close is `FM-8`**, and that is deliberate: its
+fix is a design decision on the safety kernel with two spec-consistent
+candidates, and §11f records both with their witnesses so the ruling is made on
+evidence. **Do not adopt either without encoding it and letting TLC say whether
+the hole closes** — the technique this slice established three times over.
 
 **Two things established this session that the open items should use.** First,
 **building a missing transition is a finding technique, not bookkeeping** —
@@ -1355,25 +1624,30 @@ and the probe that showed it (`PC26`) cost one line.
 1. ~~**`FM-5`'s normative edit — not optional, wording in §8d.**~~ **LANDED
    v0.9.24, 2026-08-02 — see §11a** (footprint wider than §8d prescribed, and
    why).
-2. **Model (b)'s five controls have never been asked the witness-degeneracy
-   question** (§9f). Model (b) is in scope for the adversarial round anyway.
-3. **§7d:** does "never issued twice" carry safety weight independent of the
-   reservation? NC2 issues a second floor with `overshoot` FALSE throughout.
-4. **§8f:** is *physical* neutrality the stronger and intended precondition for
-   opening a generation? It is FM-5's mirror and should be attacked with it.
+2. ~~**Model (b)'s five controls have never been asked the witness-degeneracy
+   question**~~ **DONE, 2026-08-02 — see §11d.** Six probes (`FenceTakeover_W1`–`W6`),
+   **all REACHED**; the degeneracy was systematic (one `VEntryFill`), and it
+   found two suite defects: `I2` had never been violated by any run, and this
+   artifact's prose carried harm its runs never showed.
+3. ~~**§7d:** does "never issued twice" carry safety weight independent of the
+   reservation?~~ **ANSWERED, 2026-08-02 — see §11e. `NC20` PASSES on the full
+   graph** (1,086,199 distinct). The rule is defence in depth; **`FM-7`** is
+   that its *stated justification* assumes what the adjacent sentence forbids.
+   Wording ready.
+4. ~~**§8f:** is *physical* neutrality the stronger and intended precondition
+   for opening a generation?~~ **ANSWERED and it is worse than asked — see
+   §11f. `PC27`/`PC28` both REACHED**; **`FM-8`** is that §7's "no naked
+   residual" is enforced *only as an entry guard*, so a live generation can
+   hold a premise that has dissolved. **Ruling owed.**
 5. ~~**§10a:** the perp-side `Held/Alert` park the model narrows away.~~
    **BUILT, 2026-08-02 — see §11b/§11c. It found `FM-6`,** and it disproved
    §10a's own stated reason for the narrowing (`PC26`).
 
-**`FM-5`'s normative edit is still OWED, and it is not optional** (§8d). The
-model found a spec defect in SM §7's FLAG-3 ruling composed with §2's
-reservation-aware sizing; the model encodes the sound reading and NC7
-encodes the defective one, but `docs/state-machines.md` still says the
-unsound thing. §5's roster puts findings triage in **slice E**, so it is
-scheduled there — but until it lands the two artifacts disagree and
-CLAUDE.md's standing rule ("treat the formal model as authoritative about
-the safety kernel's behaviour") is what resolves it. The wording to land is
-in §8d.
+**`FM-5`'s normative edit LANDED in v0.9.24** (§11a) — the paragraph that stood
+here saying otherwise was written for slice D and was not updated when item 1
+closed. It is removed rather than corrected in place, because a stale "still
+OWED" beside a closed item is the same drift `adr-history.md`'s Status line had
+(§11a): the body moves and the line a reader keys off does not.
 
 Decisions already taken, recorded so they are not silently reopened:
 **(1)** §2 is modeled **with** §7, because the shared

@@ -1,6 +1,119 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-02, session 69): **SLICE E IS PART-DONE — `FM-5`'s NORMATIVE EDIT LANDED, AND BUILDING THE MISSING TRANSITION FOUND A SIXTH SPEC DEFECT, `FM-6`. DOCS ARE v0.9.24.**
+## Status (2026-08-02, session 70): **§46 SLICE E IS COMPLETE — ALL FIVE DOCKET ITEMS CLOSED, AND ITEMS 2/3/4 PRODUCED `FM-7` AND `FM-8` — BOTH NORMATIVE EDITS LANDED (`FM-8` BY USER RULING IN-SESSION; ITS MODEL ENCODING IS OWED, TASK #156). DOCS ARE v0.9.25.**
+
+**`FM-8` was RULED by the user in-session and its normative edit LANDED; what
+remains is the MODEL ENCODING (task #156, slice F, sketch in §46 §11f).**
+The ruling is the **standing precondition**: "no naked residual" is a standing
+condition and not only an entry test, so the §2 classifier leaving `Determined`
+**supersedes** an active generation, quiescing its reserved second leg to §6.7
+finality first — a **third** row beside `EmergencyClosePackage` and
+`FenceReadyLost`, policed by the **same** quiesce invariant rather than a new
+one. The rejected alternative (tighten `PdPlan` to physical `realized = 0`)
+**moves the witness rather than removing the class**: a floor issued a step
+after the generation opens dissolves the premise identically. It is on record
+as an available hardening, not as a refuted idea. **The clause is normative
+from v0.9.25 and NO RUN YET SHOWS THE HOLE CLOSES** — that split is marked
+everywhere it appears, because a fix argued is not a fix checked.
+
+**Item 2 — model (b)'s five controls, asked the witness question for the first
+time.** Six probes (`FenceTakeover_W1`–`W6`), **all REACHED**: every control's
+stated harm is real, and TLC had simply been reporting a shallower witness.
+**The degeneracy was systematic rather than four accidents** — every invariant
+in model (b) can be tripped by a cheap *surrogate* for exposure (an order
+sitting live, unfilled) or by exposure itself, and the surrogate is always
+exactly one `VEntryFill` closer to `Init`, so breadth-first search returns it
+every time. `FM-1`'s full cost is `NC4`'s committed 11-step trace **plus one
+fill**. `NC3` is the exception **and not by luck**: its harmful precondition
+(`pos ≠ "flat"`) is a *guard of the action its constant unlocks*, which is the
+general form — a control built that way is degenerate-proof in that dimension.
+
+**Two suite defects came out of it, neither visible from a green run.**
+**(1) `I2_HostIndependentCoverage` had never been violated by any run in the
+suite.** It is listed in exactly two configs and both halt on a shallower `I3`
+first, so the search ends before the `I2` state exists to be found; the
+configs' own "I2 or I3" wording is what hid it. **A config listing two
+invariants is checking whichever is shallower** — the one-claim-per-config rule
+now has a second, independent reason beside attribution. **(2)
+`fence-takeover-model.md`'s prose carried harm its runs never showed** (§1's
+NC2 line, §2's FM-1 trace said "→ I3, then I2"; NC4 never violates I2). The
+claims were **true about the system**, which is exactly why four review rounds
+passed over them — a false claim gets challenged, a true one resting on a run
+that did not show it reads as verified. Corrected in place, not quietly.
+
+**Item 3 — `FM-7`, LANDED.** §7d's candidate finding was itself read off a
+**truncated search**: `NC2` lists `TypeOK` and `INV2`, and `INV2` *is*
+`floorCount <= 1`, so TLC halted at the first second-dispatch state and
+`overshoot` was never a checked invariant in that run. `NC20` is the honest
+experiment (NC2's constants, `INV2` removed, `INV1` alone) and it **PASSES over
+the complete graph — 8,770,801 generated / 1,086,199 distinct / 0 left on
+queue**. Non-vacuity cost no run, since `NC2`'s `INV2` violation already proves
+double issuance is reached. **The rule is right and stays; its recorded
+justification was the defect** — the `[0.4, 1.0]` counterexample assumes the
+reservation is not counted while the adjacent sentence requires it to be. It is
+now stated as deliberate defence in depth, with the parenthetical retained as
+*what the rule protects against* (the `FM-5` world). Fixed rather than left
+because **nobody re-derives a recorded justification**.
+
+**Item 4 — `FM-8`, RULED IN-SESSION; encoding owed.** §7's "the package has no naked residual" is
+enforced **only as an entry guard**, on a reservation-netted quantity. `PC27`
+(3 steps) opens a generation on a package **physically short 2**, exactly
+offset by somebody else's reserved reduction. `PC28` (4 steps) goes one further:
+the offsetting reduction's own result comes back **ambiguous**, its ledger entry
+is released **exactly as SM §2 row 4 mandates**, and a live `PackageDelever`
+generation is left over a package that is physically short and **no longer even
+`Determined`, with nothing reserved against it**. Not a model artifact — the
+release is correct; what is missing is anything that tells the *generation*.
+It is **`FM-5`'s mirror** (*counted before its backing exists* / *premise
+outliving the entry*) and invisible to every invariant, since `INV5` polices the
+generation's own legs and never its premise. §8f asked *which* neutrality; the
+probes say the sharper question is **when it is checked**.
+
+**Also repaired: v0.9.24 bumped `tutorial.md` and never re-ran the i18n
+pipeline** — the ka header fragment was still at v0.9.23. That is the v0.9.6
+§15c finding recurring, and `assemble.mjs` **refused outright** when run, which
+is the mechanism working and nobody having run it. Header synced, re-assembled,
+`bun test` **16 pass / 0 fail**.
+
+**Suite is 69 runs, and every one of them has its predicted result in this
+tree state — but the claim is ASSEMBLED FROM TWO INVOCATIONS and must be
+quoted that way.** The unfiltered `./run.sh` reported **68 of 69**; the one
+off-prediction, `FenceTakeover_Live2`, was then re-run alone and **PASSES**
+(1,705,418 generated / 249,936 distinct, depth 34, 24m02s — the artifact's
+recorded figures). **A single-invocation 69/69 has NOT been produced.** That
+distinction is exactly what `run.sh`'s `FILTERED … NOT the full suite` line
+exists to preserve, and it is cheap to close now: one unfiltered run on
+cleared metadirs.
+
+**Why `Live2` failed the first time, and why it was NOT a model regression:**
+the JVM died with **SIGBUS in an mmap'd `arraycopy`** as the temporal phase
+started, *after* the safety phase had reproduced the recorded state graph
+**exactly**. `.tools/` had accumulated **12 GB over 114 `states-*`
+directories** — TLC never reclaims a `-metadir`. Cleared (12 GB → 3.2 MB) and
+the config passed. `run.sh`'s header now carries this as a standing
+pre-flight step; it matters most beside the capture, where disk is the shared
+resource that cannot be re-fetched.
+
+**A process rule was broken this session and the breach is recorded rather
+than absorbed:** `run.sh` was edited at 08:02Z *while the `Live2` re-run was
+executing*, ~40 minutes after this same handoff gained the rule forbidding
+it. It was benign — the run completed coherently and its trailing section
+header printed the PRE-edit text, so bash had already buffered that region,
+and `bash -n` plus the runner's own 1+68 count confirm the file afterwards.
+Benign is not the same as correct: the edits were comments, and an edit to an
+executable region can resume bash at a wrong byte offset.
+
+Marker grep **ZERO**; capture **PID 8495** healthy; `make ci` green;
+`bun test` 16/16.
+
+**Two process facts worth carrying.** A running `run.sh` **re-reads the `.tla`
+and the script itself on every config**, so neither may be edited mid-run — a
+baseline run had to be stopped for this. And **a probe being violated says the
+state is reachable; only the trace says it is the harm the control names** —
+`W2`'s route was not the one predicted and `W6` exists only because `W4`'s
+trace was read.
+
+## Status (2026-08-02, session 69 — HISTORICAL): **SLICE E IS PART-DONE — `FM-5`'s NORMATIVE EDIT LANDED, AND BUILDING THE MISSING TRANSITION FOUND A SIXTH SPEC DEFECT, `FM-6`. DOCS ARE v0.9.24.**
 
 **Docket items 1 and 5 are CLOSED; items 2, 3 and 4 remain OPEN** (§46 §11, and
 its RESUME HERE). Marker grep **ZERO**; `make ci` green; capture **PID 8495**
@@ -207,7 +320,47 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated session 69, 2026-08-02 — §46 SLICE E PART-DONE, items 1 and 5 closed, `FM-6` found and landed; next are items 2, 3, 4)
+## START HERE (updated session 70, 2026-08-02 — §46 SLICE E COMPLETE; `FM-7` and `FM-8` both landed, `FM-8`'s model encoding owed as slice F)
+
+**Branch `feat/milestone-1-foundation`. Docs are v0.9.25.**
+
+**First act, in order:**
+
+1. **Task #150 — the §32m-D per-tier one-day figure.** It became measurable at
+   **2026-08-02T11:13Z** and is **due 2026-08-03T11:13Z**; it was *not yet
+   measurable* during session 70, which is the only reason it is not done.
+   Tightest clock on the board. The procedure is fixed
+   (`docs/superpowers/specs/2026-08-01-strategy2-capture-expansion.md`, its
+   RESUME HERE item 1): **`du` split BTC-tier vs alt-tier** against §42c's
+   bound (~0.6–1.1 G/day/symbol — the two Bybit streams are the unmeasured
+   scale-down), **plus a full-day verify over the measured day**, which will
+   show this restart's `process_restart` gaps and **must still report
+   0 integrity**. Lands as **§44e in that record**, and it is **§38f's named
+   revisit point** (ruling §42f-3) — the off-host decision gets re-argued on a
+   measured disk clock.
+2. **Task #156 — slice F: encode `FM-8`'s ruling and prove the hole closes.**
+   The ruling landed; the run has not. §46 §11f holds the sketch — a
+   `PREMISE_IS_STANDING` constant gating `Supersede("premise")` on
+   `PdActive /\ cls # "Determined"`, `PC28` **flipping polarity** from
+   positive control to invariant, and `NC21` as the control that must violate
+   it. **Read the encoding subtlety before writing it:** the harm is not the
+   state existing *transiently* (a legal quiesce window contains it), so the
+   invariant must be read from a flag written at the event — the shape
+   `INV6_SupersessionQuiescesFirst` already uses.
+3. **Confirm the full-suite verdict** if session 70's background `./run.sh`
+   did not finish. A filtered run is not the suite result.
+
+**Slice E is closed; do not reopen its docket.** §46 §11a–§11f record all five
+items, and §11d/§11e/§11f are this session's. The design record's RESUME HERE
+is current.
+
+**Standing rituals, unchanged:** `pgrep -f "arblab capture run"` **FIRST**
+(PID 8495); **never rebuild over `bin/arblab` while capture runs**; cap
+`TLC_WORKERS` beside it (4); marker grep `grep -rn "SPEC EDIT OWED" internal/ tools/`
+must be **zero**. **New:** never edit a `.tla` or `run.sh` while `run.sh` is
+running — it re-reads both on every config.
+
+## START HERE (updated session 69, 2026-08-02 — HISTORICAL — §46 SLICE E PART-DONE, items 1 and 5 closed, `FM-6` found and landed; next are items 2, 3, 4)
 
 **Branch `feat/milestone-1-foundation`. Docs are v0.9.24.** Read
 **`docs/superpowers/specs/2026-08-01-formal-model-a-ambiguous-order-design.md`

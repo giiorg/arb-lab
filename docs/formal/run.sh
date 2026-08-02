@@ -5,19 +5,31 @@
 # and that the properties are not passing vacuously.
 #
 # Model (b) FenceTakeover: SM SS3/SS4/SS6 -- the fence/takeover/plan
-#   composition. 8 runs.
+#   composition. 14 runs: 3 nominals (safety + two liveness), 5 negative
+#   controls, and SLICE E's 6 CONTROL-WITNESS probes (W1-W6), which asked
+#   model (a)'s witness-degeneracy question of controls that predate it.
+#   Every one was REACHED: each control's stated harm is real, and TLC had
+#   simply been reporting a shallower witness. NC4's is the sharpest --
+#   FM-1's full cost is its committed 11-state trace plus ONE VEntryFill.
 # Model (a) AmbiguousOrder: SM SS2 composed with SM SS7 -- the
 #   ambiguous-order classifier, the finality contract, the interval-floor
 #   generation and PackageDelever's generations on one reservation ledger.
-#   Slices A+B+C+E: 52 runs. 22 are the nominals and the negative controls
-#   (composed nominal + the SS2-only nominal + NC1-NC12 + NC17 + NC19, then
-#   the nominal LIVENESS config + NC13-NC16 + NC18); 26 are POSITIVE controls,
-#   expected to be VIOLATED because each names an interesting state and a
-#   probe that PASSES is a coverage gap (see AmbiguousOrderCoverage.tla);
+#   Slices A+B+C+E: 55 runs. 23 are the nominals and the negative controls
+#   (composed nominal + the SS2-only nominal + NC1-NC12 + NC17 + NC19 + NC20,
+#   then the nominal LIVENESS config + NC13-NC16 + NC18); 28 are POSITIVE
+#   controls, expected to be VIOLATED because each names an interesting state
+#   and a probe that PASSES is a coverage gap (see AmbiguousOrderCoverage.tla);
 #   and 4 are CONTROL-WITNESS probes (W1-W4), which ask of a control's own
 #   counterexample whether it demonstrates the HARM or only the flag.
 #
-#   SLICE E added the SECOND PARK: SM SS7 enters Held/Alert from
+#   SLICE E added NC20 (SS7d: does "never issued twice" carry safety weight
+#   independent of the reservation? It PASSES the complete graph, so the rule
+#   is defence in depth -- FM-7 is that its RECORDED JUSTIFICATION assumed the
+#   reservation is not counted) and PC27/PC28 (SS8f: PC27 shows a generation
+#   IS opened over a physically-exposed package, PC28 shows its premise can
+#   then dissolve -- FM-8, ruled and landed, model encoding owed as slice F).
+#
+#   SLICE E also added the SECOND PARK: SM SS7 enters Held/Alert from
 #   `PerpReduceInFlight` OR `SpotReduceInFlight` and slices A-D modeled only
 #   the second, so `HeldPerp`, P5, INV8, NC17 (the cause-blind exit -- model
 #   (b)'s Cx8-2 asked here for the first time), NC18 and probes PC25/PC26
@@ -37,6 +49,19 @@
 #   recorded state graph exactly (25,514 / 5,169, depth 15), which is what
 #   says the slice-B refactor did not quietly change the object slice A
 #   verified.
+#
+# 69 runs in total (14 + 55). A FILTERED run is not the suite result -- the
+# summary line says so, and prose downstream must not launder one into the
+# other.
+#
+# CLEAR `.tools/states-*` BEFORE A FULL RUN. TLC keeps one -metadir per config
+# and never reclaims them, so they accumulate across sessions -- measured at
+# 12 GB over 114 directories on 2026-08-02, and a full run under that pressure
+# killed FenceTakeover_Live2's JVM with SIGBUS in an mmap'd arraycopy as the
+# temporal phase started. The .out files are the results; the metadirs are
+# scratch, so `rm -rf .tools/states-*` loses nothing. Matters most beside the
+# market-data capture, where disk is the shared resource that cannot be
+# re-fetched.
 #
 # Requires: java (17+). Fetches a pinned tla2tools.jar on first run.
 set -u
@@ -204,8 +229,25 @@ r FenceTakeover FenceTakeover_NC2   fail "I2_HostIndependentCoverage|I3_Evidence
 r FenceTakeover FenceTakeover_NC3   fail "I1_NeverTwoWriters"
 r FenceTakeover FenceTakeover_NC4   fail "I2_HostIndependentCoverage|I3_EvidenceGatedTerminal"
 r FenceTakeover FenceTakeover_NC5   failprop "P4_ArbitrationCompletes"
+# SLICE E item 2 -- the CONTROL-WITNESS probes model (a) has had since
+# slice C, asked of model (b)'s five controls for the first time. Same
+# polarity as every positive control here: the probe claims the harmful
+# state is never reached, so VIOLATED = reached = the control's harm is
+# real. Each config lists exactly ONE probe and NO I-invariant -- the NC5
+# attribution rule, and here it also keeps the search alive past the
+# shallow violation that is the control's own result.
+r FenceTakeover FenceTakeover_W1 probe "W1_NoPostLatchWriteOverExposure"
+r FenceTakeover FenceTakeover_W2 probe "W2_NoTombstoneOverExposure"
+r FenceTakeover FenceTakeover_W3 probe "W3_NoTwoWritersBothLanded"
+r FenceTakeover FenceTakeover_W4 probe "W4_NoExposureAfterActuatedFlat"
+r FenceTakeover FenceTakeover_W5 probe "W5_NoNakedUnarbitratedStrand"
+# W6 exists because W4's TRACE was read: W4 was reached and showed only the
+# first half of FM-1's claim (exposure re-admitted, coverage still intact).
+# A probe being violated says the state is reachable; only the trace says
+# whether it is the harm the control names.
+r FenceTakeover FenceTakeover_W6 probe "W6_NoStaleTombstoneOverExposure"
 
-echo "###### MODEL (a): AmbiguousOrder -- SM SS2 x SS7, slices A+B+C ############"
+echo "###### MODEL (a): AmbiguousOrder -- SM SS2 x SS7, slices A+B+C+E ##########"
 echo
 r AmbiguousOrder AmbiguousOrder      pass
 r AmbiguousOrder AmbiguousOrder_SM2  pass
@@ -229,6 +271,12 @@ r AmbiguousOrder AmbiguousOrder_NC17 fail "INV8_CompleteMeansLegsFinal"
 # DEAD END, not a violated invariant -- see the config for why that is the
 # honest report and why no slice before E could have produced it.
 r AmbiguousOrder AmbiguousOrder_NC19 deadlock "FM-6 stale verdict, no admissible action"
+# SLICE E item 3. NC2's constants with INV2 REMOVED and INV1 alone: NC2
+# halts at the first floorCount = 2 state, so SS7d's "overshoot stays FALSE
+# throughout" was read off a truncated search in which overshoot was not a
+# checked invariant at all. Non-vacuity is free -- INV2 IS `floorCount <=
+# 1`, so NC2's violation already proves double issuance is reached here.
+r AmbiguousOrder AmbiguousOrder_NC20 pass
 
 # SLICE C -- liveness. The nominal config checks P1-P4 under LiveSpec (the
 # fairness set), and each control below flips ONE constant and must produce a
@@ -263,7 +311,9 @@ for p in PC1_FloorNeverDispatched PC2_NeverTwoGenerations \
          PC20_NeverTwoGenerations PC21_TransientAlwaysZero \
          PC22_ClsNeverAmbiguous PC23_ClsNeverDeadlineExceeded \
          PC24_FloorNeverOutstanding \
-         PC25_PdNeverHeldPerp PC26_PerpParkAlwaysEmpty; do
+         PC25_PdNeverHeldPerp PC26_PerpParkAlwaysEmpty \
+         PC27_GenNeverOpenedOverReservedExposure \
+         PC28_GenPremiseNeverEvaporates; do
   gen_probe_cfg "$p" INVARIANTS
   r AmbiguousOrderCoverage "$TOOLS_DIR/AmbiguousOrder_PC_$p" probe "$p"
 done
