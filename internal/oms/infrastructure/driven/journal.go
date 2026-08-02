@@ -1,0 +1,444 @@
+package driven
+
+import (
+	"database/sql"
+	"errors"
+	"fmt"
+	"net/url"
+
+	"github.com/giiorg/arb-lab/internal/oms/application/ports"
+	"github.com/giiorg/arb-lab/internal/oms/domain"
+	"github.com/giiorg/arb-lab/internal/platform/ids"
+
+	// The pure-Go SQLite driver. cgo-free is a requirement rather than a
+	// preference: §13 pins the deployment target to Linux and the capture
+	// binary is built and shipped as a static artifact, so a cgo driver would
+	// make the OMS the one component that cannot be cross-built.
+	_ "modernc.org/sqlite"
+)
+
+// §3.6 rule 2's compile-time assertion. Under mutation this reports NOBUILD!!,
+// which for THIS assertion is a kill rather than a non-result — see CLAUDE.md's
+// verdict table.
+var _ ports.Journal = (*SQLiteJournal)(nil)
+
+// SQLiteJournal is §5.1's durable, append-only, hash-chained write-ahead
+// journal, and the adapter §47e recorded as missing.
+//
+// # The store is SQLite because §5.3 will need it to be, not because a log file
+// # would not work
+//
+// A hash-chained file is the smaller implementation and it was rejected on one
+// sentence: §5.3 requires that applying a fill, advancing the per-instrument
+// REST recovery cursor, and appending journal/outbox events happen in ONE
+// transaction. driven/doc.go already states the consequence — "a transaction
+// spanning two stores cannot be added to one of them alone" — so a journal in
+// its own file is a journal the fill path cannot join, and the rule would be
+// met by rewriting this adapter at slice D/F or not met at all. D2 and §13 name
+// the store (SQLite, WAL, synchronous=FULL, local filesystem only); this is
+// that store arriving for its first tenant.
+//
+// # Durability is per call, and it costs one fsync per record
+//
+// ports.Journal's contract is that a method returns only when the record is
+// durable, with no Sync to pair. Here that is one transaction per Append, and
+// under WAL + synchronous=FULL one transaction is one WAL fsync. The cost is
+// real and it is the cost the contract asks for: batching would satisfy every
+// signature and none of the meaning, and the defect surfaces once — during the
+// crash the fsync existed for.
+//
+// The pragmas are set in the DSN rather than by a statement after opening, and
+// that is not a style choice. `synchronous` is a PER-CONNECTION setting, and
+// database/sql owns a POOL: a pragma issued once as a statement configures
+// whichever connection happened to serve it, and the pool's next connection is
+// created with the default. The failure is silent, intermittent, and in the
+// direction that loses data. Set in the DSN, every connection the pool opens
+// carries it — and Open then VERIFIES it rather than assuming, which is §13's
+// "boot verifies journal_mode/synchronous pragmas".
+//
+// # What is proven here and what is not
+//
+// The tests below prove the configuration that produces the fsync, not the
+// fsync. No portable Go test can observe a device write, and one that claimed
+// to would be the more dangerous artifact. What IS bite-checkable is the
+// configuration claim itself: a mutant that writes synchronous(normal) has to
+// fail, and it does — see TestOpenRefusesWeakenedDurability.
+//
+// The remaining gap is the host, and it is worth naming because development
+// happens on the wrong one: on macOS fsync(2) does not flush the drive's write
+// cache (F_FULLFSYNC does, and §13 records that it is macOS-only and therefore
+// NOT the mechanism). So a passing suite on a developer Mac is evidence about
+// this code and not about power-loss durability. The Linux target with write
+// barriers is where the claim holds.
+//
+// # §13's THIRD durability precondition is not checked here, and where it goes
+//
+// §13 names three: WAL, synchronous=FULL, and "local filesystem only — ext4/xfs
+// with write barriers, NEVER NFS/network FS (SQLite documents these as
+// corruption-prone)". Open verifies the first two and does not check the third.
+//
+// Recorded rather than left silent, because an unchecked normative claim is
+// exactly what §47e found twice in a roster that read as complete, and the
+// slice-close marker grep is structurally blind to an UNMARKED one. This
+// carries no marker either, and deliberately: a marker means the code departs
+// from the spec and the spec must change, and nothing here departs — the
+// requirement is scheduled, not declined. (Phrased without the marker's literal
+// wording on purpose. The grep scans code, so a comment ABOUT the marker is
+// indistinguishable from the marker itself — the same collision the doc set
+// avoids by being out of scope, arriving one directory in.)
+//
+// It is scheduled to §7.5's reconcile-only boot (slice F) rather than to this
+// constructor, on placement grounds rather than effort. §7.5 already owns a
+// list of refuse-to-trade posture assertions checked before trading resumes —
+// margin mode, spot-as-collateral, position mode, leverage pin — and "the
+// journal is on a filesystem SQLite can be trusted on" is a member of that
+// list, not a property of opening a file. Splitting it off would put one
+// posture check in an adapter constructor and the rest in boot, which is how a
+// checklist acquires a member nobody knows to look for. Task #168.
+//
+// # The dependency, and what it costs the graph
+//
+// transport/doc.go records the engine module's FIRST third-party runtime
+// dependency and the fact that it added one node with no transitive edges. This
+// is the second, and the honest figure is different: modernc.org/sqlite brings
+// nine more modules (libc, mathutil, memory, bigfft, go-humanize, uuid,
+// go-isatty, go-strftime, golang.org/x/sys). §13 names the store rather than a
+// driver, so the driver was the open choice; cgo-free decided it, because the
+// alternative makes the OMS the one component in a Linux-target deployment that
+// cannot be cross-built, and §12 milestone 3 has no exception for that.
+//
+// # Single connection, and the chain is why
+//
+// Each Append reads the chain head and writes the record that extends it. Two
+// connections doing that concurrently is a read-modify-write race whose losing
+// side writes a record whose prev_hash names a record that is no longer the
+// head — a fork in a structure that has no rule for one. SetMaxOpenConns(1)
+// serialises it at the pool, and BEGIN IMMEDIATE (via _txlock) takes the write
+// lock at the start of the transaction rather than on the first write, so a
+// second process opening the same file fails fast instead of mid-append.
+type SQLiteJournal struct {
+	db *sql.DB
+}
+
+// schema is the journal's DDL, applied on every Open (each statement is IF NOT
+// EXISTS, so an existing file is left alone).
+//
+// # Three tables rather than one, and the reason is ports.Journal's own
+//
+// The port declares two methods rather than one Append(Record) because a single
+// record type would need "an optional field, whose zero value is then a legal
+// value with no meaning". One wide table is that rejected shape in SQL: a
+// planned row and a state row have disjoint field sets, so half the columns are
+// NULL on every row and a state record with a stray side column is
+// representable. Splitting the detail out lets every column in every table be
+// NOT NULL, which is the same totality argument one layer down.
+//
+// The rejected alternative was one table plus a CHECK constraint asserting the
+// per-kind nullability. It is expressible and it was refused because it states
+// the field list twice — once in the columns, once in the CHECK — and the copy
+// that drifts is always the one that is not the definition.
+//
+// # Append-only is enforced by the database, not by this package's method set
+//
+// The triggers are the point. An adapter that simply never issues UPDATE or
+// DELETE is append-only by convention, and the convention holds until the first
+// migration script, repair query or `sqlite3` session. RAISE(ABORT) makes the
+// mutation fail where it is attempted. This is the standing rule about defaults
+// with two directions, applied to a table: the version that is right when
+// somebody forgets.
+//
+// # The money columns are mantissa + asset, which is fixedpoint's seam
+//
+// Not a formatted string. fixedpoint/codec.go argues it in full: the int64
+// mantissa is exactly SQLite INTEGER and exactly Postgres BIGINT, so the stored
+// form is lossless and identical across the dialects D2 names, and the asset
+// tag needs its own column because no single column can carry a number and a
+// tag without becoming text.
+const schema = `
+CREATE TABLE IF NOT EXISTS journal (
+	seq       INTEGER PRIMARY KEY,
+	kind      TEXT NOT NULL,
+	client_id TEXT NOT NULL,
+	prev_hash BLOB NOT NULL,
+	hash      BLOB NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS journal_planned (
+	seq            INTEGER PRIMARY KEY REFERENCES journal(seq),
+	venue          TEXT NOT NULL,
+	product        TEXT NOT NULL,
+	symbol         TEXT NOT NULL,
+	contract       TEXT NOT NULL,
+	side           TEXT NOT NULL,
+	order_type     TEXT NOT NULL,
+	time_in_force  TEXT NOT NULL,
+	qty_asset      TEXT NOT NULL,
+	qty_mantissa   INTEGER NOT NULL,
+	price_base     TEXT NOT NULL,
+	price_quote    TEXT NOT NULL,
+	price_mantissa INTEGER NOT NULL,
+	reduce_only    INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS journal_state (
+	seq   INTEGER PRIMARY KEY REFERENCES journal(seq),
+	state TEXT NOT NULL
+) STRICT;
+
+CREATE TRIGGER IF NOT EXISTS journal_no_update BEFORE UPDATE ON journal
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_no_delete BEFORE DELETE ON journal
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_planned_no_update BEFORE UPDATE ON journal_planned
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_planned_no_delete BEFORE DELETE ON journal_planned
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_state_no_update BEFORE UPDATE ON journal_state
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_state_no_delete BEFORE DELETE ON journal_state
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+`
+
+// The pragma values Open requires, named so the verification and the DSN cannot
+// drift apart: both read these constants.
+const (
+	wantJournalMode = "wal"
+
+	// wantSynchronous is SQLite's FULL. In WAL mode this is the setting that
+	// fsyncs the WAL on every commit — NORMAL fsyncs only at checkpoint, which
+	// is precisely a journal that returns before the record is durable.
+	wantSynchronous = 2
+
+	// wantForeignKeys is on, so the detail tables' REFERENCES actually bite.
+	// SQLite defaults foreign keys OFF, which makes a declared REFERENCES a
+	// comment.
+	wantForeignKeys = 1
+)
+
+// OpenSQLiteJournal opens (or creates) the journal at path and returns it ready
+// to append.
+//
+// It is not exported to composition roots in any usable sense — singlewriter
+// forbids every package outside internal/oms/ from importing this one — so the
+// caller is oms/module.go. That is §26e point 3 arriving as a scheduled
+// consequence: the adapter sits in a policed package, so the root supplies
+// configuration and the context constructs.
+func OpenSQLiteJournal(path string) (*SQLiteJournal, error) {
+	if path == "" {
+		return nil, ErrJournalPathUnset
+	}
+
+	db, err := sql.Open("sqlite", journalDSN(path))
+	if err != nil {
+		return nil, fmt.Errorf("oms journal: open %q: %w", path, err)
+	}
+
+	// One connection. See the type comment: the chain head is read and extended
+	// in the same transaction, and two connections doing that concurrently fork
+	// the chain.
+	db.SetMaxOpenConns(1)
+
+	j := &SQLiteJournal{db: db}
+	if err := j.verifyPragmas(); err != nil {
+		return nil, errors.Join(fmt.Errorf("oms journal: %q: %w", path, err), db.Close())
+	}
+	if _, err := db.Exec(schema); err != nil {
+		return nil, errors.Join(fmt.Errorf("oms journal: schema %q: %w", path, err), db.Close())
+	}
+	return j, nil
+}
+
+// journalDSN builds the connection string.
+//
+// url.URL rather than string concatenation, because a path containing a '?' or
+// a '#' would otherwise silently truncate the pragma list — and a DSN whose
+// pragmas were dropped opens successfully with the defaults. verifyPragmas
+// catches that, which is the argument for having it rather than an argument for
+// being careless here.
+func journalDSN(path string) string {
+	q := url.Values{}
+	q.Add("_pragma", "journal_mode("+wantJournalMode+")")
+	q.Add("_pragma", fmt.Sprintf("synchronous(%d)", wantSynchronous))
+	q.Add("_pragma", fmt.Sprintf("foreign_keys(%d)", wantForeignKeys))
+
+	// Take the write lock when the transaction begins rather than at its first
+	// write. Under deferred locking a second writer discovers the conflict
+	// after this process has already read the chain head, which turns a clean
+	// refusal into a retry against a head that may have moved.
+	q.Set("_txlock", "immediate")
+
+	u := url.URL{Scheme: "file", Opaque: path, RawQuery: q.Encode()}
+	return u.String()
+}
+
+// verifyPragmas is §13's "boot verifies journal_mode/synchronous pragmas".
+//
+// It exists because the DSN is a REQUEST. A driver that ignores an unknown
+// pragma, a path that swallowed the query string, a future driver upgrade that
+// renames the option — each leaves a journal that opens cleanly, works
+// perfectly, and is not durable. Every one of those is invisible without this
+// function, and none of them is visible in a test that only appends and reads
+// back.
+func (j *SQLiteJournal) verifyPragmas() error {
+	var mode string
+	if err := j.db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil {
+		return fmt.Errorf("read journal_mode: %w", err)
+	}
+	if mode != wantJournalMode {
+		return fmt.Errorf("journal_mode is %q, want %q: %w", mode, wantJournalMode, ErrJournalPragma)
+	}
+
+	var sync int
+	if err := j.db.QueryRow("PRAGMA synchronous").Scan(&sync); err != nil {
+		return fmt.Errorf("read synchronous: %w", err)
+	}
+	if sync != wantSynchronous {
+		return fmt.Errorf("synchronous is %d, want %d (FULL): %w", sync, wantSynchronous, ErrJournalPragma)
+	}
+
+	var fk int
+	if err := j.db.QueryRow("PRAGMA foreign_keys").Scan(&fk); err != nil {
+		return fmt.Errorf("read foreign_keys: %w", err)
+	}
+	if fk != wantForeignKeys {
+		return fmt.Errorf("foreign_keys is %d, want %d: %w", fk, wantForeignKeys, ErrJournalPragma)
+	}
+	return nil
+}
+
+// Close releases the database.
+//
+// It does not checkpoint the WAL, and the omission is deliberate: a checkpoint
+// on close would make a clean shutdown produce a different on-disk shape from a
+// crash, and §7.5's recovery has to handle the crash shape anyway. Leaving them
+// identical means the path recovery exercises is the path every start takes.
+func (j *SQLiteJournal) Close() error {
+	if err := j.db.Close(); err != nil {
+		return fmt.Errorf("oms journal: close: %w", err)
+	}
+	return nil
+}
+
+// AppendPlanned durably records the intent to place an order — §6 step 5.
+//
+// It validates the order, and the boundary between what it checks and what it
+// refuses to check is ports.Journal's own. The port says legality is the
+// caller's, and means SM §1's TRANSITION legality: a recorder that refused
+// illegal transitions would be a second home for the edge set. Well-formedness
+// is a different question. A record this package cannot rebuild into a valid
+// domain.Order is a record that fails at §7.5's replay — at boot, on a process
+// that is trying to find out what orders exist at a venue — so it is refused
+// here, where the caller still has the order in hand and nothing has been sent.
+func (j *SQLiteJournal) AppendPlanned(o domain.Order) error {
+	if err := o.Validate(); err != nil {
+		return fmt.Errorf("oms journal: append planned: %w", err)
+	}
+	return j.appendRecord(kindPlanned, string(o.ClientOrderID), encodePlanned(o),
+		func(tx *sql.Tx, seq int64) error {
+			_, err := tx.Exec(`INSERT INTO journal_planned
+				(seq, venue, product, symbol, contract, side, order_type, time_in_force,
+				 qty_asset, qty_mantissa, price_base, price_quote, price_mantissa, reduce_only)
+				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+				seq,
+				string(o.Instrument.Venue), string(o.Instrument.Product),
+				o.Instrument.Symbol, string(o.Instrument.Contract),
+				string(o.Side), string(o.Type), string(o.TimeInForce),
+				string(o.Quantity.Asset()), o.Quantity.Mantissa(),
+				string(o.LimitPrice.Base()), string(o.LimitPrice.Quote()), o.LimitPrice.Mantissa(),
+				o.ReduceOnly)
+			return err
+		})
+}
+
+// AppendState durably records an order reaching a lifecycle state.
+//
+// The state is checked for MEMBERSHIP and nothing else — OrderState.Validate,
+// which separates the unset value from an unknown one. That is the same line
+// AppendPlanned draws: an undeclared state is a value §7.5 cannot replay, while
+// an illegal transition between two declared states is a claim about SM §1's
+// edges that this recorder deliberately does not hold.
+func (j *SQLiteJournal) AppendState(id ids.ClientOrderID, state domain.OrderState) error {
+	if id == "" {
+		return fmt.Errorf("oms journal: append state %q: %w", state, ErrJournalClientIDUnset)
+	}
+	if err := state.Validate(); err != nil {
+		return fmt.Errorf("oms journal: append state for order %q: %w", id, err)
+	}
+	return j.appendRecord(kindState, string(id), encodeState(id, state),
+		func(tx *sql.Tx, seq int64) error {
+			_, err := tx.Exec(`INSERT INTO journal_state (seq, state) VALUES (?,?)`,
+				seq, string(state))
+			return err
+		})
+}
+
+// appendRecord is the chain extension both methods share: read the head, link
+// to it, write both rows, commit.
+//
+// The head is read from the DATABASE inside the transaction rather than from a
+// field on this struct, and the cheaper alternative is worth naming as rejected
+// rather than left as an optimisation somebody adds later. An in-memory head is
+// a second copy of a fact the table already states, and the two disagree in
+// exactly the case that matters: a process that opened an existing journal, or
+// one whose last commit failed after the field was updated. Re-reading costs an
+// indexed single-row lookup on the primary key, against an fsync in the same
+// transaction — it is not measurable next to what it is protecting.
+func (j *SQLiteJournal) appendRecord(kind, clientID string, body []byte, detail func(*sql.Tx, int64) error) error {
+	tx, err := j.db.Begin()
+	if err != nil {
+		return fmt.Errorf("oms journal: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	seq, prev, err := chainHead(tx)
+	if err != nil {
+		return fmt.Errorf("oms journal: read chain head: %w", err)
+	}
+
+	hash := chainHash(uint64(seq), prev, body)
+	if _, err := tx.Exec(
+		`INSERT INTO journal (seq, kind, client_id, prev_hash, hash) VALUES (?,?,?,?,?)`,
+		seq, kind, clientID, prev[:], hash[:]); err != nil {
+		return fmt.Errorf("oms journal: insert %s record at seq %d: %w", kind, seq, err)
+	}
+	if err := detail(tx, seq); err != nil {
+		return fmt.Errorf("oms journal: insert %s detail at seq %d: %w", kind, seq, err)
+	}
+
+	// The fsync is here. Under WAL + synchronous=FULL the commit does not
+	// return until the WAL is on the device, which is what lets this method's
+	// return double as ports.Journal's durability guarantee.
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("oms journal: commit %s record at seq %d: %w", kind, seq, err)
+	}
+	return nil
+}
+
+// chainHead returns the sequence the next record takes and the hash it links
+// to.
+//
+// An empty journal yields sequence 1 and the genesis seed. One rather than
+// zero, on the same rule the OCC version follows: zero is not a sequence, it is
+// the absence of one, and a chain whose first record sits at 0 makes "no
+// records" and "one record" the same answer to `SELECT MAX(seq)`.
+func chainHead(tx *sql.Tx) (int64, [32]byte, error) {
+	var lastSeq int64
+	var lastHash []byte
+
+	err := tx.QueryRow(`SELECT seq, hash FROM journal ORDER BY seq DESC LIMIT 1`).
+		Scan(&lastSeq, &lastHash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 1, genesisHash(), nil
+	}
+	if err != nil {
+		return 0, [32]byte{}, err
+	}
+	if len(lastHash) != len(genesisHash()) {
+		return 0, [32]byte{}, fmt.Errorf("head at seq %d has a %d-byte hash, want %d: %w",
+			lastSeq, len(lastHash), len(genesisHash()), ErrJournalChainCorrupt)
+	}
+
+	var prev [32]byte
+	copy(prev[:], lastHash)
+	return lastSeq + 1, prev, nil
+}

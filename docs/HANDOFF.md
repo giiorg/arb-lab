@@ -1,6 +1,111 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-02, session 73): **MILESTONE 3 IS ADMITTED BEFORE STRATEGY #2's GATE — THE ROSTER IS UNBLOCKED FOR ~2 MONTHS OF FOUNDATION WORK, AND THE GROUND FOR IT WAS ALREADY IN THE RECORD THAT REJECTED IT. DOCS ARE v0.9.28.**
+## Status (2026-08-02, session 74): **MILESTONE 3 SLICE A IS LANDED — `ports.Journal` HAS AN ADAPTER, AND THE STORAGE ENGINE WAS DECIDED BY A REQUIREMENT THAT BINDS NONE OF ITS OWN METHODS. DOCS ARE v0.9.29.**
+
+**Code changed.** `internal/oms/infrastructure/driven/`: `journal.go`,
+`journalcodec.go`, `journalerrors.go`, `journal_internal_test.go`. Design record
+is **§48**
+(`docs/superpowers/specs/2026-08-02-m3-slice-a-durable-journal.md`); core §12
+milestone 3 and §13 gain dated annotations; ADR §3 has the dated block.
+**`make ci` green, both modules; marker grep zero; 12 mutations, 12 kills.**
+
+**§47e finding 2 is CLOSED.** §5.3's fsync-before-network crash boundary is no
+longer proven only against a test fake. The adapter is append-only,
+hash-chained, one fsync per record, on SQLite in WAL mode at
+`synchronous=FULL` — **verified at open rather than assumed**, because
+`synchronous` is a per-CONNECTION setting and `database/sql` owns a pool, so a
+pragma issued as a statement configures whichever connection served it and the
+next one gets the default.
+
+**THE FINDING: the store was chosen by §5.3, not by §13 — and it is invisible
+from inside slice A.** Neither `AppendPlanned` nor `AppendState` needs a
+transaction, so a bespoke hash-chained log file is the smaller implementation
+and the one a reader reaches for. What forbids it is §5.3's rule that the fill
+apply, the REST cursor advance and the journal/outbox append share **one
+transaction**, plus `driven/doc.go`'s already-recorded consequence that *a
+transaction spanning two stores cannot be added to one of them alone*. The log
+file gets rewritten at slice D/F or the rule goes unmet. **A component's
+storage engine can be decided by a constraint that binds none of its own
+methods.**
+
+**TWO MORE FINDINGS, both about evidence rather than code.** (1) **Session 73's
+predicted design fork was mis-premised** — it named reuse of `engine/capture`'s
+codec, *"already fuzzed, already has a hash chain"*, and `engine/capture` has
+**no hash chain**: per-record CRC32C, a dense *sequence* chain, whole-file
+`.sha256` sidecars. (2) **The pragma check hid a self-consistent mutation** —
+`journalDSN` and `verifyPragmas` deliberately share `wantSynchronous` so they
+cannot drift, which means mutating the constant makes the request and the check
+**agree**, and every *Open succeeds* test passes against a journal that no
+longer fsyncs. Capture's wrong-CRC-polynomial note arriving as a configuration
+constant; the fix is the same — the required values are stated as **literals**
+in the test. **When a value is deliberately shared between the code that SETS a
+thing and the code that CHECKS it, the check cannot also be the test.**
+
+**§47f's collapse warning stopped ONE SHORT and this is the reusable part.** It
+named a chain of length 1. At length **2**, "link to the previous record" and
+"link to the first record" are *still* the same predicate — record 1 is both.
+**Three** is the shortest chain that separates them, and the inequality is
+asserted rather than implied.
+
+**THREE THINGS SLICE A DELIBERATELY DID NOT DO — read these before assuming.**
+(1) **`Deps.Journal` is still a port field.** `module.go` predicts its
+conversion to configuration and the prediction is now *live* (a root can fill it
+only by writing its own journal outside `oms`), but §47f assigns that to slice B
+and no binary wires `oms` at all today. (2) **Chain VERIFICATION is not
+implemented** — only construction; the sole replayer is the test oracle, and a
+production verifier belongs with §7.5. (3) **§13's third durability
+precondition is not checked** — local filesystem only, never NFS. It carries
+**no `SPEC EDIT OWED`**: nothing departs from the spec, the requirement is
+scheduled to §7.5's refuse-to-trade posture list (**task #168**), which is the
+§47e shape caught on the way in rather than two milestones later.
+
+**The engine module gained its second third-party runtime dependency and the
+cost is worse than the first.** `modernc.org/sqlite`, cgo-free (a cgo driver
+makes the OMS the one component of a Linux-target deployment that cannot be
+cross-built) — **+9 modules**, against `coder/websocket`'s one node with no
+transitive edges. No document named a driver; §13 now does.
+
+## START HERE (updated session 74, 2026-08-02 — slice A is done; slice B is next and it carries a wiring correction slice A left for it)
+
+**Branch `feat/milestone-1-foundation`. Docs are v0.9.29.**
+
+**First act, in order:**
+
+1. **Read §48g before slice B**, specifically item 1. Slice B owns the
+   `Deps.Journal ports.Journal` → configuration conversion, and the reason it is
+   slice B's rather than slice A's is recorded there — including the cost, which
+   is that `module_test.go`'s one distinctive claim currently rests on injecting
+   a fake journal at that seam. Decide what replaces it before editing `Deps`.
+2. **Slice B — the planning use case, §6 step 5 (task #161).** Deterministic
+   `ClientOrderID` minting, `TradePlanned`, `ApplyPlanned`'s first caller, OCC
+   version threaded into `Dispatch`. It is what gives the wiring something to be
+   for, and it closes `module.go`'s stated hole. `ids` already has its base32
+   oracle for the determinism claim.
+3. **Re-verify the gate check at slice B rather than inheriting it.** §47f says
+   no new §3.6 gate is due because `singlewriter` polices by position — slice A
+   confirmed that by RUNNING the gate, not by reading the analyzer. Do the same:
+   rule 10's deferral named the wrong construct and cost 13 silent fallthroughs.
+4. **§38f is STILL a live user decision (task #158)** — untouched by slice A and
+   still the only clock-bound item. ≥2 TB recommended; 85 days to a full disk,
+   gate at day 59.
+5. **Tasks #152, #153, #159, #167 and the new #168 are unchanged by this slice.**
+
+**Standing rituals, unchanged — and one now bites.** `pgrep -f "arblab capture
+run"` **FIRST** (PID 8495, config `1c362feffe4a`); **never rebuild over
+`bin/arblab` while capture runs** — slice A did not, because `make lint` builds
+`bin/arblab-**lint**`, a different binary, which is worth knowing before the
+first slice that builds `bin/arblab` itself; cap `TLC_WORKERS` (4); marker grep
+`grep -rn "SPEC EDIT OWED" internal/ tools/` must be **zero**; never edit a
+`.tla` or `run.sh` mid-run; read figures only from a **completed** invocation.
+
+**Doc-set landing is COMPLETE, including the Georgian.** All seven docs are
+stamped v0.9.29; `docs/tutorial.ka.md` was regenerated with **`node
+docs/i18n/tools/assemble.mjs`** after syncing `docs/i18n/ka/tutorial/header.md`
+— source first, then assemble, which produced the expected one-line diff. The
+tool lives under `docs/i18n/tools/`, **not** `tools/`, and **no `make` target
+invokes it**; task **#167** is still that gap.
+
+## Status (2026-08-02, session 73 — HISTORICAL): **MILESTONE 3 IS ADMITTED BEFORE STRATEGY #2's GATE — THE ROSTER IS UNBLOCKED FOR ~2 MONTHS OF FOUNDATION WORK, AND THE GROUND FOR IT WAS ALREADY IN THE RECORD THAT REJECTED IT. DOCS ARE v0.9.28.**
 
 **No code changed. This was a ruling session.** The ruling and the whole doc set
 landed in **`f92fbff`**; a follow-up commit adds this SHA record itself, which
@@ -54,7 +159,7 @@ only against a test fake**. `module.go` is honest about the write repository
 being unwired; the journal's absence is the same shape one layer down and was
 stated nowhere.
 
-## START HERE (updated session 73, 2026-08-02 — the roster is unblocked; slice A is the first buildable work in two months)
+## START HERE (session 73 — HISTORICAL, superseded by session 74's above; its step 2 is DONE)
 
 **Branch `feat/milestone-1-foundation`. Docs are v0.9.28.**
 
