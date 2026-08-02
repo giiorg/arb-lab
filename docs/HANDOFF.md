@@ -1,6 +1,123 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-02, session 74): **MILESTONE 3 SLICE A IS LANDED — `ports.Journal` HAS AN ADAPTER, AND THE STORAGE ENGINE WAS DECIDED BY A REQUIREMENT THAT BINDS NONE OF ITS OWN METHODS. DOCS ARE v0.9.29.**
+## Status (2026-08-02, session 75): **MILESTONE 3 SLICE B IS LANDED — §6 STEP 5 EXISTS, `module.go`'s STATED HOLE IS CLOSED, AND WHAT CLOSED IT WAS A SIGNATURE RATHER THAN A CHECK. DOCS ARE v0.9.30.**
+
+**Code changed.** New: `internal/oms/application/planning.go` + `planning_test.go`.
+Changed: `application/dispatch.go`, `dispatch_test.go`, `application/errors.go`,
+`application/ports/repository.go`, `internal/oms/module.go`, `module_test.go`.
+Design record is **§49**
+(`docs/superpowers/specs/2026-08-02-m3-slice-b-planning.md`); core §6 step 5 is
+**rewritten**, §6 step 7 gains a clause, §6's sequence diagram is corrected, §12
+milestone 3 gains its slice-B annotation, ADR §3 has the dated block.
+**`make ci` green, both modules; marker grep zero; 17 mutations, 17 kills.**
+
+**What landed.** Deterministic `ClientOrderID` minting (a pure function of
+trade/leg/attempt), every leg's intent fsynced to the write-ahead journal before
+any submission, `ApplyPlanned`'s first caller, the OCC version threaded into
+`Dispatch`, and `Deps.Journal` converted from a port field to a **path** — the
+conversion `module.go` predicted and `singlewriter` forced, since with the
+adapter inside a policed package the only way a root could still fill a
+`ports.Journal` field was by writing a second write path.
+
+**THE DECISION THE SLICE TURNS ON IS `Dispatch`'s SIGNATURE.** It is now
+`Dispatch(ids.ClientOrderID, int64)` and it **reads the order from the write
+repository**. Two holes close that no check could have closed: an order that was
+never planned cannot be dispatched, and an order mutated between planning and
+dispatch cannot be submitted in place of the one that was journaled. §6 step 5's
+ordering becomes a property of the type system. **One consequence points the
+other way and is the transferable half:** `admit`'s `domain.Order.Validate` had
+to be **removed**, because with the order arriving from a repository whose
+`ApplyPlanned` refuses a malformed one it became a branch no test could reach —
+an unreachable sentinel reading as a handled case. Its removal is sound only
+because the refusal is now stated as a **port contract** rather than assumed from
+one adapter.
+
+**`TradePlanned` is deliberately NOT written, and the argument is the part worth
+carrying.** §6 step 5 named *"`TradePlanned` + intents"*. The easy reason is
+insufficient (§5.1's `Trade` aggregate has no domain type). What makes the
+omission *safe* is **a different clause of the same sentence** — *before any
+submission*: every leg is journaled before `Plan` returns anything dispatchable,
+so the only state a partially-journaled plan can reach is one where nothing was
+sent, which §5.3 prices as *"safe to replan or discard"*. The premise is code, so
+it is a **run** rather than a paragraph — the test breaks the *last* leg's
+journal write and requires the repository to be entirely empty. The change that
+would break it is named in the spec: a planner that dispatches leg 0 before
+journaling leg 1.
+
+**THE FINDING: `FM-5`'s shape arrives in Go, at the projection layer.** A
+journal-then-apply failure *after* the send leaves a sent order at `Planned` in
+the current-state store — and `Planned` is the **one** non-terminal state
+contributing no possible-delta interval. So a sent order reads to the §6.7
+classifier as contributing nothing, turning an **ambiguous** residual into a
+**determined** one and unblocking precisely the ≤5 s compensation the ambiguity
+existed to hold. **The projection does not merely lag; it lags in the direction
+that unblocks the held action.** It inherits the family's consequence unchanged —
+**no invariant computed from the projection can detect it** (§46 §8e, one layer
+out of TLA⁺). Landed as a refuse-to-trade clause in §6 step 7; **task #169**
+carries the response to slice E/F. **It carried no marker and the grep could
+never have found it** — nothing departs from a clause, the clause was absent.
+The reading pass beside the grep is what found it.
+
+**Two method notes, both cheap and both new.** (1) The collapse checklist found a
+**format** collapse rather than a cardinality one: `ClientOrderID` renders leg and
+attempt as **two decimal digits each**, so at attempt 0 a field-order bug mints
+the identical id — the tell was the format, not the data. Every fixture now uses
+attempt 7. (2) **All four `NOBUILD!!` this slice were bad seds**, and the
+discriminator is now stated generally: *"does not implement"* is §3.6 rule 2's
+assertion doing its job (a kill); ***"declared and not used"* is Go reporting
+that the mutation deleted a value's only reader** (re-aim, keeping the variable
+read).
+
+**§47f's gate re-verification is DONE by running, not reading.** `make lint` is
+clean with `module.go`'s new `driven` import, and the gate was shown to still
+bite on CLAUDE.md's **isolating** probe — `internal/marketdata` (a context root,
+where `hexboundary` is silent) importing `oms/application/ports`. Probe applied
+and removed. **No new §3.6 gate is due**, checked rather than inherited.
+
+## START HERE (updated session 75, 2026-08-02 — slice B is done; slice C is next)
+
+**Branch `feat/milestone-1-foundation`. Docs are v0.9.30.**
+
+**First act, in order:**
+
+1. **Slice C — `engine/venue`'s never-delivered account/order half (task #162).**
+   §47e finding 1: the package holds books, funding, sources and both venues'
+   wire decoders, and there is **no signed REST client, no `Place`, no
+   `OrderByClientID`, no `Fills`**. `ports.OrderPlacer` has had no adapter for
+   the whole of milestone 3 so far — slice B's `module_test.go` still fakes it.
+   **Testnet only**; venue facts are normative and already recorded (profiles
+   §1/§4/§7), so nothing unverified enters. Attach to §7.6's priority ladder via
+   `platform/ratelimit`, which is built.
+2. **§47f's standing hazard for slice C applies literally:** any test reading a
+   channel a mutation could stop feeding needs **its own bound**, or a mutant
+   that blocks reports `TIMEOUT!!` and names no defect. And **a fix applied in
+   one place gets applied to its mirror** — slice C builds *two* venues' clients,
+   so whatever repetition, bound or isolation trick one earns, the other gets the
+   same session.
+3. **§38f is STILL a live user decision (task #158)** — untouched by slices A and
+   B, and still the only clock-bound item. ≥2 TB recommended; 85 days to a full
+   disk, gate at day 59 (~2026-09-30).
+4. **Tasks #152, #153, #159, #167, #168 are unchanged by this slice.** New this
+   session: **#169** (act on `Outcome.Applied`, slice E/F).
+
+**Standing rituals, unchanged.** `pgrep -f "arblab capture run"` **FIRST**
+(PID 8495, config `1c362feffe4a`, 951 GiB free); **never rebuild over
+`bin/arblab` while capture runs** — `make lint` builds `bin/arblab-**lint**`, a
+different binary, which is what let slices A and B run the gates safely; cap
+`TLC_WORKERS` (4); marker grep `grep -rn "SPEC EDIT OWED" internal/ tools/` must
+be **zero**; never edit a `.tla` or `run.sh` mid-run; read figures only from a
+**completed** invocation.
+
+**Doc-set landing is COMPLETE, including the Georgian.** All seven docs are
+stamped v0.9.30. `docs/tutorial.ka.md` was regenerated with **`node
+docs/i18n/tools/assemble.mjs`** after editing `docs/i18n/ka/tutorial/header.md`
+**and `s-3-9.md`** — source first, then assemble, which produced exactly the
+expected two-line diff. The §3.9 crash-walkthrough's t₀ row named `TradePlanned`
+and the §6 step 5 edit invalidated it, so both language sources moved together.
+The tool lives under `docs/i18n/tools/`, **not** `tools/`, and **no `make` target
+invokes it**; task **#167** is still that gap.
+
+## Status (2026-08-02, session 74 — HISTORICAL): **MILESTONE 3 SLICE A IS LANDED — `ports.Journal` HAS AN ADAPTER, AND THE STORAGE ENGINE WAS DECIDED BY A REQUIREMENT THAT BINDS NONE OF ITS OWN METHODS. DOCS ARE v0.9.29.**
 
 **Code changed.** `internal/oms/infrastructure/driven/`: `journal.go`,
 `journalcodec.go`, `journalerrors.go`, `journal_internal_test.go`. Design record
@@ -65,7 +182,7 @@ makes the OMS the one component of a Linux-target deployment that cannot be
 cross-built) — **+9 modules**, against `coder/websocket`'s one node with no
 transitive edges. No document named a driver; §13 now does.
 
-## START HERE (updated session 74, 2026-08-02 — slice A is done; slice B is next and it carries a wiring correction slice A left for it)
+## START HERE (session 74 — HISTORICAL, superseded by session 75's above; its steps 1–3 are DONE — §48g item 1 read, slice B landed, the gate re-verified by running the isolating probe)
 
 **Branch `feat/milestone-1-foundation`. Docs are v0.9.29.**
 

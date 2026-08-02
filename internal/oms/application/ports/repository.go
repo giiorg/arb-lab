@@ -129,6 +129,19 @@ type OrderWriteRepository interface {
 	// A ClientOrderID the repository already holds is refused rather than
 	// replaced or ignored, on domain.Ledger.Register's argument: both
 	// resolutions are recoveries that look like they worked.
+	//
+	// It MUST refuse an order that fails domain.Order.Validate, and that is a
+	// requirement on implementations rather than a description of one — the
+	// half of this port a compile-time assertion cannot check, stated here the
+	// way Journal states durability and ErrVersionConflict states its sentinel.
+	//
+	// It is load-bearing downstream: this repository is the only source of
+	// orders the dispatch path sends, so Dispatch reads well-formedness from
+	// the fact that a record EXISTS rather than re-deriving it. A Validate at
+	// the dispatch boundary would be a branch no test could reach, which is
+	// this repo's unreachable-sentinel shape; the check therefore has to be
+	// genuinely here, and an implementation that skipped it would remove it
+	// from the system rather than move it.
 	ApplyPlanned(domain.Order) (OrderRecord, error)
 
 	// Load returns the current record.

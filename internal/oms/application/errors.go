@@ -14,6 +14,55 @@ var (
 	ErrJournalMissing = errors.New("oms: dispatcher has no journal")
 	ErrPlacerMissing  = errors.New("oms: dispatcher has no order placer")
 
+	// ErrOrdersMissing reports a use case constructed without the write
+	// repository — §6's APPLY half.
+	//
+	// It is one sentinel for both use cases rather than one each, unlike the two
+	// above, and the asymmetry is worth a sentence. Those name a port that
+	// belongs to ONE use case's job (the placer is the dispatch path's alone), so
+	// the message can say what the missing wire was for. This port is the same
+	// wire in both, and a caller branching on it takes the same action either
+	// way: the composition root wired a use case with no current-state store.
+	//
+	// What it costs when absent: the planner would journal an intent and apply it
+	// nowhere, so §6 step 5's record would exist and the order it describes would
+	// be unknown to every subsequent read — including Dispatch's own load, which
+	// is what makes an unplanned dispatch impossible to express.
+	ErrOrdersMissing = errors.New("oms: use case has no order write repository")
+
+	// ErrPlanEmpty reports a TradePlan with no legs.
+	//
+	// Refused rather than treated as a no-op returning zero records, because the
+	// two readings differ in exactly the case that matters: a caller whose leg
+	// construction silently produced nothing gets a successful plan, dispatches
+	// none of it, and reports a trade that was planned. §6 step 5 exists to make
+	// intent durable BEFORE submission; a plan with no intent has nothing to be
+	// durable about.
+	ErrPlanEmpty = errors.New("oms: trade plan has no legs")
+
+	// ErrLegAlreadyPlanned reports a plan whose minted ClientOrderID the write
+	// repository already holds.
+	//
+	// # It is checked BEFORE anything is journaled, and that ordering is the
+	// # whole point of the check
+	//
+	// ApplyPlanned would refuse the duplicate on its own — domain.Ledger.Register
+	// does, with the diagnosis of why neither replacing nor ignoring is safe — so
+	// this looks like a second home for one rule. It is not, because the two
+	// checks catch it at different moments and only the earlier one is in time.
+	//
+	// §5.3: a ClientOrderID is "unique per submission; never reused within the
+	// recoverable window". The journal is append-only. So a duplicate detected at
+	// APPLY time has already been journaled, and the journal now holds two
+	// planned records under one ClientOrderID — with two different intents, if
+	// anything about the order changed between the attempts. §7.5's replay then
+	// has two answers to "what was this order" and no rule for which wins, which
+	// is precisely the ambiguity ClientOrderID uniqueness exists to prevent.
+	//
+	// Detected first, nothing is written at all and the caller replans with a
+	// fresh attempt — which is what ClientOrderRef.Attempt is for.
+	ErrLegAlreadyPlanned = errors.New("oms: a leg's client order id is already known to the write repository")
+
 	// ErrOrderNotOMSMinted reports a dispatch of an order whose ClientOrderID
 	// this system did not mint.
 	//

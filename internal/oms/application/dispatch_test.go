@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/giiorg/arb-lab/internal/oms/application"
@@ -12,10 +13,10 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
 
-// # The fakes, and the two properties the checklist demanded of them
+// # The fakes, and the three properties the checklist demanded of them
 //
-// Both were chosen before the tests were written, because each closes a
-// fixture collapse that would otherwise make several assertions vacuous.
+// Each was chosen before the tests were written, because each closes a fixture
+// collapse that would otherwise make several assertions vacuous.
 //
 //  1. The journal fails a NAMED append rather than every call. A fake that
 //     fails everything cannot tell "refuses to place when authorization is not
@@ -25,6 +26,13 @@ import (
 //  2. The placer COUNTS its calls. §5.3's rule is a count, and every other
 //     assertion in this file is satisfied by a dispatcher that calls Place
 //     twice.
+//  3. The repository plants records at a CHOSEN version rather than always at
+//     1. Every record a real ApplyPlanned creates is at version 1, so a suite
+//     that only ever dispatches version-1 records cannot tell "compares the
+//     caller's expected version" from "assumes the first version" — the two
+//     predicates coincide on the only value the fixture ever holds. plantAt is
+//     what separates them, and the applied-call log is what makes the
+//     separation an assertion rather than an inference.
 
 // journalCall is one durable record, in the order it was written.
 type journalCall struct {
@@ -39,6 +47,13 @@ type fakeJournal struct {
 	// failOn maps a target state to the error its append returns. Keyed by
 	// state rather than by call index so a test names the step it is breaking.
 	failOn map[domain.OrderState]error
+
+	// failPlannedFrom, when positive, makes the Nth AppendPlanned (1-based) and
+	// every later one fail. The planning path needs a failure at a CHOSEN leg,
+	// which is what proves that a plan is journaled in full before any of it is
+	// applied.
+	failPlannedFrom int
+	failPlannedErr  error
 }
 
 func newFakeJournal() *fakeJournal {
@@ -47,6 +62,9 @@ func newFakeJournal() *fakeJournal {
 
 func (j *fakeJournal) AppendPlanned(o domain.Order) error {
 	j.planned = append(j.planned, o)
+	if j.failPlannedFrom > 0 && len(j.planned) >= j.failPlannedFrom {
+		return j.failPlannedErr
+	}
 	return nil
 }
 
@@ -60,6 +78,15 @@ func (j *fakeJournal) states() []domain.OrderState {
 	out := make([]domain.OrderState, len(j.calls))
 	for i, c := range j.calls {
 		out[i] = c.state
+	}
+	return out
+}
+
+// plannedIDs returns the ids of the intents recorded, in order.
+func (j *fakeJournal) plannedIDs() []ids.ClientOrderID {
+	out := make([]ids.ClientOrderID, len(j.planned))
+	for i, o := range j.planned {
+		out[i] = o.ClientOrderID
 	}
 	return out
 }
@@ -88,8 +115,121 @@ func (p *fakePlacer) Place(o domain.Order) (ports.Ack, error) {
 	return p.ack, p.err
 }
 
-var _ ports.Journal = (*fakeJournal)(nil)
-var _ ports.OrderPlacer = (*fakePlacer)(nil)
+// applyCall is one write to the current-state projection, recorded with the
+// version it claimed. The version is the field the tests are about: it is the
+// only evidence that Dispatch threaded the caller's number through rather than
+// producing one of its own.
+type applyCall struct {
+	id       ids.ClientOrderID
+	expected int64
+	to       domain.OrderState
+}
+
+// fakeOrders is ports.OrderWriteRepository at the port, not the real adapter.
+//
+// The application layer's tests use doubles at its own ports — that is the
+// hexagonal discipline and the reason hexboundary exists — and this one deviates
+// from the real adapter in exactly one direction: it lets a test plant a record
+// at a chosen version and fail a chosen write. It does NOT restate SM §1's edge
+// set: legality is domain.CanTransition here as it is in the adapter, because a
+// fake holding a second opinion about which transitions are legal would let this
+// suite pass against a dispatcher the real repository refuses.
+//
+// The composition against the REAL adapter is oms/module_test.go's job, and it
+// is why that file is an integration test rather than a wiring assertion.
+type fakeOrders struct {
+	records map[ids.ClientOrderID]ports.OrderRecord
+	applied []applyCall
+
+	// failApplyState maps a target state to the error its apply returns.
+	failApplyState map[domain.OrderState]error
+
+	// failLoad, when set, is returned by every Load. It is NOT
+	// ports.ErrOrderUnknown: the planner has to tell "this id is free" from
+	// "the repository could not answer", and a fake that could only produce the
+	// first would leave the distinction untested.
+	failLoad error
+
+	// failApplyPlannedFrom, when positive, makes the Nth ApplyPlanned (1-based)
+	// and every later one fail. A count rather than a flag, because the state
+	// worth pinning is the PARTIAL one — some legs applied, one refused — and a
+	// fake that failed the first call could never produce it.
+	failApplyPlannedFrom int
+	failApplyPlannedErr  error
+	appliedPlanned       int
+}
+
+func newFakeOrders() *fakeOrders {
+	return &fakeOrders{
+		records:        make(map[ids.ClientOrderID]ports.OrderRecord),
+		failApplyState: make(map[domain.OrderState]error),
+	}
+}
+
+func (r *fakeOrders) ApplyPlanned(o domain.Order) (ports.OrderRecord, error) {
+	r.appliedPlanned++
+	if r.failApplyPlannedFrom > 0 && r.appliedPlanned >= r.failApplyPlannedFrom {
+		return ports.OrderRecord{}, r.failApplyPlannedErr
+	}
+	// ports.OrderWriteRepository requires this refusal of every implementation,
+	// and the dispatch path reads well-formedness from the fact that a record
+	// exists — so a fake that skipped it would remove the check from the system
+	// rather than from this double.
+	if err := o.Validate(); err != nil {
+		return ports.OrderRecord{}, fmt.Errorf("fake repository: %w", err)
+	}
+	if _, ok := r.records[o.ClientOrderID]; ok {
+		return ports.OrderRecord{}, fmt.Errorf("fake repository: order %q already exists", o.ClientOrderID)
+	}
+	rec := ports.OrderRecord{Order: o, State: domain.StatePlanned, Version: 1}
+	r.records[o.ClientOrderID] = rec
+	return rec, nil
+}
+
+func (r *fakeOrders) Load(id ids.ClientOrderID) (ports.OrderRecord, error) {
+	if r.failLoad != nil {
+		return ports.OrderRecord{}, r.failLoad
+	}
+	rec, ok := r.records[id]
+	if !ok {
+		return ports.OrderRecord{}, fmt.Errorf("load order %q: %w", id, ports.ErrOrderUnknown)
+	}
+	return rec, nil
+}
+
+func (r *fakeOrders) ApplyState(id ids.ClientOrderID, expected int64, to domain.OrderState) (ports.OrderRecord, error) {
+	r.applied = append(r.applied, applyCall{id: id, expected: expected, to: to})
+	if err := r.failApplyState[to]; err != nil {
+		return ports.OrderRecord{}, err
+	}
+	rec, ok := r.records[id]
+	if !ok {
+		return ports.OrderRecord{}, fmt.Errorf("advance order %q: %w", id, ports.ErrOrderUnknown)
+	}
+	if rec.Version != expected {
+		return ports.OrderRecord{}, fmt.Errorf("advance order %q: %w", id, ports.ErrVersionConflict)
+	}
+	if err := domain.CanTransition(rec.State, to); err != nil {
+		return ports.OrderRecord{}, fmt.Errorf("advance order %q: %w", id, err)
+	}
+	rec.State = to
+	rec.Version++
+	r.records[id] = rec
+	return rec, nil
+}
+
+// ApplyFill is unreachable from the dispatch and planning paths — §6's fill
+// handler is a later slice — and returns a refusal rather than a zero value so
+// that a use case which started calling it fails loudly here.
+func (r *fakeOrders) ApplyFill(domain.Fill, int64) (ports.OrderRecord, bool, error) {
+	return ports.OrderRecord{}, false, errors.New("fake repository: ApplyFill has no caller in this slice")
+}
+
+var (
+	_ ports.Journal              = (*fakeJournal)(nil)
+	_ ports.OrderPlacer          = (*fakePlacer)(nil)
+	_ ports.OrderWriteRepository = (*fakeOrders)(nil)
+)
 
 // mintedID returns a ClientOrderID this system minted, built through the real
 // constructor rather than written as a literal — a hand-written id that stops
@@ -97,15 +237,20 @@ var _ ports.OrderPlacer = (*fakePlacer)(nil)
 // test of ErrOrderNotOMSMinted.
 func mintedID(t *testing.T, leg int) ids.ClientOrderID {
 	t.Helper()
-	trade, err := ids.ParseTradeID("018f0c1a-2b3c-7d4e-8f90-1a2b3c4d5e6f")
-	if err != nil {
-		t.Fatalf("ParseTradeID: %v", err)
-	}
-	id, err := ids.NewClientOrderID(ids.ClientOrderRef{Trade: trade, Leg: leg})
+	id, err := ids.NewClientOrderID(ids.ClientOrderRef{Trade: testTrade(t), Leg: leg})
 	if err != nil {
 		t.Fatalf("NewClientOrderID: %v", err)
 	}
 	return id
+}
+
+func testTrade(t *testing.T) ids.TradeID {
+	t.Helper()
+	trade, err := ids.ParseTradeID("018f0c1a-2b3c-7d4e-8f90-1a2b3c4d5e6f")
+	if err != nil {
+		t.Fatalf("ParseTradeID: %v", err)
+	}
+	return trade
 }
 
 func perp() ids.VenueInstrument {
@@ -115,67 +260,112 @@ func perp() ids.VenueInstrument {
 	}
 }
 
+// spot is the cash-and-carry package's OTHER leg. It carries no ContractType,
+// because ids.VenueInstrument requires one exactly when the product is a
+// derivative — which is what makes a two-leg plan a fixture that varies the
+// instrument rather than repeating it.
+func spot() ids.VenueInstrument {
+	return ids.VenueInstrument{
+		Venue: "binance", Product: ids.ProductSpot, Symbol: "BTCUSDT",
+	}
+}
+
+func qty(t *testing.T, v string) fixedpoint.Quantity {
+	t.Helper()
+	q, err := fixedpoint.ParseQuantity("BTC", v)
+	if err != nil {
+		t.Fatalf("ParseQuantity(%q): %v", v, err)
+	}
+	return q
+}
+
+func price(t *testing.T, v string) fixedpoint.Price {
+	t.Helper()
+	p, err := fixedpoint.ParsePrice("BTC", "USDT", v)
+	if err != nil {
+		t.Fatalf("ParsePrice(%q): %v", v, err)
+	}
+	return p
+}
+
 // dispatchableOrder is §6 step 6's own shape — a marketable-IOC limit — so
 // every test below varies exactly the field it is about.
 func dispatchableOrder(t *testing.T) domain.Order {
 	t.Helper()
-	q, err := fixedpoint.ParseQuantity("BTC", "0.5")
-	if err != nil {
-		t.Fatalf("ParseQuantity: %v", err)
-	}
-	px, err := fixedpoint.ParsePrice("BTC", "USDT", "50000")
-	if err != nil {
-		t.Fatalf("ParsePrice: %v", err)
-	}
 	return domain.Order{
 		ClientOrderID: mintedID(t, 1),
 		Instrument:    perp(),
 		Side:          domain.SideSell,
 		Type:          domain.OrderTypeLimit,
 		TimeInForce:   domain.TimeInForceIOC,
-		Quantity:      q,
-		LimitPrice:    px,
+		Quantity:      qty(t, "0.5"),
+		LimitPrice:    price(t, "50000"),
 	}
+}
+
+// plantAt puts a record in the repository at a chosen state and version,
+// standing in for the planning path this test file does not exercise.
+//
+// The version is a parameter rather than 1 for the reason the header states: a
+// fixture pinned to the value ApplyPlanned always produces makes "threads the
+// caller's version" and "assumes the first version" the same claim.
+func plantAt(t *testing.T, r *fakeOrders, o domain.Order, state domain.OrderState, version int64) {
+	t.Helper()
+	r.records[o.ClientOrderID] = ports.OrderRecord{Order: o, State: state, Version: version}
+}
+
+// plant is the ordinary case: a freshly planned order, exactly as Plan leaves it.
+func plant(t *testing.T, r *fakeOrders, o domain.Order) {
+	t.Helper()
+	plantAt(t, r, o, domain.StatePlanned, 1)
 }
 
 // newDispatcher builds a dispatcher over fresh fakes, with the placer watching
 // the journal so every test gets the ordering assertion for free.
-func newDispatcher(t *testing.T) (*application.Dispatcher, *fakeJournal, *fakePlacer) {
+func newDispatcher(t *testing.T) (*application.Dispatcher, *fakeJournal, *fakePlacer, *fakeOrders) {
 	t.Helper()
 	j := newFakeJournal()
 	p := &fakePlacer{watch: j}
-	d, err := application.NewDispatcher(j, p)
+	r := newFakeOrders()
+	d, err := application.NewDispatcher(j, p, r)
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	return d, j, p
+	return d, j, p, r
 }
 
 func TestNewDispatcherRefusesAMissingPort(t *testing.T) {
 	t.Parallel()
 
-	if _, err := application.NewDispatcher(nil, &fakePlacer{}); !errors.Is(err, application.ErrJournalMissing) {
-		t.Errorf("NewDispatcher(nil, placer) = %v, want ErrJournalMissing", err)
+	// One omission at a time and a DIFFERENT sentinel per case: together they
+	// catch a constructor that checks only the first port, and one that answers
+	// a single blanket refusal to all three.
+	if _, err := application.NewDispatcher(nil, &fakePlacer{}, newFakeOrders()); !errors.Is(err, application.ErrJournalMissing) {
+		t.Errorf("NewDispatcher(nil, placer, orders) = %v, want ErrJournalMissing", err)
 	}
-	if _, err := application.NewDispatcher(newFakeJournal(), nil); !errors.Is(err, application.ErrPlacerMissing) {
-		t.Errorf("NewDispatcher(journal, nil) = %v, want ErrPlacerMissing", err)
+	if _, err := application.NewDispatcher(newFakeJournal(), nil, newFakeOrders()); !errors.Is(err, application.ErrPlacerMissing) {
+		t.Errorf("NewDispatcher(journal, nil, orders) = %v, want ErrPlacerMissing", err)
+	}
+	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, nil); !errors.Is(err, application.ErrOrdersMissing) {
+		t.Errorf("NewDispatcher(journal, placer, nil) = %v, want ErrOrdersMissing", err)
 	}
 
 	// The positive control. Without it a constructor that refused everything
-	// would score two out of two above.
-	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}); err != nil {
-		t.Errorf("NewDispatcher with both ports = %v, want nil", err)
+	// would score three out of three above.
+	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, newFakeOrders()); err != nil {
+		t.Errorf("NewDispatcher with every port = %v, want nil", err)
 	}
 }
 
 func TestDispatchPlacesAValidOrderExactlyOnce(t *testing.T) {
 	t.Parallel()
 
-	d, j, p := newDispatcher(t)
+	d, j, p, r := newDispatcher(t)
 	p.ack = ports.Ack{VenueOrderID: "V-1"}
 	o := dispatchableOrder(t)
+	plant(t, r, o)
 
-	out, err := d.Dispatch(o)
+	out, err := d.Dispatch(o.ClientOrderID, 1)
 	if err != nil {
 		t.Fatalf("Dispatch = %v, want nil", err)
 	}
@@ -194,6 +384,9 @@ func TestDispatchPlacesAValidOrderExactlyOnce(t *testing.T) {
 	if !out.Journaled {
 		t.Error("Journaled = false, want true")
 	}
+	if !out.Applied {
+		t.Error("Applied = false, want true")
+	}
 
 	// Both records, in order, under the order's own id. The first is the crash
 	// boundary; the second is the result.
@@ -206,8 +399,59 @@ func TestDispatchPlacesAValidOrderExactlyOnce(t *testing.T) {
 			t.Errorf("journal recorded id %q, want %q", c.id, o.ClientOrderID)
 		}
 	}
+
+	// The order that reached the venue is the one the REPOSITORY held, which is
+	// the one §6 step 5 journaled. Nothing the caller passed could have
+	// influenced it — the caller passed an id.
 	if len(p.orders) == 1 && p.orders[0] != o {
 		t.Errorf("Place received %+v, want %+v", p.orders[0], o)
+	}
+
+	// The projection followed, and ends where the venue put it.
+	final, err := r.Load(o.ClientOrderID)
+	if err != nil {
+		t.Fatalf("Load after dispatch: %v", err)
+	}
+	if final.State != domain.StateSubmitted {
+		t.Errorf("repository state = %s, want %s", final.State, domain.StateSubmitted)
+	}
+	if final.Version != 3 {
+		t.Errorf("repository version = %d, want 3 — one bump per applied write", final.Version)
+	}
+}
+
+// TestDispatchThreadsTheCallersVersionThroughBothApplies is the OCC claim, and
+// the fixture is deliberately at a version no ApplyPlanned would produce.
+//
+// At version 1 the two readings coincide: a dispatcher that threaded `expected`
+// and one that hardcoded the first version write the same two numbers. At 5 they
+// diverge, and the applied-call log names which was written.
+func TestDispatchThreadsTheCallersVersionThroughBothApplies(t *testing.T) {
+	t.Parallel()
+
+	d, _, _, r := newDispatcher(t)
+	o := dispatchableOrder(t)
+	plantAt(t, r, o, domain.StatePlanned, 5)
+
+	out, err := d.Dispatch(o.ClientOrderID, 5)
+	if err != nil {
+		t.Fatalf("Dispatch = %v, want nil", err)
+	}
+	if !out.Applied {
+		t.Fatal("Applied = false, want true")
+	}
+
+	want := []applyCall{
+		{id: o.ClientOrderID, expected: 5, to: domain.StateDispatchAuthorized},
+		{id: o.ClientOrderID, expected: 6, to: domain.StateSubmitted},
+	}
+	if len(r.applied) != len(want) {
+		t.Fatalf("applied %+v, want %+v", r.applied, want)
+	}
+	for i := range want {
+		if r.applied[i] != want[i] {
+			t.Errorf("apply %d = %+v, want %+v", i, r.applied[i], want[i])
+		}
 	}
 }
 
@@ -221,8 +465,11 @@ func TestDispatchPlacesAValidOrderExactlyOnce(t *testing.T) {
 func TestDispatchJournalsAuthorizationBeforePlacing(t *testing.T) {
 	t.Parallel()
 
-	d, j, p := newDispatcher(t)
-	if _, err := d.Dispatch(dispatchableOrder(t)); err != nil {
+	d, j, p, r := newDispatcher(t)
+	o := dispatchableOrder(t)
+	plant(t, r, o)
+
+	if _, err := d.Dispatch(o.ClientOrderID, 1); err != nil {
 		t.Fatalf("Dispatch = %v", err)
 	}
 	if len(p.appendsBefore) != 1 {
@@ -237,7 +484,13 @@ func TestDispatchJournalsAuthorizationBeforePlacing(t *testing.T) {
 	}
 }
 
-// TestDispatchRefusesBeforeSendingAnything covers admit's three checks.
+// TestDispatchRefusesBeforeSendingAnything covers the checks admit makes on the
+// order it loaded.
+//
+// Every case plants the offending order rather than passing it, because that is
+// now the only way one can exist — and it is the realistic provenance: §6 step
+// 10's reconciler puts foreign orders in this same repository, which is exactly
+// why "we loaded it from our own store" is not evidence that we minted it.
 //
 // The type and the time in force vary INDEPENDENTLY: a fixture wrong in both at
 // once cannot tell which comparison fired, and a suite of only such fixtures
@@ -285,24 +538,29 @@ func TestDispatchRefusesBeforeSendingAnything(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			d, j, p := newDispatcher(t)
+			d, j, p, r := newDispatcher(t)
 			o := dispatchableOrder(t)
 			tc.mutate(&o)
+			plant(t, r, o)
 
-			out, err := d.Dispatch(o)
+			out, err := d.Dispatch(o.ClientOrderID, 1)
 			if err == nil {
 				t.Fatal("Dispatch = nil, want a refusal")
 			}
-			if tc.want != domain.ErrOrderUnset && !errors.Is(err, tc.want) {
+			if !errors.Is(err, tc.want) {
 				t.Errorf("Dispatch = %v, want %v", err, tc.want)
 			}
-			// The refusal's whole value: nothing left the process and nothing
-			// reached the disk, so §5.3's "safe to replan or discard" holds.
+			// The refusal's whole value: nothing left the process, nothing
+			// reached the disk and nothing moved in the projection, so §5.3's
+			// "safe to replan or discard" holds.
 			if p.calls != 0 {
 				t.Errorf("Place called %d times on a refused order, want 0", p.calls)
 			}
 			if len(j.calls) != 0 {
 				t.Errorf("journal recorded %v on a refused order, want nothing", j.states())
+			}
+			if len(r.applied) != 0 {
+				t.Errorf("repository saw %+v on a refused order, want nothing", r.applied)
 			}
 			if out != (application.Outcome{}) {
 				t.Errorf("Outcome = %+v on a refusal, want the zero value", out)
@@ -311,26 +569,66 @@ func TestDispatchRefusesBeforeSendingAnything(t *testing.T) {
 	}
 }
 
-// TestDispatchRefusesAnInvalidOrderWithTheDomainsOwnError is the one admit case
-// the table above cannot phrase, since its error comes from domain rather than
-// from this package.
-func TestDispatchRefusesAnInvalidOrderWithTheDomainsOwnError(t *testing.T) {
+// TestDispatchRefusesAnOrderTheRepositoryCannotSupply is the refusal that only
+// exists because Dispatch loads what it sends — §6 step 5's ordering, enforced
+// by the shape of the call rather than by a caller's discipline.
+//
+// The three cases are the three ways a load can fail to produce a dispatchable
+// record, and they are separate because they send a reader to three different
+// places: never planned, planned but moved on, planned but at another version.
+func TestDispatchRefusesAnOrderTheRepositoryCannotSupply(t *testing.T) {
 	t.Parallel()
 
-	d, _, p := newDispatcher(t)
-	o := dispatchableOrder(t)
-	o.Quantity = fixedpoint.Quantity{}
+	t.Run("an order that was never planned", func(t *testing.T) {
+		t.Parallel()
 
-	_, err := d.Dispatch(o)
-	if err == nil {
-		t.Fatal("Dispatch of an order with no quantity = nil, want a refusal")
-	}
-	if errors.Is(err, application.ErrNotMarketableIOCLimit) || errors.Is(err, application.ErrOrderNotOMSMinted) {
-		t.Errorf("Dispatch = %v, want the domain's validation error", err)
-	}
-	if p.calls != 0 {
-		t.Errorf("Place called %d times, want 0", p.calls)
-	}
+		d, j, p, _ := newDispatcher(t)
+
+		_, err := d.Dispatch(mintedID(t, 1), 1)
+		if !errors.Is(err, ports.ErrOrderUnknown) {
+			t.Fatalf("Dispatch of an unplanned order = %v, want ErrOrderUnknown", err)
+		}
+		if p.calls != 0 || len(j.calls) != 0 {
+			t.Errorf("Place called %d times and journal recorded %v, want nothing", p.calls, j.states())
+		}
+	})
+
+	t.Run("a stale version", func(t *testing.T) {
+		t.Parallel()
+
+		d, j, p, r := newDispatcher(t)
+		o := dispatchableOrder(t)
+		plantAt(t, r, o, domain.StatePlanned, 4)
+
+		_, err := d.Dispatch(o.ClientOrderID, 3)
+		if !errors.Is(err, ports.ErrVersionConflict) {
+			t.Fatalf("Dispatch at a stale version = %v, want ErrVersionConflict", err)
+		}
+		if p.calls != 0 || len(j.calls) != 0 {
+			t.Errorf("Place called %d times and journal recorded %v, want nothing", p.calls, j.states())
+		}
+	})
+
+	t.Run("an order past Planned", func(t *testing.T) {
+		t.Parallel()
+
+		// The realistic instance: this order was dispatched by a previous
+		// process, and §5.3 says such an order is resolved by query only. A
+		// dispatcher that re-authorized it would be the double-send the whole
+		// path exists to prevent, and the refusal comes from SM §1's edge set
+		// rather than from a rule restated here.
+		d, j, p, r := newDispatcher(t)
+		o := dispatchableOrder(t)
+		plantAt(t, r, o, domain.StateDispatchAuthorized, 2)
+
+		_, err := d.Dispatch(o.ClientOrderID, 2)
+		if !errors.Is(err, domain.ErrTransitionNoOp) {
+			t.Fatalf("Dispatch of an already-authorized order = %v, want ErrTransitionNoOp", err)
+		}
+		if p.calls != 0 || len(j.calls) != 0 {
+			t.Errorf("Place called %d times and journal recorded %v, want nothing", p.calls, j.states())
+		}
+	})
 }
 
 // TestDispatchRefusesToPlaceWhenAuthorizationIsNotDurable is the safety claim of
@@ -339,15 +637,20 @@ func TestDispatchRefusesToPlaceWhenAuthorizationIsNotDurable(t *testing.T) {
 	t.Parallel()
 
 	diskFull := errors.New("no space left on device")
-	d, j, p := newDispatcher(t)
+	d, j, p, r := newDispatcher(t)
 	j.failOn[domain.StateDispatchAuthorized] = diskFull
+	o := dispatchableOrder(t)
+	plant(t, r, o)
 
-	out, err := d.Dispatch(dispatchableOrder(t))
+	out, err := d.Dispatch(o.ClientOrderID, 1)
 	if !errors.Is(err, diskFull) {
 		t.Fatalf("Dispatch = %v, want the journal's error", err)
 	}
 	if p.calls != 0 {
 		t.Errorf("Place called %d times after a failed authorization append, want 0", p.calls)
+	}
+	if len(r.applied) != 0 {
+		t.Errorf("repository saw %+v, want nothing — the apply is downstream of the fsync", r.applied)
 	}
 	if out != (application.Outcome{}) {
 		t.Errorf("Outcome = %+v, want the zero value when nothing was sent", out)
@@ -364,10 +667,12 @@ func TestDispatchRefusesToPlaceWhenAuthorizationIsNotDurable(t *testing.T) {
 func TestDispatchReportsAnUnjournaledResultWithoutFailing(t *testing.T) {
 	t.Parallel()
 
-	d, j, p := newDispatcher(t)
+	d, j, p, r := newDispatcher(t)
 	j.failOn[domain.StateSubmitted] = errors.New("no space left on device")
+	o := dispatchableOrder(t)
+	plant(t, r, o)
 
-	out, err := d.Dispatch(dispatchableOrder(t))
+	out, err := d.Dispatch(o.ClientOrderID, 1)
 	if err != nil {
 		t.Fatalf("Dispatch = %v, want nil — a lost result record is not a failed dispatch", err)
 	}
@@ -380,10 +685,79 @@ func TestDispatchReportsAnUnjournaledResultWithoutFailing(t *testing.T) {
 	if out.Journaled {
 		t.Error("Journaled = true after the result append failed, want false")
 	}
+	// Applied stays TRUE, and the pair is the point: the two fields report
+	// independent stores, and a Dispatch that collapsed them into one flag would
+	// pass every assertion above.
+	if !out.Applied {
+		t.Error("Applied = false, want true — the projection is unaffected by a journal failure")
+	}
 	// The authorization record survives, and it is what recovery reads.
 	if got := j.states(); len(got) == 0 || got[0] != domain.StateDispatchAuthorized {
 		t.Errorf("journal = %v, want the authorization record to remain", got)
 	}
+}
+
+// TestDispatchSendsWhenTheProjectionFails is the ordering consequence that is
+// least obvious and most load-bearing.
+//
+// The authorization fsync is the commitment to call Place exactly once. So a
+// repository failure AFTER it must not abort the send: refusing there would
+// leave a durable DispatchAuthorized record for an order nothing ever sent, and
+// §5.3 then resolves it by querying a venue that never heard of it — a
+// permanently unresolvable order, produced by being careful.
+func TestDispatchSendsWhenTheProjectionFails(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the authorization apply fails", func(t *testing.T) {
+		t.Parallel()
+
+		d, _, p, r := newDispatcher(t)
+		r.failApplyState[domain.StateDispatchAuthorized] = errors.New("projection unavailable")
+		o := dispatchableOrder(t)
+		plant(t, r, o)
+
+		out, err := d.Dispatch(o.ClientOrderID, 1)
+		if err != nil {
+			t.Fatalf("Dispatch = %v, want nil — the send was already authorized", err)
+		}
+		if p.calls != 1 {
+			t.Errorf("Place called %d times, want 1", p.calls)
+		}
+		if out.Applied {
+			t.Error("Applied = true, want false")
+		}
+		if !out.Journaled {
+			t.Error("Journaled = false, want true — the journal is what recovery reads")
+		}
+		// The result apply is SKIPPED rather than attempted against a guessed
+		// version: exactly one call reached the repository.
+		if len(r.applied) != 1 {
+			t.Errorf("repository saw %+v, want only the authorization attempt", r.applied)
+		}
+	})
+
+	t.Run("the result apply fails", func(t *testing.T) {
+		t.Parallel()
+
+		d, _, p, r := newDispatcher(t)
+		r.failApplyState[domain.StateSubmitted] = errors.New("projection unavailable")
+		o := dispatchableOrder(t)
+		plant(t, r, o)
+
+		out, err := d.Dispatch(o.ClientOrderID, 1)
+		if err != nil {
+			t.Fatalf("Dispatch = %v, want nil", err)
+		}
+		if p.calls != 1 {
+			t.Errorf("Place called %d times, want 1", p.calls)
+		}
+		if out.Applied {
+			t.Error("Applied = true, want false")
+		}
+		if len(r.applied) != 2 {
+			t.Errorf("repository saw %+v, want both attempts", r.applied)
+		}
+	})
 }
 
 // TestDispatchClassifiesThePlaceOutcome walks the Effect × Class table through
@@ -453,10 +827,12 @@ func TestDispatchClassifiesThePlaceOutcome(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			d, j, p := newDispatcher(t)
+			d, j, p, r := newDispatcher(t)
 			p.err = tc.placeErr
+			o := dispatchableOrder(t)
+			plant(t, r, o)
 
-			out, err := d.Dispatch(dispatchableOrder(t))
+			out, err := d.Dispatch(o.ClientOrderID, 1)
 			if err != nil {
 				t.Fatalf("Dispatch = %v, want nil — Place ran, so there is a state to report", err)
 			}
@@ -484,6 +860,13 @@ func TestDispatchClassifiesThePlaceOutcome(t *testing.T) {
 			if got := j.states(); !equalStates(got, want) {
 				t.Errorf("journal recorded %v, want %v", got, want)
 			}
+			// Every classification the dispatcher can produce is a legal
+			// successor of DispatchAuthorized, so the projection follows it.
+			// This is the assertion that would fail if a future member of the
+			// table named a state SM §1 cannot reach from the crash boundary.
+			if !out.Applied {
+				t.Errorf("Applied = false for %s — the projection refused a state the dispatcher produced", tc.wantState)
+			}
 		})
 	}
 }
@@ -494,14 +877,18 @@ func TestDispatchClassifiesThePlaceOutcome(t *testing.T) {
 func TestDispatchRefusesASecondDispatchOfTheSameOrder(t *testing.T) {
 	t.Parallel()
 
-	d, j, p := newDispatcher(t)
+	d, j, p, r := newDispatcher(t)
 	o := dispatchableOrder(t)
+	plant(t, r, o)
 
-	if _, err := d.Dispatch(o); err != nil {
+	if _, err := d.Dispatch(o.ClientOrderID, 1); err != nil {
 		t.Fatalf("first Dispatch = %v, want nil", err)
 	}
 
-	out, err := d.Dispatch(o)
+	// Version 3 is where the first dispatch left the record, so this second call
+	// is the one a caller who re-read the record would make — not one holding a
+	// stale number. The refusal is therefore the guard's, not the OCC's.
+	out, err := d.Dispatch(o.ClientOrderID, 3)
 	if !errors.Is(err, application.ErrOrderAlreadyDispatched) {
 		t.Fatalf("second Dispatch = %v, want ErrOrderAlreadyDispatched", err)
 	}
@@ -516,20 +903,64 @@ func TestDispatchRefusesASecondDispatchOfTheSameOrder(t *testing.T) {
 	}
 }
 
+// TestASecondDispatcherOverTheSameRepositoryIsAlsoRefused isolates the OTHER
+// mechanism, and the isolation is the point.
+//
+// The in-process guard and the repository both refuse a repeat, so a single test
+// shows that something objected rather than that either rule did. A fresh
+// Dispatcher has an empty guard set by construction — which §5.3 requires, since
+// a restarted process must query rather than re-dispatch — so what refuses here
+// can only be SM §1's edge set, reached through the record the first dispatch
+// left behind.
+func TestASecondDispatcherOverTheSameRepositoryIsAlsoRefused(t *testing.T) {
+	t.Parallel()
+
+	j := newFakeJournal()
+	p := &fakePlacer{}
+	r := newFakeOrders()
+	o := dispatchableOrder(t)
+	plant(t, r, o)
+
+	first, err := application.NewDispatcher(j, p, r)
+	if err != nil {
+		t.Fatalf("NewDispatcher: %v", err)
+	}
+	if _, err := first.Dispatch(o.ClientOrderID, 1); err != nil {
+		t.Fatalf("first Dispatch = %v", err)
+	}
+
+	second, err := application.NewDispatcher(j, p, r)
+	if err != nil {
+		t.Fatalf("NewDispatcher: %v", err)
+	}
+	_, err = second.Dispatch(o.ClientOrderID, 3)
+	if errors.Is(err, application.ErrOrderAlreadyDispatched) {
+		t.Fatal("a fresh dispatcher refused with ErrOrderAlreadyDispatched — its guard set must start empty")
+	}
+	if !errors.Is(err, domain.ErrTransitionForbidden) && !errors.Is(err, domain.ErrTransitionNoOp) {
+		t.Fatalf("second dispatcher = %v, want SM §1's refusal", err)
+	}
+	if p.calls != 1 {
+		t.Errorf("Place called %d times across both dispatchers, want 1", p.calls)
+	}
+}
+
 // TestDispatchAdmitsADifferentOrder is the guard's positive control: it is keyed
 // on the ClientOrderID, not a latch that closes after one dispatch.
 func TestDispatchAdmitsADifferentOrder(t *testing.T) {
 	t.Parallel()
 
-	d, _, p := newDispatcher(t)
+	d, _, p, r := newDispatcher(t)
 	first := dispatchableOrder(t)
 	second := dispatchableOrder(t)
 	second.ClientOrderID = mintedID(t, 0) // the other leg of the same trade
+	plant(t, r, first)
+	plant(t, r, second)
 
-	if _, err := d.Dispatch(first); err != nil {
+	if _, err := d.Dispatch(first.ClientOrderID, 1); err != nil {
 		t.Fatalf("first Dispatch = %v", err)
 	}
-	if _, err := d.Dispatch(second); err != nil {
+	if _, err := d.Dispatch(second.ClientOrderID, 1); err != nil {
 		t.Fatalf("Dispatch of the other leg = %v, want nil", err)
 	}
 	if p.calls != 2 {
@@ -537,28 +968,32 @@ func TestDispatchAdmitsADifferentOrder(t *testing.T) {
 	}
 }
 
-// TestDispatchDoesNotBurnTheIDOnARefusal covers the placement of step 3.
+// TestDispatchDoesNotBurnTheIDOnARefusal covers the placement of the guard's
+// write.
 //
 // The id is recorded only AFTER the authorization append succeeds, because
-// everything before that point sent nothing — so a caller that corrects a
-// refused order and calls again has not double-dispatched anything. Recording
-// it in admit would look equivalent and would permanently reject an order whose
-// only fault was a typo.
+// everything before that point sent nothing — so a caller that corrects its
+// mistake and calls again has not double-dispatched anything. Recording it in
+// admit would look equivalent and would permanently reject an order whose only
+// fault was a stale read.
 func TestDispatchDoesNotBurnTheIDOnARefusal(t *testing.T) {
 	t.Parallel()
 
 	t.Run("after an admit refusal", func(t *testing.T) {
 		t.Parallel()
 
-		d, _, p := newDispatcher(t)
-		bad := dispatchableOrder(t)
-		bad.TimeInForce = domain.TimeInForceGTC
+		d, _, p, r := newDispatcher(t)
+		o := dispatchableOrder(t)
+		plant(t, r, o)
 
-		if _, err := d.Dispatch(bad); !errors.Is(err, application.ErrNotMarketableIOCLimit) {
-			t.Fatalf("Dispatch of a GTC order = %v, want ErrNotMarketableIOCLimit", err)
+		// The SAME id both times: the refusal is the caller's stale version, and
+		// the correction is re-reading it. A test using two different orders
+		// would prove only that the guard is keyed on something.
+		if _, err := d.Dispatch(o.ClientOrderID, 7); !errors.Is(err, ports.ErrVersionConflict) {
+			t.Fatalf("Dispatch at a stale version = %v, want ErrVersionConflict", err)
 		}
-		if _, err := d.Dispatch(dispatchableOrder(t)); err != nil {
-			t.Fatalf("Dispatch of the corrected order = %v, want nil", err)
+		if _, err := d.Dispatch(o.ClientOrderID, 1); err != nil {
+			t.Fatalf("Dispatch after re-reading = %v, want nil", err)
 		}
 		if p.calls != 1 {
 			t.Errorf("Place called %d times, want 1", p.calls)
@@ -568,17 +1003,19 @@ func TestDispatchDoesNotBurnTheIDOnARefusal(t *testing.T) {
 	t.Run("after a failed authorization append", func(t *testing.T) {
 		t.Parallel()
 
-		d, j, p := newDispatcher(t)
+		d, j, p, r := newDispatcher(t)
 		j.failOn[domain.StateDispatchAuthorized] = errors.New("transient")
+		o := dispatchableOrder(t)
+		plant(t, r, o)
 
-		if _, err := d.Dispatch(dispatchableOrder(t)); err == nil {
+		if _, err := d.Dispatch(o.ClientOrderID, 1); err == nil {
 			t.Fatal("Dispatch with a failing journal = nil, want a refusal")
 		}
 		// Nothing was sent, so a retry is legitimate — and this is the case the
 		// guard must NOT swallow, since the alternative is an order that can
 		// never be placed because its own journal hiccupped once.
 		delete(j.failOn, domain.StateDispatchAuthorized)
-		if _, err := d.Dispatch(dispatchableOrder(t)); err != nil {
+		if _, err := d.Dispatch(o.ClientOrderID, 1); err != nil {
 			t.Fatalf("Dispatch after the journal recovered = %v, want nil", err)
 		}
 		if p.calls != 1 {
@@ -594,19 +1031,59 @@ func TestDispatchDoesNotBurnTheIDOnARefusal(t *testing.T) {
 func TestDispatchGuardsAgainstARepeatAfterAFailedPlace(t *testing.T) {
 	t.Parallel()
 
-	d, _, p := newDispatcher(t)
+	d, _, p, r := newDispatcher(t)
 	p.err = apperror.Transport("place", apperror.EffectUnknown, errors.New("timeout"))
 	o := dispatchableOrder(t)
+	plant(t, r, o)
 
-	out, err := d.Dispatch(o)
+	out, err := d.Dispatch(o.ClientOrderID, 1)
 	if err != nil {
 		t.Fatalf("Dispatch = %v, want nil", err)
 	}
 	if out.Cause == nil {
 		t.Fatal("Cause = nil, want the timeout")
 	}
-	if _, err := d.Dispatch(o); !errors.Is(err, application.ErrOrderAlreadyDispatched) {
+	if _, err := d.Dispatch(o.ClientOrderID, 3); !errors.Is(err, application.ErrOrderAlreadyDispatched) {
 		t.Errorf("retry after a failed Place = %v, want ErrOrderAlreadyDispatched", err)
+	}
+	if p.calls != 1 {
+		t.Errorf("Place called %d times, want exactly 1", p.calls)
+	}
+}
+
+// TestDispatchGuardHoldsWhenTheProjectionDidNot is why the in-process guard was
+// not deleted when the repository started refusing repeats.
+//
+// With the authorization apply broken, the record is still at StatePlanned — so
+// the repository would happily admit this order a second time, for an order that
+// has already reached the venue. The guard is the mechanism precisely in the
+// case where the other mechanism is the thing that broke.
+func TestDispatchGuardHoldsWhenTheProjectionDidNot(t *testing.T) {
+	t.Parallel()
+
+	d, _, p, r := newDispatcher(t)
+	r.failApplyState[domain.StateDispatchAuthorized] = errors.New("projection unavailable")
+	o := dispatchableOrder(t)
+	plant(t, r, o)
+
+	out, err := d.Dispatch(o.ClientOrderID, 1)
+	if err != nil {
+		t.Fatalf("Dispatch = %v, want nil", err)
+	}
+	if out.Applied {
+		t.Fatal("Applied = true, want false — the fixture depends on the apply having failed")
+	}
+	// The record is untouched, so the repository has no objection to make.
+	rec, err := r.Load(o.ClientOrderID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if rec.State != domain.StatePlanned || rec.Version != 1 {
+		t.Fatalf("record = %s/v%d, want planned/v1 — the fixture's premise", rec.State, rec.Version)
+	}
+
+	if _, err := d.Dispatch(o.ClientOrderID, 1); !errors.Is(err, application.ErrOrderAlreadyDispatched) {
+		t.Errorf("second Dispatch = %v, want ErrOrderAlreadyDispatched", err)
 	}
 	if p.calls != 1 {
 		t.Errorf("Place called %d times, want exactly 1", p.calls)
