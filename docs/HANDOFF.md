@@ -1,6 +1,111 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-02, session 71): **SLICE F IS BUILT — `FM-8`'s RULING IS ENCODED AND CHECKED, THE HOLE IS SHOWN TO CLOSE, AND ENCODING IT FOUND `FM-9`. DOCS ARE v0.9.26.**
+## Status (2026-08-02, session 72): **THE §32m-D PER-TIER DISK FIGURE IS MEASURED — TASK #150 IS CLOSED THREE HOURS INSIDE ITS DEADLINE, AND §38f's OFF-HOST DECISION IS BACK WITH THE USER ON A MEASURED CLOCK. DOCS ARE v0.9.27.**
+
+**The figure: 11.165 GiB for the measured day — BTC tier 4.314, alt tier 6.852,
+per shortlisted symbol 0.387 (MUSDT) to 1.743 (BEATUSDT).** Record is
+**capture-expansion §44e**; the profiles gained a 2026-08-02 dated block; core
+§12's milestone 2b step 2 carries the landed-figure annotation; ADR §3 has the
+dated block. No code changed — this was a measurement session.
+
+**The measured day is 2026-08-01T12:00Z → 2026-08-02T12:00Z, 24 whole hours,
+deliberately NOT the 11:13Z restart anniversary.** That hour holds ~11 minutes
+of the *previous* process for the eight BTC sources and only ~47 minutes of life
+for the 32 new alt ones, so a tier split over it is biased by construction in
+the direction that flatters the tier under test. Sized rather than waved at:
+~1%, so it would not have changed a conclusion — the window is still chosen so
+both tiers are measured over identical, complete, single-process hours.
+
+**Both verifies are clean in the sense that matters.** The full-day run is
+**0 integrity / 50 coverage, verdict COVERAGE**, and **all 960 per-hour source
+lines (40 × 24) read `alive 60/60`** — a fully covered day, unlike the
+2026-07-31 figure. The restart-hour run reports the restart exactly as §44d
+promised: **8 `process_restart` gap records** (the pre-existing BTC sources) and
+**32 `alive_short`** (the new alt sources at 47/60). Of the 50 findings, **24
+are the `fundingInfo` hourly `restart_boundary`** — task #153's marker is
+**48% of a clean day's findings**, which is a measured input to that ruling.
+
+**THE FINDING: §42c's aggregate was right and its premise was false.** The
+derived ~0.6–1.1 G/day/symbol rested on "the two fixed-rate Binance streams
+contribute ~450M/day regardless of symbol activity". The eight-symbol total
+landed inside the derived band and the mean inside the per-symbol one — **and no
+symbol-level claim survived**: MUSDT is 35% below the floor, BEAT is 1.58× the
+ceiling, and BEAT's Bybit book (959.5 MiB) *exceeds BTC's* (678.9). Cause
+measured, not inferred, by splitting bytes/day into **records/day ×
+bytes/record**: bytes/record is constant across the nine perp streams
+(966–1132 B for a 20-level book) and the **rate** over those same nine runs
+2.68/s to 8.99/s against a 10/s ceiling (9.98/s on BTC spot, the closest
+anything comes to saturating it). **A venue's
+documented "update speed" is a MAXIMUM, not a cadence** — both venues' book
+streams push only on change. Ruled out as local loss, which is the claim that
+matters since both produce the same byte count: **`pu`-chain breaks zero**,
+minimum inter-push **102 ms** (the cap, exactly), maximum silence **22.5 s** in the hour checked, **94.8 s** over the day.
+
+**The refuted premise also underwrites an operational setting, and that is the
+part with a to-do.** §44b copied BTC's 10 s `first_data_timeout` to all 32 new
+sources *because* depth20 was believed fixed-rate. Binance partial depth has no
+subscribe-time snapshot (Bybit does, on both topics), and MUSDT's Binance book
+is silent >10 s for **3.42% of the day, max 94.8 s** → **~1 reconnect in 100
+would trip its own first-data deadline** on a perfectly healthy stream. It
+self-recovers via the backoff ladder and has not bitten (the day's one
+`no_first_data` is on BTC during the blip cluster). **Recorded, not fixed:**
+the setting is restart-required, and a restart is an operational act — raise
+the nine Binance `depth20` sources to 30 s **at the next restart that happens
+for another reason**.
+
+**`markPrice@1s` is the one genuinely fixed-cadence stream (exactly 86,400
+records/day on 7 of 9 symbols), and that makes it an INSTRUMENT.** It prices
+the two reconnect hours at **103 s and 48 s of lost data inside hours scoring
+`alive 60/60`** (not a verify defect — `alive` counts minutes touched — but a
+limit §45's decision-grid joins must know); read backwards it says the
+2026-07-31 day was **~61% covered**, where the scale-up that produced
+3.6–3.8 G/day assumed ~1.2×; and it caught a defect in **this session's own
+reading tooling**, which silently dropped `gapped` hour lines and would have
+published a false 91.67% coverage figure. **A one-number scale-up cannot
+separate coverage from activity.**
+
+**§38f, re-argued on the measured clock (ruling §42f-3's named revisit):**
+954 GiB free, 11.165 GiB/day → **85 days to zero free, 76 to a 100 GiB floor**,
+and the gate the schedule waits on (BCHUSDT, ~2026-09-30) is **at day 59**, by
+which point **~678 GiB of un-backfillable archive sits single-copy**. **Books
+are 93.6% of the daily bytes.** §38f's premium estimate ("~6 GB/day") was half
+the real rate — the rsync line is unchanged, the sizing is not: **≥2 TB**, not
+512 GB. **Recommendation on the table for the user: take the target now rather
+than at a third deferral.** Compression and retention stay refused on §38g's
+original grounds.
+
+## START HERE (updated session 72, 2026-08-02 — task #150 CLOSED; the only clock-bound item left is a user decision)
+
+**Branch `feat/milestone-1-foundation`. Docs are v0.9.27.**
+
+**First act, in order:**
+
+1. **§38f's destination is a live user decision** — §44e states the measured
+   case and recommends a **≥2 TB** target now. It has been deferred twice, both
+   times against derived numbers; this is the first time it is being put with a
+   measured one. Nothing else is blocked on it, and everything is at risk from
+   it.
+2. **Task #153 — the hourly `restart_boundary` on `fundingInfo`** is now cheap
+   to rule on and has a measured weight (24 of 50 findings on a clean day,
+   multiplying with every REST-overlay source added). The three options and the
+   two-directions argument are recorded in session 64's block below; nothing
+   needs re-deriving.
+3. **Task #152 waits on the clock, not on work** — gate evidence accumulates
+   until BCHUSDT's 180 matched post-cutoff settlements (~2026-09-30), then
+   `arblab crossvenue gate`. Periodic `crossvenue fetch` keeps it fed.
+4. **Formal model (a) is at a clean stopping point** (slice F closed, suite
+   75/75 from one unfiltered invocation). `FM-8`'s candidate 2 remains
+   unrefuted and unadopted — see session 71's block.
+
+**Standing rituals, unchanged:** `pgrep -f "arblab capture run"` **FIRST**
+(PID 8495, config `1c362feffe4a`); **never rebuild over `bin/arblab` while
+capture runs**; cap `TLC_WORKERS` (4) beside it; marker grep
+`grep -rn "SPEC EDIT OWED" internal/ tools/` must be **zero**; never edit a
+`.tla` or `run.sh` mid-run. **New from this session:** a full-day verify over 40
+sources costs ~27 minutes at 99% of one core — do not run it beside TLC, and
+read figures only from a completed invocation.
+
+## Status (2026-08-02, session 71 — HISTORICAL): **SLICE F IS BUILT — `FM-8`'s RULING IS ENCODED AND CHECKED, THE HOLE IS SHOWN TO CLOSE, AND ENCODING IT FOUND `FM-9`. DOCS ARE v0.9.26.**
 
 **The one thing slice E left open is closed, and there is now a run that says
 so.** `NC21` — the **pre-ruling world**, §7's precondition as an entry guard
@@ -478,7 +583,7 @@ The guide is bilingual. Design: `docs/superpowers/specs/2026-07-25-guide-localiz
 
 **Deliberately not done here:** no change to `tutorial.md` (this is a translation, not a revision — the open `core §12` / `core §2.4` finding below is untouched), no change to `docs/guide/`, no Artifact publication.
 
-## START HERE (updated session 70, 2026-08-02 — §46 SLICE E COMPLETE; `FM-7` and `FM-8` both landed, `FM-8`'s model encoding owed as slice F)
+## START HERE (updated session 70, 2026-08-02 — HISTORICAL — §46 SLICE E COMPLETE; `FM-7` and `FM-8` both landed, `FM-8`'s model encoding owed as slice F, done in session 71)
 
 **Branch `feat/milestone-1-foundation`. Docs are v0.9.25.**
 
