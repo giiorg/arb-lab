@@ -202,13 +202,33 @@ type Cost struct {
 
 // Validate reports whether the cost is populated.
 //
-// A zero weight is refused rather than read as free. Every metered endpoint on
-// both venues weighs at least one, so a zero is a field nobody filled in, and an
-// unweighted request is a bucket that never fills — which looks exactly like a
-// system comfortably inside its budget right up to the ban.
+// # The refusal is "charges nothing anywhere", not "weight is zero"
+//
+// It was the narrower rule first, on the reasoning that "every metered endpoint
+// on both venues weighs at least one, so a zero is a field nobody filled in".
+// That premise is FALSE, and the endpoint it is false about is the most
+// important one in this system: Binance documents `POST /fapi/v1/order` as
+// verbatim "1 on 10s order rate limit(X-MBX-ORDER-COUNT-10S); 1 on 1min order
+// rate limit(X-MBX-ORDER-COUNT-1M); 0 on IP rate limit(x-mbx-used-weight-1m)"
+// (Profiles §7). A futures order really does weigh zero against the weight
+// budget and one against each order budget, so the truthful Cost for placing an
+// order was the one Validate refused.
+//
+// What survives is the argument, which was never about the weight field: a cost
+// that charges NO dimension is a bucket that never fills, and that looks exactly
+// like a system comfortably inside its budget right up to the ban. So the check
+// is that some dimension is charged. Weight zero beside Orders one is a venue
+// fact; Weight zero beside Orders zero is still the field nobody filled in.
+//
+// DimensionRequests is deliberately not counted as "charged". Every Acquire
+// charges one request by construction (see units), so counting it would make
+// this check vacuous — the zero Cost would pass on a dimension the caller cannot
+// get wrong, and the one budget with no header to correct it afterwards is
+// exactly the IP envelope. A check whose subject is the field nobody filled in
+// must read the fields a caller fills in.
 func (c Cost) Validate() error {
-	if c.Weight == 0 {
-		return fmt.Errorf("weight 0: %w", ErrCostUnset)
+	if c.Weight == 0 && c.Orders == 0 {
+		return fmt.Errorf("weight 0 and orders 0: %w", ErrCostUnset)
 	}
 	return nil
 }

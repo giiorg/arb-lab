@@ -50,6 +50,7 @@ var (
 	ErrRecvWindowRange       = errors.New("transport: recv window exceeds the venue ceiling")
 	ErrSignerUnset           = errors.New("transport: signer unset")
 	ErrLimitReaderUnset      = errors.New("transport: limit reader unset")
+	ErrEnvelopeReaderUnset   = errors.New("transport: envelope reader unset — a venue that states refusals in the body would read as accepting everything")
 	ErrGovernorUnset         = errors.New("transport: governor unset")
 	ErrClockUnset            = errors.New("transport: clock unset")
 

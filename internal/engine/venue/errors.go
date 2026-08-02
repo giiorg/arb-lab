@@ -85,6 +85,50 @@ var (
 	// span beginning at 1, which reads as an enormous overlap against any live
 	// book and applies deltas the reconstruction has already applied.
 	ErrDeltaFirstSeqUnset = errors.New("venue: book delta first sequence unset")
+
+	// The order surface's refusals (§4's OrderGateway.Place, venue-side).
+	//
+	// Every one of these is caught BEFORE a byte leaves the process, which is
+	// what makes them EffectNotApplied by evidence rather than by assumption —
+	// the one Effect §5.3 forbids inferring from a cause.
+	ErrOrderSideInvalid         = errors.New("venue: order side is empty or outside the declared pair")
+	ErrOrderClientIDUnset       = errors.New("venue: order carries no client order id")
+	ErrOrderQuantityNotPositive = errors.New("venue: order quantity is not positive")
+	ErrOrderCodecUnset          = errors.New("venue: order codec unset")
+	ErrOrderTransportsUnset     = errors.New("venue: order client has no signed transport for a product family")
+
+	// ErrReduceOnlyOnSpot reports §5.3's flag on an instrument that has no
+	// position to reduce. Refused rather than dropped: an order sent without a
+	// flag the caller asked for is an order that can INCREASE a holding.
+	ErrReduceOnlyOnSpot = errors.New("venue: reduce-only is set on a spot instrument")
+
+	// ErrOrderUrgencyRoutine reports §7.6's read-traffic class on an order.
+	// Refused rather than rounded, because Routine sits BETWEEN the two
+	// ceilings and both roundings are a real decision — see OrderRequest.
+	ErrOrderUrgencyRoutine = errors.New("venue: an order cannot carry the Routine shed class")
+
+	// ErrOrderVenueMismatch reports an order routed to another venue's client.
+	// It matters because the symbol usually exists on both: the request would
+	// be signed with these credentials and accepted by this host.
+	ErrOrderVenueMismatch = errors.New("venue: order is for a different venue than this client")
+
+	// ErrOrderFamilyUnrouted reports a product family this client was not
+	// configured for. Refused rather than defaulted for the reason
+	// OrderClient's doc gives: on Binance the families are different HOSTS, and
+	// "BTCUSDT" is a real, executable instrument on both.
+	ErrOrderFamilyUnrouted = errors.New("venue: order client has no route for this product family")
+
+	// ErrOrderIDUnacceptable reports a ClientOrderID the venue's own rule
+	// rejects — too long, or carrying a character outside its published set
+	// (Profiles §7). Caught here so the failure names the id rather than
+	// arriving as a venue rejection that reads like a credential fault.
+	ErrOrderIDUnacceptable = errors.New("venue: client order id is outside this venue's published rule")
+
+	// ErrAckUnreadable reports an acknowledgement that decoded but does not
+	// describe the order that was sent — a venue echoing a different client id,
+	// or none at all. Distinct from a JSON failure: the bytes parsed, and what
+	// they say is about another order.
+	ErrAckUnreadable = errors.New("venue: order acknowledgement does not match the order sent")
 )
 
 // There is deliberately no sentinel here for "funding asked of a spot

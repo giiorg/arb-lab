@@ -60,7 +60,6 @@ import (
 	"fmt"
 
 	"github.com/giiorg/arb-lab/internal/oms/application"
-	"github.com/giiorg/arb-lab/internal/oms/application/ports"
 	"github.com/giiorg/arb-lab/internal/oms/infrastructure/driven"
 )
 
@@ -84,15 +83,21 @@ import (
 // adapter. §26e point 3's "move the type rather than widen the gate", arriving
 // as scheduled.
 //
-// Placer's adapter is a venue client. Venue clients live outside this context
-// entirely (§20a defers them), which is marketdata.Deps.Resnapshotter's
-// situation exactly, so that field is permanent: a root supplies it or the
-// context does not build.
+// The second field went the same way one slice later, and this doc used to say
+// it would not. It read: "Placer's adapter is a venue client. Venue clients live
+// outside this context entirely, which is marketdata.Deps.Resnapshotter's
+// situation exactly, so that field is permanent." The premise was right and the
+// conclusion did not follow — a venue CLIENT does live outside, but what the
+// field asked for was not a venue client. It asked for something implementing
+// §4's Place over an oms/domain.Order, which is a venue client wrapped in this
+// context's own ACL adapter, and §4 assigns that adapter to the context. So the
+// field now holds the venue client it always described, and the adapter is built
+// below. See Deps.VenueOrders.
 //
 // # Neither field is refused HERE
 //
-// A root passing a nil placer gets application.ErrPlacerMissing from the
-// constructor that owns the wire; an unset path gets driven.ErrJournalPathUnset
+// A root passing a nil venue client gets driven.ErrVenueOrderPlacerMissing from
+// the adapter that owns the wire; an unset path gets driven.ErrJournalPathUnset
 // from the adapter that owns the file — see New.
 type Deps struct {
 	// JournalPath is where §5.1's durable, append-only, hash-chained
@@ -115,20 +120,31 @@ type Deps struct {
 	// place that requirement is met or missed.
 	JournalPath string
 
-	// Placer is §4's OrderGateway narrowed to its one submitting method.
+	// VenueOrders is the venue's order surface — a *venue.OrderClient, in
+	// practice.
 	//
-	// The submit-once rule binds the adapter as well as the caller: an
-	// implementation that retries inside Place breaks §5.3 exactly as
-	// thoroughly as a caller that calls it twice, and the caller cannot see it
-	// happen. A root wiring a transport with retries configured on it has
-	// disabled this context's central safety property without touching this
-	// context.
+	// # It used to be a ports.OrderPlacer, and the field could not stay that way
 	//
-	// A failure must carry an apperror.Effect, and an adapter that forgets gets
-	// the conservative answer rather than a sharp one — apperror.EffectOf
-	// reports EffectUnknown for anything it does not recognise, which sends the
-	// order to SubmissionUnknown and the OMS to the venue to ask.
-	Placer ports.OrderPlacer
+	// The old shape asked a root for something implementing §4's Place over a
+	// domain.Order, and there were exactly two ways to satisfy it. Either
+	// engine/venue imports oms/domain — inverting the layering §4 sets up, so
+	// that a shared venue client depends on one context's model — or the root
+	// writes this context's ACL adapter itself, which puts the translation §4
+	// assigns to the context in a composition root instead, where a second
+	// binary would write it again and the two copies would drift.
+	//
+	// So the field became the VENUE client, and driven.OrderGateway is
+	// constructed here, exactly as JournalPath's conversion went in slice B and
+	// for the same reason: what a root legitimately owns is which venue it
+	// trades on, not how this context talks to it.
+	//
+	// The submit-once rule still binds whatever is supplied. §5.3 forbids
+	// transport retries, and an implementation that retries inside Place breaks
+	// that as thoroughly as a caller that calls it twice — invisibly, because
+	// the caller cannot see it happen. A root wiring a client with retries
+	// configured has disabled this context's central safety property without
+	// touching this context.
+	VenueOrders driven.VenueOrderPlacer
 }
 
 // Module is the context's driving surface.
@@ -209,7 +225,15 @@ func New(deps Deps) (*Module, error) {
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("oms: planner: %w", err), journal.Close())
 	}
-	dispatcher, err := application.NewDispatcher(journal, deps.Placer, orders)
+	// §4's thin ACL adapter, constructed HERE rather than by a root — see
+	// Deps.VenueOrders. It is the layer that refuses what §6 step 6 forbids
+	// sending and translates the rest into engine/venue's vocabulary.
+	placer, err := driven.NewOrderGateway(deps.VenueOrders)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("oms: order gateway: %w", err), journal.Close())
+	}
+
+	dispatcher, err := application.NewDispatcher(journal, placer, orders)
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("oms: dispatcher: %w", err), journal.Close())
 	}

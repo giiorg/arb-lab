@@ -1,6 +1,10 @@
 package ports
 
-import "github.com/giiorg/arb-lab/internal/oms/domain"
+import (
+	"fmt"
+
+	"github.com/giiorg/arb-lab/internal/oms/domain"
+)
 
 // OrderPlacer is §4's OrderGateway narrowed to its first method.
 //
@@ -33,8 +37,70 @@ type OrderPlacer interface {
 	// EffectUnknown for anything it does not recognise, which sends the order to
 	// SubmissionUnknown and the OMS to the venue to ask. That is the conservative
 	// answer, and it is the one an adapter that forgot gets.
-	Place(domain.Order) (Ack, error)
+	//
+	// # The Urgency argument, and why the order cannot supply it
+	//
+	// [SPEC EDIT OWED] §4's signature is Place(Order) (Ack, error), with no
+	// second argument. It cannot stay that way, and the reason is that §7.6's
+	// shed classes have NO CARRIER anywhere in this system: the class of an
+	// order is a property of the §5.3 COMMAND that produced it — OpenTrade
+	// creates exposure, ExposureReduction and EmergencyClosePackage remove it —
+	// and neither domain.Order nor ports.OrderRecord holds which command that
+	// was. The adapter is the layer that must state it and the only layer with
+	// no way to know it.
+	//
+	// Defaulting is not available, because the two defaults are not equally
+	// wrong. Opening puts the order under §7.6's ~70% back-off ceiling, so a
+	// FLATTEN defaulted to Opening is shed during exactly the incident the
+	// reserve exists for; Safety puts it at capacity, so ordinary trading
+	// spends the reserve and needs a second coincidence before it hurts. A
+	// silent default here would be the first kind.
+	//
+	// The alternative considered and not taken: a field on domain.Order naming
+	// its originating command. It is the better long-term shape — the same fact
+	// also decides §5.3's `stop-opening` exemption, which likewise has no
+	// carrier — and it is a §5.1 aggregate change that reaches the journal
+	// codec, the planner and recovery. Owed to the spec as §4 + §5.3 + §7.6.
+	Place(o domain.Order, u Urgency) (Ack, error)
 }
+
+// Urgency is §7.6's shed class, narrowed to the two values an ORDER can carry.
+//
+// # Two members, not three, and the missing one is the point
+//
+// §7.6 declares Opening, Routine and Safety. Routine is "the reads that keep the
+// risk view live — marks, books, account posture", which no order is under any
+// §5.3 command. Declaring it here would put a value in the type that no caller
+// can correctly choose and that maps to neither ceiling: Routine sits BETWEEN
+// the two, so an adapter translating it must round, and both roundings are the
+// silent version of a decision this type exists to make explicit.
+//
+// So the narrowing is the ACL doing its job — platform/ratelimit.Priority is the
+// rate limiter's vocabulary and has all three, and the translation happens in
+// the driven adapter, which is the layer entitled to speak both.
+type Urgency string
+
+const (
+	// UrgencyOpening is §7.6's Opening: "requests that create new exposure —
+	// the same act §5.3 calls stop-opening". A cash-and-carry entry leg.
+	UrgencyOpening Urgency = "opening"
+
+	// UrgencySafety is §7.6's Safety: §6.7 ambiguity resolution, §7.1's margin
+	// top-up, a flatten. It spends the reserve band, so it is the class that
+	// must not be reached for by default.
+	UrgencySafety Urgency = "safety"
+)
+
+// Validate reports whether u is one of the declared classes.
+func (u Urgency) Validate() error {
+	switch u {
+	case UrgencyOpening, UrgencySafety:
+		return nil
+	}
+	return fmt.Errorf("%q: %w", string(u), ErrUrgencyInvalid)
+}
+
+func (u Urgency) String() string { return string(u) }
 
 // Ack is what a venue returns from an accepted Place.
 //

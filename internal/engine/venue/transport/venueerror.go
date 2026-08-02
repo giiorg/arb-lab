@@ -61,8 +61,8 @@ func ClassifyTransportError(op string, err error) *apperror.Error {
 	return apperror.Transport(op, apperror.EffectUnknown, err)
 }
 
-// ClassifyStatus turns a venue's HTTP response into the error the OMS reads, or
-// nil if the venue accepted the call.
+// classifyStatus turns a venue's HTTP STATUS into the error the OMS reads, or
+// nil if the status reported acceptance.
 //
 // It also returns the rate-limit penalty the response earns, or
 // PenaltyUnspecified for none — the two travel together because they are read
@@ -72,7 +72,17 @@ func ClassifyTransportError(op string, err error) *apperror.Error {
 // code is the venue's own error code where the caller has decoded one (Bybit's
 // retCode, Binance's negative code) and "" where it has not. It refines the
 // penalty; it never softens an Effect.
-func ClassifyStatus(op string, status int, code string, retryAfter time.Duration, detail string) (*apperror.Error, ratelimit.PenaltyKind) {
+//
+// # It is UNEXPORTED, and the reason is a venue fact rather than tidiness
+//
+// This function was exported and was the whole classifier, which is correct only
+// for a venue whose status carries its verdict. Bybit's does not — it answers a
+// refused request with HTTP 200 and a retCode (envelope.go, verified live) — so
+// a caller holding a body and reaching for this one would read a rejection as an
+// acceptance. There is now exactly one exported way to classify a response that
+// has a body, and it is ClassifyResponse; leaving this one reachable would leave
+// the wrong answer reachable by the more obvious name.
+func classifyStatus(op string, status int, code string, retryAfter time.Duration, detail string) (*apperror.Error, ratelimit.PenaltyKind) {
 	switch {
 	case status >= 200 && status < 300:
 		return nil, ratelimit.PenaltyUnspecified

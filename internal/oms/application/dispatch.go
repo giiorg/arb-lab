@@ -204,7 +204,20 @@ type Outcome struct {
 // repository would happily admit the order a second time, for an order that has
 // already been sent. The map is the mechanism that holds precisely when the
 // projection is the thing that broke.
-func (d *Dispatcher) Dispatch(id ids.ClientOrderID, expected int64) (Outcome, error) {
+// # The urgency argument is the caller's, and it is checked BEFORE the fsync
+//
+// [SPEC EDIT OWED] §6 step 6 describes this method as taking the order alone.
+// ports.OrderPlacer.Place records why the §7.6 shed class has to travel with it
+// and why no default is available; what this method adds is WHERE it is refused.
+// An invalid class must fail above the AppendState below, because that fsync is
+// the commitment to call Place exactly once: refusing after it would leave a
+// durable authorization for an order nothing ever sent, which §5.3 then resolves
+// by querying a venue that never heard of it.
+func (d *Dispatcher) Dispatch(id ids.ClientOrderID, expected int64, urgency ports.Urgency) (Outcome, error) {
+	if err := urgency.Validate(); err != nil {
+		return Outcome{}, fmt.Errorf("dispatch order %q urgency: %w", id, err)
+	}
+
 	o, err := d.admit(id, expected)
 	if err != nil {
 		return Outcome{}, err
@@ -231,7 +244,7 @@ func (d *Dispatcher) Dispatch(id ids.ClientOrderID, expected int64) (Outcome, er
 	// the consequence is stated.
 	authorized, applyErr := d.orders.ApplyState(id, expected, domain.StateDispatchAuthorized)
 
-	ack, placeErr := d.placer.Place(o)
+	ack, placeErr := d.placer.Place(o, urgency)
 
 	state, unhandled := classifyPlace(placeErr)
 

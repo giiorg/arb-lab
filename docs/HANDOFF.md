@@ -1,5 +1,38 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
+## ⚠ IN FLIGHT (2026-08-02, session 77): **SLICE C2a's CODE IS COMPLETE AND GREEN; ITS DOCS ARE NOT. START AT §51h.**
+
+**Read `docs/superpowers/specs/2026-08-02-m3-slice-c2a-write-path.md` first — §51h
+is the exact remaining list, and nothing on it is discovery.** Docs are still
+stamped **v0.9.31**; the bump to v0.9.32 is part of what is owed.
+
+**State of the tree:** `make ci` green both modules, 20 mutations / 20 kills,
+committed as a **mid-slice WIP** commit. The slice is **NOT closed**:
+`grep -rn "SPEC EDIT OWED" internal/ tools/` returns **2**, deliberately, and
+both are this slice's owed spec edits (§4/§5.3/§7.6 and §6 step 6).
+
+**What landed in code.** `engine/venue` gains the order write path
+(`order.go`, `order_binance.go`, `order_bybit.go`); `transport` gains
+`envelope.go`; `oms/infrastructure/driven` gains the real ACL adapter
+(`ordergateway.go`), so `module_test.go` no longer fakes the port.
+`ports.OrderPlacer.Place` and `Dispatcher.Dispatch` gain §7.6's shed class;
+`Deps.Placer` became `Deps.VenueOrders`; `ratelimit.Cost.Validate` was corrected.
+
+**Three findings, all in §51:** (1) **Bybit answers a REFUSED request with HTTP
+200**, so C1's status-only classifier read a rejection as an acceptance — and via
+`ClassifyAckDecodeFailure` it would have recorded an explicit venue rejection as
+`EffectApplied`, an order that definitely exists. (2) **§7.6's shed classes have
+no carrier anywhere** — not on `domain.Order`, not on `ports.OrderRecord` — and
+neither possible default is safe. (3) **Binance documents `POST /fapi/v1/order`
+as weight ZERO**, which `Cost.Validate`'s zero-is-unusable rule refused: a
+documented venue zero meeting a default written for forgotten fields.
+
+**Slice C2 was split again, user-accepted:** C2a = the write path (this), C2b =
+the read path (**task #172**), which carries an open question recorded at the
+split — the query methods have no consumer until slice D declares one.
+
+---
+
 ## Status (2026-08-02, session 76): **MILESTONE 3 SLICE C1 IS LANDED — `engine/venue` HAS A SIGNED REST TRANSPORT, AND THE SLICE'S LESSON IS THAT THE TWO ADAPTERS' *EVIDENCE* IS NOT SYMMETRIC EVEN THOUGH THEIR CODE IS. DOCS ARE v0.9.31.**
 
 **Code changed.** New: `internal/engine/venue/transport/{credential,signing,signed,venueerror}.go`

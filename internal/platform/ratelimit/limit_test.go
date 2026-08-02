@@ -181,9 +181,16 @@ func TestCostValidate(t *testing.T) {
 		{"a query costs weight only", ratelimit.Cost{Weight: 2}, nil},
 		{"an order costs weight and an order slot", ratelimit.Cost{Weight: 1, Orders: 1}, nil},
 
-		// Zero weight is refused because it is how the field gets forgotten,
-		// and a forgotten weight is a bucket that never fills.
-		{"a zero weight is refused", ratelimit.Cost{Orders: 1}, ratelimit.ErrCostUnset},
+		// The row this check was rewritten for. Binance documents POST
+		// /fapi/v1/order as "0 on IP rate limit(x-mbx-used-weight-1m)" and 1 on
+		// each order-count limit (Profiles §7), so a weightless order is a
+		// VENUE FACT and the earlier rule refused the truthful cost of the most
+		// important call in the system.
+		{"a futures order costs no weight and one order slot", ratelimit.Cost{Orders: 1}, nil},
+
+		// What survives: a cost charging no dimension a caller fills in is the
+		// field nobody populated, and a bucket that never fills looks exactly
+		// like a system comfortably inside its budget right up to the ban.
 		{"the zero value is refused", ratelimit.Cost{}, ratelimit.ErrCostUnset},
 	}
 

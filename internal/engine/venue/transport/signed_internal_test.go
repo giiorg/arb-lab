@@ -89,6 +89,7 @@ func testClient(t *testing.T, srv *httptest.Server, gov *ratelimit.Governor) *Si
 		RecvWindow: 5000 * time.Millisecond,
 		Signer:     signer,
 		Limits:     BinanceLimitReader{},
+		Envelope:   BinanceEnvelope{},
 		Governor:   gov,
 		Clock:      clk,
 	})
@@ -290,7 +291,7 @@ func TestClassifyStatus(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err, pen := ClassifyStatus("op", tc.status, tc.code, 0, "detail")
+			err, pen := classifyStatus("op", tc.status, tc.code, 0, "detail")
 			if !tc.wantErr {
 				if err != nil {
 					t.Fatalf("status %d: got %v, want nil", tc.status, err)
@@ -321,11 +322,11 @@ func TestClassifyStatus(t *testing.T) {
 // every other error of its class in a log.
 func TestClassifyStatusFallsBackToTheHTTPStatusForACode(t *testing.T) {
 	t.Parallel()
-	err, _ := ClassifyStatus("op", 401, "", 0, "")
+	err, _ := classifyStatus("op", 401, "", 0, "")
 	if err.Code() != "401" {
 		t.Errorf("Code() = %q, want %q", err.Code(), "401")
 	}
-	withCode, _ := ClassifyStatus("op", 401, "10003", 0, "")
+	withCode, _ := classifyStatus("op", 401, "10003", 0, "")
 	if withCode.Code() != "10003" {
 		t.Errorf("Code() = %q, want the venue's own code", withCode.Code())
 	}
@@ -535,6 +536,7 @@ func TestSignedClientConfigRefusesEveryMissingDependency(t *testing.T) {
 	good := SignedClientConfig{
 		Scheme: "https", Host: "example.com", Timeout: time.Second, ReadLimit: 1024,
 		RecvWindow: time.Second, Signer: signer, Limits: BinanceLimitReader{},
+		Envelope: BinanceEnvelope{},
 		Governor: testGovernor(t), Clock: clk,
 	}
 	// Positive control: the complete config must pass, or every case below
@@ -551,6 +553,7 @@ func TestSignedClientConfigRefusesEveryMissingDependency(t *testing.T) {
 		"recv window": func(c *SignedClientConfig) { c.RecvWindow = 0 },
 		"signer":      func(c *SignedClientConfig) { c.Signer = nil },
 		"limits":      func(c *SignedClientConfig) { c.Limits = nil },
+		"envelope":    func(c *SignedClientConfig) { c.Envelope = nil },
 		"governor":    func(c *SignedClientConfig) { c.Governor = nil },
 		"clock":       func(c *SignedClientConfig) { c.Clock = nil },
 	}

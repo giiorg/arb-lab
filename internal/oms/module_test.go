@@ -1,11 +1,13 @@
 package oms_test
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
 
+	"github.com/giiorg/arb-lab/internal/engine/venue"
 	"github.com/giiorg/arb-lab/internal/oms"
 	"github.com/giiorg/arb-lab/internal/oms/application"
 	"github.com/giiorg/arb-lab/internal/oms/application/ports"
@@ -13,6 +15,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/oms/infrastructure/driven"
 	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
+	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
 
 	_ "modernc.org/sqlite"
 )
@@ -41,24 +44,32 @@ import (
 // refusals and the double-dispatch backstop against port fakes; none of that is
 // repeated here.
 
-// countingPlacer is the one port a root still supplies. It counts because §5.3's
-// rule is a count — "submit once, NO transport retry" — and it records the order
-// because a module that reached the venue with a DIFFERENT order than it planned
-// would satisfy the count.
+// countingPlacer is the one wire a root still supplies, and slice C2a moved it
+// one layer OUT: Deps no longer takes a ports.OrderPlacer, it takes the venue
+// client, and driven.OrderGateway is built inside New.
+//
+// That makes this fake stronger than the one it replaces. It records
+// venue.OrderRequest rather than domain.Order, so what it observes is the far
+// side of the ACL — and the claim that gets checked is the one a port-level fake
+// could not see: that the module TRANSLATED, and translated correctly. A wiring
+// that reached the venue with the planned order's identity but the wrong side or
+// the wrong shed class would have satisfied the old fake completely.
+//
+// It counts because §5.3's rule is a count — "submit once, NO transport retry".
 type countingPlacer struct {
-	ack ports.Ack
+	ack venue.OrderAck
 
 	calls  int
-	orders []domain.Order
+	orders []venue.OrderRequest
 }
 
-func (p *countingPlacer) Place(o domain.Order) (ports.Ack, error) {
+func (p *countingPlacer) Place(_ context.Context, r venue.OrderRequest) (venue.OrderAck, error) {
 	p.calls++
-	p.orders = append(p.orders, o)
+	p.orders = append(p.orders, r)
 	return p.ack, nil
 }
 
-var _ ports.OrderPlacer = (*countingPlacer)(nil)
+var _ driven.VenueOrderPlacer = (*countingPlacer)(nil)
 
 const venueOrderID = "V-77"
 
@@ -76,7 +87,7 @@ func fullDeps(t *testing.T) oms.Deps {
 	t.Helper()
 	return oms.Deps{
 		JournalPath: journalPath(t),
-		Placer:      &countingPlacer{ack: ports.Ack{VenueOrderID: venueOrderID}},
+		VenueOrders: &countingPlacer{ack: venue.OrderAck{VenueOrderID: venueOrderID}},
 	}
 }
 
@@ -155,14 +166,22 @@ func TestNewRefusesEachMissingDependency(t *testing.T) {
 	// — the one belonging to the constructor that owns that wire. module.go adds
 	// no refusals of its own precisely so that these stay where they are, and
 	// this is the assertion that says so: a New with its own blanket check would
-	// answer one sentinel to both cases. They come from two different packages,
-	// which is the sharper form of the same claim.
+	// answer one sentinel to both cases.
+	//
+	// This comment used to add "they come from two different packages, which is
+	// the sharper form of the same claim", and slice C2a made that FALSE: the
+	// second dependency moved from application.ErrPlacerMissing to
+	// driven.ErrVenueOrderPlacerMissing when Deps.Placer became Deps.VenueOrders,
+	// so both sentinels are now driven's. The distinctness that survives is
+	// per-WIRE rather than per-package, and it is still the thing being checked.
+	// Corrected rather than left, because a test comment claiming more than the
+	// test does is read as evidence by everyone except the person who wrote it.
 	cases := map[string]struct {
 		mutate func(*oms.Deps)
 		want   error
 	}{
 		"no journal path": {func(d *oms.Deps) { d.JournalPath = "" }, driven.ErrJournalPathUnset},
-		"no placer":       {func(d *oms.Deps) { d.Placer = nil }, application.ErrPlacerMissing},
+		"no venue client": {func(d *oms.Deps) { d.VenueOrders = nil }, driven.ErrVenueOrderPlacerMissing},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -258,7 +277,7 @@ func TestPlanThenDispatchWritesOneJournalAndOneProjection(t *testing.T) {
 	t.Parallel()
 
 	deps := fullDeps(t)
-	placer := deps.Placer.(*countingPlacer)
+	placer := deps.VenueOrders.(*countingPlacer)
 	m := newModule(t, deps)
 
 	planned, err := m.Plan.Plan(cashAndCarry(t))
@@ -272,7 +291,7 @@ func TestPlanThenDispatchWritesOneJournalAndOneProjection(t *testing.T) {
 	// The perp leg. Index 1 rather than 0 so that "the leg asked for" and "the
 	// first leg" are different records — a plan of one would make them the same.
 	perp := planned[1]
-	out, err := m.Dispatch.Dispatch(perp.Order.ClientOrderID, perp.Version)
+	out, err := m.Dispatch.Dispatch(perp.Order.ClientOrderID, perp.Version, ports.UrgencyOpening)
 	if err != nil {
 		t.Fatalf("Dispatch = %v, want nil", err)
 	}
@@ -280,8 +299,29 @@ func TestPlanThenDispatchWritesOneJournalAndOneProjection(t *testing.T) {
 	if placer.calls != 1 {
 		t.Errorf("the supplied placer saw %d calls, want exactly 1", placer.calls)
 	}
-	if len(placer.orders) == 1 && placer.orders[0] != perp.Order {
-		t.Errorf("the supplied placer received %+v, want the planned order %+v", placer.orders[0], perp.Order)
+	// What reached the venue is now a venue.OrderRequest, so this asserts the
+	// TRANSLATION as well as the identity. The fields are spelled out rather
+	// than compared against a call to the adapter's own converter: a check that
+	// re-runs the translator to produce its expectation agrees with the
+	// translator by construction, and would pass with every mapping reversed.
+	//
+	// The perp leg is a SELL at index 1, which is what makes the side assertion
+	// able to fail — leg 0 is a buy, so a translator that answered Buy for
+	// everything would be invisible against it.
+	if len(placer.orders) == 1 {
+		got := placer.orders[0]
+		want := venue.OrderRequest{
+			Instrument:    perp.Order.Instrument,
+			ClientOrderID: perp.Order.ClientOrderID,
+			Side:          venue.OrderSideSell,
+			Quantity:      perp.Order.Quantity,
+			LimitPrice:    perp.Order.LimitPrice,
+			ReduceOnly:    false,
+			Urgency:       ratelimit.PriorityOpening,
+		}
+		if got != want {
+			t.Errorf("the venue received %+v, want %+v", got, want)
+		}
 	}
 	// The venue's answer reaches the caller through the module. Non-zero on
 	// purpose: against a zero Ack this assertion holds for a module that
@@ -332,7 +372,7 @@ func TestDispatchRefusesAnOrderThisModuleNeverPlanned(t *testing.T) {
 	t.Parallel()
 
 	deps := fullDeps(t)
-	placer := deps.Placer.(*countingPlacer)
+	placer := deps.VenueOrders.(*countingPlacer)
 	m := newModule(t, deps)
 
 	id, err := ids.NewClientOrderID(ids.ClientOrderRef{Trade: testTrade(t), Leg: 1})
@@ -340,7 +380,7 @@ func TestDispatchRefusesAnOrderThisModuleNeverPlanned(t *testing.T) {
 		t.Fatalf("NewClientOrderID: %v", err)
 	}
 
-	if _, err := m.Dispatch.Dispatch(id, 1); !errors.Is(err, ports.ErrOrderUnknown) {
+	if _, err := m.Dispatch.Dispatch(id, 1, ports.UrgencyOpening); !errors.Is(err, ports.ErrOrderUnknown) {
 		t.Fatalf("Dispatch of an unplanned order = %v, want ErrOrderUnknown", err)
 	}
 	if placer.calls != 0 {

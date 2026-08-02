@@ -60,4 +60,11 @@ var (
 	// version is right for a fill, and wrong for a cancel that raced a fill,
 	// which is why this port does not retry for anyone.
 	ErrVersionConflict = errors.New("oms: write repository record has moved since it was read")
+
+	// ErrUrgencyInvalid reports a §7.6 shed class that is empty or outside the
+	// two an order can carry. Empty is the reachable one and is the reason this
+	// is checked at all: Urgency is a string, so a caller that never set it
+	// passes the compiler, and the zero value must not be readable as either
+	// class — one would shed a flatten and the other would spend the reserve.
+	ErrUrgencyInvalid = errors.New("oms: order urgency is empty or not a declared shed class")
 )

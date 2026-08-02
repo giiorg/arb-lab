@@ -72,6 +72,16 @@ type SignedClientConfig struct {
 	// Limits reads the venue's rate-limit headers.
 	Limits LimitReader
 
+	// Envelope reads the venue's own verdict out of a response body.
+	//
+	// Required, and not defaultable to a reader that finds nothing: on Bybit
+	// the body is where a refusal is stated at all (HTTP 200 + retCode), so a
+	// client without one classifies every Bybit rejection as an acceptance.
+	// The venue that needs this least — Binance, whose status is authoritative
+	// — is the one whose reader looks like it could be omitted, which is why
+	// there is a BinanceEnvelope rather than a nil.
+	Envelope EnvelopeReader
+
 	// Governor is the venue's §7.6 budget. Required: a client that could run
 	// without one would be a client that spends an unmetered budget, which
 	// looks exactly like a system comfortably inside its limits until the ban.
@@ -113,6 +123,9 @@ func (c SignedClientConfig) Validate() error {
 	}
 	if c.Limits == nil {
 		return ErrLimitReaderUnset
+	}
+	if c.Envelope == nil {
+		return ErrEnvelopeReaderUnset
 	}
 	if c.Governor == nil {
 		return ErrGovernorUnset
@@ -196,11 +209,17 @@ type Response struct {
 //  3. Read the server clock and sign — a refusal here is still pre-send.
 //  4. Send, ONCE. From this point "not sent" can no longer be inferred.
 //  5. Fold the venue's headers into the governor, whatever the status.
-//  6. Classify the status, and penalize the governor if it earned one.
+//  6. Classify the RESPONSE — status and body together — and penalize the
+//     governor if it earned one.
 //
 // Step 5 runs before step 6 deliberately: a 429 carries the headers that say how
 // far over we went, and returning early on the status would discard exactly the
 // reading taken when it mattered most.
+//
+// Step 6 reads the body as well as the status, and that is not a refinement:
+// Bybit states a refusal in the body BENEATH a success status, so a step 6 that
+// read the status alone would return (Response, nil) for a rejected order. See
+// envelope.go.
 func (c *SignedClient) Do(ctx context.Context, call Call) (Response, error) {
 	req := ratelimit.Request{Family: call.Family, Priority: call.Priority, Cost: call.Cost}
 	if err := req.Validate(); err != nil {
@@ -265,7 +284,7 @@ func (c *SignedClient) Do(ctx context.Context, call Call) (Response, error) {
 	c.observe(call, resp.Header)
 
 	out := Response{Status: resp.StatusCode, Body: body, Header: resp.Header}
-	aerr, penalty := ClassifyStatus(call.Op, resp.StatusCode, "", retryAfter(resp.Header), "")
+	aerr, penalty := ClassifyResponse(call.Op, c.cfg.Envelope, out, retryAfter(resp.Header))
 	if penalty != ratelimit.PenaltyUnspecified {
 		// A Penalize failure must not mask the venue's own refusal, which is the
 		// fact the caller has to act on. It is folded into nothing and the

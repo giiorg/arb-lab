@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/giiorg/arb-lab/internal/oms/application"
+	"github.com/giiorg/arb-lab/internal/oms/application/ports"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
@@ -558,7 +559,7 @@ func TestPlannedOrdersAreDispatchable(t *testing.T) {
 	}
 
 	for i, rec := range records {
-		out, err := dispatcher.Dispatch(rec.Order.ClientOrderID, rec.Version)
+		out, err := dispatcher.Dispatch(rec.Order.ClientOrderID, rec.Version, ports.UrgencyOpening)
 		if err != nil {
 			t.Fatalf("Dispatch of planned leg %d = %v, want nil", i, err)
 		}
