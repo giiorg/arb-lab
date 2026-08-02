@@ -2,9 +2,13 @@
 
 ## Status (2026-08-02, session 73): **MILESTONE 3 IS ADMITTED BEFORE STRATEGY #2's GATE — THE ROSTER IS UNBLOCKED FOR ~2 MONTHS OF FOUNDATION WORK, AND THE GROUND FOR IT WAS ALREADY IN THE RECORD THAT REJECTED IT. DOCS ARE v0.9.28.**
 
-**No code changed. This was a ruling session.** Record is **§47**
+**No code changed. This was a ruling session.** The ruling and the whole doc set
+landed in **`f92fbff`**; a follow-up commit adds this SHA record itself, which
+is why the count is two and not one. Record is **§47**
 (`docs/superpowers/specs/2026-08-02-milestone-3-pre-gate-ruling.md`); core §12
-gains **three** dated annotations; ADR §3 has the dated block.
+gains **three** dated annotations; ADR §3 has the dated block. `make ci` was
+**not** run and does not need to be — the change is docs-only, and the gate
+that applies to it is the marker grep, which is **zero**.
 
 **THE FINDING: §42d's rejected alternative (i) is refuted by §42d's rejected
 alternative (ii), one sentence below it.** (i) rejected *"proceed to milestone 3
