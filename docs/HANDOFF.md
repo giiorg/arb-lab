@@ -1,6 +1,113 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-02, session 75): **MILESTONE 3 SLICE B IS LANDED — §6 STEP 5 EXISTS, `module.go`'s STATED HOLE IS CLOSED, AND WHAT CLOSED IT WAS A SIGNATURE RATHER THAN A CHECK. DOCS ARE v0.9.30.**
+## Status (2026-08-02, session 76): **MILESTONE 3 SLICE C1 IS LANDED — `engine/venue` HAS A SIGNED REST TRANSPORT, AND THE SLICE'S LESSON IS THAT THE TWO ADAPTERS' *EVIDENCE* IS NOT SYMMETRIC EVEN THOUGH THEIR CODE IS. DOCS ARE v0.9.31.**
+
+**Code changed.** New: `internal/engine/venue/transport/{credential,signing,signed,venueerror}.go`
++ `{signing,signed}_internal_test.go`. Changed: `transport/errors.go`. Design record is **§50**
+(`docs/superpowers/specs/2026-08-02-m3-slice-c1-signed-transport.md`); **`venue-profiles.md` gains a
+whole new §6**, core **§7.6 is corrected**, §12 milestone 3 gains its slice-C1 annotation, ADR §3 has
+the dated block. **`make ci` green both modules; marker grep zero; 18 mutations, 18 kills.**
+
+**SLICE C IS SPLIT BY LAYER, NOT BY VENUE — and the alternative is refuted in advance.** §47f's full
+slice C is 2–3× slices A and B. Splitting Binance-then-Bybit puts the two venues' clients in
+**different sessions**, which is exactly what §47f's own standing hazard forbids (*"slice C builds two
+venues' clients; whatever repetition, bound or isolation trick one earns, the other gets the same
+session"*). Splitting by layer keeps both venues inside each sub-slice. **User accepted 2026-08-02.**
+C1 = credentials, both signature compositions, the clock-injected timestamp, the §7.6 governor
+attachment, effect classification. **C2 = `Place`, `OrderByClientID`, `Fills`, the Bybit history
+fallback, and the `ports.OrderPlacer` adapter** — still task #162.
+
+**FINDING 1: the scope note's premise was FALSE, and the tell is cheap.** §47f's slice-C row cites
+*"profiles §1/§4/§7"* for facts it says are already recorded. **There is no §7** — the document has
+ended at §5 throughout — and **how either venue composes the string it signs was recorded nowhere in
+the doc set.** That is §47e's own shape one layer out: §47e caught a normative claim the code silently
+failed; this is a **verification claimed as banked when it was not**. Both are invisible to
+`grep -rn "SPEC EDIT OWED"` because the clause is *absent* rather than *departed from*. **Carry the
+tell: a citation to a section that does not exist. Check the section exists before relying on what it
+says.**
+
+**FINDING 2 — THE ONE TO CARRY: the evidence does not mirror, even where the code does.** Binance
+publishes **three** reproducible HMAC vectors (two documents, two secrets — all three re-computed
+here and matching). **Bybit's masks its secret**, and the rescue hypothesis (that the secret is the
+literal placeholder) was **tested and refuted**. The credential-free differential probe — sign with an
+invented key twice, correctly and incorrectly, and read the venue's complaint — is **refuted on both
+venues**, because each checks the credential *before* the signature: Binance answers `-2015` to both,
+Bybit answers **HTTP 401 with `content-length: 0`** to both. **That refutation is only trustworthy
+because Binance ran first as its positive control** — on Bybit alone the result is two identical 401s,
+readable equally as *"no complaint, so it is right"*, with nothing in the observation to arbitrate.
+**So `BybitSigner` has NO offline oracle and `BinanceSigner` has three.** The two look symmetric in
+the code and their passing test counts are **not comparable evidence**. §47f's mirror rule covers
+*fixes* propagating; **its inverse does not follow from it.** Task **#171** is the only thing that
+closes it: a real testnet credential, before any Bybit order is placed.
+
+**FINDING 3: §7.6 was WRONG about Bybit's header — corrected in the core.** It folded *"the reported
+consumption (`X-MBX-USED-WEIGHT-*`, `X-Bapi-Limit-*`)"* upward-only, but `X-Bapi-Limit-Status` is
+verbatim *"your **remaining** requests"* — the complement. Folding it directly **inflates** the count
+when the venue reports room (90 remaining > 30 used → adopted) and **discards** it when the venue
+reports almost none (2 remaining < 30 used → ignored). **The discarded direction is silent and is the
+one that ends in the ban.** Fixed to `used = X-Bapi-Limit − X-Bapi-Limit-Status`, deriving nothing
+when the cap is absent. Invisible because both headers are integers about the same budget in
+similarly-named fields — the **format-collapse family one layer up**, colliding on *meaning*.
+
+**THE DESIGN DECISION WORTH KNOWING: the acceptance window is asymmetric and only one side is
+configurable.** Both venues test `timestamp < serverTime + 1000 && serverTime - timestamp <=
+recvWindow`. `recvWindow` widens **only the behind side**; the ahead side is a **fixed 1000 ms** no
+parameter can raise. So the documented knob for timing rejections repairs one direction and **cannot
+touch the other** — a fast host keeps failing intermittently with the fix apparently applied. It is a
+named constant composed with `platform/clock`'s uncertainty band: signing refuses when the band does
+not fit inside `min(aheadTolerance, recvWindow)`. And **`recvWindow` unset is REFUSED**, because the
+venues' 5000 ms default silently adopts *their* policy, and `recvWindow` bounds how long a delayed,
+non-idempotent `Place` can still execute after we stopped waiting for it.
+
+**METHOD NOTE — the collapse checklist gains a SIBLING.** Three mutants survived. Two were ordinary
+fixture collapses (**the body was empty in every Binance fixture**, so signing it or not was the same
+expression; **every fixture used recvWindow = 5000**, which is also both venues' *default* — the value
+a fixture drifts toward). The third is a **new shape**: the credential-redaction fixture was **varied
+correctly** — key and secret given different lengths so a swap would show — and the **assertion** was
+what collapsed, because `strings.Contains(rendered, len(secret))` is still true when the two lengths
+trade places. **Beside "the fixture does not contain the thing under test" now belongs "the assertion
+does not distinguish the thing under test."**
+
+**Also worth knowing: a data race in a TEST failed the whole package under `make ci` and passed under
+`go test`.** Two parallel subtests shared one `SignedRequest`. A race abort's blast radius is the
+entire test binary, so *"everything broke"* is a plausible symptom of **one** shared fixture — do not
+read the first red `make ci` as a catastrophe before reading the trace.
+
+## START HERE (session 76, 2026-08-02 — C1 is done; C2 is next)
+
+**Branch `feat/milestone-1-foundation`. Docs are v0.9.31.**
+
+**First act, in order:**
+
+1. **Slice C2 — the order surface (task #162's remainder).** `Place`, `OrderByClientID`, `Fills`,
+   Bybit's `GET /v5/order/history` fallback, and the first real `ports.OrderPlacer` adapter
+   (`oms/module_test.go` still fakes it). **Testnet only.** Build on
+   `transport.SignedClient`/`Signer`/`ClassifyStatus` — the effect classification is done, so C2
+   supplies venue codes to it rather than re-deriving effects.
+2. **§4's constraint C1 could not satisfy and C2 must:** every per-instrument method keys on
+   **`VenueInstrument`**, not C1's `ProductCategory` — spot and perp have independent order-ID
+   namespaces. `Call.Family` is right for a transport call and insufficient for `Place`.
+3. **Task #171 gates the Bybit half.** There is no offline oracle for its signature. A real testnet
+   credential must sign one accepted request before any Bybit order is placed. Do **not** infer
+   correctness from Binance's vectors passing.
+4. **§38f is STILL a live user decision (task #158)** — untouched by A, B and C1, still the only
+   clock-bound item. ≥2 TB recommended; gate at ~2026-09-30.
+5. **New this session: #170** (§7.6's 418/IP-ban operator alert is unmet end-to-end and unmarked) and
+   **#171** (above). #152, #153, #159, #167, #168, #169 unchanged.
+
+**Standing rituals, unchanged.** `pgrep -f "arblab capture run"` **FIRST** (PID 8495, 951 GiB free);
+**never rebuild over `bin/arblab` while capture runs** — `make lint` builds `bin/arblab-**lint**`; cap
+`TLC_WORKERS` (4); marker grep `grep -rn "SPEC EDIT OWED" internal/ tools/` must be **zero**; never
+edit a `.tla` or `run.sh` mid-run; read figures only from a **completed** invocation. **`make ci`
+runs `-race` and `go test` does not — do not call a slice done on the plain run.**
+
+**Doc-set landing is COMPLETE, including the Georgian.** All seven docs stamped v0.9.31.
+`docs/tutorial.ka.md` was regenerated with **`node docs/i18n/tools/assemble.mjs`** after editing
+`docs/i18n/ka/tutorial/header.md` — **source first, then assemble**; the expected one-line diff in
+each. It lives under `docs/i18n/tools/`, **not** `tools/`, and **no `make` target invokes it**; task
+**#167** is still that gap.
+
+## Status (2026-08-02, session 75 — HISTORICAL): **MILESTONE 3 SLICE B IS LANDED — §6 STEP 5 EXISTS, `module.go`'s STATED HOLE IS CLOSED, AND WHAT CLOSED IT WAS A SIGNATURE RATHER THAN A CHECK. DOCS ARE v0.9.30.**
 
 **Code changed.** New: `internal/oms/application/planning.go` + `planning_test.go`.
 Changed: `application/dispatch.go`, `dispatch_test.go`, `application/errors.go`,
@@ -75,7 +182,7 @@ bite on CLAUDE.md's **isolating** probe — `internal/marketdata` (a context roo
 where `hexboundary` is silent) importing `oms/application/ports`. Probe applied
 and removed. **No new §3.6 gate is due**, checked rather than inherited.
 
-## START HERE (updated session 75, 2026-08-02 — slice B is done; slice C is next)
+## START HERE (session 75 — HISTORICAL, superseded by session 76's above; its step 1 is DONE for slice C1)
 
 **Branch `feat/milestone-1-foundation`. Docs are v0.9.30.**
 

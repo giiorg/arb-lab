@@ -39,6 +39,27 @@ var (
 	ErrPathMalformed  = errors.New("transport: path must start with / and not end with /")
 	ErrReadLimitRange = errors.New("transport: read limit must be positive")
 
+	// The signed client's configuration refusals. Every one of these is a
+	// request that could never be accepted by any venue, caught before a byte
+	// goes out — the same configuration/runtime line the sentinels above draw,
+	// held at the point where a bad request would otherwise become an
+	// authentication error and read as a credential fault.
+	ErrSignMethodUnset       = errors.New("transport: signed request method unset")
+	ErrSignMethodUnsupported = errors.New("transport: signed request method must be GET or POST")
+	ErrRecvWindowUnset       = errors.New("transport: recv window unset — no venue default is adopted, see SignedRequest.RecvWindow")
+	ErrRecvWindowRange       = errors.New("transport: recv window exceeds the venue ceiling")
+	ErrSignerUnset           = errors.New("transport: signer unset")
+	ErrLimitReaderUnset      = errors.New("transport: limit reader unset")
+	ErrGovernorUnset         = errors.New("transport: governor unset")
+	ErrClockUnset            = errors.New("transport: clock unset")
+
+	// The server-clock refusals. Separate sentinels because they send the
+	// operator to different places: Unusable is a venue that was never
+	// calibrated, Uncertain is one whose calibration is too loose to sign
+	// inside the venue's acceptance window (Profiles §6).
+	ErrServerTimeUnusable  = errors.New("transport: venue server time is unusable — the venue is uncalibrated")
+	ErrServerTimeUncertain = errors.New("transport: venue server-clock uncertainty exceeds the acceptance window")
+
 	// Runtime — reconnect, do not stop.
 	ErrDial        = errors.New("transport: dial failed")
 	ErrSubscribe   = errors.New("transport: subscribe failed")
