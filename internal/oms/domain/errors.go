@@ -169,6 +169,106 @@ var (
 	// ErrOrderUnset reports an order registered with no client order ID.
 	ErrOrderUnset = errors.New("oms: order carries no client order ID")
 
+	// ErrSideUnhandled reports a DECLARED side that a decision site has no case
+	// for — ErrOrderStateUnhandled's counterpart on a two-member set, and it
+	// exists for the same reason rather than because two members feel like
+	// enough: without it, PossibleDeltaFor's switch would end in a trailing
+	// return and one of the two directions would be untestable.
+	ErrSideUnhandled = errors.New("oms: order side has no case at this decision site")
+
+	// ErrHedgeGroupAccountUnset and ErrHedgeGroupSymbolUnset report an
+	// incompletely populated §5.1 hedge-group key.
+	//
+	// The account one is the dangerous half and it is the half a struct literal
+	// omits most easily. §5.1 makes the key (account, venue, symbol) and one
+	// deployment holds several subaccounts; with the account blank, every
+	// subaccount trading a symbol collapses into one group, and a naked long in
+	// one nets against a naked short in another to a residual of ZERO. Positions
+	// and margin are per subaccount, so nothing about that netting is real — the
+	// group reads flat, no compensating trade is sized, and both legs stay naked
+	// with every invariant over the group agreeing.
+	ErrHedgeGroupAccountUnset = errors.New("oms: hedge group names no account")
+	ErrHedgeGroupSymbolUnset  = errors.New("oms: hedge group names no symbol")
+
+	// ErrOrderOutsideHedgeGroup reports an order handed to the classifier that
+	// does not belong to the group being classified.
+	//
+	// It refuses rather than skipping the order, and the direction is the point:
+	// silently skipping computes a residual over a SUBSET while reporting it as
+	// the group's, which is the same wrong number as a mis-keyed group and is
+	// harder to find because the caller's set looked right. §6.7's verdict is
+	// only meaningful over the whole group.
+	ErrOrderOutsideHedgeGroup = errors.New("oms: order does not belong to this hedge group")
+
+	// ErrIntervalInverted reports a possible-delta interval whose low endpoint is
+	// above its high one.
+	//
+	// Unreachable through PossibleDeltaFor, which clamps; reachable through
+	// arithmetic on a hand-built interval, and worth refusing because an inverted
+	// interval breaks the one property every consumer relies on — that Straddles
+	// and FloorReduction partition the cases between them. Inverted, a range can
+	// be both non-straddling and have no safe endpoint.
+	ErrIntervalInverted = errors.New("oms: possible-delta interval is inverted")
+
+	// ErrIntervalStraddlesZero reports a floor magnitude asked of an interval
+	// that contains zero in its interior.
+	//
+	// §6.7: "if the interval straddles zero (a < 0 < b) no nonzero compensation
+	// is safe in all states → de-minimis only". The refusal is an error rather
+	// than a zero magnitude because "no safe action exists" and "the safe action
+	// is to do nothing" are different answers, and only the second may be
+	// reported to an operator as the rule complying.
+	ErrIntervalStraddlesZero = errors.New("oms: possible-delta interval straddles zero")
+
+	// ErrClassificationUnset and ErrClassificationUnknown report an empty §6.7
+	// verdict and one that is not a declared value.
+	//
+	// Split for OrderState's reason: the empty one is a field nobody populated —
+	// a zero-valued struct, a projection row that lost a column — and it is the
+	// more dangerous, because a zero Classification is not "ambiguous by
+	// default" but a value every switch refuses, so a group carrying one cannot
+	// be classified at all rather than being classified safely.
+	ErrClassificationUnset   = errors.New("oms: classification unset")
+	ErrClassificationUnknown = errors.New("oms: classification is not a declared value")
+
+	// ErrClassificationUnhandled reports a DECLARED verdict a decision site has
+	// no case for.
+	ErrClassificationUnhandled = errors.New("oms: classification has no case at this decision site")
+
+	// ErrReductionProducerInvalid reports a reserved-reduction producer that is
+	// neither declared value.
+	ErrReductionProducerInvalid = errors.New("oms: reduction producer is not a declared value")
+
+	// ErrReservationUnset reports a reservation created with no id.
+	ErrReservationUnset = errors.New("oms: reservation carries no id")
+
+	// ErrDuplicateReservation reports reserving an id the ledger already holds.
+	//
+	// Ledger.Register's argument, on the subtrahend rather than the minuend:
+	// replacing the entry discards an outstanding commitment whose order is live
+	// at the venue, and keeping it attaches a second generation to the first
+	// one's amount. §6.7's "never issued twice" is a claim about entries, so an
+	// id collision is exactly where it would be defeated.
+	ErrDuplicateReservation = errors.New("oms: reserved-reduction ledger already holds this reservation id")
+
+	// ErrUnknownReservation reports amending or releasing an id the ledger does
+	// not hold.
+	//
+	// It refuses rather than creating on demand, on Ledger.Register's argument
+	// one layer over: a ledger that invents entries on demand always reconciles,
+	// and here the invented entry would be a SUBTRAHEND — so a typo in an id
+	// silently reduces the residual and makes a naked group read as hedged.
+	ErrUnknownReservation = errors.New("oms: reserved-reduction ledger does not hold this reservation id")
+
+	// ErrReservationAssetMismatch reports amending an entry with a quantity in a
+	// different asset from the ledger's.
+	//
+	// fixedpoint refuses a disagreeing tag on arithmetic, but Amend performs no
+	// arithmetic — it stores — so without this check the disagreement would
+	// surface later, inside Outstanding's fold, attributed to whichever entry the
+	// map happened to visit first.
+	ErrReservationAssetMismatch = errors.New("oms: reservation quantity is not the ledger's asset")
+
 	// ErrOrderedQuantityNotPositive reports an order registered for zero size or
 	// less.
 	//

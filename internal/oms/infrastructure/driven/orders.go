@@ -17,6 +17,27 @@ import (
 // only in the binary that wires it, while this fails in `go build ./...`.
 var _ ports.OrderWriteRepository = (*MemoryOrderWriteRepository)(nil)
 
+// The same assertion for the read port §6.7's classifier holds. It is a second
+// line rather than a wider first one because the two ports are deliberately
+// separate — see ports/hedgegroup.go — and an assertion naming only the write
+// repository would go on compiling if OrdersIn were deleted.
+var _ ports.HedgeGroupOrders = (*MemoryOrderWriteRepository)(nil)
+
+// This adapter's own refusals, both about §5.1's account component.
+var (
+	// ErrRepositoryAccountUnset reports a store constructed with no account.
+	ErrRepositoryAccountUnset = errors.New("oms write repository: no account configured")
+
+	// ErrRepositoryAccountMismatch reports a hedge group whose account is not
+	// the one this store holds.
+	//
+	// It is refused rather than answered with an empty result, and the two are
+	// not interchangeable: an empty result is a real state §6.7 classifies as
+	// Determined with a zero residual, so the wrong account would return the one
+	// answer that unblocks a compensating trade sized from nothing.
+	ErrRepositoryAccountMismatch = errors.New("oms write repository: hedge group names a different account")
+)
+
 // firstVersion is the version an order's record is created at.
 //
 // One rather than zero, so the zero value of ports.OrderRecord is unusable in
@@ -56,6 +77,33 @@ const firstVersion int64 = 1
 type MemoryOrderWriteRepository struct {
 	mu sync.Mutex
 
+	// account is the venue subaccount whose orders this store holds — §5.1's
+	// first hedge-group component, and the one an order record cannot carry.
+	//
+	// # It is here because §5.1's key has a component §5.1's Order type does not
+	//
+	// §5.1 makes the OMS lease exclusive "per hedge-group (account, venue,
+	// symbol)" and puts Account first in the fill dedupe key. Its own Order field
+	// list has no account in it, so an order record carries the venue and the
+	// symbol and nothing that says whose they are. Before this field, the only
+	// Account in the whole system was domain.Fill's — a field whose consumer
+	// (the dedupe key) is real and whose producer does not exist yet.
+	//
+	// So one store holds one account's orders, and OrdersIn refuses any other.
+	// That makes the single-account assumption a CHECKED premise instead of an
+	// invisible one, and the direction it fails in is why it is worth a field: a
+	// classifier that netted two subaccounts would sum a naked long in one
+	// against a naked short in the other to a residual of ZERO — positions and
+	// margin are per subaccount, so none of that netting is real. The group reads
+	// flat, no compensating trade is sized, and both legs stay naked with every
+	// invariant over the group agreeing. It is the rare failure here that
+	// concludes rather than halts.
+	//
+	// If a deployment ever holds two subaccounts, the shape is two stores — or an
+	// Account on the record, which is a §5.1 edit. Named so it is a decision
+	// rather than a rediscovery.
+	account string
+
 	// records is the current-state store: what §6's apply step writes and what
 	// the running system reads instead of replaying the journal.
 	records map[ids.ClientOrderID]*record
@@ -87,18 +135,67 @@ type record struct {
 	authorizedAt clock.ServerTime
 }
 
-// NewMemoryOrderWriteRepository returns an empty repository.
+// NewMemoryOrderWriteRepository returns an empty repository for one venue
+// subaccount.
 //
-// It refuses nothing and returns no error, unlike this repo's other
-// constructors, because it has no dependency to refuse. The absence is worth a
-// sentence only because the pattern elsewhere is the opposite: those
-// constructors take ports and reject a nil one, and there is nothing to hand
-// this constructor that could be wrong.
-func NewMemoryOrderWriteRepository() *MemoryOrderWriteRepository {
+// The account is required and empty is refused, which is this constructor's only
+// refusal. It is required rather than defaulted because the two candidate
+// defaults are both wrong in the concluding direction: an empty account makes
+// every subaccount's orders one hedge group (see the field's doc), and a
+// hard-coded placeholder makes a real deployment's mismatch invisible until the
+// day a second account exists — at which point every call site already compiles.
+func NewMemoryOrderWriteRepository(account string) (*MemoryOrderWriteRepository, error) {
+	if account == "" {
+		return nil, ErrRepositoryAccountUnset
+	}
 	return &MemoryOrderWriteRepository{
+		account: account,
 		records: make(map[ids.ClientOrderID]*record),
 		ledger:  domain.NewLedger(),
+	}, nil
+}
+
+// OrdersIn is ports.HedgeGroupOrders: every order record in one §5.1 hedge
+// group.
+//
+// # It matches on venue and symbol, and ASSERTS the account
+//
+// §5.1's key has three components and a record carries two of them, so the
+// account cannot be matched — it can only be checked against the one this store
+// was built for. A mismatch is refused rather than answered with an empty slice,
+// because the two are indistinguishable to a caller and only one of them is a
+// real answer: an empty group means "no orders", which §6.7 classifies as
+// Determined with a zero residual and which unblocks a compensating trade sized
+// from nothing.
+//
+// ProductCategory and ContractType are deliberately not compared. That is the
+// whole of §5.1's "deliberately grouping a trade's spot + perp legs": the two
+// legs of one cash-and-carry are different instruments, and their exposures
+// netting IS the group.
+func (r *MemoryOrderWriteRepository) OrdersIn(group domain.HedgeGroup) ([]ports.OrderRecord, error) {
+	if err := group.Validate(); err != nil {
+		return nil, fmt.Errorf("write repository: %w", err)
 	}
+	if group.Account != r.account {
+		return nil, fmt.Errorf("write repository holds account %q, asked for group %s: %w",
+			r.account, group, ErrRepositoryAccountMismatch)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var out []ports.OrderRecord
+	for _, rec := range r.records {
+		if !group.Holds(rec.order.Instrument) {
+			continue
+		}
+		snapshot, err := r.snapshot(rec)
+		if err != nil {
+			return nil, fmt.Errorf("group %s: %w", group, err)
+		}
+		out = append(out, snapshot)
+	}
+	return out, nil
 }
 
 // ApplyPlanned creates the record for a newly planned order.

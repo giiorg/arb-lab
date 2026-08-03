@@ -179,6 +179,22 @@ type Deps struct {
 	// quietly opted out of.
 	Clock clock.Clock
 
+	// Account is the venue subaccount this OMS instance trades — §5.1's first
+	// hedge-group component, and the one an order record cannot carry.
+	//
+	// It is a root's business for InstrumentAssets' reason: it is a statement
+	// about what this deployment is, not about how this context works. §5.1's
+	// Order field list has no account in it, so nothing in the write path can
+	// supply it and nothing in the record set can be checked against it — see
+	// driven.MemoryOrderWriteRepository's own field, where the single-account
+	// premise is asserted rather than assumed.
+	//
+	// Empty is refused by the repository. Both plausible defaults fail in the
+	// concluding direction: an empty account makes every subaccount's orders one
+	// hedge group, and a placeholder hides the mismatch until a second account
+	// exists.
+	Account string
+
 	// Resolution is the local policy §5.3's rule needs and no venue publishes:
 	// the propagation bound, the sweep's strictness margin, and the assumed
 	// retention for a surface whose venue states none.
@@ -229,6 +245,19 @@ type Module struct {
 	// holding no placer — the reason "never resubmitted" is not expressible.
 	Resolve *application.Resolver
 
+	// Classify is §6.7, "the single gate for every compensating trade": the
+	// determined-vs-ambiguous verdict over a hedge group's residual, and the
+	// owner of §6.7's outstanding_reserved_reductions ledger.
+	//
+	// It is exposed because its clients are outside this context — §6 step 7's
+	// one-leg-failure handler, §6 step 8's forced-close path, §7.4's kill-switch
+	// and takeover — and every one of them is required to route through it. What
+	// it can hand back is a verdict and, in the deadline-exceeded branch, one
+	// authorized interval-floor magnitude; the order that executes either is
+	// planned and dispatched through the two fields above, which is what keeps
+	// the gate a gate rather than a second write path.
+	Classify *application.Classifier
+
 	// journal is held only so Close can release it, and it is unexported for
 	// the same reason ports.OrderWriteRepository never becomes a field here: a
 	// *driven.SQLiteJournal handed to a root is a write path to order state
@@ -265,8 +294,13 @@ func New(deps Deps) (*Module, error) {
 	}
 
 	// One repository, shared. See the package comment: two would make Plan and
-	// Dispatch disagree about which orders exist.
-	orders := driven.NewMemoryOrderWriteRepository()
+	// Dispatch disagree about which orders exist — and, since slice E, would
+	// make Classify compute a residual over a different set of orders from the
+	// one Dispatch is adding to.
+	orders, err := driven.NewMemoryOrderWriteRepository(deps.Account)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("oms: write repository: %w", err), journal.Close())
+	}
 
 	planner, err := application.NewPlanner(journal, orders)
 	if err != nil {
@@ -295,10 +329,19 @@ func New(deps Deps) (*Module, error) {
 		return nil, errors.Join(fmt.Errorf("oms: resolver: %w", err), journal.Close())
 	}
 
+	// The classifier takes the SAME repository, through a different port. It is
+	// the one use case here that must never write, and ports.HedgeGroupOrders is
+	// what makes that structural rather than reviewed — see that port's doc.
+	classifier, err := application.NewClassifier(orders)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("oms: classifier: %w", err), journal.Close())
+	}
+
 	return &Module{
 		Plan:     planner,
 		Dispatch: dispatcher,
 		Resolve:  resolver,
+		Classify: classifier,
 		journal:  journal,
 	}, nil
 }

@@ -170,4 +170,65 @@ var (
 	// arm is distinguishable by a test from the arms above it rather than
 	// returning what one of them already returns.
 	ErrAttributionUnhandled = errors.New("oms: sweep attribution verdict has no case")
+
+	// ErrHedgeGroupOrdersMissing reports a classifier constructed with no order
+	// source.
+	ErrHedgeGroupOrdersMissing = errors.New("oms: classifier has no hedge-group order source")
+
+	// ErrHedgeGroupNotTracked and ErrHedgeGroupAlreadyTracked report a hedge
+	// group the classifier does not hold and one it already holds.
+	//
+	// The first refuses rather than tracking on demand, and the direction is why:
+	// a classifier that created a group when first asked would answer an unknown
+	// group with "Determined, residual zero, no reservations" — the one verdict
+	// that unblocks a compensating trade — for a group whose orders and
+	// reservations it has simply never seen. A typo in a group key would then
+	// read as a flat package.
+	//
+	// The second refuses rather than replacing, on domain.Ledger.Register's
+	// argument: replacing discards the group's outstanding reservations while
+	// their orders stay live at the venue, which is FM-5's harm arriving by a
+	// different route — a subtrahend that stops being counted rather than one
+	// counted too early.
+	// ErrHedgeGroupAssetUnset reports a hedge group tracked with no base asset.
+	ErrHedgeGroupAssetUnset = errors.New("oms: hedge group has no base asset")
+
+	ErrHedgeGroupNotTracked     = errors.New("oms: hedge group is not tracked by this classifier")
+	ErrHedgeGroupAlreadyTracked = errors.New("oms: hedge group is already tracked by this classifier")
+
+	// ErrCompensationBeforeFinality reports a reduction sized from a verdict that
+	// does not permit one — §6.7's central rule, "no path compensates the
+	// uncertain part of an ambiguous residual before the finality barrier".
+	ErrCompensationBeforeFinality = errors.New("oms: residual is not determined, so no compensating trade may be sized from it")
+
+	// ErrFloorOutsideDeadlineBranch reports an interval floor asked for outside
+	// the deadline-exceeded branch.
+	//
+	// §6.7 narrows the floor twice and this is the narrowing a reader loses
+	// first: it is "the SOLE exception to 'no compensation before finality'",
+	// AND it "applies only in the deadline-exceeded branch (normal operation
+	// waits for finality and compensates the exact residual)". A merely-ambiguous
+	// group has a guaranteed floor too, and it is deliberately not compensable —
+	// which is also where formal model (a) is stricter than §6.7's general
+	// sentence, on purpose.
+	ErrFloorOutsideDeadlineBranch = errors.New("oms: the interval floor applies only in the deadline-exceeded branch")
+
+	// ErrFloorAlreadyIssued reports a second interval floor in one
+	// deadline-exceeded episode — §6.7's "never issued twice".
+	//
+	// It is defence in depth rather than the primary mechanism: reservation-aware
+	// sizing already prevents a second floor reaching the opposite sign, checked
+	// over model (a)'s complete state graph. This is the rule that survives a
+	// defect in that mechanism, so its refusal is what a caller sees when the
+	// other one has already failed silently.
+	ErrFloorAlreadyIssued = errors.New("oms: the interval floor has already been issued for this episode")
+
+	// ErrFloorMagnitudeZero reports an interval whose nearest-zero endpoint is
+	// zero, so no nonzero compensation is invariant across resolutions.
+	//
+	// Distinct from a straddling interval, which domain refuses with its own
+	// sentinel: there the range spans zero and nothing is safe, here the range
+	// touches zero and doing nothing is exactly right. Both refuse, and merging
+	// them would report "no safe action exists" for a group that is provably fine.
+	ErrFloorMagnitudeZero = errors.New("oms: the interval's nearest-zero endpoint is zero, so no floor is issuable")
 )

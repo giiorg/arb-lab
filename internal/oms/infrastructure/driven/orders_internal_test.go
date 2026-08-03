@@ -9,6 +9,20 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
 
+// testAccount is the venue subaccount every fixture in this package trades
+// under. §5.1 makes the account the first component of the hedge-group key, and
+// the store now holds exactly one — see MemoryOrderWriteRepository.account.
+const testAccount = "sub-1"
+
+func newTestRepository(t *testing.T) *MemoryOrderWriteRepository {
+	t.Helper()
+	repo, err := NewMemoryOrderWriteRepository(testAccount)
+	if err != nil {
+		t.Fatalf("NewMemoryOrderWriteRepository: %v", err)
+	}
+	return repo
+}
+
 // snapshot's two error returns are unreachable through the exported API, and
 // this file is why they are checked anyway.
 //
@@ -32,7 +46,7 @@ func TestSnapshotRefusesARecordTheLedgerDoesNotKnow(t *testing.T) {
 
 	// The state ApplyPlanned cannot produce: a record with no ledger
 	// registration behind it.
-	repo := NewMemoryOrderWriteRepository()
+	repo := newTestRepository(t)
 	repo.records[id] = &record{
 		order:   domain.Order{ClientOrderID: id},
 		state:   domain.StatePlanned,
@@ -62,7 +76,7 @@ func TestSnapshotSucceedsOnAConsistentlyBuiltRecord(t *testing.T) {
 		Symbol: "BTCUSDT", Contract: ids.ContractLinear,
 	}
 
-	repo := NewMemoryOrderWriteRepository()
+	repo := newTestRepository(t)
 	if err := repo.ledger.Register(id, instrument, quantity); err != nil {
 		t.Fatalf("Register: %v", err)
 	}

@@ -1,6 +1,72 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-03, session 82): **MILESTONE 3 SLICE D IS CLOSED — THE STABLE-NOT-FOUND RULE IS EXECUTABLE, ITS ANCHOR EXISTS, AND THE READING PASS FOUND A VERBATIM QUOTE ATTRIBUTED TO A SECTION THAT DOES NOT CONTAIN IT. DOCS ARE v0.9.34; MARKER GREP IS ZERO.**
+## Status (2026-08-03, session 83): **MILESTONE 3 SLICE E IS CLOSED — §6.7's CLASSIFIER IS EXECUTABLE, `FM-5`/`FM-6`/`FM-7` ARE NOW CLAIMS THE TYPES MAKE, AND §5.1's HEDGE-GROUP KEY HAD A COMPONENT NOTHING CARRIED. DOCS ARE v0.9.35; MARKER GREP IS ZERO.**
+
+**The slice is done end to end.** `make ci` green on both modules, marker grep **0**,
+**34 mutations / 34 kills**, docs at **v0.9.35** across all five. Design record **§54**,
+build record **§54h**. Tasks **#176** and **#177** were raised at the close and **#164**
+is complete.
+
+**WHAT LANDED.** `oms/domain` gains `HedgeGroup`, `PossibleDelta`,
+`ReservedReductions` and `Classification`; `oms/application` gains `Classifier` and
+`Verdict`; `ports` gains `HedgeGroupOrders` — **one read method**. The write repository
+gains `OrdersIn` and an **account**, `Deps` gains `Account`, `Module` gains `Classify`.
+
+**THE CLASSIFIER DECIDES AND CANNOT ACT.** §6.7 routes six clients through this gate and
+every one of them wants to trade, so `Classifier` holds a one-method read port and no
+writer, placer or journal: there is no method through which a compensating trade could be
+issued. `Resolver`'s no-placer argument, applied to the other end of the same section.
+
+**`FM-5` IS INEXPRESSIBLE, NOT FORBIDDEN.** `Reserve` takes **no amount** — the nominal
+reading in `AmbiguousOrder.tla` is literally `Pend(0, "pkgspot", FALSE)`, and
+`RESERVE_AT_CREATION = TRUE`, the control that *is* `FM-5`, has no Go spelling. An entry
+becomes nonzero only through `Amend`, a producer stating what it has **committed and not
+yet realized**. **`FM-6` gets the guard the spec's stated inputs never needed:** the
+subtrahend's mutators live on the classifier and each **returns a fresh verdict**, so a
+ledger change that does not re-classify is a call that does not exist. The asymmetry is
+the lesson — *a re-run rule that is written down has a reader; the missing one has none.*
+**`FM-8` lands by half** (the release is here; the generation that must be told is not)
+and **`FM-9` is deferred with its construct named** — SM §7's ladder, milestone 4, task
+**#177**, and the seam it reads (`OutstandingFor`) is built and exercised.
+
+**FINDING 1 — §5.1's hedge-group key has THREE components and an order record carries
+TWO.** `(account, venue, symbol)` is defined once, in §5.1, whose own `Order` field list
+has no account in it; the only `Account` in the system was `domain.Fill`'s, a field with
+a real consumer and **no producer at all** (task **#176**). Its failure direction is the
+rare one in this kernel that **concludes rather than halts**: two subaccounts' opposite
+naked legs net to a residual of **zero**, the group reads flat, no reduction is sized,
+and every invariant over the group agrees. §5.1 is edited; the store holds one account
+and refuses another's group.
+
+**FINDING 2 — THE READING PASS CAUGHT A FIGURE ONE STEP BEFORE IT REACHED THE CODE.**
+SM §2 cited `NC20` as **1,086,199** distinct states — the *model*'s slice E measurement
+on the pre-`FM-8` graph. The current suite reproduces **1,093,953**. §46 froze the old
+figure deliberately, as a record of what that release checked, which is right for a
+record and wrong for a normative sentence a reader tries to reproduce; by the time this
+slice read it the stale number had reached **six documents** and was on its way into a Go
+doc comment. **A figure no run reproduces reads exactly like one that does.**
+
+**THE BATTERY: 34 kills, two survivors on the first pass, and both were ONE NEW SHAPE.**
+Deleting either episode-reset flag left every test green — the deadline flag is invisible
+at the moment of resolution (a collapsed range returns `Determined` whatever the flag
+says) and the floor flag is invisible when the next call sets the deadline itself. **The
+observable difference exists only on the FOLLOWING incident, and no test had one.** For
+the checklist: *when state is per-episode, the fixture that separates "cleared" from
+"latched" is the NEXT episode, not the current one.*
+
+**WHAT IS NEXT: slice F — reconcile-only boot (§7.5) + the continuous net-delta
+invariant (task #165).** It owes slice D's journal column for `AuthorizedAt` **with its
+replayer**, and it is where §6 step 7's `Outcome.Applied` refuse-to-trade condition
+(task **#169**) and `Fill.Account` (**#176**) both land.
+
+**Standing, unchanged:** capture **PID 8495**, never rebuild over `bin/arblab`,
+`make ci` runs `-race` and `go test` does not, cap `TLC_WORKERS` at 4, read TLC figures
+only from a COMPLETED invocation. **§38f (task #158) is still the only clock-bound user
+decision**: ≥2 TB off-host, gate ~2026-09-30.
+
+---
+
+## Status (2026-08-03, session 82 — HISTORICAL): **MILESTONE 3 SLICE D IS CLOSED — THE STABLE-NOT-FOUND RULE IS EXECUTABLE, ITS ANCHOR EXISTS, AND THE READING PASS FOUND A VERBATIM QUOTE ATTRIBUTED TO A SECTION THAT DOES NOT CONTAIN IT. DOCS ARE v0.9.34; MARKER GREP IS ZERO.**
 
 **The slice is done end to end.** `make ci` green on both modules, marker grep **0**,
 28 mutations / 28 kills, docs at **v0.9.34** across all five, the Georgian regenerated

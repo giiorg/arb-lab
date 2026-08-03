@@ -17,6 +17,19 @@ import (
 
 const account = "sub-1"
 
+// newTestRepository builds a store for the one account these fixtures use.
+// §5.1's hedge-group key starts with the account and an order record carries no
+// such field, so the store is what holds it — see
+// MemoryOrderWriteRepository.account.
+func newTestRepository(t *testing.T) *driven.MemoryOrderWriteRepository {
+	t.Helper()
+	repo, err := driven.NewMemoryOrderWriteRepository(account)
+	if err != nil {
+		t.Fatalf("NewMemoryOrderWriteRepository: %v", err)
+	}
+	return repo
+}
+
 // mintedID builds an id through the real constructor rather than as a literal,
 // on §25d's finding: a hand-written id that stops parsing after a format change
 // turns whichever test depends on it into a test of something else, silently.
@@ -80,7 +93,7 @@ func plannedOrder(t *testing.T) domain.Order {
 // created returns a repository holding one planned order at version 1.
 func created(t *testing.T) (*driven.MemoryOrderWriteRepository, domain.Order) {
 	t.Helper()
-	repo := driven.NewMemoryOrderWriteRepository()
+	repo := newTestRepository(t)
 	o := plannedOrder(t)
 	if _, err := repo.ApplyPlanned(o); err != nil {
 		t.Fatalf("ApplyPlanned: %v", err)
@@ -159,7 +172,7 @@ func testAnchor(t *testing.T) clock.ServerTime {
 func TestApplyPlannedCreatesTheRecordAtPlannedAndVersionOne(t *testing.T) {
 	t.Parallel()
 
-	repo := driven.NewMemoryOrderWriteRepository()
+	repo := newTestRepository(t)
 	o := plannedOrder(t)
 
 	rec, err := repo.ApplyPlanned(o)
@@ -229,7 +242,7 @@ func TestApplyPlannedRefusesAnOrderThatDoesNotValidate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			repo := driven.NewMemoryOrderWriteRepository()
+			repo := newTestRepository(t)
 			o := plannedOrder(t)
 			tc.mutate(&o)
 
@@ -287,7 +300,7 @@ func TestApplyPlannedRefusesARepeatOfAValidOrder(t *testing.T) {
 func TestLoadRefusesAnOrderTheRepositoryNeverCreated(t *testing.T) {
 	t.Parallel()
 
-	repo := driven.NewMemoryOrderWriteRepository()
+	repo := newTestRepository(t)
 
 	if _, err := repo.Load(mintedID(t, 1)); !errors.Is(err, ports.ErrOrderUnknown) {
 		t.Fatalf("Load error = %v, want %v", err, ports.ErrOrderUnknown)
@@ -522,7 +535,7 @@ func TestApplyStateReportsTheVersionConflictWhenTheEdgeIsAlsoIllegal(t *testing.
 func TestApplyStateRefusesAnOrderTheRepositoryNeverCreated(t *testing.T) {
 	t.Parallel()
 
-	repo := driven.NewMemoryOrderWriteRepository()
+	repo := newTestRepository(t)
 
 	// StateSubmitted rather than the authorization target, because ApplyState now
 	// refuses that one on the TARGET ALONE and would answer this test with the
@@ -700,7 +713,7 @@ func TestApplyFillRefusesAnExecutionOnAnotherInstrument(t *testing.T) {
 func TestApplyFillRefusesAnExecutionNamingAnOrderTheRepositoryNeverCreated(t *testing.T) {
 	t.Parallel()
 
-	repo := driven.NewMemoryOrderWriteRepository()
+	repo := newTestRepository(t)
 	o := plannedOrder(t)
 
 	_, _, err := repo.ApplyFill(execution(t, o, "e-1", "3"), 1)
@@ -814,4 +827,121 @@ func TestConcurrentWritesAndReadsAreFreeOfDataRaces(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// OrdersIn spans the two legs of a hedge group and stops at its edges.
+//
+// Four orders rather than two, and the exclusions vary ONE component each: a
+// different symbol on the same venue, and the same symbol on a different venue.
+// A single foreign order differing in both would be excluded by either check
+// alone, and the spot/perp pair is what makes "spans the product category" a
+// claim rather than a coincidence — they differ only in Product and Contract.
+func TestOrdersInReturnsBothLegsAndNothingElse(t *testing.T) {
+	t.Parallel()
+
+	repo := newTestRepository(t)
+	inGroup := []ids.VenueInstrument{spot(), perp()}
+	outOfGroup := []ids.VenueInstrument{
+		{Venue: "binance", Product: ids.ProductSpot, Symbol: "ETHUSDT"},
+		{Venue: "bybit", Product: ids.ProductSpot, Symbol: "BTCUSDT"},
+	}
+
+	want := make(map[ids.ClientOrderID]bool)
+	for i, instrument := range append(append([]ids.VenueInstrument{}, inGroup...), outOfGroup...) {
+		o := plannedOrder(t)
+		o.ClientOrderID = mintedID(t, i+1)
+		o.Instrument = instrument
+		if _, err := repo.ApplyPlanned(o); err != nil {
+			t.Fatalf("ApplyPlanned(%s): %v", instrument.Symbol, err)
+		}
+		if i < len(inGroup) {
+			want[o.ClientOrderID] = true
+		}
+	}
+
+	got, err := repo.OrdersIn(domain.HedgeGroup{Account: account, Venue: "binance", Symbol: "BTCUSDT"})
+	if err != nil {
+		t.Fatalf("OrdersIn: %v", err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("OrdersIn returned %d records, want %d", len(got), len(want))
+	}
+	for _, rec := range got {
+		if !want[rec.Order.ClientOrderID] {
+			t.Fatalf("OrdersIn returned %q, which is on %s/%s",
+				rec.Order.ClientOrderID, rec.Order.Instrument.Venue, rec.Order.Instrument.Symbol)
+		}
+	}
+}
+
+// The account is ASSERTED, not matched, and a mismatch is refused rather than
+// answered with an empty result.
+//
+// The two are indistinguishable to a caller and only one is a real answer: an
+// empty group is a state §6.7 classifies as Determined with a zero residual,
+// which is the one verdict that unblocks a compensating trade sized from
+// nothing. The store holds a real order here, so an implementation that filtered
+// on the account instead of asserting it would return nothing and look correct.
+func TestOrdersInRefusesAnotherAccountsGroup(t *testing.T) {
+	t.Parallel()
+
+	repo, o := created(t)
+	group := domain.HedgeGroup{Account: "sub-2", Venue: "binance", Symbol: o.Instrument.Symbol}
+
+	if _, err := repo.OrdersIn(group); !errors.Is(err, driven.ErrRepositoryAccountMismatch) {
+		t.Fatalf("OrdersIn = %v, want ErrRepositoryAccountMismatch", err)
+	}
+}
+
+func TestOrdersInOnAGroupWithNoOrders(t *testing.T) {
+	t.Parallel()
+
+	repo := newTestRepository(t)
+	got, err := repo.OrdersIn(domain.HedgeGroup{Account: account, Venue: "binance", Symbol: "BTCUSDT"})
+	if err != nil {
+		t.Fatalf("OrdersIn: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("OrdersIn returned %d records, want 0", len(got))
+	}
+}
+
+func TestOrdersInRefusesAnIncompleteGroup(t *testing.T) {
+	t.Parallel()
+
+	repo := newTestRepository(t)
+	_, err := repo.OrdersIn(domain.HedgeGroup{Venue: "binance", Symbol: "BTCUSDT"})
+	if !errors.Is(err, domain.ErrHedgeGroupAccountUnset) {
+		t.Fatalf("OrdersIn = %v, want ErrHedgeGroupAccountUnset", err)
+	}
+}
+
+// The records OrdersIn hands back are snapshots, so a fill applied after the
+// order was planned is in them.
+//
+// The cumulative is asserted against its exact value rather than against
+// "nonzero": §6.7 sums it across the group, and a record carrying the ordered
+// quantity instead of the executed one would still be nonzero.
+func TestOrdersInReportsTheLiveCumulative(t *testing.T) {
+	t.Parallel()
+
+	repo, o := created(t)
+	rec, changed, err := repo.ApplyFill(execution(t, o, "1", "4"), 1)
+	if err != nil {
+		t.Fatalf("ApplyFill: %v", err)
+	}
+	if !changed {
+		t.Fatalf("ApplyFill reported no change (record %+v)", rec)
+	}
+
+	got, err := repo.OrdersIn(domain.HedgeGroup{Account: account, Venue: "binance", Symbol: o.Instrument.Symbol})
+	if err != nil {
+		t.Fatalf("OrdersIn: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("OrdersIn returned %d records, want 1", len(got))
+	}
+	if want := qty(t, "4").Decimal(); got[0].Cumulative.Decimal() != want {
+		t.Fatalf("cumulative = %s, want %s (ordered was 10)", got[0].Cumulative, want)
+	}
 }

@@ -131,6 +131,7 @@ func fullDeps(t *testing.T) oms.Deps {
 		t.Fatalf("NewTestClock: %v", err)
 	}
 	return oms.Deps{
+		Account:         "sub-1",
 		JournalPath:     journalPath(t),
 		VenueOrders:     &countingPlacer{ack: venue.OrderAck{VenueOrderID: venueOrderID}},
 		VenueOrderReads: silentReader{},
