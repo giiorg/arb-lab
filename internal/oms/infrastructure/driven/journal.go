@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"time"
 
 	"github.com/giiorg/arb-lab/internal/oms/application/ports"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
+	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 
 	// The pure-Go SQLite driver. cgo-free is a requirement rather than a
@@ -185,6 +187,12 @@ CREATE TABLE IF NOT EXISTS journal_state (
 	state TEXT NOT NULL
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS journal_authorized (
+	seq               INTEGER PRIMARY KEY REFERENCES journal(seq),
+	instant_unix_nano INTEGER NOT NULL,
+	uncertainty_nano  INTEGER NOT NULL
+) STRICT;
+
 CREATE TRIGGER IF NOT EXISTS journal_no_update BEFORE UPDATE ON journal
 	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS journal_no_delete BEFORE DELETE ON journal
@@ -196,6 +204,10 @@ CREATE TRIGGER IF NOT EXISTS journal_planned_no_delete BEFORE DELETE ON journal_
 CREATE TRIGGER IF NOT EXISTS journal_state_no_update BEFORE UPDATE ON journal_state
 	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS journal_state_no_delete BEFORE DELETE ON journal_state
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_authorized_no_update BEFORE UPDATE ON journal_authorized
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_authorized_no_delete BEFORE DELETE ON journal_authorized
 	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
 `
 
@@ -350,14 +362,68 @@ func (j *SQLiteJournal) AppendPlanned(o domain.Order) error {
 		})
 }
 
+// AppendAuthorized durably records §6 step 6's commitment to call Place exactly
+// once, with the instant §5.3 measures its two bounds from.
+//
+// # The instant is refused for being UNSET and for being unstorable, and those
+// # are two different checks
+//
+// The first is the port's, and ApplyAuthorized makes the same one against the
+// same sentinel: an unset ServerTime answers Uncertain to every boundary, so
+// accepting it here would durably record an authorization whose order can never
+// be resolved.
+//
+// The second is this adapter's alone, because it is a property of the STORED
+// form rather than of the value: the column is a Unix-nanosecond integer, and
+// time.Time.UnixNano does not report an instant outside roughly 1678..2262 — it
+// wraps, silently, and the journal gets a plausible instant in the wrong
+// century. capture's frame codec pays for the same lesson with the same
+// round-trip check, and the direction here is worse: a wrapped anchor does not
+// look wrong, it looks like an order authorized long ago, which is precisely
+// the reading §5.3's retention bound treats as "the venue has purged this by
+// now, absence proves nothing".
+func (j *SQLiteJournal) AppendAuthorized(id ids.ClientOrderID, at clock.ServerTime) error {
+	if id == "" {
+		return fmt.Errorf("oms journal: append authorization: %w", ErrJournalClientIDUnset)
+	}
+	if err := at.Validate(); err != nil {
+		return fmt.Errorf("oms journal: append authorization for order %q: %w: %w",
+			id, ports.ErrAuthorizationNeedsAnchor, err)
+	}
+	instant := at.Instant()
+	if ns := instant.UnixNano(); !time.Unix(0, ns).Equal(instant) {
+		return fmt.Errorf("oms journal: append authorization for order %q at %s: %w",
+			id, instant.Format(time.RFC3339), ErrJournalAnchorRange)
+	}
+	return j.appendRecord(kindAuthorized, string(id), encodeAuthorized(id, at),
+		func(tx *sql.Tx, seq int64) error {
+			_, err := tx.Exec(
+				`INSERT INTO journal_authorized (seq, instant_unix_nano, uncertainty_nano) VALUES (?,?,?)`,
+				seq, instant.UnixNano(), int64(at.Uncertainty()))
+			return err
+		})
+}
+
 // AppendState durably records an order reaching a lifecycle state.
 //
-// The state is checked for MEMBERSHIP and nothing else — OrderState.Validate,
-// which separates the unset value from an unknown one. That is the same line
-// AppendPlanned draws: an undeclared state is a value §7.5 cannot replay, while
-// an illegal transition between two declared states is a claim about SM §1's
-// edges that this recorder deliberately does not hold.
+// StateDispatchAuthorized is refused HERE, on the target alone, exactly as
+// MemoryOrderWriteRepository.ApplyState refuses it one store over — and the
+// mirror is the point rather than a coincidence of design. The log and the
+// projection are the two places an order's state lives, and a rule enforced in
+// one of them leaves the other holding the shape the rule exists to eliminate.
+// Here that shape is a durable authorization with no anchor, in the store §7.5
+// replays.
+//
+// The state is otherwise checked for MEMBERSHIP and nothing else —
+// OrderState.Validate, which separates the unset value from an unknown one.
+// That is the same line AppendPlanned draws: an undeclared state is a value
+// §7.5 cannot replay, while an illegal transition between two declared states
+// is a claim about SM §1's edges that this recorder deliberately does not hold.
 func (j *SQLiteJournal) AppendState(id ids.ClientOrderID, state domain.OrderState) error {
+	if state == domain.StateDispatchAuthorized {
+		return fmt.Errorf("oms journal: append state %s for order %q: %w",
+			state, id, ports.ErrAuthorizationNeedsAnchor)
+	}
 	if id == "" {
 		return fmt.Errorf("oms journal: append state %q: %w", state, ErrJournalClientIDUnset)
 	}

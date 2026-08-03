@@ -2,6 +2,7 @@ package ports
 
 import (
 	"github.com/giiorg/arb-lab/internal/oms/domain"
+	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
 
@@ -38,9 +39,29 @@ import (
 // could disagree about its quantity, and the journal is what §7.5 replays to
 // decide what an in-flight order was.
 //
-// Splitting it makes each record type total. It also matches what the two calls
-// actually mean: one records a decision that an order EXISTS, the other records
-// that it reached a state.
+// Splitting it makes each record type total. It also matches what the calls
+// actually mean: one records a decision that an order EXISTS, one records that
+// it reached a state, and one records the single state that carries an instant
+// with it.
+//
+// # THREE methods now, and the third is the write repository's split arriving
+// # at the log
+//
+// [SPEC EDIT LANDED — v0.9.36] Slice D made the anchorless authorization
+// inexpressible in the PROJECTION: OrderWriteRepository.ApplyAuthorized takes
+// §5.3's anchor, and ApplyState refuses StateDispatchAuthorized outright, so no
+// caller can advance an order to the crash boundary without producing the
+// instant recovery measures its two bounds from. The journal kept the
+// anchorless spelling as its ONLY one for a slice, and the journal is the store
+// §7.5 replays — so the projection could not hold an unanchored authorization
+// and the log could not hold an anchored one. A crash-recovered order therefore
+// arrived at StateDispatchAuthorized with no anchor however carefully the live
+// path had stamped it, which makes StateAbsentAfterFinality unreachable for
+// exactly the order §5.3 says recovery resolves that way.
+//
+// This is the recorded mirror-rule shape with its second axis: the two stores
+// are mirrors across journal-and-projection, not across two venues or two
+// directions of travel, and the fix applied to one of them stopped there.
 type Journal interface {
 	// AppendPlanned durably records the intent to place an order — §6 step 5's
 	// "TradePlanned + intents persisted and fsynced to the write-ahead journal
@@ -51,6 +72,22 @@ type Journal interface {
 	// and a parameter would invite a caller to name another.
 	AppendPlanned(domain.Order) error
 
+	// AppendAuthorized durably records §6 step 6's commitment to call Place
+	// exactly once — StateDispatchAuthorized, with the instant §5.3's
+	// stable-not-found rule measures both of its bounds from.
+	//
+	// at MUST be in the VENUE's clock frame, and an implementation refuses an
+	// unset one. ports.OrderRecord.AuthorizedAt argues the frame in full: gate
+	// 4's comparison is against the venue's own arithmetic, so a local instant is
+	// wrong by a small stable offset and reads as correct.
+	//
+	// It is a separate method for OrderWriteRepository.ApplyAuthorized's reason,
+	// one store over: an optional instant on AppendState has a zero value that is
+	// legal for eleven states and catastrophic for the twelfth — an order
+	// authorized at the epoch, which the retention bound judges long purged. Here
+	// the misuse is not discouraged; it is a method that does not exist.
+	AppendAuthorized(id ids.ClientOrderID, at clock.ServerTime) error
+
 	// AppendState durably records an order reaching a lifecycle state.
 	//
 	// It takes the target state only, not the pair. The journal is append-only
@@ -58,8 +95,16 @@ type Journal interface {
 	// again would be a second copy of a fact the log states, and a replay finding
 	// the two disagree has no rule for which wins.
 	//
-	// Legality is the CALLER's to establish, through domain.CanTransition. This
-	// port is a recorder, and a recorder that refused illegal transitions would
-	// be a second home for SM §1's edge set.
+	// It MUST refuse StateDispatchAuthorized, on the TARGET alone, exactly as
+	// OrderWriteRepository.ApplyState does and with the same sentinel
+	// (ErrAuthorizationNeedsAnchor). Leaving it reachable here would leave the
+	// shape the method above exists to eliminate — a durable authorization with
+	// no instant to resolve it from — in the one store recovery reads.
+	//
+	// Legality is otherwise the CALLER's to establish, through
+	// domain.CanTransition. This port is a recorder, and a recorder that refused
+	// illegal transitions would be a second home for SM §1's edge set. The
+	// refusal above is not an exception to that: it is about which METHOD carries
+	// a target, not about which transitions into it are legal.
 	AppendState(ids.ClientOrderID, domain.OrderState) error
 }

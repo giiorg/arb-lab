@@ -23,6 +23,17 @@ var (
 	// before. The resolver refuses for the same reason from the other end.
 	ErrClockMissing = errors.New("oms: use case has no clock")
 
+	// ErrJournalReplayMissing reports a Replayer constructed with no journal to
+	// replay.
+	//
+	// Named separately from ErrJournalMissing, which is the WRITE half's, and the
+	// separation is the ports' own: a use case holding both could append while
+	// deciding what the log means. A caller branching on the two takes different
+	// action — a missing write journal means no order may be planned or sent, a
+	// missing read journal means this process cannot establish what it did last
+	// time and must not leave reconcile-only.
+	ErrJournalReplayMissing = errors.New("oms: replayer has no journal to replay")
+
 	// ErrOrdersMissing reports a use case constructed without the write
 	// repository — §6's APPLY half.
 	//

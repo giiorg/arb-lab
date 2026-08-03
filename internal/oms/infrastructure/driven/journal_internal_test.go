@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/giiorg/arb-lab/internal/oms/application/ports"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
+	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
@@ -63,6 +66,24 @@ func openTestJournal(t *testing.T) (*SQLiteJournal, string) {
 	}
 	t.Cleanup(func() { _ = j.Close() })
 	return j, path
+}
+
+// testAnchor builds a calibrated venue instant for an authorization record.
+//
+// The uncertainty is derived from the offset rather than fixed, and that is the
+// collapse checklist again: a helper pinning one band would make the two
+// columns indistinguishable in every fixture that used it, so a codec writing
+// the instant twice — or the band into the instant's column — would produce a
+// chain that verifies. Both numbers vary, and they never coincide.
+func testAnchor(t *testing.T, offsetSeconds int) clock.ServerTime {
+	t.Helper()
+	at, err := clock.NewServerTime(
+		time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC).Add(time.Duration(offsetSeconds)*time.Second),
+		time.Duration(offsetSeconds+1)*time.Millisecond)
+	if err != nil {
+		t.Fatalf("NewServerTime: %v", err)
+	}
+	return at
 }
 
 // testOrder builds a well-formed order. Every string field is a parameter that
@@ -194,6 +215,20 @@ func oraclePreimage(t *testing.T, db *sql.DB, r replayed) []byte {
 		b = append(b, 2) // kind tag, spelled as a literal
 		b = append(b, oracleStr(r.clientID)...)
 		b = append(b, oracleStr(state)...)
+		return b
+
+	case "authorized":
+		var instant, uncertainty int64
+		if err := db.QueryRow(
+			`SELECT instant_unix_nano, uncertainty_nano FROM journal_authorized WHERE seq = ?`, r.seq).
+			Scan(&instant, &uncertainty); err != nil {
+			t.Fatalf("oracle authorized detail at seq %d: %v", r.seq, err)
+		}
+		var b []byte
+		b = append(b, 3) // kind tag, spelled as a literal
+		b = append(b, oracleStr(r.clientID)...)
+		b = append(b, oracleI64(instant)...)
+		b = append(b, oracleI64(uncertainty)...)
 		return b
 	}
 
@@ -403,19 +438,27 @@ func TestChainVerifiesAtEveryLength(t *testing.T) {
 			t.Parallel()
 			j, path := openTestJournal(t)
 
-			// Kinds interleave — collapse dimension 2. A chain of one kind
-			// makes the kind tag a constant, and a constant in a preimage is
-			// a field no test can see.
+			// All THREE kinds interleave — collapse dimension 2, re-run now
+			// that there are three. A chain of one kind makes the kind tag a
+			// constant, and a chain of two makes the THIRD tag's presence in
+			// the preimage unobservable, which is the same defect one member
+			// along: the fixture would not contain the thing under test.
 			for i := range n {
-				if i%2 == 0 {
+				switch i % 3 {
+				case 0:
 					if err := j.AppendPlanned(testOrder(t, fmt.Sprintf("c-%d", i), "binance", "BTCUSDT")); err != nil {
 						t.Fatalf("AppendPlanned %d: %v", i, err)
 					}
-					continue
-				}
-				if err := j.AppendState(ids.ClientOrderID(fmt.Sprintf("c-%d", i-1)),
-					domain.StateDispatchAuthorized); err != nil {
-					t.Fatalf("AppendState %d: %v", i, err)
+				case 1:
+					if err := j.AppendAuthorized(ids.ClientOrderID(fmt.Sprintf("c-%d", i-1)),
+						testAnchor(t, i)); err != nil {
+						t.Fatalf("AppendAuthorized %d: %v", i, err)
+					}
+				case 2:
+					if err := j.AppendState(ids.ClientOrderID(fmt.Sprintf("c-%d", i-2)),
+						domain.StateSubmitted); err != nil {
+						t.Fatalf("AppendState %d: %v", i, err)
+					}
 				}
 			}
 
@@ -627,8 +670,11 @@ func TestJournalIsAppendOnly(t *testing.T) {
 	if err := j.AppendPlanned(testOrder(t, "c-1", "binance", "BTCUSDT")); err != nil {
 		t.Fatalf("AppendPlanned: %v", err)
 	}
-	if err := j.AppendState("c-1", domain.StateDispatchAuthorized); err != nil {
+	if err := j.AppendState("c-1", domain.StateSubmitted); err != nil {
 		t.Fatalf("AppendState: %v", err)
+	}
+	if err := j.AppendAuthorized("c-1", testAnchor(t, 1)); err != nil {
+		t.Fatalf("AppendAuthorized: %v", err)
 	}
 
 	db, err := sql.Open("sqlite", "file:"+path)
@@ -647,6 +693,8 @@ func TestJournalIsAppendOnly(t *testing.T) {
 		{"delete a planned detail", `DELETE FROM journal_planned WHERE seq = 1`},
 		{"update a state detail", `UPDATE journal_state SET state = 'filled' WHERE seq = 2`},
 		{"delete a state detail", `DELETE FROM journal_state WHERE seq = 2`},
+		{"update an authorized detail", `UPDATE journal_authorized SET instant_unix_nano = 0 WHERE seq = 3`},
+		{"delete an authorized detail", `DELETE FROM journal_authorized WHERE seq = 3`},
 	}
 	for _, m := range mutations {
 		t.Run(m.name, func(t *testing.T) {
@@ -662,8 +710,8 @@ func TestJournalIsAppendOnly(t *testing.T) {
 	if err := db.QueryRow(`SELECT count(*) FROM journal`).Scan(&n); err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	if n != 2 {
-		t.Errorf("journal holds %d records, want 2 — reads must still work", n)
+	if n != 3 {
+		t.Errorf("journal holds %d records, want 3 — reads must still work", n)
 	}
 }
 
@@ -692,8 +740,8 @@ func TestReopenContinuesTheChain(t *testing.T) {
 	if err := first.AppendPlanned(testOrder(t, "c-1", "binance", "BTCUSDT")); err != nil {
 		t.Fatalf("AppendPlanned: %v", err)
 	}
-	if err := first.AppendState("c-1", domain.StateDispatchAuthorized); err != nil {
-		t.Fatalf("AppendState: %v", err)
+	if err := first.AppendAuthorized("c-1", testAnchor(t, 0)); err != nil {
+		t.Fatalf("AppendAuthorized: %v", err)
 	}
 	if err := first.Close(); err != nil {
 		t.Fatalf("close: %v", err)
@@ -752,6 +800,13 @@ func TestAppendStateRefusals(t *testing.T) {
 		{"no client order id", "", domain.StateSubmitted, ErrJournalClientIDUnset},
 		{"unset state", "c-1", "", domain.ErrOrderStateUnset},
 		{"undeclared state", "c-1", "nearly_filled", domain.ErrOrderStateUnknown},
+
+		// The crash boundary has its own method and its own record kind, so
+		// this one is refused on the TARGET alone — the mirror of
+		// MemoryOrderWriteRepository.ApplyState, in the store §7.5 replays.
+		// Without it the log could hold an authorization with no anchor while
+		// the projection could not, which is where slice D's fix stopped.
+		{"the authorization target", "c-1", domain.StateDispatchAuthorized, ports.ErrAuthorizationNeedsAnchor},
 	}
 
 	for _, tc := range cases {

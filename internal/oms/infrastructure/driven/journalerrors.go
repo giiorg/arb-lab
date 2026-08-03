@@ -49,13 +49,59 @@ var (
 
 	// ErrJournalChainCorrupt reports a chain head this package cannot extend.
 	//
-	// Distinct from a failed VERIFICATION, which is slice F's reconcile-only
-	// boot and does not exist yet. This one fires on the narrow case the
-	// append path can see for itself: a head row whose hash column is not a
-	// 32-byte digest, so there is nothing to link the next record to. Linking
-	// to a truncated or padded value anyway would produce a record that
-	// verifies against a head no verifier will ever recompute.
+	// Distinct from a failed VERIFICATION, which is now ports.ErrJournalChainBroken
+	// — declared beside the port because §7.5's replayer branches on it. This
+	// one fires on the narrow case the APPEND path can see for itself: a head
+	// row whose hash column is not a 32-byte digest, so there is nothing to link
+	// the next record to. Linking to a truncated or padded value anyway would
+	// produce a record that verifies against a head no verifier will ever
+	// recompute.
+	//
+	// The two are not merged, and the reason is what each licenses: this one
+	// refuses a WRITE, so §6 step 6's caller must not send an order; that one
+	// refuses to trust a READ, and its consequence is a boot posture. A single
+	// sentinel would make the dispatch path's correct response ("refuse the
+	// send") and boot's correct response ("halt, latched, alert") the same
+	// branch.
 	ErrJournalChainCorrupt = errors.New("oms journal: chain head is not a 32-byte digest")
+
+	// ErrJournalAnchorRange reports an authorization instant outside what Unix
+	// nanoseconds can hold — before 1678 or after 2262.
+	//
+	// It is a claim about the STORED form, which is why it is the adapter's and
+	// not the port's: time.Time.UnixNano does not report the overflow, it wraps,
+	// and the journal would hold a plausible instant in the wrong century.
+	// capture's frame codec refuses the same value for the same reason
+	// (ErrRecvTimeRange); the consequence here is sharper, because §5.3's
+	// retention gate reads a long-ago anchor as "the venue has purged this by
+	// now" — an absence that proves nothing, reported as proof.
+	ErrJournalAnchorRange = errors.New("oms journal: authorization instant is not representable in Unix nanoseconds")
+
+	// ErrJournalVisitorMissing reports a Replay with no visitor to hand records
+	// to. A nil visitor cannot be treated as "verify only": the walk would
+	// return success having applied nothing, which is exactly what a successful
+	// replay of an EMPTY journal returns, and §7.5 would resume trading against
+	// a projection it never rebuilt.
+	ErrJournalVisitorMissing = errors.New("oms journal: replay has no visitor")
+
+	// ErrJournalKindUnknown reports a stored kind column no encoder knows.
+	//
+	// Refused rather than skipped. A record this build cannot interpret is one
+	// whose effect on an order's state it cannot rule out, so skipping would
+	// rebuild a projection that is silently missing whatever a later format
+	// recorded — and the realistic cause is exactly that: a journal written by a
+	// newer binary, read by an older one after a rollback.
+	ErrJournalKindUnknown = errors.New("oms journal: record kind is not one this build can replay")
+
+	// ErrJournalDetailMissing reports a journal row whose detail row or column
+	// is absent — the record exists and the thing it describes does not.
+	//
+	// Unreachable through this adapter (both rows are written in one
+	// transaction, and foreign_keys is verified ON at Open) and reported anyway,
+	// because the store is a file an operator can open with sqlite3. The
+	// alternative is reading a NULL as a zero, which produces an order with no
+	// side, at no price, in no state — every field legal, nothing true.
+	ErrJournalDetailMissing = errors.New("oms journal: record has no detail row for its kind")
 
 	// ErrJournalClientIDUnset reports an AppendState with no order to attach
 	// the state to.

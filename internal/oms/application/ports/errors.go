@@ -75,6 +75,30 @@ var (
 	// component reports healthy.
 	ErrAuthorizationNeedsAnchor = errors.New("oms: an order may not reach the dispatch boundary without a venue-frame authorization instant")
 
+	// ErrJournalChainBroken reports a replay whose hash chain does not verify: a
+	// record whose recomputed digest is not the one stored, a prev_hash that does
+	// not name its predecessor, or a sequence with a hole in it.
+	//
+	// # It is HERE rather than in the adapter, and slice A predicted the move
+	//
+	// driven/journalerrors.go keeps the journal's own refusals beside the
+	// adapter, on the stated test that no use case branches on them — and it
+	// named the exception in advance: "if a later slice does need to branch —
+	// §7.5's reconcile-only boot is the candidate, since a broken chain there is
+	// an operator-clearance matter rather than a refusal — the sentinel moves to
+	// ports/ WITH the port method that reports it." This is that slice, this is
+	// that method, and the branch is real: §7.5's replayer reports a broken chain
+	// as boot.OutcomeEvidenceUnusable and every other replay failure as a plain
+	// refusal, which are different postures and different clearance rules.
+	//
+	// The prediction's REASONING needed re-deriving rather than inheriting,
+	// though, and it came out one rung stricter than the sentence above: an
+	// operator-clearance matter in §7.5's vocabulary is PostureReconcileOnly,
+	// which permits the reconciliation writes this log is the input to. A chain
+	// that does not verify halts as well as latching. Recorded because "already
+	// decided, see the note" is exactly the premise nobody re-checks.
+	ErrJournalChainBroken = errors.New("oms: journal hash chain does not verify")
+
 	// ErrUrgencyInvalid reports a §7.6 shed class that is empty or outside the
 	// two an order can carry. Empty is the reachable one and is the reason this
 	// is checked at all: Urgency is a string, so a caller that never set it

@@ -258,6 +258,20 @@ type Module struct {
 	// the gate a gate rather than a second write path.
 	Classify *application.Classifier
 
+	// Recover is §7.5's reconcile-only boot, first half: the current-state
+	// projection rebuilt from the write-ahead journal before any venue call.
+	//
+	// It is exposed because its caller is a composition root's reconcile phase
+	// (boot.KindReconcile), which is outside this context — and because the
+	// ORDER between it and the three fields above is the one a root cannot be
+	// allowed to get wrong. Plan, Dispatch, Resolve and Classify all read the
+	// projection this rebuilds; run before it, each of them reads an empty store
+	// and answers confidently: Plan mints an id the journal already holds,
+	// Dispatch refuses a live order as unknown, and Classify reports a hedge
+	// group flat. That last one is the reason this is a field rather than
+	// something New could do for itself — see New.
+	Recover *application.Replayer
+
 	// journal is held only so Close can release it, and it is unexported for
 	// the same reason ports.OrderWriteRepository never becomes a field here: a
 	// *driven.SQLiteJournal handed to a root is a write path to order state
@@ -279,6 +293,20 @@ type Module struct {
 // driven.ErrJournalPathUnset directly rather than on a wrapped string.
 //
 // # This constructor now ACQUIRES something, which it never did before
+//
+// # It CONSTRUCTS the replayer and does not RUN it, and the split is §7.5's
+//
+// Rebuilding the projection here would make a wired module a recovered one,
+// which reads as the safer shape and is the wrong one twice over. First,
+// ordering: §3.2 puts reconcile-only boot last, after observability, so that a
+// process dying in the journal join dies with a diagnosis rather than an exit
+// code — and a root constructs this context wherever it likes. Second, and
+// worse: New reports failure by returning an error, and boot.Run turns a failed
+// phase into an unwind and a dead process. A journal that will not replay must
+// leave a process that is ALIVE, halted, latched and audible to §7.4's
+// watchdog, because the alternative — exiting — presents to that watchdog
+// exactly as a dead host and escalates to an actuator takeover. The verdict is
+// a posture, and a constructor has no way to report one.
 //
 // Opening the journal is a resource acquisition, and every refusal after it must
 // release it or leak a file handle and a SQLite connection for the lifetime of
@@ -337,11 +365,21 @@ func New(deps Deps) (*Module, error) {
 		return nil, errors.Join(fmt.Errorf("oms: classifier: %w", err), journal.Close())
 	}
 
+	// The journal's read half, into the same repository every other use case
+	// writes through. The same *SQLiteJournal satisfies both ports and is handed
+	// over as two different capabilities: the planner and the dispatcher cannot
+	// replay it, and the replayer cannot append to it.
+	replayer, err := application.NewReplayer(journal, orders)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("oms: replayer: %w", err), journal.Close())
+	}
+
 	return &Module{
 		Plan:     planner,
 		Dispatch: dispatcher,
 		Resolve:  resolver,
 		Classify: classifier,
+		Recover:  replayer,
 		journal:  journal,
 	}, nil
 }

@@ -229,7 +229,7 @@ type Outcome struct {
 // refused. ports.OrderPlacer.Place records why the §7.6 shed class has to travel
 // with the call and why no default is available; what this method adds is the
 // side of the fsync the refusal must land on.
-// An invalid class must fail above the AppendState below, because that fsync is
+// An invalid class must fail above the AppendAuthorized below, because that fsync is
 // the commitment to call Place exactly once: refusing after it would leave a
 // durable authorization for an order nothing ever sent, which §5.3 then resolves
 // by querying a venue that never heard of it.
@@ -264,10 +264,15 @@ func (d *Dispatcher) Dispatch(id ids.ClientOrderID, expected int64, urgency port
 	// reason: it is deployment configuration, fixable, and costs nothing to
 	// refuse here.
 	//
-	// ApplyAuthorized refuses the same instant again, and the duplication is the
-	// ordinary one this file already carries for the marketable-IOC check: this
-	// guard protects the dispatch path's fsync ordering, that one protects the
-	// repository against every OTHER caller that will reach it.
+	// Both stores refuse the same unset instant again, and the duplication is
+	// the ordinary one this file already carries for the marketable-IOC check.
+	// What has changed since slice D is what this particular guard is FOR: with
+	// AppendAuthorized taking the anchor, an anchorless authorization can no
+	// longer be fsynced at all, so the ordering property is structural rather
+	// than dependent on this line. What survives here is the diagnosis — this is
+	// the only layer that knows WHICH venue's calibration is missing, and
+	// "authorize dispatch on binance" is the message that sends an operator to
+	// the right clock.
 	authorizedAt := d.clk.ServerNow(o.Instrument.Venue)
 	if err := authorizedAt.Validate(); err != nil {
 		return Outcome{}, fmt.Errorf("authorize dispatch of order %q on %s: %w: %w",
@@ -277,7 +282,14 @@ func (d *Dispatcher) Dispatch(id ids.ClientOrderID, expected int64, urgency port
 	// §6 step 6: "immediately before the single Place, fsync
 	// DispatchAuthorized". ports.Journal returns only when the record is
 	// durable, so there is no Sync to pair with this.
-	if err := d.journal.AppendState(id, domain.StateDispatchAuthorized); err != nil {
+	//
+	// The anchor goes INTO the record rather than staying in this process's
+	// memory, and that is slice F1's correction to slice D: the projection held
+	// the instant and the log did not, so a crash between here and the next
+	// write left recovery with an order at the crash boundary and no instant to
+	// resolve it from — which makes StateAbsentAfterFinality unreachable for
+	// exactly the order §5.3 says recovery resolves that way.
+	if err := d.journal.AppendAuthorized(id, authorizedAt); err != nil {
 		return Outcome{}, fmt.Errorf("authorize dispatch of order %q: %w", id, err)
 	}
 

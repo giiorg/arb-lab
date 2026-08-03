@@ -1,6 +1,94 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-03, session 83): **MILESTONE 3 SLICE E IS CLOSED — §6.7's CLASSIFIER IS EXECUTABLE, `FM-5`/`FM-6`/`FM-7` ARE NOW CLAIMS THE TYPES MAKE, AND §5.1's HEDGE-GROUP KEY HAD A COMPONENT NOTHING CARRIED. DOCS ARE v0.9.35; MARKER GREP IS ZERO.**
+## Status (2026-08-03, session 84): **MILESTONE 3 SLICE F1 IS CLOSED — §7.5's REPLAY HALF IS EXECUTABLE, §5.3's ANCHOR HAS A JOURNAL RECORD KIND, AND THE BOOT VOCABULARY WAS MISSING THE OUTCOME THAT HALTS *AND* LATCHES. DOCS ARE v0.9.36; MARKER GREP IS ZERO.**
+
+**The slice is done end to end.** `make ci` green on both modules, marker grep
+**0**, **31 mutations / 29 killed by the suite + 2 by the gate**, docs at
+**v0.9.36** across all five, the Georgian regenerated through its own invariant
+checker. Design record **§55**, build record **§55g**. **§47f's slice F is
+split**: this is F1, and the venue join + net-delta invariant are task **#178**.
+
+**WHY THE SPLIT, on the seam the code already draws.** `boot.Gate` holds §7.5's
+preconditions as a closed vocabulary and the first three are separate gates —
+`GateJournalReplayed` (before any venue call), `GateVenueJoined`,
+`GateNetDeltaAsserted` — and the posture is the **weakest over the required
+set**, so a build that satisfies the first and not the others cannot trade. F2
+also needs venue surfaces that do not exist: §7.5 names `Positions` and
+`FundingLedger`, and `engine/venue` has neither.
+
+**WHAT LANDED.** `ports` gains `JournalReplay` + `JournalVisitor` (one method
+per record kind, so a fourth kind breaks every visitor at build time) and
+`ErrJournalChainBroken`; `application` gains `Replayer`/`Recovery`; `driven`
+gains the walk, the per-record verification and the `journal_authorized` table;
+`ports.Journal` gains `AppendAuthorized` and `AppendState` **refuses**
+`StateDispatchAuthorized`; `Module` gains `Recover`.
+
+**THE REPLAY REBUILDS THROUGH THE WRITE PATH.** Every record is applied through
+`ApplyPlanned`/`ApplyAuthorized`/`ApplyState`, so the recovered projection can
+only reach states a live process could have produced and an impossible history
+is **refused rather than installed**. Verification is **per record and before
+the apply** — three claims, each with an isolating probe. **No fill is
+journaled**, so after this phase an order's *state* is authoritative and its
+executed *quantity* is not yet a claim at all; that is F2's. Stated limit:
+**tail truncation is undetectable** without an independently durable head.
+
+**FINDING 1 — the anchor is the mirror rule on a NEW axis.** Slice D made the
+anchorless authorization inexpressible in the **projection**; the **journal**
+kept the anchorless spelling as its only one, so a crash-recovered order reached
+the crash boundary with no anchor *however carefully the live path had stamped
+it* — and `AbsentAfterFinality` stayed unreachable for exactly the order §5.3
+says recovery resolves that way. The mirrors are **journal and projection**, not
+two venues and not two directions of travel. *When a rule is enforced by making
+a shape inexpressible, ask which OTHER stores can express it.*
+
+**FINDING 2 — §7.5's preconditions vary on TWO axes and the vocabulary had one.**
+Restrictiveness and latching are independent; *halted + latching* had no value,
+and it is what a journal that will not verify needs. As an ordinary failure it
+is freely re-reportable, so a deterministic retry re-admits trading. As an
+ordinary operator matter it latches at **reconcile-only**, which permits
+`ActReconcile` — and the `DeactivationPending` re-drive fires a **terminal, non-reactivatable** tombstone for whichever plan the corrupt log appears to name — after its ack no `Replicate` for that `TradeID` is accepted and `ListActive` never returns it, so a trade that is in fact still open is left **permanently without a takeover path**, with its hedge-group lease released for a successor. **An act is exposure-neutral by construction only where its INPUTS are
+trustworthy.** `boot.OutcomeEvidenceUnusable` is that combination, and the latch
+rule now admits an escalation between latching outcomes while refusing every
+non-latching one — because `OutcomeFailed` is *more* restrictive and does not
+latch, so admitting it would launder the hold.
+
+**THE READING PASS CORRECTED THIS SLICE'S OWN FINDING.** The harm was first
+written as *"a tombstone that disarms venue-native protection"* — wrong about
+the mechanism, since `EmergencyPlanStore` is an **internal** port and not a
+venue call. What `Deactivate` actually does is worse: it is terminal with **no
+reactivation**, `ListActive` is the actuator's only enumeration after host
+death, and §6 step 9 makes the ack what releases the hedge-group lease. It had
+reached four places, including a Go doc comment, before the pass opened the
+port's declaration. *A wrong harm attached to a correct finding is the version
+nobody challenges.*
+
+**THE BATTERY: one real survivor, and it is the checklist's own lesson.**
+Deleting the sequence-density check survived, because the fixture that looked
+like its probe (a deleted middle record) is caught **first** by the link check —
+a probe two checks can see shows that *something* objected. The isolating probe
+is a **dropped prefix re-anchored to the genesis seed**, where every other rule
+is satisfied exactly. Two further survivors are **gate-covered rather than
+suite-covered**, and that was verified by running `make lint` against each
+mutant rather than asserted: both switches' trailing return is the safe answer,
+so the member's own group is untestable — the recorded trailing-return trap.
+
+**WHAT IS NEXT: slice F2 — the venue join + the continuous net-delta invariant
+(task #178).** It takes `Recovery.Unresolved` (every order whose replayed state
+contributes a possible-delta interval, sorted, and deliberately **without**
+`StatePlanned`), joins it to venue truth, and treats ids the journal does not
+contain as §7.5's foreign orders — the canonical `OutcomeNeedsOperator`. It is
+where **#169** (`Outcome.Applied` holding new trading) and **#176**
+(`Fill.Account`'s producer) land, and it needs new `Positions`/`FundingLedger`
+venue clients.
+
+**Standing, unchanged:** capture **PID 8495**, never rebuild over `bin/arblab`,
+`make ci` runs `-race` and `go test` does not, cap `TLC_WORKERS` at 4, read TLC
+figures only from a COMPLETED invocation. **§38f (task #158) is still the only
+clock-bound user decision**: ≥2 TB off-host, gate ~2026-09-30.
+
+---
+
+## Status (2026-08-03, session 83 — HISTORICAL): **MILESTONE 3 SLICE E IS CLOSED — §6.7's CLASSIFIER IS EXECUTABLE, `FM-5`/`FM-6`/`FM-7` ARE NOW CLAIMS THE TYPES MAKE, AND §5.1's HEDGE-GROUP KEY HAD A COMPONENT NOTHING CARRIED. DOCS ARE v0.9.35; MARKER GREP IS ZERO.**
 
 **The slice is done end to end.** `make ci` green on both modules, marker grep **0**,
 **34 mutations / 34 kills**, docs at **v0.9.35** across all five. Design record **§54**,

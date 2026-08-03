@@ -407,7 +407,10 @@ func TestPlanThenDispatchWritesOneJournalAndOneProjection(t *testing.T) {
 	want := []journalRow{
 		{kind: "planned", clientID: string(planned[0].Order.ClientOrderID)},
 		{kind: "planned", clientID: string(perp.Order.ClientOrderID)},
-		{kind: "state", clientID: string(perp.Order.ClientOrderID), state: string(domain.StateDispatchAuthorized)},
+		// The crash boundary is its own record KIND, not a state record naming
+		// StateDispatchAuthorized: the anchor §5.3 measures from travels with it,
+		// and AppendState refuses that target outright.
+		{kind: "authorized", clientID: string(perp.Order.ClientOrderID)},
 		{kind: "state", clientID: string(perp.Order.ClientOrderID), state: string(domain.StateSubmitted)},
 	}
 	if len(records) != len(want) {
@@ -417,6 +420,113 @@ func TestPlanThenDispatchWritesOneJournalAndOneProjection(t *testing.T) {
 		if records[i] != want[i] {
 			t.Errorf("journal record %d = %+v, want %+v", i, records[i], want[i])
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// §7.5's first half: a second process over the same journal
+// ---------------------------------------------------------------------------
+
+// TestASecondModuleRebuildsWhatTheFirstOneDid is the crash this journal exists
+// for, expressed as the only thing a test can do about it: a module that plans
+// and dispatches, a Close, and a SECOND module over the same file.
+//
+// # What no layer test can say
+//
+// application/replay_test.go proves the Replayer rebuilds a scripted log, and
+// driven/journalreplay_internal_test.go proves the adapter walks a real one and
+// verifies its chain. Neither says the module wired the replay into the SAME
+// repository the dispatcher will read — and that wiring is the whole of §7.5's
+// first half. A module that replayed into a second repository would pass both
+// suites and produce a process that recovered its state into a store nothing
+// consults.
+//
+// # The two orders end in different places, and each is a separate claim
+//
+// The perp leg was dispatched, so recovery must find it in flight: the venue may
+// hold it, and §5.3 forbids resubmitting it. The spot leg was planned and never
+// sent, which §5.3 makes "safe to replan or discard" — so it must still be
+// dispatchable. A recovery that restored nothing would fail the first
+// assertion; one that restored every order to a live state would fail the
+// second. Together they say the projection holds what the log holds rather than
+// merely being non-empty.
+func TestASecondModuleRebuildsWhatTheFirstOneDid(t *testing.T) {
+	t.Parallel()
+
+	deps := fullDeps(t)
+
+	// Built directly rather than through newModule: this test closes the first
+	// module itself, and a registered cleanup would close it a second time.
+	first, err := oms.New(deps)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	planned, err := first.Plan.Plan(cashAndCarry(t))
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	spot, perp := planned[0], planned[1]
+
+	if _, err := first.Dispatch.Dispatch(perp.Order.ClientOrderID, perp.Version, ports.UrgencyOpening); err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	// The crash, as closely as a test can stage one: this process stops. The
+	// journal is on disk and the projection was never anywhere else.
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// A fresh module over the same path, with a fresh venue placer so a second
+	// Place would be visible as a call on THIS counter rather than the first.
+	next := deps
+	next.VenueOrders = &countingPlacer{ack: venue.OrderAck{VenueOrderID: venueOrderID}}
+	second, err := oms.New(next)
+	if err != nil {
+		t.Fatalf("New over the existing journal: %v", err)
+	}
+	defer func() { _ = second.Close() }()
+	placer := next.VenueOrders.(*countingPlacer)
+
+	got, err := second.Recover.Rebuild()
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	// Two planned intents, the authorization, and the result of the send.
+	if got.Records != 4 || got.LastSequence != 4 {
+		t.Errorf("Records/LastSequence = %d/%d, want 4/4", got.Records, got.LastSequence)
+	}
+	if got.Orders != 2 {
+		t.Errorf("Orders = %d, want 2", got.Orders)
+	}
+	want := []ids.ClientOrderID{perp.Order.ClientOrderID}
+	if len(got.Unresolved) != 1 || got.Unresolved[0] != want[0] {
+		t.Errorf("Unresolved = %v, want %v — the dispatched leg is the one the "+
+			"venue may hold, and the planned leg is not", got.Unresolved, want)
+	}
+
+	// §5.3: an order at DispatchAuthorized or beyond is resolved by query,
+	// never resubmitted. The recovered record is at StateSubmitted, so
+	// domain.CanTransition has no edge back to the boundary and the dispatch
+	// path refuses — which is the durable half of the single-Place rule, since
+	// the in-process backstop died with the first module.
+	if _, err := second.Dispatch.Dispatch(perp.Order.ClientOrderID, 3, ports.UrgencyOpening); err == nil {
+		t.Error("the recovered in-flight order was dispatched a second time")
+	}
+	if placer.calls != 0 {
+		t.Errorf("the second module placed %d orders, want 0", placer.calls)
+	}
+
+	// The positive control, and the other half of the recovery claim: the leg
+	// that was only ever planned is still dispatchable, at the version the
+	// replay rebuilt it to.
+	if _, err := second.Dispatch.Dispatch(spot.Order.ClientOrderID, spot.Version, ports.UrgencyOpening); err != nil {
+		t.Errorf("Dispatch of the recovered PLANNED leg = %v, want nil — §5.3 makes "+
+			"a Planned-only order safe to replan", err)
+	}
+	if placer.calls != 1 {
+		t.Errorf("the second module placed %d orders after dispatching the planned leg, want 1", placer.calls)
 	}
 }
 

@@ -68,7 +68,8 @@ func TestOutcomeValidateAndString(t *testing.T) {
 	// The zero value is legal: "unreported" is the state of a fresh checklist.
 	for _, o := range []boot.Outcome{
 		boot.OutcomeUnreported, boot.OutcomePending, boot.OutcomeFailed,
-		boot.OutcomeNeedsOperator, boot.OutcomeBlocksOpening, boot.OutcomePassed,
+		boot.OutcomeEvidenceUnusable, boot.OutcomeNeedsOperator,
+		boot.OutcomeBlocksOpening, boot.OutcomePassed,
 	} {
 		if err := o.Validate(); err != nil {
 			t.Errorf("%s: Validate() = %v, want nil", o, err)
@@ -77,11 +78,13 @@ func TestOutcomeValidateAndString(t *testing.T) {
 			t.Errorf("Outcome(%d).String() = %q, want a name", uint8(o), s)
 		}
 	}
-	if err := boot.Outcome(6).Validate(); !errors.Is(err, boot.ErrOutcomeInvalid) {
-		t.Errorf("Outcome(6).Validate() = %v, want ErrOutcomeInvalid", err)
+	// One past the last declared member. It moves when a member is added, which
+	// is the point: the check is that the LADDER ends where the enum does.
+	if err := boot.Outcome(7).Validate(); !errors.Is(err, boot.ErrOutcomeInvalid) {
+		t.Errorf("Outcome(7).Validate() = %v, want ErrOutcomeInvalid", err)
 	}
-	if got := boot.Outcome(6).String(); got != "Outcome(6)" {
-		t.Errorf("Outcome(6).String() = %q, want %q", got, "Outcome(6)")
+	if got := boot.Outcome(7).String(); got != "Outcome(7)" {
+		t.Errorf("Outcome(7).String() = %q, want %q", got, "Outcome(7)")
 	}
 }
 
@@ -187,6 +190,7 @@ func TestChecklistOutcomeToPosture(t *testing.T) {
 		{boot.OutcomePending, boot.PostureReconcileOnly},
 		{boot.OutcomeNeedsOperator, boot.PostureReconcileOnly},
 		{boot.OutcomeFailed, boot.PostureHalted},
+		{boot.OutcomeEvidenceUnusable, boot.PostureHalted},
 	}
 
 	for _, tc := range cases {
@@ -309,6 +313,94 @@ func TestChecklistNeedsOperatorLatches(t *testing.T) {
 	}
 	if got := c.Posture(); got != boot.PostureReconcileOnly {
 		t.Errorf("Posture() = %s, want PostureReconcileOnly", got)
+	}
+}
+
+// TestEvidenceUnusableHaltsANDLatches is the combination §7.5 needed and this
+// enum did not have until slice F1, and the test asserts BOTH halves — because
+// each half alone is already provided by an existing member, so a fixture
+// checking one of them would pass against the wrong member.
+//
+// The producer is §7.5's journal replay finding a chain that does not verify.
+// Halted matters because PostureReconcileOnly permits ActReconcile, and §7.5's
+// reconcile writes — the DeactivationPending re-drive above all — are computed
+// FROM the log that just failed to verify. Latching matters because the retry
+// of a hash verification over unchanged bytes is deterministic, so a
+// re-reportable refusal would be liftable by doing nothing.
+func TestEvidenceUnusableHaltsAndLatches(t *testing.T) {
+	t.Parallel()
+
+	c := newChecklistT(t, allGates()...)
+	reportAllT(t, c, boot.OutcomePassed)
+	if err := c.Report(boot.GateJournalReplayed, boot.OutcomeEvidenceUnusable); err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+
+	if got := c.Posture(); got != boot.PostureHalted {
+		t.Errorf("Posture() = %s, want PostureHalted — reconcile-only would permit "+
+			"the re-drives this log is the input to", got)
+	}
+	if c.Posture().Permits(boot.ActReconcile) {
+		t.Error("a process whose journal does not verify may reconcile — " +
+			"ActReconcile is exposure-neutral given trustworthy inputs, " +
+			"and this is the gate that says they are not")
+	}
+
+	for _, o := range []boot.Outcome{
+		boot.OutcomePassed, boot.OutcomeBlocksOpening, boot.OutcomePending,
+		boot.OutcomeFailed, boot.OutcomeNeedsOperator,
+	} {
+		if err := c.Report(boot.GateJournalReplayed, o); !errors.Is(err, boot.ErrGateLatched) {
+			t.Errorf("Report(%s) over an EvidenceUnusable gate = %v, want ErrGateLatched", o, err)
+		}
+	}
+	// The honest repeat: the same walk over the same bytes fails identically,
+	// and a producer must not have to special-case its own second report.
+	if err := c.Report(boot.GateJournalReplayed, boot.OutcomeEvidenceUnusable); err != nil {
+		t.Errorf("re-reporting EvidenceUnusable = %v, want nil", err)
+	}
+	// And it clears like any other latched gate — to Unreported, not to Passed.
+	if err := c.Clear(boot.GateJournalReplayed); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+	if o, _ := c.Outcome(boot.GateJournalReplayed); o != boot.OutcomeUnreported {
+		t.Errorf("outcome after Clear = %s, want OutcomeUnreported", o)
+	}
+}
+
+// TestALatchedGateAdmitsAnEscalationAndRefusesEverythingElse pins the one
+// transition between two latching outcomes, in both directions.
+//
+// The escalation is admitted because the alternative pins a gate at the weaker
+// of two refusals by the accident of which was discovered first. The reverse is
+// refused because it weakens a hold. And OutcomeFailed is refused despite being
+// MORE restrictive than OutcomeNeedsOperator, which is the case a posture
+// comparison alone would get wrong: Failed does not latch, so admitting it
+// would launder the gate into one a later Passed could lift — clearance by two
+// reports with no operator in either.
+func TestALatchedGateAdmitsAnEscalationAndRefusesEverythingElse(t *testing.T) {
+	t.Parallel()
+
+	up := newChecklistT(t, allGates()...)
+	if err := up.Report(boot.GateJournalReplayed, boot.OutcomeNeedsOperator); err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+	if err := up.Report(boot.GateJournalReplayed, boot.OutcomeEvidenceUnusable); err != nil {
+		t.Errorf("escalating a latched gate to a stricter latching outcome = %v, want nil", err)
+	}
+	if o, _ := up.Outcome(boot.GateJournalReplayed); o != boot.OutcomeEvidenceUnusable {
+		t.Errorf("outcome after escalation = %s, want OutcomeEvidenceUnusable", o)
+	}
+
+	down := newChecklistT(t, allGates()...)
+	if err := down.Report(boot.GateJournalReplayed, boot.OutcomeEvidenceUnusable); err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+	if err := down.Report(boot.GateJournalReplayed, boot.OutcomeNeedsOperator); !errors.Is(err, boot.ErrGateLatched) {
+		t.Errorf("weakening a latched gate to a more permissive latching outcome = %v, want ErrGateLatched", err)
+	}
+	if o, _ := down.Outcome(boot.GateJournalReplayed); o != boot.OutcomeEvidenceUnusable {
+		t.Errorf("outcome after a refused weakening = %s, want OutcomeEvidenceUnusable", o)
 	}
 }
 

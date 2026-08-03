@@ -1,0 +1,461 @@
+package application_test
+
+import (
+	"errors"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/giiorg/arb-lab/internal/oms/application"
+	"github.com/giiorg/arb-lab/internal/oms/application/ports"
+	"github.com/giiorg/arb-lab/internal/oms/domain"
+	"github.com/giiorg/arb-lab/internal/platform/clock"
+	"github.com/giiorg/arb-lab/internal/platform/ids"
+)
+
+// §7.5's replay, at the use-case layer.
+//
+// # The collapse checklist, run before the mutations
+//
+//  1. ORDER COUNT. Every fixture that makes a per-order claim holds TWO orders.
+//     With one, "this order's final state" and "the first order's final state"
+//     are the same value, and Recovery.Orders cannot tell a count from a
+//     constant.
+//  2. RECORD POSITION. The duplicate, the failure and the refusal all sit at a
+//     record that is neither the first nor the last. A fixture that broke on
+//     record 1 could not tell "stopped" from "never started", and one that broke
+//     on the last could not tell "stopped" from "finished".
+//  3. WHICH ORDER IS UNRESOLVED. The two orders in the unresolved fixtures end
+//     in DIFFERENT states, one resolved and one not, and the resolved one passes
+//     THROUGH an unresolved state on its way. A fixture where both end alike
+//     would pass against a replayer that answered with the whole set — or with
+//     the empty one.
+//  4. SORT ORDER. Ids are appended in descending order, so a report that
+//     returned them in insertion order and one that sorted them differ.
+
+// journalEntry is one record as the fake emits it. The fields are per-kind and
+// only one group is meaningful at a time — the shape ports.Journal refuses in
+// its API and a scripted fixture is allowed, because the kind chooses.
+type journalEntry struct {
+	seq   uint64
+	kind  string
+	order domain.Order
+	id    ids.ClientOrderID
+	at    clock.ServerTime
+	state domain.OrderState
+}
+
+// fakeReplay is ports.JournalReplay over a scripted log.
+//
+// It does NOT verify a hash chain — that is the adapter's, checked in
+// driven/journalreplay_internal_test.go against an independent oracle. What it
+// models here is what a use case can observe: records arriving in order, and a
+// walk that stops with a particular error. failAfter is how the broken-chain
+// branch is reached without a database.
+type fakeReplay struct {
+	entries  []journalEntry
+	failWith error
+
+	// failAfter is how many entries are emitted before failWith is returned.
+	// Zero with a non-nil failWith means the walk fails before emitting
+	// anything, which is what a corrupt FIRST record looks like.
+	failAfter int
+
+	visited int
+}
+
+func (f *fakeReplay) Replay(v ports.JournalVisitor) error {
+	for _, e := range f.entries {
+		if f.failWith != nil && f.visited == f.failAfter {
+			return f.failWith
+		}
+		f.visited++
+
+		var err error
+		switch e.kind {
+		case "planned":
+			err = v.Planned(e.seq, e.order)
+		case "authorized":
+			err = v.Authorized(e.seq, e.id, e.at)
+		case "state":
+			err = v.State(e.seq, e.id, e.state)
+		default:
+			return fmt.Errorf("fake replay: entry %d has kind %q", e.seq, e.kind)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	if f.failWith != nil && f.visited == f.failAfter {
+		return f.failWith
+	}
+	return nil
+}
+
+var _ ports.JournalReplay = (*fakeReplay)(nil)
+
+// replayFixture builds a journal script for two orders, and returns the
+// replayer with the repository it writes into.
+func newReplayer(t *testing.T, entries ...journalEntry) (*application.Replayer, *fakeReplay, *fakeOrders) {
+	t.Helper()
+
+	journal := &fakeReplay{entries: entries}
+	orders := newFakeOrders()
+	r, err := application.NewReplayer(journal, orders)
+	if err != nil {
+		t.Fatalf("NewReplayer: %v", err)
+	}
+	return r, journal, orders
+}
+
+// replayAnchor is a calibrated venue instant. The uncertainty varies with the
+// offset for the reason the adapter's helper gives: two int64 nanosecond
+// numbers that always agree cannot show that they were kept apart.
+func replayAnchor(t *testing.T, offsetSeconds int) clock.ServerTime {
+	t.Helper()
+	at, err := clock.NewServerTime(
+		time.Date(2026, 8, 3, 9, 30, 0, 0, time.UTC).Add(time.Duration(offsetSeconds)*time.Second),
+		time.Duration(offsetSeconds+2)*time.Millisecond)
+	if err != nil {
+		t.Fatalf("NewServerTime: %v", err)
+	}
+	return at
+}
+
+// replayOrder builds a well-formed order with a CHOSEN id, so a fixture can
+// hold two that differ in the field the report is keyed by.
+//
+// dispatchableOrder is not reused directly because it pins the id, which is the
+// one dimension every claim here varies.
+func replayOrder(t *testing.T, id ids.ClientOrderID) domain.Order {
+	t.Helper()
+	o := dispatchableOrder(t)
+	o.ClientOrderID = id
+	if err := o.Validate(); err != nil {
+		t.Fatalf("fixture order %q: %v", id, err)
+	}
+	return o
+}
+
+// TestRebuildRestoresStateAndTheAnchor is the slice's central claim: after a
+// crash, the projection says what the log says — INCLUDING §5.3's anchor, which
+// before slice F1 no replay could produce because no record carried it.
+func TestRebuildRestoresStateAndTheAnchor(t *testing.T) {
+	t.Parallel()
+
+	first, second := mintedID(t, 0), mintedID(t, 1)
+	at := replayAnchor(t, 5)
+
+	r, _, orders := newReplayer(t,
+		journalEntry{seq: 1, kind: "planned", order: replayOrder(t, first)},
+		journalEntry{seq: 2, kind: "planned", order: replayOrder(t, second)},
+		journalEntry{seq: 3, kind: "authorized", id: first, at: at},
+		journalEntry{seq: 4, kind: "state", id: first, state: domain.StateSubmitted},
+	)
+
+	got, err := r.Rebuild()
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	if got.Records != 4 || got.LastSequence != 4 {
+		t.Errorf("Records/LastSequence = %d/%d, want 4/4", got.Records, got.LastSequence)
+	}
+	if got.Orders != 2 {
+		t.Errorf("Orders = %d, want 2", got.Orders)
+	}
+
+	rec, err := orders.Load(first)
+	if err != nil {
+		t.Fatalf("Load %q: %v", first, err)
+	}
+	if rec.State != domain.StateSubmitted {
+		t.Errorf("replayed state = %s, want %s", rec.State, domain.StateSubmitted)
+	}
+	if !rec.AuthorizedAt.Instant().Equal(at.Instant()) {
+		t.Errorf("replayed anchor = %s, want %s — a recovered order with no anchor "+
+			"can never reach AbsentAfterFinality", rec.AuthorizedAt.Instant(), at.Instant())
+	}
+	if rec.AuthorizedAt.Uncertainty() != at.Uncertainty() {
+		t.Errorf("replayed uncertainty = %s, want %s", rec.AuthorizedAt.Uncertainty(), at.Uncertainty())
+	}
+
+	// The second order is at StatePlanned, which §5.3 makes safe to replan or
+	// discard — it is in the projection and it is not in flight.
+	other, err := orders.Load(second)
+	if err != nil {
+		t.Fatalf("Load %q: %v", second, err)
+	}
+	if other.State != domain.StatePlanned {
+		t.Errorf("second order replayed at %s, want %s", other.State, domain.StatePlanned)
+	}
+}
+
+// TestUnresolvedIsDerivedFromTHEFINALSTATE is the claim that a report is
+// computed from where each order ended rather than accumulated as the walk goes.
+//
+// The fixture is built so the two readings disagree: the first order passes
+// THROUGH DispatchAuthorized and Submitted on its way to Filled, so an
+// accumulating replayer lists it, and a deriving one does not. The second order
+// stops at DispatchAuthorized and must be listed by both.
+func TestUnresolvedIsDerivedFromTheFinalState(t *testing.T) {
+	t.Parallel()
+
+	// Descending, so insertion order and sorted order differ.
+	high, low := mintedID(t, 9), mintedID(t, 1)
+	if high <= low {
+		t.Fatalf("fixture ids %q and %q are not in the order this test needs", high, low)
+	}
+
+	r, _, _ := newReplayer(t,
+		journalEntry{seq: 1, kind: "planned", order: replayOrder(t, high)},
+		journalEntry{seq: 2, kind: "planned", order: replayOrder(t, low)},
+		journalEntry{seq: 3, kind: "authorized", id: high, at: replayAnchor(t, 1)},
+		journalEntry{seq: 4, kind: "state", id: high, state: domain.StateSubmitted},
+		journalEntry{seq: 5, kind: "state", id: high, state: domain.StateAcknowledged},
+		journalEntry{seq: 6, kind: "state", id: high, state: domain.StateFilled},
+		journalEntry{seq: 7, kind: "authorized", id: low, at: replayAnchor(t, 2)},
+	)
+
+	got, err := r.Rebuild()
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	want := []ids.ClientOrderID{low}
+	if fmt.Sprint(got.Unresolved) != fmt.Sprint(want) {
+		t.Errorf("Unresolved = %v, want %v — a terminal order that PASSED THROUGH "+
+			"the crash boundary is resolved", got.Unresolved, want)
+	}
+}
+
+// TestUnresolvedIsSortedAndExcludesPlanned pins the two remaining properties of
+// the set, and the second is domain's distinction rather than this package's.
+//
+// StatePlanned is not in it because "a Planned-only order was never dispatched
+// (no venue order can exist)" — there is nothing at the venue to query about,
+// and a resolution attempt would run to its deadline over an order this system
+// merely has not sent.
+func TestUnresolvedIsSortedAndExcludesPlanned(t *testing.T) {
+	t.Parallel()
+
+	high, low, planned := mintedID(t, 9), mintedID(t, 5), mintedID(t, 1)
+
+	r, _, _ := newReplayer(t,
+		journalEntry{seq: 1, kind: "planned", order: replayOrder(t, high)},
+		journalEntry{seq: 2, kind: "planned", order: replayOrder(t, low)},
+		journalEntry{seq: 3, kind: "planned", order: replayOrder(t, planned)},
+		journalEntry{seq: 4, kind: "authorized", id: high, at: replayAnchor(t, 1)},
+		journalEntry{seq: 5, kind: "authorized", id: low, at: replayAnchor(t, 2)},
+	)
+
+	got, err := r.Rebuild()
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	want := []ids.ClientOrderID{low, high}
+	if fmt.Sprint(got.Unresolved) != fmt.Sprint(want) {
+		t.Errorf("Unresolved = %v, want %v (sorted, and without the Planned order)",
+			got.Unresolved, want)
+	}
+}
+
+// TestADuplicateStateRecordIsANoOpAndIsCounted is §5.3's duplicate deliveries
+// meeting SM §1's no-op edge.
+//
+// journalcodec.go states that AppendState "may legitimately record the same
+// order reaching the same state twice", so a replay that treated the second as a
+// broken history would refuse to boot over a well-formed journal. It is counted
+// rather than ignored because nothing else in the system would report a stream
+// that is re-delivering.
+//
+// The version is the assertion that carries the no-op claim: a replay that
+// applied the duplicate would advance it twice.
+func TestADuplicateStateRecordIsANoOpAndIsCounted(t *testing.T) {
+	t.Parallel()
+
+	id := mintedID(t, 0)
+	r, _, orders := newReplayer(t,
+		journalEntry{seq: 1, kind: "planned", order: replayOrder(t, id)},
+		journalEntry{seq: 2, kind: "authorized", id: id, at: replayAnchor(t, 1)},
+		journalEntry{seq: 3, kind: "state", id: id, state: domain.StateSubmitted},
+		journalEntry{seq: 4, kind: "state", id: id, state: domain.StateSubmitted},
+		journalEntry{seq: 5, kind: "state", id: id, state: domain.StateAcknowledged},
+		journalEntry{seq: 6, kind: "state", id: id, state: domain.StateFilled},
+	)
+
+	got, err := r.Rebuild()
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	if got.Duplicates != 1 {
+		t.Errorf("Duplicates = %d, want 1", got.Duplicates)
+	}
+	if got.Records != 6 {
+		t.Errorf("Records = %d, want 6 — a duplicate is still a record", got.Records)
+	}
+
+	rec, err := orders.Load(id)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if rec.State != domain.StateFilled {
+		t.Errorf("state = %s, want %s", rec.State, domain.StateFilled)
+	}
+	// planned(1) -> authorized(2) -> submitted(3) -> acknowledged(4) -> filled(5).
+	// The duplicate contributes nothing, which is the whole claim.
+	if rec.Version != 5 {
+		t.Errorf("version = %d, want 5 — the duplicate advanced the record", rec.Version)
+	}
+}
+
+// TestRebuildRefusesAHistoryTheLIVEPathCouldNotHaveProduced is why the replay
+// writes through the repository rather than installing records.
+//
+// Filled -> Submitted is not an edge of SM §1. A bulk loader would install it
+// and the projection would hold a state no sequence of events could reach; here
+// domain.CanTransition refuses it, in the same call the live path makes.
+func TestRebuildRefusesAHistoryTheLivePathCouldNotHaveProduced(t *testing.T) {
+	t.Parallel()
+
+	id := mintedID(t, 0)
+	r, _, _ := newReplayer(t,
+		journalEntry{seq: 1, kind: "planned", order: replayOrder(t, id)},
+		journalEntry{seq: 2, kind: "authorized", id: id, at: replayAnchor(t, 1)},
+		journalEntry{seq: 3, kind: "state", id: id, state: domain.StateFilled},
+		journalEntry{seq: 4, kind: "state", id: id, state: domain.StateSubmitted},
+	)
+
+	_, err := r.Rebuild()
+	if !errors.Is(err, domain.ErrTransitionForbidden) {
+		t.Fatalf("Rebuild = %v, want ErrTransitionForbidden", err)
+	}
+	if application.ChainBroken(err) {
+		t.Error("an unreplayable history was reported as a broken chain — the log was intact")
+	}
+}
+
+// TestRebuildRefusesAStateRecordForAnOrderThatWasNeverPlanned covers the other
+// contents failure: a log that is internally inconsistent rather than illegal.
+func TestRebuildRefusesAStateRecordForAnOrderThatWasNeverPlanned(t *testing.T) {
+	t.Parallel()
+
+	planned, orphan := mintedID(t, 0), mintedID(t, 1)
+	r, _, _ := newReplayer(t,
+		journalEntry{seq: 1, kind: "planned", order: replayOrder(t, planned)},
+		journalEntry{seq: 2, kind: "state", id: orphan, state: domain.StateSubmitted},
+		journalEntry{seq: 3, kind: "state", id: planned, state: domain.StateSubmitted},
+	)
+
+	_, err := r.Rebuild()
+	if !errors.Is(err, ports.ErrOrderUnknown) {
+		t.Fatalf("Rebuild = %v, want ErrOrderUnknown", err)
+	}
+}
+
+// TestABrokenChainIsReportedAsSuchAndLeavesTheVERIFIEDPrefixApplied is the
+// distinction §7.5's two postures rest on.
+//
+// The chain breaks at record 3, so records 1 and 2 were verified before they
+// were handed over. What the repository holds afterwards is exactly that prefix
+// — which is why the failure is a posture rather than a rollback: an operator
+// inspecting the store must see what the intact part of the log says, not an
+// empty map.
+func TestABrokenChainIsReportedAsSuchAndLeavesTheVerifiedPrefixApplied(t *testing.T) {
+	t.Parallel()
+
+	id := mintedID(t, 0)
+	journal := &fakeReplay{
+		entries: []journalEntry{
+			{seq: 1, kind: "planned", order: replayOrder(t, id)},
+			{seq: 2, kind: "authorized", id: id, at: replayAnchor(t, 1)},
+			{seq: 3, kind: "state", id: id, state: domain.StateSubmitted},
+		},
+		failAfter: 2,
+		failWith:  fmt.Errorf("record 3: %w", ports.ErrJournalChainBroken),
+	}
+	orders := newFakeOrders()
+	r, err := application.NewReplayer(journal, orders)
+	if err != nil {
+		t.Fatalf("NewReplayer: %v", err)
+	}
+
+	_, rebuildErr := r.Rebuild()
+	if !application.ChainBroken(rebuildErr) {
+		t.Fatalf("Rebuild = %v, want a broken-chain report", rebuildErr)
+	}
+
+	rec, err := orders.Load(id)
+	if err != nil {
+		t.Fatalf("Load after a broken chain: %v — the verified prefix was discarded", err)
+	}
+	if rec.State != domain.StateDispatchAuthorized {
+		t.Errorf("state = %s, want %s — the two verified records were not applied",
+			rec.State, domain.StateDispatchAuthorized)
+	}
+}
+
+// TestRebuildOfAnEmptyJournalIsASuccessfulRebuildOfNothing is the first boot,
+// at the use-case layer.
+func TestRebuildOfAnEmptyJournalIsASuccessfulRebuildOfNothing(t *testing.T) {
+	t.Parallel()
+
+	r, _, _ := newReplayer(t)
+	got, err := r.Rebuild()
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	if got.Records != 0 || got.Orders != 0 || got.LastSequence != 0 || len(got.Unresolved) != 0 {
+		t.Errorf("Rebuild of an empty journal = %+v, want a zero report", got)
+	}
+}
+
+// TestRebuildRefusesToReportOnAnOrderTheProjectionWillNotProduce covers the
+// read the report makes AFTER the walk, and the direction it fails in is why it
+// is fatal rather than skipped.
+//
+// The id is in the report's list because a journal record created it. A
+// repository that then will not produce it means the log and the projection
+// disagree about what exists — and an omitted order is an order missing from
+// Unresolved, which is the set §7.5 hands to the venue join. Under-counting
+// there is a live order nobody goes looking for.
+func TestRebuildRefusesToReportOnAnOrderTheProjectionWillNotProduce(t *testing.T) {
+	t.Parallel()
+
+	id := mintedID(t, 0)
+	journal := &fakeReplay{entries: []journalEntry{
+		{seq: 1, kind: "planned", order: replayOrder(t, id)},
+	}}
+	orders := newFakeOrders()
+	r, err := application.NewReplayer(journal, orders)
+	if err != nil {
+		t.Fatalf("NewReplayer: %v", err)
+	}
+
+	// The walk itself must succeed, so that what fails is the report and not
+	// the replay: the failure is planted only once the record has been applied.
+	sentinel := errors.New("repository is unavailable")
+	orders.failLoad = sentinel
+
+	if _, err := r.Rebuild(); !errors.Is(err, sentinel) {
+		t.Errorf("Rebuild = %v, want the repository's own failure", err)
+	}
+}
+
+func TestNewReplayerRefusesAMissingPort(t *testing.T) {
+	t.Parallel()
+
+	if _, err := application.NewReplayer(nil, newFakeOrders()); !errors.Is(err, application.ErrJournalReplayMissing) {
+		t.Errorf("NewReplayer(nil, orders) = %v, want ErrJournalReplayMissing", err)
+	}
+	if _, err := application.NewReplayer(&fakeReplay{}, nil); !errors.Is(err, application.ErrOrdersMissing) {
+		t.Errorf("NewReplayer(journal, nil) = %v, want ErrOrdersMissing", err)
+	}
+
+	// Positive control: both present is accepted, so the refusals above are not
+	// a constructor that refuses everything.
+	if _, err := application.NewReplayer(&fakeReplay{}, newFakeOrders()); err != nil {
+		t.Errorf("NewReplayer(journal, orders) = %v, want nil", err)
+	}
+}

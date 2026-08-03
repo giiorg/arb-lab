@@ -125,8 +125,19 @@ func (g Gate) String() string {
 // uniformly would let a gate that failed and then passed on its own retry
 // re-admit trading — which is exactly the health-flap re-entry §7.4 forbids,
 // arriving through §7.5's door. OutcomeNeedsOperator is that distinction made
-// into a value: it is the one outcome a fresh report cannot lift, and Clear is
-// the only thing that moves it.
+// into a value: a fresh report cannot lift it, and Clear is the only thing that
+// moves it.
+//
+// # There are TWO axes here, not one, and reading them as one loses a case
+//
+// How restrictive an outcome is (its posture ceiling) and whether a re-run of
+// the same check may lift it (whether it latches) are independent properties,
+// and this enum's members are points in that product rather than rungs of a
+// ladder. Three of the four combinations were named from the start; the fourth
+// — halted AND latching — arrived with slice F1's first producer of it, and is
+// OutcomeEvidenceUnusable. A reader who treats the members as ordered by
+// severity will reach for OutcomeFailed where that one belongs, and get a
+// refusal any retry can lift.
 type Outcome uint8
 
 const (
@@ -148,10 +159,49 @@ const (
 	OutcomePending
 
 	// OutcomeFailed is the gate's check having run and refused: a wrong margin
-	// mode, a leverage pin that does not match, a journal that will not replay.
+	// mode, a leverage pin that does not match, a venue that would not answer.
 	// Halts, and is freely re-reportable — a posture check that failed because
 	// the venue was unreachable may legitimately pass on the next attempt.
 	OutcomeFailed
+
+	// OutcomeEvidenceUnusable is the gate refusing because the EVIDENCE it
+	// reasons from cannot be trusted: a write-ahead journal whose hash chain does
+	// not verify, or whose records do not compose into a state at all.
+	//
+	// [SPEC EDIT LANDED — v0.9.36] It halts like OutcomeFailed and latches like
+	// OutcomeNeedsOperator, and until slice F1 neither of those existed together.
+	// §7.5 separates its preconditions on ONE axis — self-clearing versus
+	// latching — while the postures they impose vary on a SECOND, and the two are
+	// independent. Three of the four combinations had a value and this one did
+	// not, so the condition that wants both had to be reported as whichever half
+	// mattered more, and each half is wrong in its own direction:
+	//
+	//   - As OutcomeFailed it is HALTED and freely re-reportable, so a re-run of
+	//     the replay — over bytes that cannot change — could re-admit trading
+	//     with nobody having looked. That is §7.4's "never health-flap re-entry",
+	//     arriving through a check whose retry is deterministic.
+	//   - As OutcomeNeedsOperator it latches, and the posture it imposes is
+	//     PostureReconcileOnly — which PERMITS ActReconcile. That is the unsafe
+	//     one, and the reason is a claim this package makes one type over: an
+	//     ActReconcile is "exposure-neutral BY CONSTRUCTION". The construction is
+	//     that it re-drives what already happened, and what it re-drives is read
+	//     from the journal. §7.5's DeactivationPending re-drive fires
+	//     EmergencyPlanStore.Deactivate for whichever plan the corrupt log appears
+	//     to name, and that call is TERMINAL WITH NO REACTIVATION: after its ack
+	//     no Replicate for the TradeID is accepted and ListActive never returns
+	//     it. A plan tombstoned for a trade that is in fact still open leaves that
+	//     position permanently without a takeover path — an actuator enumerating
+	//     plans after host death finds none, and what the plan carried (client
+	//     order ids, allocated quantities, recovery cursors) is exactly what it
+	//     cannot rebuild from a dead journal — and it releases the hedge-group
+	//     lease, so a successor trade may be admitted over live exposure.
+	//     Exposure-neutrality is a property of the ACT given trustworthy inputs,
+	//     and this is the one gate whose failure means the inputs are not.
+	//
+	// So it is a fourth member rather than a re-reading of a third. Reported by
+	// the phase that verified the chain and found it broken; see
+	// oms/application.Replayer, its first and so far only producer.
+	OutcomeEvidenceUnusable
 
 	// OutcomeNeedsOperator is the gate refusing in a way no retry may lift: a
 	// foreign order, an unexplained position delta, a latched takeover epoch.
@@ -188,6 +238,8 @@ func (o Outcome) String() string {
 		return "OutcomePending"
 	case OutcomeFailed:
 		return "OutcomeFailed"
+	case OutcomeEvidenceUnusable:
+		return "OutcomeEvidenceUnusable"
 	case OutcomeNeedsOperator:
 		return "OutcomeNeedsOperator"
 	case OutcomeBlocksOpening:
@@ -207,7 +259,7 @@ func (o Outcome) posture() Posture {
 		return PostureStopOpening
 	case OutcomePassed:
 		return PostureTrading
-	case OutcomeFailed:
+	case OutcomeFailed, OutcomeEvidenceUnusable:
 		return PostureHalted
 	}
 	// Anything unrecognised. An unrecognised outcome halting is deliberate:
@@ -217,6 +269,33 @@ func (o Outcome) posture() Posture {
 	// member and a corrupted one are different facts, and only one of them
 	// should change when a member is added.
 	return PostureHalted
+}
+
+// latching reports whether a fresh report of the same gate may lift this
+// outcome.
+//
+// It is a method on the outcome rather than a set the Checklist holds, because
+// the property belongs to what was reported and not to which gate reported it:
+// the same gate can refuse in a way a retry may lift (a venue that did not
+// answer) and in a way it may not (a chain that does not verify).
+//
+// It names every member rather than testing the two that latch, so that
+// exhaustiveswitch forces a member added later to CHOOSE. The shorter form —
+// `o == OutcomeNeedsOperator || o == OutcomeEvidenceUnusable` — compiles
+// forever and answers false for anything new, and false is the direction that
+// costs something: a refusal meant to hold until an operator looked at it would
+// be lifted by the next report of the same check.
+func (o Outcome) latching() bool {
+	switch o {
+	case OutcomeNeedsOperator, OutcomeEvidenceUnusable:
+		return true
+	case OutcomeUnreported, OutcomePending, OutcomeFailed, OutcomeBlocksOpening, OutcomePassed:
+		return false
+	}
+	// An unrecognised outcome, on posture's argument: Validate refuses it at the
+	// door, and a value that arrived here anyway is a corrupted enum. Latching is
+	// the safe reading of one — it holds the gate until a human looks.
+	return true
 }
 
 // Checklist holds §7.5's preconditions and the outcome most recently reported
@@ -259,7 +338,22 @@ func (c *Checklist) Required() []Gate {
 // Report files an outcome for a gate.
 //
 // It refuses a gate this checklist never required, and refuses to move a gate
-// out of OutcomeNeedsOperator — that transition belongs to Clear alone.
+// out of a LATCHING outcome — that transition belongs to Clear alone.
+//
+// A latched gate admits exactly two reports, and both leave it latched: the
+// same outcome again, and a latching outcome that is STRICTLY MORE
+// restrictive. The repeat is admitted because it is honest — the phase that
+// found a chain broken finds it broken again on every attempt, and turning that
+// into an error would make every producer special-case its own second call. The
+// escalation is admitted because the alternative is a gate pinned at the weaker
+// of two refusals by the accident of which one was discovered first.
+//
+// What is refused is any report that would WEAKEN the hold, and the
+// non-latching ones are the reason the check cannot be a posture comparison
+// alone: OutcomeFailed is more restrictive than OutcomeNeedsOperator and does
+// not latch, so admitting it would launder a latched gate into one a later
+// OutcomePassed could lift — clearance by two reports, with no operator in
+// either.
 func (c *Checklist) Report(g Gate, o Outcome) error {
 	if err := o.Validate(); err != nil {
 		return err
@@ -268,7 +362,7 @@ func (c *Checklist) Report(g Gate, o Outcome) error {
 	if !declared {
 		return fmt.Errorf("gate %s: %w", g, ErrGateUndeclared)
 	}
-	if current == OutcomeNeedsOperator && o != OutcomeNeedsOperator {
+	if current.latching() && !(o.latching() && o.posture() <= current.posture()) {
 		return fmt.Errorf("gate %s: %w", g, ErrGateLatched)
 	}
 	c.outcomes[g] = o
@@ -283,7 +377,8 @@ func (c *Checklist) Outcome(g Gate) (Outcome, bool) {
 	return o, declared
 }
 
-// Clear lifts an operator hold, and returns the gate to OutcomeUnreported.
+// Clear lifts an operator hold on a LATCHED gate, and returns it to
+// OutcomeUnreported.
 //
 // Not to OutcomePassed, deliberately. §7.4 requires clearance AND "a fresh
 // VerifyFence propagation test" before normal operation returns, so clearance
@@ -296,7 +391,7 @@ func (c *Checklist) Clear(g Gate) error {
 	if !declared {
 		return fmt.Errorf("gate %s: %w", g, ErrGateUndeclared)
 	}
-	if current != OutcomeNeedsOperator {
+	if !current.latching() {
 		return fmt.Errorf("gate %s: %w", g, ErrGateNotLatched)
 	}
 	c.outcomes[g] = OutcomeUnreported

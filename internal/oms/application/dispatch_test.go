@@ -37,9 +37,15 @@ import (
 //     separation an assertion rather than an inference.
 
 // journalCall is one durable record, in the order it was written.
+//
+// at carries the authorization anchor and is the zero ServerTime on every other
+// record — which is the one place this fake is allowed the optional-field shape
+// ports.Journal refuses in its API, because a test asserting the ORDER of the
+// records needs them in one slice.
 type journalCall struct {
 	id    ids.ClientOrderID
 	state domain.OrderState
+	at    clock.ServerTime
 }
 
 type fakeJournal struct {
@@ -70,7 +76,26 @@ func (j *fakeJournal) AppendPlanned(o domain.Order) error {
 	return nil
 }
 
+// AppendAuthorized records §6 step 6's fsync, keyed under the state it means so
+// that failOn and the ordering assertions read one list of records.
+func (j *fakeJournal) AppendAuthorized(id ids.ClientOrderID, at clock.ServerTime) error {
+	if err := at.Validate(); err != nil {
+		return fmt.Errorf("%w: %w", ports.ErrAuthorizationNeedsAnchor, err)
+	}
+	j.calls = append(j.calls, journalCall{id: id, state: domain.StateDispatchAuthorized, at: at})
+	return j.failOn[domain.StateDispatchAuthorized]
+}
+
+// AppendState refuses StateDispatchAuthorized exactly as the real adapter does.
+//
+// A fake that admitted it would be laxer than the port it stands for, and the
+// defect it would hide is precisely the one this slice exists to close: a
+// dispatcher journaling the crash boundary through the anchorless method would
+// pass every test here and leave recovery unable to resolve the order.
 func (j *fakeJournal) AppendState(id ids.ClientOrderID, state domain.OrderState) error {
+	if state == domain.StateDispatchAuthorized {
+		return fmt.Errorf("append state %s for order %q: %w", state, id, ports.ErrAuthorizationNeedsAnchor)
+	}
 	j.calls = append(j.calls, journalCall{id: id, state: state})
 	return j.failOn[state]
 }

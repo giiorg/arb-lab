@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 
 	"github.com/giiorg/arb-lab/internal/oms/domain"
+	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
 
@@ -30,14 +31,31 @@ import (
 // every wrong choice a person would actually make. The fixture here therefore
 // varies the split point across fields that are both non-empty on both sides.
 //
-// # There is no timestamp in a record, and the absence is deliberate
+// # There is no timestamp on a record, and there IS one inside exactly one
+// # record kind — the distinction is the whole of what slice A got right and
+// # what it got wrong
 //
-// §5.1 orders the journal by its sequence, not by a clock, and §7.5 replays it
-// in that order. A wall-clock field would need platform/clock injected into an
-// adapter that otherwise has no time in it, and it would add a value the chain
-// covers but nothing reads — an attractive nuisance for a later reader who
-// mistakes it for the ordering authority. When an event time is genuinely
-// needed it is the venue's, and it arrives on a fill.
+// Slice A refused a timestamp COLUMN and gave two reasons: §5.1 orders the
+// journal by its sequence rather than by a clock, so a wall-clock field would
+// be "a value the chain covers but nothing reads" and an attractive nuisance
+// for a reader who mistook it for the ordering authority; and "when an event
+// time is genuinely needed it is the venue's, and it arrives on a fill".
+//
+// The first reason still holds and is why there is still no per-record
+// timestamp: nothing here records WHEN a record was written. The second expired
+// one slice later, and expired in the way a rejection's reason does — quietly,
+// with no clause anywhere for a grep to find. §5.3's stable-not-found rule
+// measures both of its time bounds from the instant this system authorized the
+// single Place, and the order it resolves that way is one with NO FILL and no
+// venue record at all: there is no fill for the venue's time to arrive on. So
+// the anchor is a field OF one record kind, in the venue's own clock frame,
+// carried because the rule reads it — which is the test the first reason
+// states, met rather than contradicted.
+//
+// See ports.OrderRecord.AuthorizedAt for the consequence of not having it: a
+// crash-recovered order at StateDispatchAuthorized with no anchor cannot reach
+// StateAbsentAfterFinality by any evidence, so it holds its hedge group
+// ambiguous for ever with every light green.
 
 const (
 	// chainLabel domain-separates this hash chain from every other one in the
@@ -64,13 +82,19 @@ const (
 // Record kind tags, as they appear in the hashed preimage.
 //
 // A tag inside the preimage rather than only in the kind column, because the
-// two record shapes must not be able to collide even if their remaining fields
-// serialise identically. They cannot today — a planned record has strictly more
-// fields — but "cannot today" is a property of the current field lists, not of
-// the encoding, and the field lists are what a later slice edits.
+// record shapes must not be able to collide even if their remaining fields
+// serialise identically. When there were two kinds that was a precaution about
+// a future edit — a planned record has strictly more fields than a state one,
+// so nothing could collide as the format then stood. The third kind is the edit
+// the precaution was for: an authorization is a client id followed by sixteen
+// fixed bytes, and a state record is a client id followed by a length-prefixed
+// string, so a state whose text happened to encode as those sixteen bytes would
+// hash identically to an authorization of the same order. The tag is what
+// separates them, and it is now load-bearing rather than defensive.
 const (
-	kindTagPlanned uint8 = 1
-	kindTagState   uint8 = 2
+	kindTagPlanned    uint8 = 1
+	kindTagState      uint8 = 2
+	kindTagAuthorized uint8 = 3
 )
 
 // Kind names, as they appear in the kind column.
@@ -80,8 +104,9 @@ const (
 // is inserted, and the corruption reads as a planned record that became a state
 // record rather than as a crash.
 const (
-	kindPlanned = "planned"
-	kindState   = "state"
+	kindPlanned    = "planned"
+	kindState      = "state"
+	kindAuthorized = "authorized"
 )
 
 // genesisHash is the prev_hash of sequence 1.
@@ -126,6 +151,30 @@ func encodeState(id ids.ClientOrderID, state domain.OrderState) []byte {
 	b = append(b, kindTagState)
 	b = appendString(b, string(id))
 	b = appendString(b, string(state))
+	return b
+}
+
+// encodeAuthorized is the canonical preimage of an AppendAuthorized record.
+//
+// The state is NOT in it, and its absence is the same decision Journal made by
+// giving the authorization its own method: there is exactly one state this
+// record kind can mean, so encoding it would be a second spelling of the kind
+// tag — two fields that must agree, with no rule for a replay that finds they
+// do not.
+//
+// Both halves of the ServerTime are carried. The instant alone would be a
+// reading whose uncertainty a replay would have to invent, and clock.ServerTime
+// refuses to be built without one precisely because every boundary comparison
+// §5.3 makes is three-valued: a band nobody recorded reads at replay as a
+// perfectly synchronised venue, which answers Certainly to boundaries it should
+// answer Uncertain to. That is the resolver refusing LATE — the one direction
+// its whole design avoids.
+func encodeAuthorized(id ids.ClientOrderID, at clock.ServerTime) []byte {
+	b := make([]byte, 0, 64)
+	b = append(b, kindTagAuthorized)
+	b = appendString(b, string(id))
+	b = appendInt64(b, at.Instant().UnixNano())
+	b = appendInt64(b, int64(at.Uncertainty()))
 	return b
 }
 

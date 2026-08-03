@@ -41,19 +41,23 @@ var (
 	// the caller has no way to notice.
 	ErrGateUndeclared = errors.New("boot: gate not required by this checklist")
 
-	// ErrGateLatched reports an attempt to move a gate out of
-	// OutcomeNeedsOperator by filing a fresh outcome.
+	// ErrGateLatched reports an attempt to move a gate out of a LATCHING
+	// outcome by filing a fresh one.
 	//
 	// §7.4 is explicit that return to normal operation requires explicit
 	// operator clearance and a fresh propagation test — "never health-flap
-	// re-entry". A gate that needs an operator therefore only moves through
+	// re-entry". A gate in such an outcome therefore only moves through
 	// Clear, and Clear returns it to Unreported rather than to Passed: the
 	// clearance restores the ability to pass, not the pass.
+	//
+	// It does NOT report the two moves a latched gate admits — the same outcome
+	// filed again, and an escalation to a strictly more restrictive latching
+	// outcome. Both leave the gate latched; see Checklist.Report.
 	ErrGateLatched = errors.New("boot: gate is latched pending operator clearance")
 
-	// ErrGateNotLatched reports a Clear against a gate that is not awaiting an
-	// operator. Clearing something that was never blocked is a typo with no
-	// effect, which is the shape of a control an operator believes worked.
+	// ErrGateNotLatched reports a Clear against a gate in no latching outcome.
+	// Clearing something that was never blocked is a typo with no effect, which
+	// is the shape of a control an operator believes worked.
 	ErrGateNotLatched = errors.New("boot: gate is not awaiting operator clearance")
 
 	// ErrPhaseKindInvalid reports a phase whose Kind is unset or unknown.
