@@ -1,6 +1,115 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-03, session 80): **MILESTONE 3 SLICE C2b IS LANDED AND CLOSED — THE ORDER READ PATH EXISTS, §47e FINDING 1 IS FULLY DISCHARGED, AND §4's `Cursor` CANNOT BE EITHER VENUE'S CURSOR. DOCS ARE v0.9.33.**
+## Status (2026-08-03, session 81): **MILESTONE 3 SLICE D IS BUILT AND *NOT CLOSED* — CODE IS IN `6508fb1`, DOCS ARE OWED, MUTATIONS HAVE NOT RUN. DOCS STAY AT v0.9.33; MARKER GREP IS **2**, DELIBERATELY.**
+
+**This is a mid-slice handoff at a green seam, not a close.** `make ci` is green
+on both modules, every test passes, the tree is clean at `6508fb1`, and the
+capture is untouched at **PID 8495**. What is *not* done is listed under WHAT
+REMAINS below — read that before writing anything.
+
+**What landed (code only).** New: `internal/oms/application/ports/resolver.go`
+(`OrderResolver` + its result types), `internal/oms/application/resolve.go`
+(`Resolver`, the four gates), `internal/oms/infrastructure/driven/orderresolver.go`
+(the read-half ACL), plus `resolve_test.go` and `orderresolver_test.go`. Changed:
+`ports.OrderRecord` gains `AuthorizedAt`, `OrderWriteRepository` gains
+`ApplyAuthorized` and closes `ApplyState` against `StateDispatchAuthorized`,
+`Dispatcher` takes a `clock.Clock`, `domain.successors` gains the `Canceled`
+edge, `oms.Deps`/`Module` gain the read wiring. Design record is **§53**
+(`docs/superpowers/specs/2026-08-03-m3-slice-d-stable-not-found.md`) — **read it
+first; it holds the rulings and the rejected alternatives.**
+
+**THE RULE, MADE EXECUTABLE — four gates, and `AbsentAfterFinality` needs all
+four.** §5.3 names the venue-specific stable-not-found rule twice and never
+states its steps; SM §2 supplies the four-step contract and §5.3's v0.9.33
+paragraph supplies the bound. Composed: (1) the **landing horizon** has passed,
+so an authorized send can no longer land after the query; (2) the order is
+**absent from every surface** the venue offers (engine/venue's walk); (3) an
+**executions sweep proved coverage** past that horizon and contains no row this
+system cannot rule out; (4) the answering surface's **published reach** still
+covers the order. Any gate failing yields an `UnprovedReason` and **no state
+change** — the type can refuse to conclude and cannot conclude wrongly.
+
+**FINDING 1 — the rule's anchor has no home, and slice A's rejection of it
+expired.** Both time bounds count from the instant this system committed to the
+single `Place`. Nothing recorded it: not `domain.Order` (the immutable plan-time
+half), not `OrderRecord`, and **not the journal** — whose codec *deliberately*
+refused a timestamp, on the ground that it would add *"a value the chain covers
+but **nothing reads**"* and that *"when an event time is genuinely needed it is
+the venue's, and **it arrives on a fill**"*. Both clauses were true in slice A.
+Both are false now: §5.3's retention bound reads it as of **v0.9.33, one slice
+later**, and the case that needs it is an order with **no fill and no venue
+record at all** — there is no fill for it to arrive on, and a not-found answer
+carries no venue `created time` either. **This is the recorded
+rejected-alternative-is-an-unchecked-claim shape with a second axis: the
+rejection's REASON was a claim about the future, and nobody re-derives a
+rejection when the future arrives.** No grep can see it — the clause is *absent*,
+not departed from. **Consequence:** the projection is in process memory, so a
+crash-recovered order has no anchor, and `AbsentAfterFinality` is **unreachable
+for exactly the order §5.3 says recovery resolves that way** — the order stays in
+a state `ContributesPossibleDelta` answers true for, its group is `Ambiguous` for
+ever, new trading is held, every light green. **Taken:** `OrderRecord.AuthorizedAt`
+as a **venue-frame `clock.ServerTime`** stamped above the fsync; the journal
+column is **slice F's, with its replayer** (schema-field-frozen-before-its-consumer).
+
+**FINDING 2 — SM §1's query-resolution set had no `Canceled`.** §6 step 6 sends
+nothing but marketable IOCs, so the commonest thing a resolving query can find is
+an order the venue terminated unfilled — and that answer had **no legal target**
+from `DispatchAuthorized` or `SubmissionUnknown`. Worse than stuck: the nearest
+available terminal is `AbsentAfterFinality`, which is precisely FLAG-2's
+evidence-class conflation, so a missing edge left a **wrong** edge as the only
+legal one. The v0.9.11 venue-initiated-termination fix added exactly this edge
+for the two LIVE states and stopped there — **the mirror rule's second axis
+again, live-vs-recovery this time.**
+
+**Two rulings taken, both in §53, do not silently reopen.** Gate 4 compares
+against **`min(unfilled, filled)`**, because an absence must be inexplicable
+under *every* hypothesis and we do not know which kind of order it was — that is
+what the absence means. And an **unpublished retention licenses only what an
+operator configures** (`application.SurfaceKey`): "no cliff" licenses proved
+absence for ever, "never provable" makes every Binance-spot lost-ack IOC
+unresolvable — half of every cash-and-carry — so both defaults are unsafe and the
+carrier is forced.
+
+**The checklist ran BEFORE the battery and found dead code in the new code
+itself:** `attribute()` took a venue order id, and the only path that calls it is
+the absent one, where the venue by definition supplies none — two unreachable
+arms reading as handled cases. Removed, and the consequence priced honestly: **on
+Binance ANY execution row inside the window makes the absence inconclusive**,
+because the client order id is absent from both trade lists and the venue id is
+the only other key. Closing that means persisting `Ack.VenueOrderID` and
+reconciling against the set of our own orders — §7.5's reconciler, slice F.
+
+**WHAT REMAINS for slice D to close, in order:**
+
+1. **The mutation battery has NOT run.** `tools/mutate.sh` over `resolve.go`,
+   `orderresolver.go`, `orders.go`'s `ApplyAuthorized`/`advance`, and
+   `dispatch.go`'s anchor check. Aim at each gate separately — the four are
+   independently falsifiable and that is the point of the shape.
+2. **Two `[SPEC EDIT OWED]` markers are live** (`ports/repository.go`,
+   `domain/transition.go`) and the grep is **2**, which is correct for a WIP
+   commit and must be **zero** before the slice closes.
+3. **Docs owed:** core **§5.3** (the journal must carry the anchor; the
+   crash-recovered consequence), **SM §1's transitions table** (the two
+   `→ Canceled` query-resolution rows), core **§4** (the resolver's shape if
+   anything is owed there), **§12**'s milestone-3 slice-D annotation, **ADR §3**'s
+   dated block, this HANDOFF, and the Georgian regen. Version goes to **v0.9.34**.
+4. **The reading pass**, beside the grep and not into it — it is what caught the
+   finding in each of the last three slices.
+5. **§53h**, the design record's build record, is a stub awaiting the close.
+
+**Tasks to raise at the close** (not yet created): persist `Ack.VenueOrderID` so
+a Binance sweep can rule out our *other* orders; a **§7.5 boot posture check**
+refusing to trade an instrument whose absences could never be proved (the check
+that would be *in time*, where gate 4's `ReasonReachUnknown` is safe but late).
+
+**Standing, unchanged:** capture **PID 8495**, never rebuild over `bin/arblab`,
+`make ci` runs `-race` and `go test` does not, cap `TLC_WORKERS` at 4, read TLC
+figures only from a COMPLETED invocation. **§38f (task #158) is still the only
+clock-bound user decision**: ≥2 TB off-host, gate ~2026-09-30.
+
+---
+
+## Status (2026-08-03, session 80 — HISTORICAL): **MILESTONE 3 SLICE C2b IS LANDED AND CLOSED — THE ORDER READ PATH EXISTS, §47e FINDING 1 IS FULLY DISCHARGED, AND §4's `Cursor` CANNOT BE EITHER VENUE'S CURSOR. DOCS ARE v0.9.33.**
 
 **Code landed in `b0f7f33` (session 79, "WIP, docs owed"); the docs half is this
 session.** New: `internal/engine/venue/orderquery{,_binance,_bybit}.go` +
