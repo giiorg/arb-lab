@@ -179,3 +179,70 @@ func TestOrderStateString(t *testing.T) {
 		t.Errorf("String() = %q, want %q", got, "dispatch_authorized")
 	}
 }
+
+// TestMayExistAtVenueIsTheThirdPartitionAndDiffersFromBothOthers.
+//
+// The claim is not "every state but Planned" — that is what the answer happens
+// to be — but that this predicate answers a DIFFERENT question from the other
+// two, and the count of disagreements is what makes it checkable. Against
+// ContributesPossibleDelta it must differ on every terminal, which is where this
+// system's executions live: a join that used §6.7's predicate would skip the
+// filled orders and rebuild a cumulative of zero for the ones that moved the
+// position.
+func TestMayExistAtVenueIsTheThirdPartitionAndDiffersFromBothOthers(t *testing.T) {
+	t.Parallel()
+
+	terminalsInTheTrueSet := 0
+	disagreementsWithContributes := 0
+
+	for _, s := range allStates {
+		atVenue, err := s.MayExistAtVenue()
+		if err != nil {
+			t.Errorf("MayExistAtVenue(%q) errored: %v", s, err)
+			continue
+		}
+		if want := s != domain.StatePlanned; atVenue != want {
+			t.Errorf("MayExistAtVenue(%q) = %v, want %v — §5.3: a Planned-only order "+
+				"was never dispatched, and every other state was reached through a "+
+				"journaled authorization", s, atVenue, want)
+		}
+
+		terminal, err := s.IsTerminal()
+		if err != nil {
+			t.Errorf("IsTerminal(%q) errored: %v", s, err)
+			continue
+		}
+		if terminal && atVenue {
+			terminalsInTheTrueSet++
+		}
+		contributes, err := s.ContributesPossibleDelta()
+		if err != nil {
+			t.Errorf("ContributesPossibleDelta(%q) errored: %v", s, err)
+			continue
+		}
+		if contributes != atVenue {
+			disagreementsWithContributes++
+		}
+	}
+
+	// Four terminals, every one of them queryable. At zero, the join would ask
+	// the venue only about orders whose exposure is still uncertain.
+	if terminalsInTheTrueSet != 4 {
+		t.Errorf("terminals the venue may be asked about = %d, want 4", terminalsInTheTrueSet)
+	}
+	// The positive control: at zero, this predicate and §6.7's are one function.
+	if disagreementsWithContributes != 4 {
+		t.Errorf("MayExistAtVenue and ContributesPossibleDelta disagree on %d states, want 4 "+
+			"(the terminals); at 0 they have collapsed into one function", disagreementsWithContributes)
+	}
+}
+
+func TestMayExistAtVenueRefusesANonState(t *testing.T) {
+	t.Parallel()
+
+	for _, s := range []domain.OrderState{"", "filled "} {
+		if _, err := s.MayExistAtVenue(); err == nil {
+			t.Errorf("MayExistAtVenue(%q) returned no error", s)
+		}
+	}
+}

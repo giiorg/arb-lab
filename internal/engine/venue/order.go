@@ -230,6 +230,13 @@ type OrderCodec interface {
 	// trade on, so a separate interface would model something that cannot exist
 	// and would give OrderClientConfig a nil case for it.
 	OrderQueryCodec
+
+	// PositionCodec is the position surface (slice F2), embedded on the same
+	// argument one step further: §7.5 asserts a net-delta invariant against the
+	// venue's own positions before trading resumes, so a venue whose derivative
+	// positions cannot be read is not a venue this system may hold a derivative
+	// leg on.
+	PositionCodec
 }
 
 // OrderClient is §4's OrderGateway.Place for one venue.

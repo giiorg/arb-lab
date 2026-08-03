@@ -459,3 +459,51 @@ func TestNewReplayerRefusesAMissingPort(t *testing.T) {
 		t.Errorf("NewReplayer(journal, orders) = %v, want nil", err)
 	}
 }
+
+// TestDispatchedIsASupersetOfUnresolvedAndHoldsTheTerminals is the handoff §7.5's
+// venue join takes, and the fixture is built so that the two lists DIFFER.
+//
+// A journal whose orders are all unresolved makes "hands over the uncertain set"
+// and "hands over everything that was sent" the same list, and the join would
+// then be tested against a fixture that cannot show the difference the two
+// questions have. The difference is where this system's fills are: §6 step 6
+// sends marketable IOCs, whose ordinary outcome is terminal within
+// milliseconds, so the orders that moved the position are exactly the ones
+// §6.7's set excludes.
+func TestDispatchedIsASupersetOfUnresolvedAndHoldsTheTerminals(t *testing.T) {
+	t.Parallel()
+
+	filled, live, planned := mintedID(t, 9), mintedID(t, 5), mintedID(t, 1)
+
+	r, _, _ := newReplayer(t,
+		journalEntry{seq: 1, kind: "planned", order: replayOrder(t, filled)},
+		journalEntry{seq: 2, kind: "planned", order: replayOrder(t, live)},
+		journalEntry{seq: 3, kind: "planned", order: replayOrder(t, planned)},
+		journalEntry{seq: 4, kind: "authorized", id: filled, at: replayAnchor(t, 1)},
+		journalEntry{seq: 5, kind: "authorized", id: live, at: replayAnchor(t, 2)},
+		journalEntry{seq: 6, kind: "state", id: filled, state: domain.StateSubmitted},
+		journalEntry{seq: 7, kind: "state", id: filled, state: domain.StateAcknowledged},
+		journalEntry{seq: 8, kind: "state", id: filled, state: domain.StateFilled},
+	)
+
+	got, err := r.Rebuild()
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	if want := []ids.ClientOrderID{live}; fmt.Sprint(got.Unresolved) != fmt.Sprint(want) {
+		t.Errorf("Unresolved = %v, want %v — the filled order's interval has collapsed", got.Unresolved, want)
+	}
+	// Sorted, and it holds the terminal: leg 5 sorts before leg 9.
+	if want := []ids.ClientOrderID{live, filled}; fmt.Sprint(got.Dispatched) != fmt.Sprint(want) {
+		t.Errorf("Dispatched = %v, want %v (sorted, WITH the filled order and WITHOUT the planned one)",
+			got.Dispatched, want)
+	}
+	// The positive control on the whole claim: at equal lengths the two lists are
+	// one list, and every assertion above would pass against a report that
+	// derived both from the same predicate.
+	if len(got.Dispatched) == len(got.Unresolved) {
+		t.Errorf("Dispatched and Unresolved are the same size (%d); the fixture cannot show that they answer different questions",
+			len(got.Dispatched))
+	}
+}

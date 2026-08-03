@@ -184,6 +184,15 @@ func (r *OrderResolver) SweepExecutions(o domain.Order, since, until time.Time) 
 				VenueOrderID:  e.VenueOrderID,
 				Quantity:      e.Quantity,
 				At:            e.At,
+
+				// Carried since slice F2, when the port stopped being wide enough
+				// only to ANSWER a question about a row and became wide enough to
+				// admit one as a fill. The venue's Side is deliberately still not
+				// carried: direction lives on the order (domain.Fill's
+				// single-statement-of-direction rule), and a side beside it would
+				// be a second place for a sign error to live.
+				Price: e.Price,
+				Fee:   e.Fee,
 			})
 		}
 

@@ -69,7 +69,7 @@ func TestOutcomeValidateAndString(t *testing.T) {
 	for _, o := range []boot.Outcome{
 		boot.OutcomeUnreported, boot.OutcomePending, boot.OutcomeFailed,
 		boot.OutcomeEvidenceUnusable, boot.OutcomeNeedsOperator,
-		boot.OutcomeBlocksOpening, boot.OutcomePassed,
+		boot.OutcomeBlocksOpening, boot.OutcomeProjectionStale, boot.OutcomePassed,
 	} {
 		if err := o.Validate(); err != nil {
 			t.Errorf("%s: Validate() = %v, want nil", o, err)
@@ -80,11 +80,11 @@ func TestOutcomeValidateAndString(t *testing.T) {
 	}
 	// One past the last declared member. It moves when a member is added, which
 	// is the point: the check is that the LADDER ends where the enum does.
-	if err := boot.Outcome(7).Validate(); !errors.Is(err, boot.ErrOutcomeInvalid) {
-		t.Errorf("Outcome(7).Validate() = %v, want ErrOutcomeInvalid", err)
+	if err := boot.Outcome(8).Validate(); !errors.Is(err, boot.ErrOutcomeInvalid) {
+		t.Errorf("Outcome(8).Validate() = %v, want ErrOutcomeInvalid", err)
 	}
-	if got := boot.Outcome(7).String(); got != "Outcome(7)" {
-		t.Errorf("Outcome(7).String() = %q, want %q", got, "Outcome(7)")
+	if got := boot.Outcome(8).String(); got != "Outcome(8)" {
+		t.Errorf("Outcome(8).String() = %q, want %q", got, "Outcome(8)")
 	}
 }
 
@@ -191,6 +191,7 @@ func TestChecklistOutcomeToPosture(t *testing.T) {
 		{boot.OutcomeNeedsOperator, boot.PostureReconcileOnly},
 		{boot.OutcomeFailed, boot.PostureHalted},
 		{boot.OutcomeEvidenceUnusable, boot.PostureHalted},
+		{boot.OutcomeProjectionStale, boot.PostureStopOpening},
 	}
 
 	for _, tc := range cases {
@@ -497,5 +498,58 @@ func TestChecklistBlockingIsSorted(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("Blocking() = %v, want %v", got, want)
 		}
+	}
+}
+
+// TestProjectionStaleWithholdsOpeningsAndLatches is the second empty cell of the
+// outcome product, and the two halves fail in opposite directions.
+//
+// Not halted: §6 step 7's condition is a send that REACHED the venue, so the
+// order may be executing while the projection says it was never dispatched, and
+// a halted process cannot flatten it. Latching: the check that would lift it —
+// the net-delta assertion — recomputes from the projection that is known stale,
+// and the stale reading is the PERMISSIVE one (StatePlanned contributes no
+// possible delta, so the group reads determined and flat). A freely
+// re-reportable outcome would therefore be lifted by an invariant agreeing with
+// its own corrupted input.
+func TestProjectionStaleWithholdsOpeningsAndLatches(t *testing.T) {
+	t.Parallel()
+
+	c := newChecklistT(t, allGates()...)
+	reportAllT(t, c, boot.OutcomePassed)
+	if err := c.Report(boot.GateNetDeltaAsserted, boot.OutcomeProjectionStale); err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+
+	if got := c.Posture(); got != boot.PostureStopOpening {
+		t.Errorf("Posture() = %s, want PostureStopOpening", got)
+	}
+	if !c.Posture().Permits(boot.ActReduce) {
+		t.Error("a process holding a stale projection may not reduce exposure — " +
+			"the order this outcome is about may be filling right now")
+	}
+	if c.Posture().Permits(boot.ActOpen) {
+		t.Error("openings are permitted while the projection is known stale")
+	}
+
+	for _, o := range []boot.Outcome{
+		boot.OutcomePassed, boot.OutcomeBlocksOpening, boot.OutcomePending, boot.OutcomeFailed,
+	} {
+		if err := c.Report(boot.GateNetDeltaAsserted, o); !errors.Is(err, boot.ErrGateLatched) {
+			t.Errorf("Report(%s) over a ProjectionStale gate = %v, want ErrGateLatched", o, err)
+		}
+	}
+	// OutcomeFailed is in that list deliberately: it is MORE restrictive and does
+	// not latch, so admitting it would launder the hold into one a later Passed
+	// could lift.
+
+	// The two strictly-more-restrictive latching outcomes are admitted, because
+	// a gate pinned at the weaker of two refusals by the accident of discovery
+	// order is the failure the escalation rule exists to prevent.
+	if err := c.Report(boot.GateNetDeltaAsserted, boot.OutcomeNeedsOperator); err != nil {
+		t.Errorf("escalating ProjectionStale to NeedsOperator = %v, want nil", err)
+	}
+	if err := c.Report(boot.GateNetDeltaAsserted, boot.OutcomeEvidenceUnusable); err != nil {
+		t.Errorf("escalating NeedsOperator to EvidenceUnusable = %v, want nil", err)
 	}
 }

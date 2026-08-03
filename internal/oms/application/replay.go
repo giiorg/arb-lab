@@ -120,6 +120,25 @@ type Recovery struct {
 	// sent. Using ContributesPossibleDelta rather than negating IsTerminal is
 	// what keeps that one difference in one place.
 	Unresolved []ids.ClientOrderID
+
+	// Dispatched names every order the venue may hold a record of, sorted, and
+	// it is a SUPERSET of Unresolved.
+	//
+	// # The difference between the two lists is where this system's fills are
+	//
+	// Unresolved is §6.7's question — which orders' exposure is still uncertain —
+	// so it holds no terminal. Dispatched is §7.5's — which orders can the venue
+	// be ASKED about — so it holds every terminal except the one that was never
+	// sent. That gap is not an edge case: §6 step 6 sends marketable IOC limits,
+	// whose ordinary outcome is terminal within milliseconds, so the orders that
+	// actually moved the position are exactly the ones the uncertain-set excludes.
+	//
+	// The venue join takes THIS list, and a join that took Unresolved instead
+	// would rebuild executed quantity for the orders that have none and leave a
+	// zero cumulative on the ones that filled — which the §6.7 classifier reads
+	// as a flat, DETERMINED group, and a determined group is the one where
+	// compensating trades are permitted.
+	Dispatched []ids.ClientOrderID
 }
 
 // Rebuild replays the journal into the write repository.
@@ -297,8 +316,23 @@ func (b *rebuild) report() (Recovery, error) {
 		if contributes {
 			rec.Unresolved = append(rec.Unresolved, id)
 		}
+
+		// Derived from its own predicate rather than from `contributes ||
+		// IsTerminal`, which is the same set today and is the composition that
+		// silently stops holding: the two lists answer different questions, and
+		// expressing one as arithmetic over the other would make a change to
+		// §6.7's uncertain-set quietly change which orders §7.5 asks the venue
+		// about.
+		atVenue, err := current.State.MayExistAtVenue()
+		if err != nil {
+			return Recovery{}, fmt.Errorf("report on replayed order %q at %s: %w", id, current.State, err)
+		}
+		if atVenue {
+			rec.Dispatched = append(rec.Dispatched, id)
+		}
 	}
 	sort.Slice(rec.Unresolved, func(i, j int) bool { return rec.Unresolved[i] < rec.Unresolved[j] })
+	sort.Slice(rec.Dispatched, func(i, j int) bool { return rec.Dispatched[i] < rec.Dispatched[j] })
 	return rec, nil
 }
 

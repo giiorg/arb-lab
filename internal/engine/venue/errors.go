@@ -199,6 +199,60 @@ var (
 	// instrument has and which makes the kernel's cross-asset check vacuous:
 	// a Price of BTC-per-BTC compares equal to everything it should refuse.
 	ErrInstrumentAssetsIdentical = errors.New("venue: instrument base and quote assets are the same")
+
+	// ErrPositionSettleUnset reports a position scope with no settlement asset.
+	//
+	// It is refused rather than defaulted because Bybit's linear enumeration is
+	// ILLEGAL without one (either symbol or settleCoin is required, and this
+	// surface deliberately sends no symbol), so the two candidate defaults are a
+	// call the venue rejects and a call that silently enumerates the wrong
+	// settlement asset — and the second answers "no positions" for an account
+	// that holds them.
+	ErrPositionSettleUnset = errors.New("venue: position scope names no settlement asset")
+
+	// ErrPositionSurfaceAbsent reports a position read asked of a family that has
+	// no position surface — spot, on both venues.
+	//
+	// A distinct sentinel from ErrOrderFamilyUnrouted, and the distinction is
+	// what a reader does next: an unrouted family is a wiring gap someone can
+	// close by configuring a transport, while this one cannot be closed at all. A
+	// spot leg's exposure is a wallet balance, which is not a position and is not
+	// comparable to one without a baseline this system does not record.
+	ErrPositionSurfaceAbsent = errors.New("venue: this product family has no position surface")
+
+	// ErrPositionsUnreadable reports a position answer that does not describe the
+	// enumeration requested — a row with no symbol, a second row for a symbol
+	// already answered, an envelope naming another category.
+	ErrPositionsUnreadable = errors.New("venue: position answer does not match the enumeration requested")
+
+	// ErrPositionModeNotOneWay reports a row that is not one-way — Binance
+	// positionSide other than BOTH, Bybit positionIdx other than 0.
+	//
+	// §4.1 makes a hedge position mode refuse-to-trade, and this is where it is
+	// first observable: a hedge-mode account answers with a LONG row and a SHORT
+	// row for one symbol, whose net is a subtraction no field on either row
+	// states. Refusing is what stops one leg being reported as the position.
+	ErrPositionModeNotOneWay = errors.New("venue: position row is not one-way position mode")
+
+	// ErrPositionSideUnreadable reports a row whose direction cannot be read: an
+	// undeclared side, or Bybit's documented empty side beside a NONZERO size.
+	//
+	// The second is the one worth naming. An empty side with size 0 is the
+	// documented flat row and is admitted; the same field with a live size is a
+	// direction the venue did not state, and the two available defaults report a
+	// real position as flat or as pointing the wrong way.
+	ErrPositionSideUnreadable = errors.New("venue: position row states no readable direction")
+
+	// ErrPositionInstrumentAmbiguous reports a row whose symbol matches more
+	// than one declared instrument in the caller's table.
+	//
+	// Refused rather than resolved to either, because the resolution is a coin
+	// flip: Go's map iteration is randomized, so "the first match" is a different
+	// instrument on different runs, and the two carry different base assets in
+	// exactly the case that produced the duplicate — an unvalidated ContractType
+	// splitting one real instrument across two keys (domain.FillKey records the
+	// same hazard on the fill dedupe identity).
+	ErrPositionInstrumentAmbiguous = errors.New("venue: more than one declared instrument matches this position row")
 )
 
 // There is deliberately no sentinel here for "funding asked of a spot

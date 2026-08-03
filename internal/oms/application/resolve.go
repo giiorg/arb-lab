@@ -471,7 +471,11 @@ func (r *Resolver) absent(rec ports.OrderRecord, status ports.VenueOrder, venueN
 		return unproved(ReasonSweepIncomplete, status.Reach), nil
 	}
 
-	ours, verdict := attribute(sweep.Executions, rec.Order.ClientOrderID)
+	// The venue order id is EMPTY here and cannot be otherwise: this path is
+	// reached because the venue answered "no such order", so it supplied no id
+	// for it. That is the arm attribute's second key cannot help — see its doc,
+	// and task #174 for the lever that would.
+	ours, verdict := attribute(sweep.Executions, rec.Order.ClientOrderID, "")
 	switch verdict {
 	case attributionClean:
 		// All four gates. This is the ONLY path in this file to
@@ -543,34 +547,36 @@ const (
 // attribute decides whether a sweep contains an execution belonging to one
 // order.
 //
-// # The ONLY key it can use is the client order id, and that is a venue fact
-// # with a sharper edge than it first appears
+// # It has TWO keys now, and the second one's absence used to be an argument
 //
-// The natural second key is the venue's own order id, and it is not available
-// here. Binance's trade lists carry no client order id at all — neither
-// /fapi/v1/userTrades nor /api/v3/myTrades returns one — so on Binance the venue
-// id is the only join key; and this function is reached from ONE place, the
-// absent path, where a venue that reports no such order has supplied no id for
-// it either. A parameter for it would be an argument every caller passes empty,
-// which is this repo's unreachable-sentinel shape: two arms nothing can reach,
-// reading as handled cases.
+// Slice D declared the venue order id unusable here and gave a reason: "this
+// function is reached from ONE place, the absent path, where a venue that
+// reports no such order has supplied no id for it either. A parameter for it
+// would be an argument every caller passes empty, which is this repo's
+// unreachable-sentinel shape."
 //
-// So the consequence is stated plainly rather than papered over with a
-// parameter: ON BINANCE, ANY execution row inside the window makes the sweep
-// inconclusive. Not a rare corner — another of this system's own orders filling
-// on the same instrument within the window does it, and the window is tens of
-// seconds. What would close it is knowing the venue ids of our OTHER orders, so
-// that their rows could be ruled out; that means persisting Ack.VenueOrderID and
-// reconciling against the set, which is §7.5's reconciler and not this rule.
-// C2b recorded that Fills and OrderByClientID are a COMPOSITION rather than
-// independent; this is the same fact with its operational cost priced.
+// [SPEC EDIT LANDED — v0.9.37] That was true of its only caller and false of the
+// function, and the difference arrived with §7.5's join: Joiner attributes the
+// executions of orders the venue DOES hold, and the same query that establishes
+// that hands back the venue's id for them. A rejection's reason is a claim about
+// what callers exist, and nobody re-derives one when a caller appears — the
+// recorded shape (§53), on a parameter this time rather than on a column.
+//
+// So `venueOrderID` is empty from the absent path and populated from the join,
+// and both arms are reachable. On Binance it is the ONLY key: neither
+// /fapi/v1/userTrades nor /api/v3/myTrades returns a client order id, so without
+// it every row inside the window is unattributable and the venue's own
+// cumulative could never be rebuilt into the projection. Task #174 (persisting
+// Ack.VenueOrderID) is a different lever on the same fact — it would let the
+// ABSENT path rule out our other orders' rows, which this parameter cannot,
+// because an order the venue denies holding has no id to compare against.
 //
 // # Ours WINS over unknown, and the ordering is the safety property
 //
 // An execution we can attribute is exposure, and it must not be masked by an
 // unrelated row we merely could not classify. So every row is examined before
 // the verdict is taken, rather than returning on the first ambiguous one.
-func attribute(rows []ports.VenueExecution, id ids.ClientOrderID) ([]ports.VenueExecution, attributionVerdict) {
+func attribute(rows []ports.VenueExecution, id ids.ClientOrderID, venueOrderID string) ([]ports.VenueExecution, attributionVerdict) {
 	var ours []ports.VenueExecution
 	unknown := false
 
@@ -582,9 +588,20 @@ func attribute(rows []ports.VenueExecution, id ids.ClientOrderID) ([]ports.Venue
 			// order with no ClientOrderID and Resolve loads its order from the
 			// repository that enforced it.
 			ours = append(ours, e)
+		case venueOrderID != "" && e.VenueOrderID == venueOrderID:
+			// The venue named no client order id — Binance's ordinary row — and
+			// its own id is the one the resolving query returned for this order.
+			// Guarded on the caller's id being non-empty rather than on the row's,
+			// because two empty strings comparing equal would attribute every
+			// unidentified row on the instrument to this order.
+			ours = append(ours, e)
 		case e.ClientOrderID != "":
 			// The venue named a DIFFERENT order. Ruled out — and this is the arm
 			// that makes Bybit's sweep conclusive where Binance's is not.
+		case venueOrderID != "" && e.VenueOrderID != "":
+			// The venue named a different order of ITS own. Ruled out on the same
+			// ground, and reachable only when this caller has an id to compare
+			// against; from the absent path the row falls through to unknown.
 		default:
 			unknown = true
 		}

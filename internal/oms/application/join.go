@@ -1,0 +1,493 @@
+package application
+
+import (
+	"fmt"
+	"sort"
+
+	"github.com/giiorg/arb-lab/internal/oms/application/ports"
+	"github.com/giiorg/arb-lab/internal/oms/domain"
+	"github.com/giiorg/arb-lab/internal/platform/clock"
+	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
+	"github.com/giiorg/arb-lab/internal/platform/ids"
+)
+
+// Joiner is the second half of build-spec §7.5's reconcile-only boot: the
+// replayed journal "joined to venue truth", and the net-delta invariant asserted
+// before trading resumes.
+//
+// # What the replay leaves it, and why the gap is the dangerous kind
+//
+// Replayer rebuilds STATE and cannot rebuild quantity: no fill is journaled, so
+// every replayed record carries a zero cumulative. That is not a missing number
+// with an obvious shape — it is a number whose absence reads as a conclusion.
+// §6.7's classifier folds those cumulatives into a residual, and a group of
+// zeroes is Determined and flat, which is the verdict that PERMITS a compensating
+// trade. A process that booted, replayed, and started classifying would size its
+// reductions against a position it cannot see.
+//
+// So this use case exists to turn the venue's own record into the projection's,
+// and the boot checklist is what holds the interval: GateNetDeltaAsserted is a
+// separate gate from GateJournalReplayed, the posture is the weakest over the
+// required set, and nothing may trade until this has run.
+//
+// # It joins THREE venue surfaces, and the third is what makes the join a check
+//
+// §7.5 names OrderByClientID, Fills, Positions and FundingLedger. The first two
+// answer "what did OUR orders do" and the third answers "what does the ACCOUNT
+// hold", and only the pair of them can disagree. An assertion built from our own
+// orders alone would be the shape this repo has paid for twice — a checker
+// recomputing the thing it checks — and it would agree with itself over an
+// account holding a position no order of ours explains, which is the exact
+// condition §7.5 alerts on.
+//
+// FundingLedger is deliberately not here. It settles in the quote asset on both
+// venues' linear perps, so it moves no position and can explain no delta, and a
+// port whose consumer does not exist yet is a shape frozen against nothing —
+// ports.OrderResolver's own argument. It lands with §8's funding accrual.
+//
+// # Not safe for concurrent use
+//
+// Dispatcher's and Resolver's argument, unchanged.
+type Joiner struct {
+	venue     ports.OrderResolver
+	positions ports.VenuePositions
+	orders    ports.OrderWriteRepository
+	clk       clock.Clock
+	account   string
+	scopes    []ports.PositionScope
+}
+
+// NewJoiner constructs the use case, refusing a missing port.
+//
+// # account is §5.1's first dedupe-key component, and this is its producer
+//
+// domain.Fill's Account had a consumer and no producer at all until here: §5.1
+// puts it first in the fill dedupe key and first in the hedge-group key, and
+// nothing in the system minted one. A venue execution does not carry it — the
+// venue knows which subaccount it answered for and does not repeat it per row —
+// so it is deployment configuration, exactly as §5.2 says (`subaccount id`), and
+// this is the layer that knows it.
+//
+// Empty is refused rather than defaulted, on the write repository's argument for
+// the same string: an empty account merges every subaccount into one dedupe
+// identity, so two subaccounts sharing a venue's per-instrument execution-ID
+// sequence would silently drop each other's fills as duplicates.
+//
+// # scopes are the position enumerations to assert over, and they are the
+// # deployment's rather than derived
+//
+// A scope names a venue, a derivative family and a settlement asset. It is not
+// derived from the instruments this system trades, because the derivation would
+// be exactly backwards: the enumeration exists to find exposure on instruments
+// NOTHING here knows about, and a scope computed from what we know cannot widen
+// past it. An empty list is legal and means "assert nothing", which the report
+// says out loud — see Join.Unasserted.
+func NewJoiner(v ports.OrderResolver, p ports.VenuePositions, orders ports.OrderWriteRepository, clk clock.Clock, account string, scopes ...ports.PositionScope) (*Joiner, error) {
+	if v == nil {
+		return nil, ErrResolverMissing
+	}
+	if p == nil {
+		return nil, ErrVenuePositionsMissing
+	}
+	if orders == nil {
+		return nil, ErrOrdersMissing
+	}
+	if clk == nil {
+		return nil, ErrClockMissing
+	}
+	if account == "" {
+		return nil, ErrJoinAccountUnset
+	}
+	for _, s := range scopes {
+		if err := s.Validate(); err != nil {
+			return nil, err
+		}
+	}
+	return &Joiner{
+		venue:     v,
+		positions: p,
+		orders:    orders,
+		clk:       clk,
+		account:   account,
+		scopes:    append([]ports.PositionScope(nil), scopes...),
+	}, nil
+}
+
+// PositionScope is ports.PositionScope, re-exported for the composition seam.
+//
+// A composition root has to NAME this type to configure which enumerations the
+// invariant is asserted over, and §3.6 rule 6's gate forbids any root importing
+// oms/application/ports — the port package is write authority as far as
+// singlewriter is concerned, and it polices the abstraction as well as the
+// adapter. An alias here is the narrow seam that keeps both true: the root names
+// application.PositionScope, which it may already import for ResolutionPolicy,
+// and no import edge to the policed package appears anywhere.
+type PositionScope = ports.PositionScope
+
+// InstrumentDelta is one instrument's disagreement between the venue's position
+// and the exposure this system's own orders account for.
+type InstrumentDelta struct {
+	// Instrument is which market.
+	Instrument ids.VenueInstrument
+
+	// Expected is the signed net this system's orders explain: the sum over
+	// every joined order on this instrument of its side applied to the
+	// cumulative quantity the venue reported for it.
+	Expected fixedpoint.Quantity
+
+	// Observed is the venue's own signed position.
+	Observed fixedpoint.Quantity
+
+	// Unexplained is Observed − Expected, and it is carried rather than left to
+	// the reader because it is the number the operator acts on: its SIGN says
+	// which way the account is exposed beyond what we can account for, and a
+	// report that made the reader subtract would be one where a subtraction in
+	// the wrong order is invisible.
+	Unexplained fixedpoint.Quantity
+}
+
+// Join is what one venue join established.
+type Join struct {
+	// Orders is how many orders were joined to the venue, and Fills is how many
+	// executions the join admitted into the projection.
+	//
+	// Duplicates counts the executions the fill ledger already held. It is not
+	// noise: this join re-sweeps from each order's authorization anchor on every
+	// boot rather than advancing a cursor, so on the second boot after a fill
+	// EVERY row is a duplicate — a run reporting fills and no duplicates where
+	// duplicates were expected means the projection lost them.
+	Orders     int
+	Fills      int
+	Duplicates int
+
+	// Absent are the orders the venue says it does not hold. They are NOT a
+	// failure and NOT a resolution: §5.3's stable-not-found rule is what decides
+	// what an absence licenses, through four gates this use case does not
+	// implement, so they are handed back for Resolver to run.
+	Absent []ids.ClientOrderID
+
+	// Incomplete are the orders whose executions sweep did not prove coverage
+	// through the instant it was asked about — a page budget spent, a venue that
+	// stopped answering. Retryable, and the reason the join must not conclude:
+	// a truncated sweep's silence is not evidence, and admitting the rows it did
+	// return would rebuild a cumulative that is right about everything except
+	// how much is missing.
+	Incomplete []ids.ClientOrderID
+
+	// Unattributed are the orders whose venue-reported cumulative disagrees with
+	// what this join could admit for them.
+	//
+	// It is the join's own cross-check and it uses two DIFFERENT venue surfaces:
+	// the order surface states a total, the executions sweep states the rows. A
+	// disagreement means an execution exists that the sweep did not attribute to
+	// this order — on Binance the ordinary cause is a trade list carrying no
+	// client order id for an order whose venue id we could not read — and the
+	// exposure it represents is real whether or not we can name its row.
+	Unattributed []ids.ClientOrderID
+
+	// Unexplained are the instruments whose venue position exceeds what our
+	// orders account for. §7.5's "unexplained position deltas", which "alert for
+	// operator clearance" and are "not auto-corrected".
+	Unexplained []InstrumentDelta
+
+	// Foreign are the venue's own symbols that this deployment does not trade at
+	// all, in the venue's spelling, sorted. §7.5's "foreign orders".
+	Foreign []string
+
+	// Unasserted are the instruments this join rebuilt fills for and could NOT
+	// compare against a position, because no position surface covers them.
+	//
+	// # It is a field rather than a doc comment because the gap is permanent
+	//
+	// Every spot leg is in it. Neither venue has a position surface for spot — a
+	// spot balance is not a position — and the balance that exists instead
+	// includes coins this system never bought, so it is comparable to our
+	// exposure only against a baseline nothing records. §7.5 lists `Positions`
+	// among the surfaces its join uses without saying that one of a
+	// cash-and-carry package's two legs is outside it.
+	//
+	// It does NOT block the gate, and that direction is deliberate: a leg whose
+	// invariant can never be asserted would hold the posture below trading for
+	// ever, which is this repo's recorded halts-itself-with-every-light-green
+	// failure. So the limit is reported on every boot instead, where an operator
+	// sees it, rather than inherited silently by whoever reads a clean report.
+	Unasserted []ids.VenueInstrument
+}
+
+// NeedsOperator reports whether this join found something §7.5 refuses to
+// auto-correct.
+//
+// The three conditions are one answer because §7.5 gives them one: foreign
+// orders and unexplained position deltas "alert for operator clearance (they are
+// not auto-corrected)", and an unattributed execution is an unexplained delta
+// that has not reached the position surface yet. None of them is lifted by
+// running this join again — the same account answers the same way — which is
+// precisely what boot.OutcomeNeedsOperator means.
+func (j Join) NeedsOperator() bool {
+	return len(j.Unattributed) > 0 || len(j.Unexplained) > 0 || len(j.Foreign) > 0
+}
+
+// Retryable reports whether the join left work a later attempt could finish.
+//
+// Separate from NeedsOperator because the two map to different boot outcomes
+// with different clearance rules: this one IS lifted by a re-run — a sweep that
+// ran out of pages gets further next time, and an absence is resolved by the
+// rule §5.3 owns. Reporting it as the latching outcome would demand an operator
+// for a venue that was merely busy.
+func (j Join) Retryable() bool {
+	return len(j.Absent) > 0 || len(j.Incomplete) > 0
+}
+
+// Join rebuilds executed quantity from the venue and asserts the net-delta
+// invariant.
+//
+// # It takes the ids whose state means the venue MAY hold a record
+//
+// Recovery.Dispatched, not Recovery.Unresolved. The unresolved set is §6.7's —
+// orders whose exposure is still uncertain — and it excludes every terminal,
+// which is where this system's executions actually are: a marketable IOC that
+// took part of the book ends Filled or Canceled with real fills, and the replay
+// gave it a zero cumulative like everything else. Joining only the uncertain
+// orders would rebuild the quantity for the orders that have none.
+//
+// # err != nil means the projection is PART-REBUILT and must not be traded on
+//
+// A venue query that fails, a repository that refuses a fill, a quantity whose
+// asset tag disagrees: each leaves the fills admitted so far in place, on
+// Rebuild's argument — they are what the venue said, and discarding them would
+// leave an operator inspecting a store that disagrees with both the log and the
+// exchange. The posture is what stops trading, not the emptiness of a map.
+func (j *Joiner) Join(dispatched []ids.ClientOrderID) (Join, error) {
+	report := Join{}
+	expected := make(map[ids.VenueInstrument]fixedpoint.Quantity, len(dispatched))
+
+	for _, id := range dispatched {
+		rec, err := j.orders.Load(id)
+		if err != nil {
+			return report, fmt.Errorf("join order %q: %w", id, err)
+		}
+		mayExist, err := rec.State.MayExistAtVenue()
+		if err != nil {
+			return report, fmt.Errorf("join order %q at %s: %w", id, rec.State, err)
+		}
+		if !mayExist {
+			// A Planned-only order was never dispatched, so there is nothing at the
+			// venue to ask about and a query would run to its deadline over an
+			// order this system merely has not sent. Refused rather than skipped:
+			// the caller derived this list from a state predicate, and one that
+			// disagrees means the two readings have drifted.
+			return report, fmt.Errorf("join order %q at %s: %w", id, rec.State, ErrOrderNotAtVenue)
+		}
+
+		rec, err = j.joinOne(rec, &report)
+		if err != nil {
+			return report, err
+		}
+		report.Orders++
+
+		signed, err := signedQuantity(rec.Order.Side, rec.Cumulative)
+		if err != nil {
+			return report, fmt.Errorf("join order %q executed: %w", id, err)
+		}
+		running, ok := expected[rec.Order.Instrument]
+		if !ok {
+			running = fixedpoint.ZeroQuantity(rec.Cumulative.Asset())
+		}
+		running, err = running.Add(signed)
+		if err != nil {
+			return report, fmt.Errorf("join order %q: %w", id, err)
+		}
+		expected[rec.Order.Instrument] = running
+	}
+
+	if err := j.assert(expected, &report); err != nil {
+		return report, err
+	}
+
+	sort.Slice(report.Unexplained, func(a, b int) bool {
+		return report.Unexplained[a].Instrument.Symbol < report.Unexplained[b].Instrument.Symbol
+	})
+	sort.Strings(report.Foreign)
+	sort.Slice(report.Unasserted, func(a, b int) bool {
+		return report.Unasserted[a].Symbol < report.Unasserted[b].Symbol
+	})
+	return report, nil
+}
+
+// joinOne reads one order's venue record and admits the executions belonging to
+// it, returning the record as the projection now holds it.
+func (j *Joiner) joinOne(rec ports.OrderRecord, report *Join) (ports.OrderRecord, error) {
+	id := rec.Order.ClientOrderID
+
+	status, err := j.venue.Resolve(rec.Order)
+	if err != nil {
+		return rec, fmt.Errorf("join order %q: %w", id, err)
+	}
+	if err := status.Presence.Validate(); err != nil {
+		return rec, fmt.Errorf("join order %q: %w", id, err)
+	}
+	if status.Presence == ports.VenueHasNoOrder {
+		// Handed to §5.3's rule rather than concluded here. An absence is the one
+		// answer this use case must not act on: it is the input to the four-gate
+		// stable-not-found contract, and reading it as "no executions" would be
+		// the inference §5.3 forbids in as many words.
+		report.Absent = append(report.Absent, id)
+		return rec, nil
+	}
+
+	// The sweep runs from the order's own anchor to the venue's clock now. The
+	// anchor's EARLIEST edge cannot be after the venue created the order, so no
+	// execution of ours precedes it; `now`'s earliest edge is the conservative
+	// end, because a window claiming to reach further than the clock can prove
+	// would make a truncated sweep look complete.
+	if err := rec.AuthorizedAt.Validate(); err != nil {
+		// The venue holds an order whose authorization instant this system does
+		// not have. The replay is what supplies it (§5.3's anchor, journaled since
+		// slice F1), so an unset one here means the record and the log disagree —
+		// and sweeping from the epoch instead would ask both venues for a window
+		// they refuse as too wide.
+		return rec, fmt.Errorf("join order %q: %w: %w", id, ports.ErrAuthorizationNeedsAnchor, err)
+	}
+	until := j.clk.ServerNow(rec.Order.Instrument.Venue)
+	if err := until.Validate(); err != nil {
+		return rec, fmt.Errorf("join order %q on %s: %w", id, rec.Order.Instrument.Venue, err)
+	}
+
+	sweep, err := j.venue.SweepExecutions(rec.Order, rec.AuthorizedAt.Earliest(), until.Earliest())
+	if err != nil {
+		return rec, fmt.Errorf("join order %q: %w", id, err)
+	}
+	if sweep.ProvenThrough.Before(until.Earliest()) {
+		report.Incomplete = append(report.Incomplete, id)
+		return rec, nil
+	}
+
+	ours, _ := attribute(sweep.Executions, id, status.VenueOrderID)
+	for _, e := range ours {
+		fill := domain.Fill{
+			ExecutionID: string(e.ExecutionID),
+			Account:     j.account,
+			Instrument:  rec.Order.Instrument,
+			Order:       id,
+			Quantity:    e.Quantity,
+			Price:       e.Price,
+			Fee:         e.Fee,
+			Ts:          e.At,
+		}
+		applied, changed, err := j.orders.ApplyFill(fill, rec.Version)
+		if err != nil {
+			return rec, fmt.Errorf("join order %q execution %q: %w", id, e.ExecutionID, err)
+		}
+		rec = applied
+		if changed {
+			report.Fills++
+			continue
+		}
+		report.Duplicates++
+	}
+
+	// The cross-check: the order surface's own total against the rows we could
+	// attribute. Two venue surfaces, and a disagreement is exposure that exists
+	// and cannot be named.
+	agree, err := rec.Cumulative.Cmp(status.Executed)
+	if err != nil {
+		return rec, fmt.Errorf("join order %q cumulative against venue: %w", id, err)
+	}
+	if agree != 0 {
+		report.Unattributed = append(report.Unattributed, id)
+	}
+	return rec, nil
+}
+
+// assert compares each configured scope's positions against what the join
+// accounted for.
+//
+// # Every instrument is answered for exactly once, and the loop is written to
+// # make that checkable
+//
+// Three sets are in play and they overlap: instruments we joined orders on,
+// instruments the venue reported a position for, and instruments in neither. An
+// instrument we hold orders on but that the venue did not report is FLAT at the
+// venue, which is a real answer here — the enumeration is not scoped by symbol,
+// so absence from it is the venue's statement rather than a question we failed
+// to ask. An instrument the venue reported that we joined no orders on has an
+// expected of zero, and every unit of it is unexplained.
+func (j *Joiner) assert(expected map[ids.VenueInstrument]fixedpoint.Quantity, report *Join) error {
+	asserted := make(map[ids.VenueInstrument]struct{}, len(expected))
+
+	for _, scope := range j.scopes {
+		venuePositions, err := j.positions.Positions(scope)
+		if err != nil {
+			return fmt.Errorf("assert net delta over %s: %w", scope, err)
+		}
+		report.Foreign = append(report.Foreign, venuePositions.Unrecognized...)
+
+		observed := make(map[ids.VenueInstrument]fixedpoint.Quantity, len(venuePositions.Positions))
+		for _, p := range venuePositions.Positions {
+			observed[p.Instrument] = p.Net
+		}
+
+		// Our instruments in this scope first, then the venue's rows that were not
+		// among them. The union is walked rather than either side alone: iterating
+		// only our own would miss a position on an instrument we hold no orders
+		// for, and iterating only the venue's would miss the opposite — a
+		// cumulative we rebuilt against a venue that reports nothing, which is the
+		// direction that means a fill was admitted twice.
+		for instrument, mine := range expected {
+			if instrument.Venue != scope.Venue || instrument.Product != scope.Product {
+				continue
+			}
+			theirs, ok := observed[instrument]
+			if !ok {
+				theirs = fixedpoint.ZeroQuantity(mine.Asset())
+			}
+			if err := j.compare(instrument, mine, theirs, report); err != nil {
+				return err
+			}
+			asserted[instrument] = struct{}{}
+		}
+		for instrument, theirs := range observed {
+			if _, done := asserted[instrument]; done {
+				continue
+			}
+			if err := j.compare(instrument, fixedpoint.ZeroQuantity(theirs.Asset()), theirs, report); err != nil {
+				return err
+			}
+			asserted[instrument] = struct{}{}
+		}
+	}
+
+	for instrument := range expected {
+		if _, done := asserted[instrument]; done {
+			continue
+		}
+		report.Unasserted = append(report.Unasserted, instrument)
+	}
+	return nil
+}
+
+// compare records one instrument's disagreement, if there is one.
+//
+// A zero difference is not recorded, and that is the whole shape of the
+// invariant: §7.5 asserts it before trading resumes, so the ordinary answer is
+// an empty report and a report is a list of exceptions.
+func (j *Joiner) compare(instrument ids.VenueInstrument, mine, theirs fixedpoint.Quantity, report *Join) error {
+	unexplained, err := theirs.Sub(mine)
+	if err != nil {
+		return fmt.Errorf("assert net delta on %s: %w", instrument.Symbol, err)
+	}
+	sign, err := unexplained.Sign()
+	if err != nil {
+		return fmt.Errorf("assert net delta on %s: %w", instrument.Symbol, err)
+	}
+	if sign == 0 {
+		return nil
+	}
+	report.Unexplained = append(report.Unexplained, InstrumentDelta{
+		Instrument:  instrument,
+		Expected:    mine,
+		Observed:    theirs,
+		Unexplained: unexplained,
+	})
+	return nil
+}

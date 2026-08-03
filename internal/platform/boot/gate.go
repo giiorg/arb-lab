@@ -133,11 +133,28 @@ func (g Gate) String() string {
 // How restrictive an outcome is (its posture ceiling) and whether a re-run of
 // the same check may lift it (whether it latches) are independent properties,
 // and this enum's members are points in that product rather than rungs of a
-// ladder. Three of the four combinations were named from the start; the fourth
-// — halted AND latching — arrived with slice F1's first producer of it, and is
-// OutcomeEvidenceUnusable. A reader who treats the members as ordered by
-// severity will reach for OutcomeFailed where that one belongs, and get a
-// refusal any retry can lift.
+// ladder. A reader who treats the members as ordered by severity will reach for
+// OutcomeFailed where a latching one belongs, and get a refusal any retry can
+// lift.
+//
+// The product has six cells over the three constraining postures, and it took
+// two slices to fill them because the FIRST gap was closed without tabulating:
+//
+//	                  freely re-reportable        latching
+//	halted            OutcomeFailed               OutcomeEvidenceUnusable  (F1)
+//	reconcile-only    OutcomeUnreported/Pending   OutcomeNeedsOperator
+//	stop-opening      OutcomeBlocksOpening        OutcomeProjectionStale   (F2)
+//
+// Slice F1 found the halted row's empty cell, added the member its own producer
+// needed, and stopped — leaving the stop-opening row in exactly the state the
+// halted row had been in, one slice after the argument for looking had been
+// written down. §6 step 7's rule is what fell in it: a send whose projection
+// write failed "HOLDS NEW TRADING until that order's state is re-derived from
+// the journal", which is stop-opening (safety execution must stay available —
+// the order may be filling) and is not liftable by a re-run, because the check
+// that would lift it recomputes from the projection that is known stale. That is
+// this repo's mirror rule on the axis it keeps missing: a fix applied to one row
+// of a table gets applied to the table.
 type Outcome uint8
 
 const (
@@ -214,6 +231,35 @@ const (
 	// openings "until the staged-float ledger is explicitly reconciled".
 	OutcomeBlocksOpening
 
+	// OutcomeProjectionStale is the gate refusing new exposure because the
+	// CURRENT-STATE PROJECTION is known to disagree with the venue: §6 step 7's
+	// dispatch that reached the venue and whose apply failed.
+	//
+	// [SPEC EDIT LANDED — v0.9.37] It blocks openings like OutcomeBlocksOpening
+	// and latches like OutcomeNeedsOperator, and it is the second empty cell of
+	// the product this type's doc tabulates. Each half of it is load-bearing in a
+	// different direction:
+	//
+	//   - Not halted. The order may be executing right now, so the safety verbs
+	//     must stay available; halting a process whose venue is filling an order
+	//     it cannot see is worse than the stale reading. §7.4's mode (a) is the
+	//     posture for exactly this — withhold new exposure, keep the ladder.
+	//   - Latching. The check that would lift it recomputes the net delta FROM
+	//     the projection, and the projection is the thing that is wrong: the
+	//     order sits at StatePlanned, which is the one non-terminal state
+	//     contributing NO possible delta (domain.ContributesPossibleDelta), so
+	//     the group reads determined and flat. A freely re-reportable outcome
+	//     would therefore be lifted by an invariant agreeing with its own
+	//     corrupted input, with nobody having looked — §46 §8e's rule arriving at
+	//     the boot checklist.
+	//
+	// What lifts it is the RE-DERIVATION §6 step 7 names: replaying the journal,
+	// which is what the process the log outlives does at boot. Inside a running
+	// process the only lift is Clear, and that is the correct asymmetry — a
+	// re-derivation is a fresh process with a fresh checklist, so the latch does
+	// not have to model it.
+	OutcomeProjectionStale
+
 	// OutcomePassed is the gate satisfied. Constrains nothing.
 	OutcomePassed
 )
@@ -244,6 +290,8 @@ func (o Outcome) String() string {
 		return "OutcomeNeedsOperator"
 	case OutcomeBlocksOpening:
 		return "OutcomeBlocksOpening"
+	case OutcomeProjectionStale:
+		return "OutcomeProjectionStale"
 	case OutcomePassed:
 		return "OutcomePassed"
 	}
@@ -255,7 +303,7 @@ func (o Outcome) posture() Posture {
 	switch o {
 	case OutcomeUnreported, OutcomePending, OutcomeNeedsOperator:
 		return PostureReconcileOnly
-	case OutcomeBlocksOpening:
+	case OutcomeBlocksOpening, OutcomeProjectionStale:
 		return PostureStopOpening
 	case OutcomePassed:
 		return PostureTrading
@@ -287,7 +335,7 @@ func (o Outcome) posture() Posture {
 // be lifted by the next report of the same check.
 func (o Outcome) latching() bool {
 	switch o {
-	case OutcomeNeedsOperator, OutcomeEvidenceUnusable:
+	case OutcomeNeedsOperator, OutcomeEvidenceUnusable, OutcomeProjectionStale:
 		return true
 	case OutcomeUnreported, OutcomePending, OutcomeFailed, OutcomeBlocksOpening, OutcomePassed:
 		return false

@@ -1,6 +1,84 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-03, session 84): **MILESTONE 3 SLICE F1 IS CLOSED — §7.5's REPLAY HALF IS EXECUTABLE, §5.3's ANCHOR HAS A JOURNAL RECORD KIND, AND THE BOOT VOCABULARY WAS MISSING THE OUTCOME THAT HALTS *AND* LATCHES. DOCS ARE v0.9.36; MARKER GREP IS ZERO.**
+## Status (2026-08-03, session 85): **MILESTONE 3 SLICE F2 IS CLOSED — §7.5's VENUE JOIN IS EXECUTABLE, THE FILL LEDGER IS REBUILT FROM VENUE TRUTH, AND THE NET-DELTA INVARIANT TURNS OUT TO COVER ONE LEG OF A TWO-LEG PACKAGE. DOCS ARE v0.9.37; MARKER GREP IS ZERO.**
+
+**The slice is done end to end.** `make ci` green on both modules, marker grep
+**0**, **31 mutations / 30 killed by the suite + 1 by the gate**, docs at
+**v0.9.37** across all five, the Georgian regenerated through its own invariant
+checker (16/16 parity tests). Design record **§56**, build record **§56i**.
+Tasks **#176** and **#178** are complete; **#179** and **#180** were raised at
+the close, and **#169**'s remainder is re-scoped onto the boot sequence.
+
+**WHAT LANDED.** `engine/venue` gains the position surface — `PositionScope`,
+`Position`, `PositionReport`, `PositionCodec` on both venues' codecs, embedded
+into `OrderCodec`; `ports` gains `VenuePositions` and widens `VenueExecution`
+with price and fee; `driven` gains the position ACL; `application` gains
+`Joiner`/`Join` and `attribute`'s second key; `domain` gains
+`OrderState.MayExistAtVenue`; `Recovery` gains `Dispatched`; `boot` gains
+`OutcomeProjectionStale`. Core **§7.5** edited, Profiles gains **§9**.
+
+**THE JOIN IS AN ENUMERATION, and that is a requirement rather than a shape.**
+§7.5 alerts on foreign orders *or* unexplained position deltas, and a
+per-instrument position read can only ask about instruments this system already
+knows it traded — the one set that cannot contain a foreign one. The endpoint
+VERSION is part of it: Binance's V2 and V3 `positionRisk` differ in what their
+SILENCE means (V3, verbatim: *"only symbol that has position or open orders will
+be returned"*), so only V3's absent row means *flat* — and on the same page it is
+also how a foreign resting ORDER becomes visible.
+
+**THE CUMULATIVE COMES FROM THE VENUE, WITH TWO KEYS AND A CROSS-CHECK.** F1 left
+every replayed order at zero, and zero is not a missing number there — §6.7 reads
+a group of zeroes as *Determined*, which is the verdict that PERMITS a
+compensating trade. The join resolves every order the venue may hold, attributes
+executions by client order id **or by the venue's own order id from that same
+query** (the only key Binance offers, since its trade rows carry no client id),
+and compares the order surface's stated cumulative against the rows it could
+attribute. It needs no transaction because it advances no cursor: **idempotence
+is what the live path buys with a transaction and this one gets from the venue.**
+
+**FINDING 1 — the invariant is stated over a hedge GROUP and venue truth exists
+for one leg.** No venue has a position surface for spot; the balance standing in
+its place holds coins this system never bought, so it needs a baseline nothing
+records. Using it anyway fails in the rare CONCLUDING direction — a pre-existing
+holding reads as our long and the group reads over-hedged. So the uncoverable
+instrument is **reported on every boot** (`Join.Unasserted`) and deliberately
+does **not** hold the posture, because a leg whose invariant can never be
+asserted would keep a correct system below trading for ever. Task **#179**.
+
+**FINDING 2 — the outcome vocabulary's SECOND empty cell, one slice after the
+first was filled without tabulating.** §6 step 7's hold is **stop-opening AND
+latching**: not halted, because the order may be executing and the safety verbs
+must stay available; not re-reportable, because the check that would lift it
+recomputes from the projection that is known stale — and the stale reading is the
+permissive one (`Planned` contributes no possible-delta interval). *An outcome
+vocabulary is a PRODUCT of the properties it decides, and a missing member is
+found by tabulating it rather than by waiting for a producer.*
+
+**THE BATTERY'S SURVIVOR WAS A COIN FLIP IN THE CODE.** Deleting the product
+comparison from the position lookup was caught only when Go's randomized map
+iteration happened to visit the spot instrument first. The answer is not more
+trials: the lookup now refuses a SECOND match, which is also a real configuration
+check (an unvalidated `ContractType` splits one instrument across two keys with
+different base assets — `domain.FillKey`'s recorded hazard). Three trials confirm
+determinism. The one gate-covered mutation is the trailing-return trap on
+`Outcome.latching`, verified by running `make lint` against the mutant with a
+clean positive control.
+
+**WHAT IS NEXT: slice G — parallel-IOC + testnet chaos (task #166), and it is
+where the BOOT SEQUENCE lands.** Nothing in this repo constructs a
+`boot.Checklist`, so both of recovery's report predicates —
+`application.ChainBroken` (F1) and `Outcome.HoldsNewTrading` (F2) — are consumed
+by nobody. Slice G builds the phase that reports them, which is also what
+discharges **#169**'s remainder and **#168**/#175's boot-posture items.
+
+**Standing, unchanged:** capture **PID 8495**, never rebuild over `bin/arblab`,
+`make ci` runs `-race` and `go test` does not, cap `TLC_WORKERS` at 4, read TLC
+figures only from a COMPLETED invocation. **§38f (task #158) is still the only
+clock-bound user decision**: ≥2 TB off-host, gate ~2026-09-30.
+
+---
+
+## Status (2026-08-03, session 84 — HISTORICAL): **MILESTONE 3 SLICE F1 IS CLOSED — §7.5's REPLAY HALF IS EXECUTABLE, §5.3's ANCHOR HAS A JOURNAL RECORD KIND, AND THE BOOT VOCABULARY WAS MISSING THE OUTCOME THAT HALTS *AND* LATCHES. DOCS ARE v0.9.36; MARKER GREP IS ZERO.**
 
 **The slice is done end to end.** `make ci` green on both modules, marker grep
 **0**, **31 mutations / 29 killed by the suite + 2 by the gate**, docs at

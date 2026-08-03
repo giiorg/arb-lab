@@ -192,12 +192,18 @@ type fakeOrders struct {
 	failApplyPlannedFrom int
 	failApplyPlannedErr  error
 	appliedPlanned       int
+
+	// fills is the dedupe identity §5.1 defines, held here rather than a count
+	// so that a repeat execution is a NO-OP and not a second application — the
+	// property §7.5's join depends on to be re-runnable.
+	fills map[domain.FillKey]struct{}
 }
 
 func newFakeOrders() *fakeOrders {
 	return &fakeOrders{
 		records:        make(map[ids.ClientOrderID]ports.OrderRecord),
 		failApplyState: make(map[domain.OrderState]error),
+		fills:          make(map[domain.FillKey]struct{}),
 	}
 }
 
@@ -280,11 +286,54 @@ func (r *fakeOrders) advance(id ids.ClientOrderID, expected int64, to domain.Ord
 	return rec, nil
 }
 
-// ApplyFill is unreachable from the dispatch and planning paths — §6's fill
-// handler is a later slice — and returns a refusal rather than a zero value so
-// that a use case which started calling it fails loudly here.
-func (r *fakeOrders) ApplyFill(domain.Fill, int64) (ports.OrderRecord, bool, error) {
-	return ports.OrderRecord{}, false, errors.New("fake repository: ApplyFill has no caller in this slice")
+// ApplyFill mirrors the adapter's contract, and it stopped being a refusal in
+// slice F2 when §7.5's join became its first caller.
+//
+// The three behaviours it has to reproduce are the ones the join's report is
+// derived from: a duplicate execution is (record, false, nil) rather than an
+// error, a no-op leaves the VERSION alone, and the cumulative is summed rather
+// than replaced. A fake that bumped the version on a duplicate would make the
+// join's second pass fail with a version conflict; one that replaced the
+// cumulative would make a two-fill order read as its last fill, and the
+// net-delta assertion would then report a delta the venue does not have.
+func (r *fakeOrders) ApplyFill(f domain.Fill, expected int64) (ports.OrderRecord, bool, error) {
+	if err := f.Validate(); err != nil {
+		return ports.OrderRecord{}, false, fmt.Errorf("fake repository: %w", err)
+	}
+	rec, ok := r.records[f.Order]
+	if !ok {
+		return ports.OrderRecord{}, false, fmt.Errorf("apply execution %q naming order %q: %w",
+			f.ExecutionID, f.Order, ports.ErrOrderUnknown)
+	}
+	if rec.Version != expected {
+		return ports.OrderRecord{}, false, fmt.Errorf("apply execution %q to order %q: %w",
+			f.ExecutionID, f.Order, ports.ErrVersionConflict)
+	}
+	key, err := f.Key()
+	if err != nil {
+		return ports.OrderRecord{}, false, fmt.Errorf("fake repository: %w", err)
+	}
+	if _, seen := r.fills[key]; seen {
+		return rec, false, nil
+	}
+	if r.fills == nil {
+		r.fills = make(map[domain.FillKey]struct{})
+	}
+	r.fills[key] = struct{}{}
+
+	cumulative := rec.Cumulative
+	if cumulative.Asset() == "" {
+		cumulative = fixedpoint.ZeroQuantity(f.Quantity.Asset())
+	}
+	total, err := cumulative.Add(f.Quantity)
+	if err != nil {
+		return ports.OrderRecord{}, false, fmt.Errorf("fake repository: %w", err)
+	}
+	rec.Cumulative = total
+	rec.Fills++
+	rec.Version++
+	r.records[f.Order] = rec
+	return rec, true, nil
 }
 
 var (

@@ -95,6 +95,18 @@ func (silentReader) Executions(context.Context, ids.VenueInstrument, venue.Instr
 
 var _ driven.VenueOrderReader = (*silentReader)(nil)
 
+// silentPositions is the venue's POSITION surface, refusing every call on
+// silentReader's argument: what this file claims about the join is that New
+// builds it over the same repository and clock, and the invariant's behaviour
+// belongs to application/join_test.go against port fakes.
+type silentPositions struct{}
+
+func (silentPositions) Positions(context.Context, venue.PositionScope, map[ids.VenueInstrument]venue.InstrumentAssets, ratelimit.Priority) (venue.PositionReport, error) {
+	return venue.PositionReport{}, errors.New("module test: the venue position surface is not exercised here")
+}
+
+var _ driven.VenuePositionReader = (*silentPositions)(nil)
+
 const venueOrderID = "V-77"
 
 // spotInstrument and perpInstrument are the two legs every fixture here uses,
@@ -135,6 +147,10 @@ func fullDeps(t *testing.T) oms.Deps {
 		JournalPath:     journalPath(t),
 		VenueOrders:     &countingPlacer{ack: venue.OrderAck{VenueOrderID: venueOrderID}},
 		VenueOrderReads: silentReader{},
+		VenuePositions:  silentPositions{},
+		PositionScopes: []application.PositionScope{
+			{Venue: "binance", Product: ids.ProductLinearPerp, Settle: "USDT"},
+		},
 		InstrumentAssets: map[ids.VenueInstrument]venue.InstrumentAssets{
 			spotInstrument(): {Base: "BTC", Quote: "USDT"},
 			perpInstrument(): {Base: "BTC", Quote: "USDT"},

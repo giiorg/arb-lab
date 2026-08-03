@@ -130,4 +130,14 @@ var (
 	// two fields would then disagree about whether the venue states a horizon,
 	// and the resolver's gate 4 branches on exactly that.
 	ErrSurfaceReachContradictory = errors.New("oms: surface reach states durations for an unpublished retention")
+
+	// ErrPositionScopeSettleUnset reports a position scope with no settlement
+	// asset.
+	//
+	// The zero-is-unusable rule at a seam where the zero value is ACCEPTED by one
+	// of the two venues: Binance enumerates the whole family and would answer an
+	// unset settlement asset perfectly well, so a caller that forgot it would see
+	// the invariant assert cleanly on one venue and fail on the other, which is
+	// the failure that gets diagnosed as a Bybit problem.
+	ErrPositionScopeSettleUnset = errors.New("oms: position scope names no settlement asset")
 )

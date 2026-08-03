@@ -188,6 +188,55 @@ func (s OrderState) IsTerminal() (bool, error) {
 // IsTerminal's reason: without them the false group here — which is where
 // Planned lives, and Planned is the entire finding — cannot be checked by any
 // test.
+// MayExistAtVenue reports whether an order in this state may have a record at
+// the venue — §7.5's join asks exactly this, and it is a THIRD partition of the
+// same twelve states.
+//
+// # Its true-set is every state but Planned, and that is not the same claim as
+// # "not Planned"
+//
+// The sentence it encodes is §5.3's: "a Planned-only order was never dispatched
+// (no venue order can exist)". Every other state was reached by a journaled
+// authorization, which §6 step 6 fsyncs BEFORE the network write precisely so
+// that a process dying mid-call leaves evidence — so from DispatchAuthorized
+// onward the venue may hold an order whatever this system last heard.
+//
+// The terminals are in the true set, and they are the members a reader deletes
+// first. StateFilled and StateCanceled are where this system's ordinary
+// executions live — a marketable IOC that took part of the book ends terminal
+// with real fills — and §7.5's replay rebuilds STATE without quantity, so a
+// recovered Filled order carries a zero cumulative and a venue position nothing
+// accounts for. StateRejected and StateAbsentAfterFinality are in it too, on the
+// weaker ground that costs a query and nothing else: an execution surfacing
+// against either of them supersedes the state (§3.0's venue-reality rule, which
+// CanTransition implements as the only edges leaving a terminal), and the
+// opposite reading skips the query that would find it.
+//
+// # Why it is not ContributesPossibleDelta, whose false-set looks similar
+//
+// That predicate answers whether an order's exposure is still UNCERTAIN, so it
+// excludes every terminal. This one answers whether the venue can be ASKED, and
+// a terminal order is precisely the one whose executions are settled fact. Using
+// the §6.7 predicate here would skip the join for every finished order and
+// rebuild a cumulative of zero for the fills that actually moved the position.
+//
+// The (bool, error) shape and the leading Validate are IsTerminal's, for
+// IsTerminal's reason.
+func (s OrderState) MayExistAtVenue() (bool, error) {
+	if err := s.Validate(); err != nil {
+		return false, err
+	}
+	switch s {
+	case StateDispatchAuthorized, StateSubmitted, StateSubmissionUnknown,
+		StateAcknowledged, StatePartiallyFilled, StateCancelPending, StateCancelUnknown,
+		StateFilled, StateCanceled, StateRejected, StateAbsentAfterFinality:
+		return true, nil
+	case StatePlanned:
+		return false, nil
+	}
+	return false, fmt.Errorf("%q: %w", string(s), ErrOrderStateUnhandled)
+}
+
 func (s OrderState) ContributesPossibleDelta() (bool, error) {
 	if err := s.Validate(); err != nil {
 		return false, err

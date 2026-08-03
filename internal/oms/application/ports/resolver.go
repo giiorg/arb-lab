@@ -180,11 +180,33 @@ type VenueOrder struct {
 
 // VenueExecution is one fill as the sweep reports it.
 //
-// It is not domain.Fill: that type carries an Account, which nothing on this
-// path can populate, and admitting a fill is a transaction §5.3 requires to
-// include the recovery cursor and the outbox. This type exists to answer one
-// question — does the sweep contain an execution belonging to this order — and
-// carries what answering it needs.
+// It is not domain.Fill, and it is now WIDE ENOUGH TO BECOME ONE. The original
+// narrowing said: "that type carries an Account, which nothing on this path can
+// populate, and admitting a fill is a transaction §5.3 requires to include the
+// recovery cursor and the outbox. This type exists to answer one question — does
+// the sweep contain an execution belonging to this order."
+//
+// [SPEC EDIT LANDED — v0.9.37] Both halves of that argument have expired, and a
+// narrowing's REASON is the load-bearing part nobody re-derives (§53's recorded
+// shape, arriving on a type rather than on a rejected column):
+//
+//   - The account had no producer because nothing owned one. The write
+//     repository has held one since slice E, where §5.1's hedge-group key turned
+//     out to have three components and an order record to carry two, and §7.5's
+//     join is the first caller that both knows the account and holds venue
+//     executions.
+//   - The transaction is a requirement on the LIVE fill path, where losing the
+//     write loses the fill: the recovery cursor advances, and the execution is
+//     never read again. §7.5's join advances no cursor — it re-sweeps from each
+//     order's authorization anchor on every boot — so its admission is
+//     re-derivable, and the fill ledger's dedupe on (account, venue, product,
+//     symbol, execution_id) makes the repeat a no-op. Idempotence is what the
+//     live path had to buy with a transaction and this one gets from the venue.
+//
+// So Price and Fee are carried now. They are not decoration: domain.Fill refuses
+// a zero-valued price or an untagged fee, which is the money kernel's
+// zero-is-unusable rule doing exactly its job — an unpopulated fee reads as a
+// free execution and an unpopulated price as one that happened at zero.
 type VenueExecution struct {
 	// ExecutionID is the venue's immutable fill id, unique only WITHIN an
 	// instrument.
@@ -203,6 +225,17 @@ type VenueExecution struct {
 	// execution.
 	Quantity fixedpoint.Quantity
 	At       time.Time
+
+	// Price is the execution price and Fee is what the venue charged, in
+	// whatever asset it charged in.
+	//
+	// The fee may be NEGATIVE — a maker rebate is a real outcome on both venues —
+	// so nothing here or downstream may take its absolute value. Its asset tag is
+	// the reason §5.1 has no separate FeeAsset column, and it is why this field
+	// is a Money rather than a decimal: a Binance fill paid in BNB against a USDT
+	// notional reconciles to two different numbers the moment the tag is dropped.
+	Price fixedpoint.Price
+	Fee   fixedpoint.Money
 }
 
 // ExecutionSweep is what one bounded sweep proved.

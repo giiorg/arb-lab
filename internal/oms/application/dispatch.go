@@ -158,6 +158,27 @@ type Outcome struct {
 	Applied bool
 }
 
+// HoldsNewTrading reports whether this dispatch's result requires new trading to
+// be held — §6 step 7's rule, as a predicate rather than as a paragraph.
+//
+// # The "it reached the venue" half is carried by the Outcome EXISTING
+//
+// Dispatch's contract is that err != nil means NOTHING WAS SENT, so a caller
+// holding an Outcome at all is one whose Place ran exactly once. That is why this
+// is `!Applied` and not a conjunction: the other conjunct is the signature's. A
+// Sent field beside it would be a second copy of a fact the contract already
+// states, and the copy is the one that goes stale.
+//
+// # What a caller does with it, and why the mapping is not here
+//
+// boot.OutcomeProjectionStale — openings withheld, safety execution retained,
+// latched until the order's state is re-derived from the journal. That mapping
+// lives with the boot sequence rather than in this package, on ChainBroken's
+// precedent: application states the fact, and the composition root that owns a
+// boot.Checklist reports the outcome. Neither consumer exists yet — nothing in
+// this repo constructs a checklist — and they are one slice's work.
+func (o Outcome) HoldsNewTrading() bool { return !o.Applied }
+
 // Dispatch submits one planned order to its venue, exactly once.
 //
 // # It takes an id and a version, NOT an order, and that is the slice's central

@@ -242,4 +242,26 @@ var (
 	// touches zero and doing nothing is exactly right. Both refuse, and merging
 	// them would report "no safe action exists" for a group that is provably fine.
 	ErrFloorMagnitudeZero = errors.New("oms: the interval's nearest-zero endpoint is zero, so no floor is issuable")
+
+	// ErrVenuePositionsMissing reports a joiner constructed with no position
+	// source. It is a separate sentinel from ErrResolverMissing because the two
+	// ports answer different questions and only one of them can disagree with
+	// us: without the enumeration the join still rebuilds every quantity and
+	// asserts nothing, which is the failure that looks like a clean boot.
+	ErrVenuePositionsMissing = errors.New("oms: joiner has no venue position source")
+
+	// ErrJoinAccountUnset reports a joiner with no subaccount to attribute fills
+	// to. §5.1 puts the account first in the fill dedupe key, and an empty one
+	// merges two subaccounts that share a venue's per-instrument execution-ID
+	// sequence — so the second subaccount's fills are dropped as duplicates.
+	ErrJoinAccountUnset = errors.New("oms: joiner has no account to attribute fills to")
+
+	// ErrOrderNotAtVenue reports a join asked about an order whose state means no
+	// venue order can exist — StatePlanned, and only that.
+	//
+	// Refused rather than skipped: the caller derives its list from the same
+	// domain predicate this checks, so an order that fails it means the two
+	// readings have drifted, and the cost of guessing is a resolving query that
+	// runs to its deadline over an order this system has merely not sent.
+	ErrOrderNotAtVenue = errors.New("oms: order's state means no venue order can exist")
 )

@@ -160,6 +160,32 @@ type Deps struct {
 	// cannot.
 	VenueOrderReads driven.VenueOrderReader
 
+	// VenuePositions is the venue's POSITION surface — the same
+	// *venue.OrderClient again, and a third field for VenueOrderReads' reason
+	// one step further.
+	//
+	// §7.5's net-delta invariant is asserted against it, and the use case that
+	// asserts it must not be able to place an order or to re-resolve one: an
+	// unexplained position that a use case could go looking for explanations for
+	// is one it can explain away. Three capabilities, three adapters, one client.
+	VenuePositions driven.VenuePositionReader
+
+	// PositionScopes are the enumerations §7.5's net-delta invariant is asserted
+	// over: a venue, a derivative family and a settlement asset each.
+	//
+	// A root's business, and NOT derivable from InstrumentAssets, which is the
+	// distinction worth stating because the two look like the same list. The
+	// enumeration exists to find exposure on instruments this system has never
+	// heard of, so a scope computed from the instruments it trades could not
+	// widen past them — the foreign position would be outside every scope, and
+	// the invariant would assert cleanly over the account that holds it.
+	//
+	// An empty list is legal and asserts nothing. It is not defaulted to "every
+	// family in InstrumentAssets" for the reason above, and the omission is
+	// visible rather than silent: application.Join reports every instrument it
+	// could not assert against a position surface.
+	PositionScopes []application.PositionScope
+
 	// InstrumentAssets is the base/quote decomposition of every instrument this
 	// deployment resolves orders for.
 	//
@@ -272,6 +298,19 @@ type Module struct {
 	// something New could do for itself — see New.
 	Recover *application.Replayer
 
+	// Join is §7.5's reconcile-only boot, second half: the replayed journal
+	// joined to venue truth, and the net-delta invariant asserted before trading
+	// resumes.
+	//
+	// It runs AFTER Recover and the ordering is not a preference. Recover
+	// rebuilds state without quantity — no fill is journaled — so between the two
+	// calls every order carries a zero cumulative, which Classify reads as a flat
+	// group and a flat group is where compensating trades are permitted. Join is
+	// what turns the venue's own record into that quantity, and boot.Checklist's
+	// two separate gates are what hold the interval: GateJournalReplayed and
+	// GateNetDeltaAsserted, reduced to the weakest posture over both.
+	Join *application.Joiner
+
 	// journal is held only so Close can release it, and it is unexported for
 	// the same reason ports.OrderWriteRepository never becomes a field here: a
 	// *driven.SQLiteJournal handed to a root is a write path to order state
@@ -374,12 +413,26 @@ func New(deps Deps) (*Module, error) {
 		return nil, errors.Join(fmt.Errorf("oms: replayer: %w", err), journal.Close())
 	}
 
+	// The position surface's ACL, and the third capability taken off the same
+	// venue client. The joiner holds the read gateway too — the SAME adapter the
+	// resolver holds, because the join reads orders and executions through
+	// exactly the port §5.3 already narrowed to the two methods recovery may use.
+	positions, err := driven.NewVenuePositions(deps.VenuePositions, deps.InstrumentAssets)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("oms: venue positions gateway: %w", err), journal.Close())
+	}
+	joiner, err := application.NewJoiner(reader, positions, orders, deps.Clock, deps.Account, deps.PositionScopes...)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("oms: joiner: %w", err), journal.Close())
+	}
+
 	return &Module{
 		Plan:     planner,
 		Dispatch: dispatcher,
 		Resolve:  resolver,
 		Classify: classifier,
 		Recover:  replayer,
+		Join:     joiner,
 		journal:  journal,
 	}, nil
 }
