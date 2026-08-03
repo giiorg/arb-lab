@@ -436,6 +436,26 @@ func (o Outcome) latching() bool {
 	return true
 }
 
+// verdict reports whether this outcome carries a RESULT: the check ran and has
+// an answer, as opposed to nobody having reported (Unreported) or the work
+// being under way (Pending).
+//
+// The property is the type doc's third axis, given a predicate. It names every
+// member on latching's argument: a member added later must choose, and the
+// trailing return treats a corrupted value as verdict-bearing — posture()
+// already halts on the same value, and a corrupted enum that constrained
+// nothing would be the one reading of it that costs something.
+func (o Outcome) verdict() bool {
+	switch o {
+	case OutcomeUnreported, OutcomePending:
+		return false
+	case OutcomeFailed, OutcomeEvidenceUnusable, OutcomeIncomplete,
+		OutcomeNeedsOperator, OutcomeBlocksOpening, OutcomeProjectionStale, OutcomePassed:
+		return true
+	}
+	return true
+}
+
 // Checklist holds §7.5's preconditions and the outcome most recently reported
 // for each.
 //
@@ -548,6 +568,55 @@ func (c *Checklist) Posture() Posture {
 		postures = append(postures, c.outcomes[g].posture())
 	}
 	return Weakest(postures...)
+}
+
+// PermitsNow reports whether the checks that have CONCLUDED permit act a — the
+// running-process read, and deliberately not Posture().Permits.
+//
+// # Why a second fold exists, and why its default is the opposite of Posture's
+//
+// Posture reduces over the REQUIRED roster, so a gate nobody reported holds the
+// answer down — default-deny, which is right at boot, where "unknown" must mean
+// "not yet". Read the same way in a RUNNING process it answers reconcile-only
+// forever on any deployment whose roster declares gates without producers,
+// which is every deployment §12's sequencing produces — G2 found this wiring
+// the first consumer and settled it for the exit code (see the reconcile root's
+// ExitClass); this method is the same produced-versus-structural split for a
+// write path that must ask per act rather than per run.
+//
+// So the fold here is over VERDICTS: the gates whose outcome reports a result
+// (the type doc's third axis). An Unreported or Pending gate says nothing and
+// constrains nothing; every concluded one imposes its ceiling, latched or not —
+// a non-latching OutcomeFailed halts new trading exactly as hard as a latch
+// does, it merely lifts differently.
+//
+// # Fail-closed on an empty verdict set
+//
+// A fold whose members are only the gates with answers has PostureTrading for
+// its identity, and a fresh checklist would therefore answer "everything is
+// permitted" — the precise "nothing was checked and everything passed" collapse
+// Weakest's identity exists to refuse. So no verdict at all refuses every act:
+// a process whose checklist holds no concluded check is a process §7.5's boot
+// has not run in, and nothing is what it is permitted to do. The two readings
+// of "no information" are opposite here and at Posture, and both are the safe
+// direction for their own question.
+func (c *Checklist) PermitsNow(a Act) bool {
+	verdicts := 0
+	weakest := PostureTrading
+	for _, g := range c.required {
+		o := c.outcomes[g]
+		if !o.verdict() {
+			continue
+		}
+		verdicts++
+		if p := o.posture(); p < weakest {
+			weakest = p
+		}
+	}
+	if verdicts == 0 {
+		return false
+	}
+	return weakest.Permits(a)
 }
 
 // Latched returns the required gates whose outcome only an operator can lift, in

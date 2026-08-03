@@ -274,6 +274,13 @@ type Module struct {
 	// in-process double-dispatch backstop is per process rather than per path.
 	// An order sent through either path and re-presented to the other is
 	// refused even when the projection is the thing that broke (§59b).
+	//
+	// It takes the root's boot.Checklist per call, and the parameter is §6
+	// step 7 living where forgetting is inexpressible: a sent leg whose apply
+	// failed files OutcomeProjectionStale at the fan-in, and the admission
+	// read refuses the next Opening package over the latch while a Safety
+	// package still passes. The root's own verdict gate runs once per run;
+	// this one runs per package.
 	Execute *application.Executor
 
 	// Resolve is §5.3's venue-specific stable-not-found rule: the only way an

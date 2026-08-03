@@ -1,6 +1,58 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-03, session 88): **MILESTONE 3 SLICE G3 IS CLOSED — §47f's ROSTER IS COMPLETE. THE PARALLEL TWO-LEG MARKETABLE-IOC EXECUTOR EXISTS, `arblab exercise run` IS THE FIRST BINARY THAT DISPATCHES, THE PROCESS-KILL-MID-IOC CHAOS TEST PROVES A–F COMPOSED — AND THE IN-PROCESS DOUBLE-DISPATCH BACKSTOP HAD SILENTLY SCOPED ITSELF "PER PATH" THE MOMENT A SECOND DISPATCH PATH EXISTED. DOCS ARE v0.9.40; MARKER GREP IS ZERO.**
+## Status (2026-08-03, session 89): **#169 IS CLOSED — §6 STEP 7's HOLD HAS ITS LIVE PRODUCER AND ITS READER, BOTH INSIDE THE WRITE PATH: THE EXECUTOR FILES THE PROJECTION-STALE LATCH AT ITS FAN-IN AND REFUSES THE NEXT OPENING AT ITS OWN ADMISSION — AND BOTH OBVIOUS ADMISSION READS WERE WRONG, EACH IN ITS OWN DIRECTION. DOCS REMAIN v0.9.40; NO SPEC EDIT OWED; MARKER GREP IS ZERO.**
+
+**The slice is done end to end.** `make ci` green on both modules, marker grep
+**0**, **16 mutations / 16 kills** (one `TIMEOUT!!` re-aimed with
+`MUTATE_TIMEOUT=240s` — the chaos test's bounded waits legitimately exceed the
+60s default when the mutant sends nothing — then caught). Design record
+**§60**, battery **§60e**. Task **#169** is discharged. No spec document
+changed, so the set stays **v0.9.40** and the Georgian needed no regeneration
+(§60f records the reading pass).
+
+**WHAT LANDED.** `Executor.Execute` takes the root's `boot.Checklist` per call
+(the Reconciler's settlement applied to the live path): its fan-in files
+`GateNetDeltaAsserted → OutcomeProjectionStale` when a SENT leg's apply failed
+— the producer `Outcome.Applied`'s doc has promised since v0.9.30 — and its
+admission (`admitPackage`, before any fsync) refuses a package whose class the
+concluded checks do not permit, `ErrExecutionHeld`. `boot.Checklist` gains
+**`PermitsNow(Act)`**: a fold over VERDICT-BEARING outcomes only (`verdict()`
+is the outcome table's third axis as a predicate), weakest ceiling vs the act,
+**fail-closed on an empty verdict set**. `reconcile.Runner` gains
+`Checklist()`; the exercise root hands it through; urgency maps to act by
+definition (`actFor`). So in one process: stale execute → latch → next opening
+refused with nothing sent → safety package still executes — asserted end to end
+on one checklist with fresh legs, so the refusal can only be the latch's.
+
+**THE FINDING — both plain admission reads are wrong, in opposite
+directions.** `Posture().Permits(ActOpen)` is §59i(iv)'s dead driver (five
+producer-less gates pin the full fold at reconcile-only forever). But the
+latch-read that G2's ExitClass made canonical is wrong the OTHER way at a
+per-act gate: a non-latching `OutcomeFailed` is a concluded HALTED verdict with
+`Latched()` empty — an admission built on the latch admits an opening over it —
+and the latch axis cannot say that `EvidenceUnusable` refuses safety execution
+while `ProjectionStale` admits it; the posture axis does. Hence the verdict
+fold. And the fold's identity is the third rule: only-the-answers folds to
+PostureTrading on a FRESH checklist — Weakest's "nothing was checked and
+everything passed" collapse reappearing one method over — so zero verdicts
+refuses every act: a checklist no check has concluded in belongs to a process
+§7.5's boot has not run in.
+
+**WHAT IS NEXT.** The candidates nearest the money, unchanged: **#170** (the
+§7.6 418/IP-ban alert no code raises), **#174** (persist `Ack.VenueOrderID`),
+**#179** (the spot leg's exposure baseline), **#171** (Bybit testnet
+credential). The §9 acceptance campaign remains runnable. A future `risk`
+context's pre-trade gate now has its seam (`admitPackage`) and its read
+(`PermitsNow`) — §60g.
+
+**Standing, unchanged:** capture **PID 8495**, never rebuild over `bin/arblab`,
+`make ci` runs `-race`, cap `TLC_WORKERS` at 4, docs/i18n parity is `bun test`.
+**§38f (task #158) is still the only clock-bound user decision** (≥2 TB
+off-host, gate ~2026-09-30).
+
+---
+
+## Status (2026-08-03, session 88 — HISTORICAL): **MILESTONE 3 SLICE G3 IS CLOSED — §47f's ROSTER IS COMPLETE. THE PARALLEL TWO-LEG MARKETABLE-IOC EXECUTOR EXISTS, `arblab exercise run` IS THE FIRST BINARY THAT DISPATCHES, THE PROCESS-KILL-MID-IOC CHAOS TEST PROVES A–F COMPOSED — AND THE IN-PROCESS DOUBLE-DISPATCH BACKSTOP HAD SILENTLY SCOPED ITSELF "PER PATH" THE MOMENT A SECOND DISPATCH PATH EXISTED. DOCS ARE v0.9.40; MARKER GREP IS ZERO.**
 
 **The slice is done end to end.** `make ci` green on both modules, marker grep
 **0**, **24 mutations / 23 caught + 1 made inexpressible** (two `NOBUILD!!` and

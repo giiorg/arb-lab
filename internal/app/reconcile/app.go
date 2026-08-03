@@ -246,9 +246,9 @@ func declaredGates() []boot.Gate {
 //
 // It is exported for exactly one composing caller — the exercise root, which
 // runs this same boot and then executes on its verdict — and the exported
-// surface is deliberately read-mostly: Sequence to run, Module, Halted and
-// BootReport to read. The phases stay unexported; a caller cannot reorder
-// them.
+// surface is deliberately read-mostly: Sequence to run; Module, Halted and
+// BootReport to read; Checklist for the execute step's use cases to report
+// into. The phases stay unexported; a caller cannot reorder them.
 type Runner struct {
 	cfg    Config
 	clk    *clock.Wall
@@ -443,6 +443,18 @@ func (r *Runner) Module() *oms.Module { return r.module }
 
 // Halted reports whether some phase concluded the ones after it must not run.
 func (r *Runner) Halted() bool { return r.halted }
+
+// Checklist is the boot's checklist, which outlives the sequence on purpose: a
+// composing root that executes after a clean verdict hands it to the use cases
+// that report into it — Module.Execute files §6 step 7's hold against it and
+// reads it back per package — so a latch a runtime finding earns lands on the
+// same record the boot's verdict was derived from, and both the executor's
+// admission read and this root's next BootReport see it. It is the live value,
+// never a copy; Clear travels with it, and Clear remains the operator's alone
+// (§7.5) the same way the phases remain unexported — a root is trusted with
+// the sharper tool because the blunt one would make the executor's filing
+// unreachable.
+func (r *Runner) Checklist() *boot.Checklist { return r.checklist }
 
 // BootReport is what the boot established so far, readable at any point — a
 // halted or failed sequence still carries its verdict, which is the

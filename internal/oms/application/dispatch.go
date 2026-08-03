@@ -187,14 +187,18 @@ type Outcome struct {
 // Sent field beside it would be a second copy of a fact the contract already
 // states, and the copy is the one that goes stale.
 //
-// # What a caller does with it, and why the mapping is not here
+// # What a caller does with it, and where the mapping lives
 //
 // boot.OutcomeProjectionStale — openings withheld, safety execution retained,
-// latched until the order's state is re-derived from the journal. That mapping
-// lives with the boot sequence rather than in this package, on ChainBroken's
-// precedent: application states the fact, and the composition root that owns a
-// boot.Checklist reports the outcome. Neither consumer exists yet — nothing in
-// this repo constructs a checklist — and they are one slice's work.
+// latched until the order's state is re-derived from the journal. Both of §6
+// step 7's paths now have their producer, and neither is this method's caller
+// remembering to file: the RECOVERY path is the Reconciler's, which reports
+// the stale set its replay found; the LIVE path is the Executor's fan-in,
+// which files the same gate and outcome when a leg it sent answers false
+// here, and whose admission read refuses the next Opening package over the
+// latch. A caller dispatching outside the package path holds the same duty
+// this predicate states — which is one reason the package path is the one
+// §6 step 6 sends through.
 func (o Outcome) HoldsNewTrading() bool { return !o.Applied }
 
 // Dispatch submits one planned order to its venue, exactly once.

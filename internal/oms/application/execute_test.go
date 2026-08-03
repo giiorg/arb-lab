@@ -10,6 +10,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/oms/application/ports"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
 	"github.com/giiorg/arb-lab/internal/platform/apperror"
+	"github.com/giiorg/arb-lab/internal/platform/boot"
 	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
@@ -64,6 +65,25 @@ func newExecutor(t *testing.T) (*application.Executor, *fakeJournal, *fakePlacer
 		t.Fatalf("NewExecutor: %v", err)
 	}
 	return e, j, p, r, d
+}
+
+// bootedChecklist is a checklist in the state a clean §7.5 boot leaves it for
+// this executor: the net-delta gate concluded Passed, and a second gate left
+// Unreported — the producer-less shape every real deployment's roster has, so
+// every test below also quietly asserts that silence does not constrain the
+// admission read. Fresh per call: two Execute calls that must share a latch
+// share the VALUE, and the ones that must not (the authority probes) take a
+// fresh one, each with a comment saying why.
+func bootedChecklist(t *testing.T) *boot.Checklist {
+	t.Helper()
+	c, err := boot.NewChecklist(boot.GateNetDeltaAsserted, boot.GateWriterAuthority)
+	if err != nil {
+		t.Fatalf("NewChecklist: %v", err)
+	}
+	if err := c.Report(boot.GateNetDeltaAsserted, boot.OutcomePassed); err != nil {
+		t.Fatalf("Report(NetDeltaAsserted, Passed): %v", err)
+	}
+	return c
 }
 
 // refs builds DispatchRefs at version 1 — where Plan leaves every record — in
@@ -121,7 +141,7 @@ func TestExecuteDispatchesEveryLegExactlyOnce(t *testing.T) {
 	plant(t, r, legSpot)
 	plant(t, r, legPerp)
 
-	ex, err := e.Execute(refsFor(legSpot, legPerp), ports.UrgencyOpening)
+	ex, err := e.Execute(bootedChecklist(t), refsFor(legSpot, legPerp), ports.UrgencyOpening)
 	if err != nil {
 		t.Fatalf("Execute = %v, want nil", err)
 	}
@@ -195,9 +215,13 @@ func TestExecuteRunsLegsInParallel(t *testing.T) {
 	plant(t, r, legSpot)
 	plant(t, r, legPerp)
 
+	// Built on the test goroutine: the helper may t.Fatal, which only the test
+	// goroutine is permitted to do.
+	checklist := bootedChecklist(t)
+
 	done := make(chan application.Execution, 1)
 	go func() {
-		ex, err := e.Execute(refsFor(legSpot, legPerp), ports.UrgencyOpening)
+		ex, err := e.Execute(checklist, refsFor(legSpot, legPerp), ports.UrgencyOpening)
 		if err != nil {
 			t.Errorf("Execute = %v, want nil", err)
 		}
@@ -251,7 +275,7 @@ func TestExecuteThreadsTheCallersUrgency(t *testing.T) {
 	plant(t, r, legSpot)
 	plant(t, r, legPerp)
 
-	if _, err := e.Execute(refsFor(legSpot, legPerp), ports.UrgencySafety); err != nil {
+	if _, err := e.Execute(bootedChecklist(t), refsFor(legSpot, legPerp), ports.UrgencySafety); err != nil {
 		t.Fatalf("Execute = %v", err)
 	}
 	if len(p.urgencies) != 2 {
@@ -285,7 +309,7 @@ func TestExecuteRefusesAnInvalidUrgency(t *testing.T) {
 	leg := packageOrder(t, 0, "0.5")
 	plant(t, r, leg)
 
-	if _, err := e.Execute(refsFor(leg), ports.Urgency("routine")); !errors.Is(err, ports.ErrUrgencyInvalid) {
+	if _, err := e.Execute(bootedChecklist(t), refsFor(leg), ports.Urgency("routine")); !errors.Is(err, ports.ErrUrgencyInvalid) {
 		t.Fatalf("Execute with an undeclared urgency = %v, want ErrUrgencyInvalid", err)
 	}
 	refusalAsserts(t, j, p)
@@ -295,7 +319,7 @@ func TestExecuteRefusesAnEmptyPackage(t *testing.T) {
 	t.Parallel()
 
 	e, j, p, _, _ := newExecutor(t)
-	if _, err := e.Execute(nil, ports.UrgencyOpening); !errors.Is(err, application.ErrPackageEmpty) {
+	if _, err := e.Execute(bootedChecklist(t), nil, ports.UrgencyOpening); !errors.Is(err, application.ErrPackageEmpty) {
 		t.Fatalf("Execute(nil) = %v, want ErrPackageEmpty", err)
 	}
 	refusalAsserts(t, j, p)
@@ -309,7 +333,7 @@ func TestExecuteRefusesAForeignID(t *testing.T) {
 	plant(t, r, leg)
 
 	refs := []application.DispatchRef{{ID: "autoclose-1234567890", Version: 1}}
-	if _, err := e.Execute(refs, ports.UrgencyOpening); !errors.Is(err, application.ErrOrderNotOMSMinted) {
+	if _, err := e.Execute(bootedChecklist(t), refs, ports.UrgencyOpening); !errors.Is(err, application.ErrOrderNotOMSMinted) {
 		t.Fatalf("Execute with a venue-shaped id = %v, want ErrOrderNotOMSMinted", err)
 	}
 	refusalAsserts(t, j, p)
@@ -322,7 +346,7 @@ func TestExecuteRefusesADuplicateLeg(t *testing.T) {
 	leg := packageOrder(t, 0, "0.5")
 	plant(t, r, leg)
 
-	if _, err := e.Execute(refsFor(leg, leg), ports.UrgencyOpening); !errors.Is(err, application.ErrPackageDuplicateLeg) {
+	if _, err := e.Execute(bootedChecklist(t), refsFor(leg, leg), ports.UrgencyOpening); !errors.Is(err, application.ErrPackageDuplicateLeg) {
 		t.Fatalf("Execute with one leg twice = %v, want ErrPackageDuplicateLeg", err)
 	}
 	refusalAsserts(t, j, p)
@@ -348,7 +372,7 @@ func TestExecuteRefusesMixedTrades(t *testing.T) {
 	plant(t, r, other)
 
 	refs := refsFor(mine, other)
-	if _, err := e.Execute(refs, ports.UrgencyOpening); !errors.Is(err, application.ErrPackageMixedTrades) {
+	if _, err := e.Execute(bootedChecklist(t), refs, ports.UrgencyOpening); !errors.Is(err, application.ErrPackageMixedTrades) {
 		t.Fatalf("Execute across two trades = %v, want ErrPackageMixedTrades", err)
 	}
 	refusalAsserts(t, j, p)
@@ -370,7 +394,7 @@ func TestExecuteRefusesMixedAttempts(t *testing.T) {
 	plant(t, r, second)
 
 	refs := refsFor(first, second)
-	if _, err := e.Execute(refs, ports.UrgencyOpening); !errors.Is(err, application.ErrPackageMixedAttempts) {
+	if _, err := e.Execute(bootedChecklist(t), refs, ports.UrgencyOpening); !errors.Is(err, application.ErrPackageMixedAttempts) {
 		t.Fatalf("Execute across two attempts = %v, want ErrPackageMixedAttempts", err)
 	}
 	refusalAsserts(t, j, p)
@@ -398,7 +422,7 @@ func TestExecuteRefusesAQuantityMismatch(t *testing.T) {
 			plant(t, r, legPerp)
 
 			refs := refsFor(legSpot, legPerp)
-			if _, err := e.Execute(refs, ports.UrgencyOpening); !errors.Is(err, application.ErrPackageQuantityMismatch) {
+			if _, err := e.Execute(bootedChecklist(t), refs, ports.UrgencyOpening); !errors.Is(err, application.ErrPackageQuantityMismatch) {
 				t.Fatalf("Execute with 0.5 vs %s = %v, want ErrPackageQuantityMismatch", mismatched, err)
 			}
 			refusalAsserts(t, j, p)
@@ -421,7 +445,7 @@ func TestExecuteRefusesAMismatchedBaseAsset(t *testing.T) {
 	plantAt(t, r, legPerp, domain.StatePlanned, 1)
 
 	refs := refsFor(legSpot, legPerp)
-	if _, err := e.Execute(refs, ports.UrgencyOpening); !errors.Is(err, application.ErrPackageQuantityMismatch) {
+	if _, err := e.Execute(bootedChecklist(t), refs, ports.UrgencyOpening); !errors.Is(err, application.ErrPackageQuantityMismatch) {
 		t.Fatalf("Execute with BTC vs ETH bases = %v, want ErrPackageQuantityMismatch", err)
 	}
 	refusalAsserts(t, j, p)
@@ -443,7 +467,7 @@ func TestExecuteRefusesAVersionConflictBeforeAnyLegSends(t *testing.T) {
 	plantAt(t, r, leg2, domain.StatePlanned, 7)
 
 	refs := refsFor(leg0, leg1, leg2)
-	if _, err := e.Execute(refs, ports.UrgencyOpening); !errors.Is(err, ports.ErrVersionConflict) {
+	if _, err := e.Execute(bootedChecklist(t), refs, ports.UrgencyOpening); !errors.Is(err, ports.ErrVersionConflict) {
 		t.Fatalf("Execute with a stale last leg = %v, want ErrVersionConflict", err)
 	}
 	refusalAsserts(t, j, p)
@@ -463,7 +487,7 @@ func TestExecuteRefusesANonIOCLeg(t *testing.T) {
 	plantAt(t, r, foreign, domain.StatePlanned, 1)
 
 	refs := refsFor(leg0, foreign)
-	if _, err := e.Execute(refs, ports.UrgencyOpening); !errors.Is(err, application.ErrNotMarketableIOCLimit) {
+	if _, err := e.Execute(bootedChecklist(t), refs, ports.UrgencyOpening); !errors.Is(err, application.ErrNotMarketableIOCLimit) {
 		t.Fatalf("Execute with a GTC leg = %v, want ErrNotMarketableIOCLimit", err)
 	}
 	refusalAsserts(t, j, p)
@@ -482,7 +506,7 @@ func TestExecuteRefusesALegInATerminalState(t *testing.T) {
 	plantAt(t, r, leg1, domain.StateFilled, 1)
 
 	refs := refsFor(leg0, leg1)
-	_, err := e.Execute(refs, ports.UrgencyOpening)
+	_, err := e.Execute(bootedChecklist(t), refs, ports.UrgencyOpening)
 	if err == nil || !errors.Is(err, domain.ErrTransitionForbidden) {
 		t.Fatalf("Execute with a Filled leg = %v, want SM §1's refusal", err)
 	}
@@ -498,7 +522,7 @@ func TestExecuteRefusesAnUnknownLeg(t *testing.T) {
 	unplanned := packageOrder(t, 1, "0.5")
 
 	refs := refsFor(leg0, unplanned)
-	if _, err := e.Execute(refs, ports.UrgencyOpening); !errors.Is(err, ports.ErrOrderUnknown) {
+	if _, err := e.Execute(bootedChecklist(t), refs, ports.UrgencyOpening); !errors.Is(err, ports.ErrOrderUnknown) {
 		t.Fatalf("Execute with an unplanned leg = %v, want ErrOrderUnknown", err)
 	}
 	refusalAsserts(t, j, p)
@@ -520,7 +544,7 @@ func TestExecuteReportsEachLegForItself(t *testing.T) {
 	plant(t, r, legSpot)
 	plant(t, r, legPerp)
 
-	ex, err := e.Execute(refsFor(legSpot, legPerp), ports.UrgencyOpening)
+	ex, err := e.Execute(bootedChecklist(t), refsFor(legSpot, legPerp), ports.UrgencyOpening)
 	if err != nil {
 		t.Fatalf("Execute = %v, want nil — after the fan-out the report is per leg", err)
 	}
@@ -554,7 +578,7 @@ func TestExecutionHoldsNewTradingWhenAnApplyFails(t *testing.T) {
 	plant(t, r, legSpot)
 	plant(t, r, legPerp)
 
-	ex, err := e.Execute(refsFor(legSpot, legPerp), ports.UrgencyOpening)
+	ex, err := e.Execute(bootedChecklist(t), refsFor(legSpot, legPerp), ports.UrgencyOpening)
 	if err != nil {
 		t.Fatalf("Execute = %v", err)
 	}
@@ -595,7 +619,7 @@ func TestAReExecutedPackageIsRefusedWhateverThePresentationOrder(t *testing.T) {
 		plant(t, r, o)
 	}
 
-	first, err := e.Execute(refsFor(legs[0], legs[1], legs[2]), ports.UrgencyOpening)
+	first, err := e.Execute(bootedChecklist(t), refsFor(legs[0], legs[1], legs[2]), ports.UrgencyOpening)
 	if err != nil {
 		t.Fatalf("first Execute = %v", err)
 	}
@@ -608,7 +632,13 @@ func TestAReExecutedPackageIsRefusedWhateverThePresentationOrder(t *testing.T) {
 
 	// Rotated, not reversed: (2,0,1) differs from both the identity and the
 	// reversal, so no coincidental permutation can satisfy it.
-	second, err := e.Execute(refsFor(legs[2], legs[0], legs[1]), ports.UrgencyOpening)
+	//
+	// A FRESH checklist, deliberately: the first execution latched its own, and
+	// the admission read would refuse this package before the fan-out — which
+	// is §6 step 7 working, and it is the test one below. THIS test isolates
+	// the layer beneath: the authority must refuse the re-send even for a
+	// caller whose checklist never heard about the first execution.
+	second, err := e.Execute(bootedChecklist(t), refsFor(legs[2], legs[0], legs[1]), ports.UrgencyOpening)
 	if err != nil {
 		t.Fatalf("second Execute = %v — preflight sees Planned records and must admit the package", err)
 	}
@@ -664,7 +694,7 @@ func TestTheAuthorityIsSharedAcrossDispatchPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
-	ex, err := e.Execute(refsFor(legSpot, legPerp), ports.UrgencyOpening)
+	ex, err := e.Execute(bootedChecklist(t), refsFor(legSpot, legPerp), ports.UrgencyOpening)
 	if err != nil {
 		t.Fatalf("Execute = %v — the package preflight reads Planned records and admits", err)
 	}
@@ -693,7 +723,9 @@ func TestTheAuthorityIsSharedAcrossDispatchPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
-	ctrl, err := split.Execute(refsFor(legSpot), ports.UrgencyOpening)
+	// A fresh checklist again: the earlier execution latched the one it was
+	// handed, and the control must reach the authority, not the admission read.
+	ctrl, err := split.Execute(bootedChecklist(t), refsFor(legSpot), ports.UrgencyOpening)
 	if err != nil {
 		t.Fatalf("control Execute = %v", err)
 	}
@@ -721,4 +753,245 @@ func qtyIn(t *testing.T, asset, v string) fixedpoint.Quantity {
 		t.Fatalf("ParseQuantity(%q, %q): %v", asset, v, err)
 	}
 	return q
+}
+
+// # §6 step 7 at the write path: the fan-in files the hold, the admission read
+// # refuses the next opening over it, and the safety verbs stay available
+
+// TestExecuteFilesTheHoldAtTheFanIn: a sent leg whose apply failed latches
+// GateNetDeltaAsserted at OutcomeProjectionStale — the live path's producer,
+// the one dispatch.go's Outcome doc promises. The checklist carries a SECOND
+// gate so "the gate the executor files" and "whatever gate the checklist has"
+// are different answers: the other gate must come through untouched.
+func TestExecuteFilesTheHoldAtTheFanIn(t *testing.T) {
+	t.Parallel()
+
+	e, _, p, r, _ := newExecutor(t)
+	p.ack = ports.Ack{VenueOrderID: "V-1"}
+	legSpot := packageOrder(t, 0, "0.5")
+	legPerp := packageOrder(t, 1, "0.5")
+	plant(t, r, legSpot)
+	plant(t, r, legPerp)
+	// EXACTLY ONE stale leg — the only fixture that separates "any leg's
+	// failed apply holds" from "all legs' failed applies hold". The both-stale
+	// shape is the second-opening test's, so the suite carries both
+	// cardinalities.
+	r.failApplyID[legPerp.ClientOrderID] = errors.New("projection store down")
+
+	c := bootedChecklist(t)
+	ex, err := e.Execute(c, refsFor(legSpot, legPerp), ports.UrgencyOpening)
+	if err != nil {
+		t.Fatalf("Execute = %v", err)
+	}
+	if !ex.HoldsNewTrading() {
+		t.Fatal("HoldsNewTrading() = false with one sent leg's apply failing")
+	}
+	if res := legByID(t, ex, legSpot.ClientOrderID); !res.Outcome.Applied {
+		t.Fatalf("clean leg Applied = false — the fixture no longer isolates the stale leg")
+	}
+	if res := legByID(t, ex, legPerp.ClientOrderID); res.Outcome.Applied {
+		t.Fatalf("stale leg Applied = true — the fixture no longer contains the thing under test")
+	}
+	if ex.Hold != nil {
+		t.Errorf("Hold = %v, want nil — an unlatched declared gate admits the filing", ex.Hold)
+	}
+	if o, _ := c.Outcome(boot.GateNetDeltaAsserted); o != boot.OutcomeProjectionStale {
+		t.Errorf("net-delta gate = %s, want OutcomeProjectionStale", o)
+	}
+	if got := c.Latched(); len(got) != 1 || got[0] != boot.GateNetDeltaAsserted {
+		t.Errorf("Latched() = %v, want exactly the net-delta gate", got)
+	}
+	if o, _ := c.Outcome(boot.GateWriterAuthority); o != boot.OutcomeUnreported {
+		t.Errorf("writer-authority gate = %s, want Unreported — the filing must not touch its neighbours", o)
+	}
+}
+
+// TestExecuteFilesNothingWhenEveryApplyLands is the filing test's positive
+// control: without it, an executor that latched every checklist it was handed
+// would pass the test above.
+func TestExecuteFilesNothingWhenEveryApplyLands(t *testing.T) {
+	t.Parallel()
+
+	e, _, p, r, _ := newExecutor(t)
+	p.ack = ports.Ack{VenueOrderID: "V-1"}
+	legSpot := packageOrder(t, 0, "0.5")
+	legPerp := packageOrder(t, 1, "0.5")
+	plant(t, r, legSpot)
+	plant(t, r, legPerp)
+
+	c := bootedChecklist(t)
+	if _, err := e.Execute(c, refsFor(legSpot, legPerp), ports.UrgencyOpening); err != nil {
+		t.Fatalf("Execute = %v", err)
+	}
+	if got := c.Latched(); len(got) != 0 {
+		t.Errorf("Latched() = %v after a clean execution, want none", got)
+	}
+	if o, _ := c.Outcome(boot.GateNetDeltaAsserted); o != boot.OutcomePassed {
+		t.Errorf("net-delta gate = %s after a clean execution, want the boot's Passed untouched", o)
+	}
+}
+
+// TestASecondOpeningInTheSameProcessIsRefusedOverTheHold is #169's claim end
+// to end: stale execution, then a NEW opening package on the SAME checklist —
+// refused at the admission read, before any fsync, with nothing sent. This is
+// the loop closing inside one process, with no composition root remembering
+// anything.
+func TestASecondOpeningInTheSameProcessIsRefusedOverTheHold(t *testing.T) {
+	t.Parallel()
+
+	e, _, p, r, _ := newExecutor(t)
+	p.ack = ports.Ack{VenueOrderID: "V-1"}
+	r.failApplyState[domain.StateSubmitted] = errors.New("projection store down")
+	legs := []domain.Order{
+		packageOrder(t, 0, "0.5"),
+		packageOrder(t, 1, "0.5"),
+		packageOrder(t, 2, "0.5"),
+		packageOrder(t, 3, "0.5"),
+	}
+	for _, o := range legs {
+		plant(t, r, o)
+	}
+
+	c := bootedChecklist(t)
+	first, err := e.Execute(c, refsFor(legs[0], legs[1]), ports.UrgencyOpening)
+	if err != nil {
+		t.Fatalf("first Execute = %v", err)
+	}
+	if !first.HoldsNewTrading() {
+		t.Fatal("first Execute must hold — every apply failed")
+	}
+	if p.calls != 2 {
+		t.Fatalf("Place called %d times after the first package, want 2", p.calls)
+	}
+
+	// FRESH legs, so the refusal cannot come from the authority or from any
+	// per-order state: the only thing standing between this package and the
+	// venue is the latch the previous package filed.
+	_, err = e.Execute(c, refsFor(legs[2], legs[3]), ports.UrgencyOpening)
+	if !errors.Is(err, application.ErrExecutionHeld) {
+		t.Fatalf("second opening Execute = %v, want ErrExecutionHeld", err)
+	}
+	if p.calls != 2 {
+		t.Errorf("Place called %d times after the refused package, want still 2 — a refusal sends nothing", p.calls)
+	}
+
+	// The asymmetry §6 step 7 is FOR: the same process, the same latch, and a
+	// SAFETY package still executes — stop-opening withholds new exposure, not
+	// the safety verbs.
+	safety, err := e.Execute(c, refsFor(legs[2], legs[3]), ports.UrgencySafety)
+	if err != nil {
+		t.Fatalf("safety Execute over the latch = %v, want admitted", err)
+	}
+	if p.calls != 4 {
+		t.Errorf("Place called %d times after the safety package, want 4 — safety execution was withheld", p.calls)
+	}
+	// Its applies failed too, so the fan-in re-files the same outcome — the
+	// honest repeat Report admits — and the latch must be exactly where it was.
+	if safety.Hold != nil {
+		t.Errorf("safety Hold = %v, want nil — a repeat of the same latching outcome is admitted", safety.Hold)
+	}
+	if o, _ := c.Outcome(boot.GateNetDeltaAsserted); o != boot.OutcomeProjectionStale {
+		t.Errorf("net-delta gate = %s after the safety package, want ProjectionStale still", o)
+	}
+}
+
+// TestExecuteRefusesANilChecklist: no checklist means nowhere for §6 step 7's
+// hold to go, and that is discovered before anything is sent, not at the
+// fan-in with live orders behind it.
+func TestExecuteRefusesANilChecklist(t *testing.T) {
+	t.Parallel()
+
+	e, j, p, r, _ := newExecutor(t)
+	leg := packageOrder(t, 0, "0.5")
+	plant(t, r, leg)
+
+	if _, err := e.Execute(nil, refsFor(leg), ports.UrgencyOpening); !errors.Is(err, application.ErrChecklistMissing) {
+		t.Fatalf("Execute(nil checklist) = %v, want ErrChecklistMissing", err)
+	}
+	refusalAsserts(t, j, p)
+}
+
+// TestExecuteRefusesAChecklistWithoutTheHoldGate: the isolating fixture
+// carries a PASSED verdict on the gate it does declare, so the admission's
+// PermitsNow read would admit this package — the refusal can only be the
+// declared-check. A fixture that failed both checks would show that something
+// objected, not that this rule did.
+func TestExecuteRefusesAChecklistWithoutTheHoldGate(t *testing.T) {
+	t.Parallel()
+
+	e, j, p, r, _ := newExecutor(t)
+	leg := packageOrder(t, 0, "0.5")
+	plant(t, r, leg)
+
+	c, err := boot.NewChecklist(boot.GateWriterAuthority)
+	if err != nil {
+		t.Fatalf("NewChecklist: %v", err)
+	}
+	if err := c.Report(boot.GateWriterAuthority, boot.OutcomePassed); err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+
+	if _, err := e.Execute(c, refsFor(leg), ports.UrgencyOpening); !errors.Is(err, application.ErrHoldGateUndeclared) {
+		t.Fatalf("Execute over a checklist without the net-delta gate = %v, want ErrHoldGateUndeclared", err)
+	}
+	refusalAsserts(t, j, p)
+}
+
+// TestExecuteRefusesEveryClassOnAVerdictlessChecklist is PermitsNow's
+// fail-closed rule reaching the write path: a checklist no check has concluded
+// in is a process §7.5's boot has not run in, and BOTH classes are refused —
+// safety too, because "no boot" is below even reconcile-only.
+func TestExecuteRefusesEveryClassOnAVerdictlessChecklist(t *testing.T) {
+	t.Parallel()
+
+	for _, urgency := range []ports.Urgency{ports.UrgencyOpening, ports.UrgencySafety} {
+		t.Run(string(urgency), func(t *testing.T) {
+			t.Parallel()
+
+			e, j, p, r, _ := newExecutor(t)
+			leg := packageOrder(t, 0, "0.5")
+			plant(t, r, leg)
+
+			c, err := boot.NewChecklist(boot.GateNetDeltaAsserted, boot.GateWriterAuthority)
+			if err != nil {
+				t.Fatalf("NewChecklist: %v", err)
+			}
+
+			if _, err := e.Execute(c, refsFor(leg), urgency); !errors.Is(err, application.ErrExecutionHeld) {
+				t.Fatalf("Execute(%s) over a verdictless checklist = %v, want ErrExecutionHeld", urgency, err)
+			}
+			refusalAsserts(t, j, p)
+		})
+	}
+}
+
+// TestExecuteRefusesOverAConcludedNonLatchingRefusal: OutcomeFailed does not
+// latch — Latched() is EMPTY here — and it halts, so both classes are refused.
+// This is the fixture that separates "reads the verdicts" from "reads the
+// latches": an admission built on Latched alone admits this package.
+func TestExecuteRefusesOverAConcludedNonLatchingRefusal(t *testing.T) {
+	t.Parallel()
+
+	for _, urgency := range []ports.Urgency{ports.UrgencyOpening, ports.UrgencySafety} {
+		t.Run(string(urgency), func(t *testing.T) {
+			t.Parallel()
+
+			e, j, p, r, _ := newExecutor(t)
+			leg := packageOrder(t, 0, "0.5")
+			plant(t, r, leg)
+
+			c := bootedChecklist(t)
+			if err := c.Report(boot.GateWriterAuthority, boot.OutcomeFailed); err != nil {
+				t.Fatalf("Report: %v", err)
+			}
+			if got := c.Latched(); len(got) != 0 {
+				t.Fatalf("fixture latched %v — this test needs the non-latching refusal", got)
+			}
+
+			if _, err := e.Execute(c, refsFor(leg), urgency); !errors.Is(err, application.ErrExecutionHeld) {
+				t.Fatalf("Execute(%s) over a Failed verdict = %v, want ErrExecutionHeld", urgency, err)
+			}
+			refusalAsserts(t, j, p)
+		})
+	}
 }

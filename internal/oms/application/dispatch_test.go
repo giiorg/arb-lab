@@ -202,6 +202,13 @@ type fakeOrders struct {
 	// failApplyState maps a target state to the error its apply returns.
 	failApplyState map[domain.OrderState]error
 
+	// failApplyID maps ONE order's id to the error its applies return — the
+	// per-leg discriminator failApplyState cannot express, and the fixture the
+	// any-leg-holds claim needs: a package with exactly one stale leg is the
+	// only shape that separates "any leg's failed apply holds" from "all legs'
+	// failed applies hold".
+	failApplyID map[ids.ClientOrderID]error
+
 	// failLoad, when set, is returned by every Load. It is NOT
 	// ports.ErrOrderUnknown: the planner has to tell "this id is free" from
 	// "the repository could not answer", and a fake that could only produce the
@@ -226,6 +233,7 @@ func newFakeOrders() *fakeOrders {
 	return &fakeOrders{
 		records:        make(map[ids.ClientOrderID]ports.OrderRecord),
 		failApplyState: make(map[domain.OrderState]error),
+		failApplyID:    make(map[ids.ClientOrderID]error),
 		fills:          make(map[domain.FillKey]struct{}),
 	}
 }
@@ -310,6 +318,9 @@ func (r *fakeOrders) ApplyState(id ids.ClientOrderID, expected int64, to domain.
 func (r *fakeOrders) advance(id ids.ClientOrderID, expected int64, to domain.OrderState) (ports.OrderRecord, error) {
 	r.applied = append(r.applied, applyCall{id: id, expected: expected, to: to})
 	if err := r.failApplyState[to]; err != nil {
+		return ports.OrderRecord{}, err
+	}
+	if err := r.failApplyID[id]; err != nil {
 		return ports.OrderRecord{}, err
 	}
 	rec, ok := r.records[id]

@@ -6,6 +6,7 @@ import (
 
 	"github.com/giiorg/arb-lab/internal/oms/application/ports"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
+	"github.com/giiorg/arb-lab/internal/platform/boot"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
@@ -122,6 +123,22 @@ type LegResult struct {
 // the order the refs were presented.
 type Execution struct {
 	Legs []LegResult
+
+	// Hold is §6 step 7's report failing to reach the checklist: nil always,
+	// unless the fan-in found a stale leg and Checklist.Report refused the
+	// filing.
+	//
+	// It is believed unreachable, and the belief is admission's postcondition
+	// rather than an assumption: Execute refused the package unless the
+	// net-delta gate was DECLARED, and PermitsNow refused it unless every
+	// concluded verdict permitted this class — which leaves the gate, at the
+	// fan-in, in a state Report admits OutcomeProjectionStale over (unlatched,
+	// or already latched at exactly this outcome, which Report accepts as the
+	// honest repeat). Checked rather than assumed on the dispatcher loop's
+	// precedent one method down: a hold that could not be RECORDED must not
+	// vanish, and this field is its only possible home — Execute's error result
+	// means nothing was sent, and after the fan-out that is never true again.
+	Hold error
 }
 
 // HoldsNewTrading reports whether any leg's result requires new trading to be
@@ -151,7 +168,7 @@ func (e Execution) Dispatched() int {
 }
 
 // Execute submits every leg of one planned package, in parallel, each exactly
-// once.
+// once, reporting §6 step 7's hold into c when a sent leg's apply fails.
 //
 // # err != nil means NO LEG WAS ATTEMPTED
 //
@@ -162,6 +179,33 @@ func (e Execution) Dispatched() int {
 // IOC — on a package the caller was told was refused. So the preflight below
 // is a read pass over every leg, and only a package that passes whole is
 // fanned out at all.
+//
+// # The checklist is a parameter because the mapping must not be rememberable
+//
+// Outcome.Applied's doc placed §6 step 7's consequence with "the composition
+// root that owns a boot.Checklist" back when nothing constructed one. The
+// Reconciler then settled what that means in practice: the root OWNS the
+// checklist and the use case that holds the evidence REPORTS into it, handed
+// the checklist per call. This is the same settlement for the live path — the
+// fan-in below is the one place that knows a send happened and its apply did
+// not, so it files GateNetDeltaAsserted → OutcomeProjectionStale itself. A
+// root that had to read Execution.HoldsNewTrading and file the report would be
+// a root that could forget to, and a forgotten filing is precisely a stale
+// projection nothing refuses an opening over — the signature carries the
+// mapping so no future root re-derives it.
+//
+// # The admission read, and why it is PermitsNow and not the boot verdict
+//
+// Before anything is sent, the package's class must be permitted by the
+// checks that have concluded: ActOpen for an Opening package, ActReduce for a
+// Safety one (see boot.PermitsNow for why unproduced gates do not constrain
+// and why an empty verdict set refuses everything). The composition root's
+// own gate — the boot VERDICT, per §59d — runs once per run and stays; this
+// read runs per package, which is what closes §6 step 7's loop inside one
+// process: the hold this method's fan-in filed refuses the next Opening
+// package at this line, while a Safety package still passes, because a
+// latched OutcomeProjectionStale is stop-opening and stop-opening is the
+// posture whose whole meaning is that the safety verbs stay available.
 //
 // # After the fan-out there is no composite error
 //
@@ -178,12 +222,15 @@ func (e Execution) Dispatched() int {
 // or by OCC at the apply (after, visibly). The window is the same one admit
 // documents for its own read-then-write, and the single-writer premise that
 // bounds it there bounds it here.
-func (e *Executor) Execute(refs []DispatchRef, urgency ports.Urgency) (Execution, error) {
+func (e *Executor) Execute(c *boot.Checklist, refs []DispatchRef, urgency ports.Urgency) (Execution, error) {
 	if err := urgency.Validate(); err != nil {
 		return Execution{}, fmt.Errorf("execute package urgency: %w", err)
 	}
 	if len(refs) == 0 {
 		return Execution{}, ErrPackageEmpty
+	}
+	if err := admitPackage(c, urgency); err != nil {
+		return Execution{}, err
 	}
 
 	if err := e.preflight(refs); err != nil {
@@ -221,7 +268,53 @@ func (e *Executor) Execute(refs []DispatchRef, urgency ports.Urgency) (Execution
 	}
 	wg.Wait()
 
-	return Execution{Legs: results}, nil
+	ex := Execution{Legs: results}
+	// §6 step 7's producer: a sent leg whose apply failed holds new trading,
+	// and the filing happens HERE — after the fan-in, in the caller's
+	// goroutine, because the checklist is not safe for concurrent use and a
+	// per-leg report from inside the fan-out would race the other legs'.
+	if ex.HoldsNewTrading() {
+		if err := c.Report(boot.GateNetDeltaAsserted, boot.OutcomeProjectionStale); err != nil {
+			ex.Hold = err
+		}
+	}
+	return ex, nil
+}
+
+// admitPackage is the write path's read of the checklist, before any fsync:
+// the checklist must exist, must declare the gate the fan-in files §6 step 7's
+// hold against, and must permit this package's class through the verdicts so
+// far. Everything here is a read, and a refusal means nothing was sent.
+func admitPackage(c *boot.Checklist, urgency ports.Urgency) error {
+	if c == nil {
+		return fmt.Errorf("execute package: %w", ErrChecklistMissing)
+	}
+	if _, declared := c.Outcome(boot.GateNetDeltaAsserted); !declared {
+		return fmt.Errorf("execute package: %w", ErrHoldGateUndeclared)
+	}
+	if act := actFor(urgency); !c.PermitsNow(act) {
+		return fmt.Errorf("execute package: %s needs %s (latched: %v): %w",
+			urgency, act, c.Latched(), ErrExecutionHeld)
+	}
+	return nil
+}
+
+// actFor maps §7.6's two order classes onto the acts the posture ladder
+// answers for: an Opening order creates exposure and a Safety order reduces or
+// bounds it — ports.Urgency's own definitions, restated as the type the
+// checklist speaks.
+//
+// The trailing return is the safe direction rather than a guess: urgency was
+// validated before this runs, so a value reaching it is corrupted, and
+// ActUnspecified is the act every posture refuses.
+func actFor(u ports.Urgency) boot.Act {
+	switch u {
+	case ports.UrgencyOpening:
+		return boot.ActOpen
+	case ports.UrgencySafety:
+		return boot.ActReduce
+	}
+	return boot.ActUnspecified
 }
 
 // preflight establishes that the whole package may be sent. Everything here is

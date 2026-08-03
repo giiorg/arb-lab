@@ -342,13 +342,42 @@ var (
 	ErrJoinerMissing         = errors.New("oms: reconciler has no venue joiner")
 	ErrResolveUseCaseMissing = errors.New("oms: reconciler has no stable-not-found resolver")
 
-	// ErrChecklistMissing reports a Reconcile called with no checklist to report
-	// into.
+	// ErrChecklistMissing reports a use case called with no checklist to report
+	// into — Reconcile's, and since §6 step 7 gained its live producer,
+	// Execute's too.
 	//
 	// It is an error rather than a silent run because the checklist is the only
 	// place the verdict goes: a reconcile that ran every phase and reported
 	// nowhere leaves a composition root reading a posture that was never
 	// constrained, which is the "nothing was checked and everything passed"
-	// collapse §7.5 argues about the fold's seed.
+	// collapse §7.5 argues about the fold's seed. For Execute the stakes are the
+	// same fact one moment later: a package sent with nowhere to file §6 step
+	// 7's hold is a stale projection nothing will ever refuse an opening over.
 	ErrChecklistMissing = errors.New("oms: reconcile has no boot checklist to report into")
+
+	// ErrExecutionHeld reports a package refused because the checklist's
+	// concluded checks do not permit its class — §6 step 7's "holds new
+	// trading", read back at the write path.
+	//
+	// The read is boot.Checklist.PermitsNow over the urgency's act: an Opening
+	// package needs ActOpen, a Safety package needs ActReduce, so a latched
+	// OutcomeProjectionStale refuses the first and admits the second — the
+	// safety verbs stay available while new trading is held, which is the
+	// asymmetry §6 step 7 is FOR. It is not the composition root's boot verdict
+	// re-checked: that gate runs once per run, and this one runs per package,
+	// which is what makes a hold filed by the PREVIOUS package's fan-in bind
+	// the next one in the same process.
+	ErrExecutionHeld = errors.New("oms: the checklist's concluded checks do not permit this package's class of execution")
+
+	// ErrHoldGateUndeclared reports an Execute over a checklist that never
+	// declared GateNetDeltaAsserted — the gate §6 step 7's hold is filed
+	// against.
+	//
+	// Refused in the preflight, with nothing sent, because the failure it
+	// prevents is discovered at the fan-in: a stale leg whose report is refused
+	// AFTER the sends is a hold with live orders behind it and nowhere to go.
+	// Every root that declares §7.5's roster in full passes this for free; what
+	// it refuses is a caller that built a bespoke short checklist, which is the
+	// shape §7.5 argues against declaring at all.
+	ErrHoldGateUndeclared = errors.New("oms: checklist does not declare the net-delta gate §6 step 7 files its hold against")
 )

@@ -684,3 +684,130 @@ func TestProjectionStaleWithholdsOpeningsAndLatches(t *testing.T) {
 		t.Errorf("escalating NeedsOperator to EvidenceUnusable = %v, want nil", err)
 	}
 }
+
+// # PermitsNow: the running-process read — verdicts constrain, silence does not,
+// # and NO verdicts refuses everything
+
+// TestPermitsNowRefusesEverythingWithNoVerdict is the fail-closed half: a fold
+// over only-the-answers has PostureTrading for its identity, and a fresh
+// checklist must not read as "everything passed". Pending is included because
+// it is the OTHER pre-verdict member — a checklist whose every gate is running
+// has still concluded nothing.
+func TestPermitsNowRefusesEverythingWithNoVerdict(t *testing.T) {
+	t.Parallel()
+
+	fresh := newChecklistT(t, boot.GateNetDeltaAsserted, boot.GateWriterAuthority)
+	pending := newChecklistT(t, boot.GateNetDeltaAsserted, boot.GateWriterAuthority)
+	if err := pending.Report(boot.GateNetDeltaAsserted, boot.OutcomePending); err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+
+	for name, c := range map[string]*boot.Checklist{"fresh": fresh, "all pending": pending} {
+		for _, a := range []boot.Act{boot.ActReconcile, boot.ActReduce, boot.ActOpen, boot.ActUnspecified} {
+			if c.PermitsNow(a) {
+				t.Errorf("%s checklist PermitsNow(%s) = true, want false — no check has concluded", name, a)
+			}
+		}
+	}
+}
+
+// TestPermitsNowIgnoresSilenceWherePostureCannot is the distinction this method
+// exists for, asserted on ONE fixture from both sides: a Passed verdict beside
+// an Unreported gate. Posture() must stay reconcile-only (default-deny over the
+// roster) while PermitsNow answers from the verdict alone — this is the
+// produced-versus-structural split the reconcile root's ExitClass draws,
+// available per act.
+func TestPermitsNowIgnoresSilenceWherePostureCannot(t *testing.T) {
+	t.Parallel()
+
+	c := newChecklistT(t, boot.GateNetDeltaAsserted, boot.GateWriterAuthority)
+	if err := c.Report(boot.GateNetDeltaAsserted, boot.OutcomePassed); err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+
+	if got := c.Posture(); got != boot.PostureReconcileOnly {
+		t.Errorf("Posture() = %s, want PostureReconcileOnly — the unreported gate must hold the boot fold down", got)
+	}
+	if !c.PermitsNow(boot.ActOpen) {
+		t.Error("PermitsNow(ActOpen) = false with the only verdict Passed — silence constrained the verdict fold")
+	}
+	if c.PermitsNow(boot.ActUnspecified) {
+		t.Error("PermitsNow(ActUnspecified) = true — a caller that has not said what it wants must be refused")
+	}
+}
+
+// TestPermitsNowConstrainsByTheVerdictsCeiling walks every verdict-bearing
+// member through the three acts on a fixture whose OTHER gate holds a Passed
+// verdict — so the member under test is never the only verdict, and a fold
+// that read the wrong gate would answer from Passed and fail the case.
+func TestPermitsNowConstrainsByTheVerdictsCeiling(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		outcome                 boot.Outcome
+		reconcile, reduce, open bool
+	}{
+		{boot.OutcomeFailed, false, false, false},
+		{boot.OutcomeEvidenceUnusable, false, false, false},
+		{boot.OutcomeIncomplete, true, false, false},
+		{boot.OutcomeNeedsOperator, true, false, false},
+		{boot.OutcomeBlocksOpening, true, true, false},
+		{boot.OutcomeProjectionStale, true, true, false},
+		{boot.OutcomePassed, true, true, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.outcome.String(), func(t *testing.T) {
+			t.Parallel()
+
+			c := newChecklistT(t, boot.GateWriterAuthority, boot.GateNetDeltaAsserted)
+			if err := c.Report(boot.GateWriterAuthority, boot.OutcomePassed); err != nil {
+				t.Fatalf("Report(WriterAuthority, Passed): %v", err)
+			}
+			if err := c.Report(boot.GateNetDeltaAsserted, tc.outcome); err != nil {
+				t.Fatalf("Report(NetDeltaAsserted, %s): %v", tc.outcome, err)
+			}
+
+			got := [3]bool{
+				c.PermitsNow(boot.ActReconcile),
+				c.PermitsNow(boot.ActReduce),
+				c.PermitsNow(boot.ActOpen),
+			}
+			want := [3]bool{tc.reconcile, tc.reduce, tc.open}
+			if got != want {
+				t.Errorf("PermitsNow(reconcile/reduce/open) = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// TestPermitsNowTakesTheWeakestVerdictEitherWayRound: with two verdicts the
+// answer is their minimum, and it must not depend on declaration order — the
+// mutant this kills is a fold that keeps the FIRST (or last) verdict it meets.
+func TestPermitsNowTakesTheWeakestVerdictEitherWayRound(t *testing.T) {
+	t.Parallel()
+
+	orders := map[string][2]boot.Gate{
+		"constraining gate declared first": {boot.GateNetDeltaAsserted, boot.GateWriterAuthority},
+		"constraining gate declared last":  {boot.GateWriterAuthority, boot.GateNetDeltaAsserted},
+	}
+	for name, gates := range orders {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			c := newChecklistT(t, gates[0], gates[1])
+			if err := c.Report(boot.GateNetDeltaAsserted, boot.OutcomeProjectionStale); err != nil {
+				t.Fatalf("Report: %v", err)
+			}
+			if err := c.Report(boot.GateWriterAuthority, boot.OutcomePassed); err != nil {
+				t.Fatalf("Report: %v", err)
+			}
+
+			if !c.PermitsNow(boot.ActReduce) {
+				t.Error("PermitsNow(ActReduce) = false — stop-opening is the stale verdict's whole point")
+			}
+			if c.PermitsNow(boot.ActOpen) {
+				t.Error("PermitsNow(ActOpen) = true over a ProjectionStale verdict — the weaker verdict won the fold")
+			}
+		})
+	}
+}

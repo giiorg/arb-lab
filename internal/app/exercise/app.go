@@ -82,6 +82,13 @@ const (
 	// holds new trading (§6 step 7). The other legs may be live at the venue,
 	// which is exactly why this is not ExitIncomplete: a retry is NOT safe,
 	// §7.5's boot is the recovery path.
+	//
+	// In the stale-apply case the executor has ALSO latched the checklist
+	// (GateNetDeltaAsserted, OutcomeProjectionStale) — so this class is what
+	// the RUN reports, while the latch is what a process that kept running
+	// would be refused new openings over. Report.Boot deliberately stays the
+	// pre-execute snapshot: re-deriving it here would rank the latch as
+	// ExitOperator and bury the more specific fact, that THIS run dispatched.
 	ExitExecution
 )
 
@@ -189,7 +196,13 @@ func execute(cfg Config, r *reconcile.Runner) (bool, application.Execution, erro
 	// Entry legs create exposure: §7.6's Opening class, by definition — see
 	// ports.Urgency. A close cycle is also an "opening" in the shed sense only
 	// when it is not §6.7 safety traffic, which a configured exercise is not.
-	ex, err := r.Module().Execute.Execute(refs, application.UrgencyOpening)
+	//
+	// The boot's checklist goes with the refs: the executor reads it before
+	// any fsync and files §6 step 7's hold into it at the fan-in, so a stale
+	// apply on this package latches the same record the verdict above was
+	// derived from — and a second execute in this process would be refused at
+	// the executor's own admission, not only at this root's verdict gate.
+	ex, err := r.Module().Execute.Execute(r.Checklist(), refs, application.UrgencyOpening)
 	if err != nil {
 		// The package preflight refused whole: nothing was sent.
 		return false, application.Execution{}, err
