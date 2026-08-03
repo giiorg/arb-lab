@@ -688,28 +688,28 @@ func TestBootRefusesASequenceWhoseTeardownOutlastsTheWatchdog(t *testing.T) {
 // that failed on a tmpfs /tmp would be testing the host. The real check has its
 // own tests above, including one that runs it against this host and accepts every
 // classified answer.
-func newRunnerFor(t *testing.T, cfg Config, check func(string) error) *runner {
+func newRunnerFor(t *testing.T, cfg Config, check func(string) error) *Runner {
 	t.Helper()
 	snap := snapshotOf(t, cfg)
-	return &runner{
+	return &Runner{
 		cfg: snap.Value, clk: testWall(t, cfg), reg: observability.NewRegistry(),
 		stderr: io.Discard, rev: strings.Repeat("0", 64), storageCheck: check,
 	}
 }
 
-func (r *runner) run(t *testing.T) (Report, error) {
+func (r *Runner) run(t *testing.T) (Report, error) {
 	t.Helper()
 	checklist, err := boot.NewChecklist(declaredGates()...)
 	if err != nil {
 		t.Fatalf("NewChecklist: %v", err)
 	}
 	r.checklist = checklist
-	running, err := r.sequence().Run(context.Background())
+	running, err := r.Sequence().Run(context.Background())
 	if err != nil {
-		return r.report(), err
+		return r.BootReport(), err
 	}
 	if _, err := running.Shutdown(context.Background(), r.clk); err != nil {
 		t.Fatalf("Shutdown: %v", err)
 	}
-	return r.report(), nil
+	return r.BootReport(), nil
 }

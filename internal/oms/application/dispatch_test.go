@@ -3,6 +3,7 @@ package application_test
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -49,6 +50,11 @@ type journalCall struct {
 }
 
 type fakeJournal struct {
+	// mu makes the fake safe under the executor's parallel legs, mirroring the
+	// real adapter's contract — the SQLite journal serialises at its pool. The
+	// assertions still read fields directly, which is safe AFTER the use case
+	// returns (the WaitGroup edge orders those reads).
+	mu      sync.Mutex
 	calls   []journalCall
 	planned []domain.Order
 
@@ -69,6 +75,8 @@ func newFakeJournal() *fakeJournal {
 }
 
 func (j *fakeJournal) AppendPlanned(o domain.Order) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
 	j.planned = append(j.planned, o)
 	if j.failPlannedFrom > 0 && len(j.planned) >= j.failPlannedFrom {
 		return j.failPlannedErr
@@ -82,6 +90,8 @@ func (j *fakeJournal) AppendAuthorized(id ids.ClientOrderID, at clock.ServerTime
 	if err := at.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", ports.ErrAuthorizationNeedsAnchor, err)
 	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
 	j.calls = append(j.calls, journalCall{id: id, state: domain.StateDispatchAuthorized, at: at})
 	return j.failOn[domain.StateDispatchAuthorized]
 }
@@ -96,8 +106,17 @@ func (j *fakeJournal) AppendState(id ids.ClientOrderID, state domain.OrderState)
 	if state == domain.StateDispatchAuthorized {
 		return fmt.Errorf("append state %s for order %q: %w", state, id, ports.ErrAuthorizationNeedsAnchor)
 	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
 	j.calls = append(j.calls, journalCall{id: id, state: state})
 	return j.failOn[state]
+}
+
+// appendCount is the watch's read, under the lock the appends take.
+func (j *fakeJournal) appendCount() int {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return len(j.calls)
 }
 
 // states returns what was durably recorded, in order.
@@ -119,6 +138,7 @@ func (j *fakeJournal) plannedIDs() []ids.ClientOrderID {
 }
 
 type fakePlacer struct {
+	mu  sync.Mutex
 	ack ports.Ack
 	err error
 
@@ -141,11 +161,13 @@ type fakePlacer struct {
 }
 
 func (p *fakePlacer) Place(o domain.Order, u ports.Urgency) (ports.Ack, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.calls++
 	p.orders = append(p.orders, o)
 	p.urgencies = append(p.urgencies, u)
 	if p.watch != nil {
-		p.appendsBefore = append(p.appendsBefore, len(p.watch.calls))
+		p.appendsBefore = append(p.appendsBefore, p.watch.appendCount())
 	}
 	return p.ack, p.err
 }
@@ -173,6 +195,7 @@ type applyCall struct {
 // The composition against the REAL adapter is oms/module_test.go's job, and it
 // is why that file is an integration test rather than a wiring assertion.
 type fakeOrders struct {
+	mu      sync.Mutex
 	records map[ids.ClientOrderID]ports.OrderRecord
 	applied []applyCall
 
@@ -208,6 +231,8 @@ func newFakeOrders() *fakeOrders {
 }
 
 func (r *fakeOrders) ApplyPlanned(o domain.Order) (ports.OrderRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.appliedPlanned++
 	if r.failApplyPlannedFrom > 0 && r.appliedPlanned >= r.failApplyPlannedFrom {
 		return ports.OrderRecord{}, r.failApplyPlannedErr
@@ -239,6 +264,8 @@ func (r *fakeOrders) ApplyPlanned(o domain.Order) (ports.OrderRecord, error) {
 }
 
 func (r *fakeOrders) Load(id ids.ClientOrderID) (ports.OrderRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.failLoad != nil {
 		return ports.OrderRecord{}, r.failLoad
 	}
@@ -256,6 +283,8 @@ func (r *fakeOrders) ApplyAuthorized(id ids.ClientOrderID, expected int64, at cl
 	if err := at.Validate(); err != nil {
 		return ports.OrderRecord{}, fmt.Errorf("fake repository: %w: %w", ports.ErrAuthorizationNeedsAnchor, err)
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	rec, err := r.advance(id, expected, domain.StateDispatchAuthorized)
 	if err != nil {
 		return ports.OrderRecord{}, err
@@ -271,11 +300,13 @@ func (r *fakeOrders) ApplyState(id ids.ClientOrderID, expected int64, to domain.
 	if to == domain.StateDispatchAuthorized {
 		return ports.OrderRecord{}, fmt.Errorf("advance order %q to %s: %w", id, to, ports.ErrAuthorizationNeedsAnchor)
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.advance(id, expected, to)
 }
 
 // advance is the shared load-check-mutate, mirroring the adapter's own split so
-// that both entry points are policed identically here as there.
+// that both entry points are policed identically here as there. Callers hold mu.
 func (r *fakeOrders) advance(id ids.ClientOrderID, expected int64, to domain.OrderState) (ports.OrderRecord, error) {
 	r.applied = append(r.applied, applyCall{id: id, expected: expected, to: to})
 	if err := r.failApplyState[to]; err != nil {
@@ -308,6 +339,8 @@ func (r *fakeOrders) advance(id ids.ClientOrderID, expected int64, to domain.Ord
 // cumulative would make a two-fill order read as its last fill, and the
 // net-delta assertion would then report a delta the venue does not have.
 func (r *fakeOrders) ApplyFill(f domain.Fill, expected int64) (ports.OrderRecord, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := f.Validate(); err != nil {
 		return ports.OrderRecord{}, false, fmt.Errorf("fake repository: %w", err)
 	}
@@ -433,6 +466,8 @@ func dispatchableOrder(t *testing.T) domain.Order {
 // caller's version" and "assumes the first version" the same claim.
 func plantAt(t *testing.T, r *fakeOrders, o domain.Order, state domain.OrderState, version int64) {
 	t.Helper()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.records[o.ClientOrderID] = ports.OrderRecord{Order: o, State: state, Version: version}
 }
 
@@ -449,7 +484,7 @@ func newDispatcher(t *testing.T) (*application.Dispatcher, *fakeJournal, *fakePl
 	j := newFakeJournal()
 	p := &fakePlacer{watch: j}
 	r := newFakeOrders()
-	d, err := application.NewDispatcher(j, p, r, testClock(t))
+	d, err := application.NewDispatcher(j, p, r, testClock(t), application.NewDispatchAuthority())
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
@@ -487,22 +522,25 @@ func TestNewDispatcherRefusesAMissingPort(t *testing.T) {
 	// One omission at a time and a DIFFERENT sentinel per case: together they
 	// catch a constructor that checks only the first port, and one that answers
 	// a single blanket refusal to all four.
-	if _, err := application.NewDispatcher(nil, &fakePlacer{}, newFakeOrders(), testClock(t)); !errors.Is(err, application.ErrJournalMissing) {
-		t.Errorf("NewDispatcher(nil, placer, orders, clock) = %v, want ErrJournalMissing", err)
+	if _, err := application.NewDispatcher(nil, &fakePlacer{}, newFakeOrders(), testClock(t), application.NewDispatchAuthority()); !errors.Is(err, application.ErrJournalMissing) {
+		t.Errorf("NewDispatcher(nil, placer, orders, clock, authority) = %v, want ErrJournalMissing", err)
 	}
-	if _, err := application.NewDispatcher(newFakeJournal(), nil, newFakeOrders(), testClock(t)); !errors.Is(err, application.ErrPlacerMissing) {
-		t.Errorf("NewDispatcher(journal, nil, orders, clock) = %v, want ErrPlacerMissing", err)
+	if _, err := application.NewDispatcher(newFakeJournal(), nil, newFakeOrders(), testClock(t), application.NewDispatchAuthority()); !errors.Is(err, application.ErrPlacerMissing) {
+		t.Errorf("NewDispatcher(journal, nil, orders, clock, authority) = %v, want ErrPlacerMissing", err)
 	}
-	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, nil, testClock(t)); !errors.Is(err, application.ErrOrdersMissing) {
-		t.Errorf("NewDispatcher(journal, placer, nil, clock) = %v, want ErrOrdersMissing", err)
+	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, nil, testClock(t), application.NewDispatchAuthority()); !errors.Is(err, application.ErrOrdersMissing) {
+		t.Errorf("NewDispatcher(journal, placer, nil, clock, authority) = %v, want ErrOrdersMissing", err)
 	}
-	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, newFakeOrders(), nil); !errors.Is(err, application.ErrClockMissing) {
-		t.Errorf("NewDispatcher(journal, placer, orders, nil) = %v, want ErrClockMissing", err)
+	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, newFakeOrders(), nil, application.NewDispatchAuthority()); !errors.Is(err, application.ErrClockMissing) {
+		t.Errorf("NewDispatcher(journal, placer, orders, nil, authority) = %v, want ErrClockMissing", err)
+	}
+	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, newFakeOrders(), testClock(t), nil); !errors.Is(err, application.ErrAuthorityMissing) {
+		t.Errorf("NewDispatcher(journal, placer, orders, clock, nil) = %v, want ErrAuthorityMissing", err)
 	}
 
 	// The positive control. Without it a constructor that refused everything
 	// would score four out of four above.
-	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, newFakeOrders(), testClock(t)); err != nil {
+	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, newFakeOrders(), testClock(t), application.NewDispatchAuthority()); err != nil {
 		t.Errorf("NewDispatcher with every port = %v, want nil", err)
 	}
 }
@@ -662,7 +700,7 @@ func TestDispatchRefusesAnUncalibratedVenueAboveTheFsync(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTestClock: %v", err)
 	}
-	d, err := application.NewDispatcher(j, p, r, clk)
+	d, err := application.NewDispatcher(j, p, r, clk, application.NewDispatchAuthority())
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
@@ -1140,7 +1178,7 @@ func TestASecondDispatcherOverTheSameRepositoryIsAlsoRefused(t *testing.T) {
 	o := dispatchableOrder(t)
 	plant(t, r, o)
 
-	first, err := application.NewDispatcher(j, p, r, testClock(t))
+	first, err := application.NewDispatcher(j, p, r, testClock(t), application.NewDispatchAuthority())
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
@@ -1148,7 +1186,7 @@ func TestASecondDispatcherOverTheSameRepositoryIsAlsoRefused(t *testing.T) {
 		t.Fatalf("first Dispatch = %v", err)
 	}
 
-	second, err := application.NewDispatcher(j, p, r, testClock(t))
+	second, err := application.NewDispatcher(j, p, r, testClock(t), application.NewDispatchAuthority())
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}

@@ -266,6 +266,16 @@ type Module struct {
 	// where an order becomes a request at a venue.
 	Dispatch *application.Dispatcher
 
+	// Execute is §6 step 6's package half: a planned package's legs submitted
+	// in parallel, each exactly once, refused whole or sent whole.
+	//
+	// It is a second path to the same crash boundary — its per-leg dispatchers
+	// and Dispatch share ONE DispatchAuthority, constructed in New, so the
+	// in-process double-dispatch backstop is per process rather than per path.
+	// An order sent through either path and re-presented to the other is
+	// refused even when the projection is the thing that broke (§59b).
+	Execute *application.Executor
+
 	// Resolve is §5.3's venue-specific stable-not-found rule: the only way an
 	// order that reached the crash boundary is ever answered for, and — by
 	// holding no placer — the reason "never resubmitted" is not expressible.
@@ -400,9 +410,21 @@ func New(deps Deps) (*Module, error) {
 		return nil, errors.Join(fmt.Errorf("oms: order gateway: %w", err), journal.Close())
 	}
 
-	dispatcher, err := application.NewDispatcher(journal, placer, orders, deps.Clock)
+	// ONE authority for the process's every dispatch path — the module's own
+	// dispatcher and the executor's per-leg dispatchers. Two would be two
+	// backstops each blind to the other's sends (§59b), and the executor's
+	// constructor makes the second one inexpressible: it is built FROM the
+	// dispatcher and inherits its authority, so this seam cannot cross the
+	// wires however it is edited.
+	dispatcher, err := application.NewDispatcher(journal, placer, orders, deps.Clock,
+		application.NewDispatchAuthority())
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("oms: dispatcher: %w", err), journal.Close())
+	}
+
+	executor, err := application.NewExecutor(dispatcher)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("oms: executor: %w", err), journal.Close())
 	}
 
 	// The read half's ACL, beside the write half's and never merged with it.
@@ -457,6 +479,7 @@ func New(deps Deps) (*Module, error) {
 	return &Module{
 		Plan:      planner,
 		Dispatch:  dispatcher,
+		Execute:   executor,
 		Resolve:   resolver,
 		Classify:  classifier,
 		Recover:   replayer,

@@ -130,6 +130,60 @@ var (
 	// than dispatch again.
 	ErrOrderAlreadyDispatched = errors.New("oms: order has already been dispatched in this process")
 
+	// ErrAuthorityMissing reports a dispatch path constructed with no
+	// DispatchAuthority.
+	//
+	// Refused rather than defaulted to a fresh private set, because a private
+	// set is the exact shape the authority replaced: a backstop scoped to one
+	// path, blind to every other path's sends, whose narrowing nothing reports.
+	// The caller who would discover the default is a second dispatch path
+	// re-presenting a sent order over a broken projection — the one case the
+	// backstop exists for (§59b).
+	ErrAuthorityMissing = errors.New("oms: dispatch path has no dispatch authority")
+
+	// ErrDispatcherMissing reports an Executor constructed with no dispatcher
+	// to inherit its collaborators from. NewExecutor's doc records why the
+	// dispatcher IS the parameter: the shared authority stops being a wire a
+	// seam could cross.
+	ErrDispatcherMissing = errors.New("oms: executor has no dispatcher to build from")
+
+	// ErrPackageEmpty reports an Execute call with no legs.
+	//
+	// ErrPlanEmpty's argument one step later: a caller whose ref construction
+	// silently produced nothing would get a successful execution of none of it,
+	// and report a package that was sent.
+	ErrPackageEmpty = errors.New("oms: package has no legs to execute")
+
+	// ErrPackageMixedTrades and ErrPackageMixedAttempts report an Execute whose
+	// legs do not belong to one planning of one trade.
+	//
+	// §6 step 5 advances the attempt for the WHOLE plan, so one package is one
+	// (trade, attempt) pair, and the ids carry both — the check reads what the
+	// caller cannot mis-state. Mixed trades would execute two packages' legs as
+	// one, and mixed attempts would execute a replan beside the plan it
+	// replaced, whose ids §5.3 says may still be live at the venue.
+	ErrPackageMixedTrades   = errors.New("oms: package legs name more than one trade")
+	ErrPackageMixedAttempts = errors.New("oms: package legs name more than one attempt")
+
+	// ErrPackageDuplicateLeg reports the same ClientOrderID presented twice in
+	// one Execute.
+	//
+	// With one trade and one attempt established, distinct ids imply distinct
+	// leg indices — so this is also what guarantees each leg's slot dispatcher
+	// is used by exactly one goroutine, which is the executor's whole
+	// concurrency argument. The refusal is therefore load-bearing for memory
+	// safety, not only for order semantics.
+	ErrPackageDuplicateLeg = errors.New("oms: package presents the same leg twice")
+
+	// ErrPackageQuantityMismatch reports legs whose base quantities differ —
+	// §6 step 6's "identical base quantity", the delta-neutral construction.
+	//
+	// The comparison is Quantity.Cmp, which refuses mismatched assets, so
+	// "identical" includes "in the same base asset": a package whose legs are
+	// sized in different bases is refused as a mismatch, never compared
+	// numerically.
+	ErrPackageQuantityMismatch = errors.New("oms: package legs do not share one base quantity")
+
 	// ErrEffectUnhandled reports a Place failure whose apperror.Effect the
 	// classifier has no case for.
 	//

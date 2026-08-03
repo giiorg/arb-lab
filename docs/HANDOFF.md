@@ -1,6 +1,75 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-03, session 87): **MILESTONE 3 SLICE G2 IS CLOSED — THE COMPOSITION ROOT EXISTS, §5.2 HAS AN OMS SCHEMA, `arblab reconcile run` IS REAL, AND §7.5's EXEMPTION FOR AN UNCOVERABLE INSTRUMENT WAS ARGUED FROM ONE CAUSE OVER A PREDICATE COLLECTING TWO. DOCS ARE v0.9.39; MARKER GREP IS ZERO.**
+## Status (2026-08-03, session 88): **MILESTONE 3 SLICE G3 IS CLOSED — §47f's ROSTER IS COMPLETE. THE PARALLEL TWO-LEG MARKETABLE-IOC EXECUTOR EXISTS, `arblab exercise run` IS THE FIRST BINARY THAT DISPATCHES, THE PROCESS-KILL-MID-IOC CHAOS TEST PROVES A–F COMPOSED — AND THE IN-PROCESS DOUBLE-DISPATCH BACKSTOP HAD SILENTLY SCOPED ITSELF "PER PATH" THE MOMENT A SECOND DISPATCH PATH EXISTED. DOCS ARE v0.9.40; MARKER GREP IS ZERO.**
+
+**The slice is done end to end.** `make ci` green on both modules, marker grep
+**0**, **24 mutations / 23 caught + 1 made inexpressible** (two `NOBUILD!!` and
+two `NO-OP!!` re-aimed; ONE genuine survivor, fixed and re-killed — see below),
+docs at **v0.9.40** across all five, the Georgian regenerated through its own
+checker. Design record **§59**, battery **§59g**. Task **#181** is discharged,
+which closes §47f's seven-slice roster.
+
+**WHAT LANDED.** `oms/application` gains `Executor` (§6 step 6's package half:
+preflight above every fsync, one goroutine per leg on per-leg dispatchers,
+per-leg results after the fan-out), `DispatchAuthority` (the process-wide
+sent-set), `DispatchRef`, `Execution`, and the re-exported urgency constants;
+`oms.Module` gains `Execute`; `app/reconcile` exports `Runner` so a composing
+caller can hold the boot open; `internal/app/exercise` is new — §5.2's OMS
+block mounted under `"oms"` plus a `trade` block, the reconcile boot run to
+conclusion FIRST and the execute step gated on `ExitClean`, after the sequence
+(never as a phase — `boot.Sequence` enforces reconcile-last and that is right);
+`cmd/arblab` gains `exercise run`, exit **3** = dispatched-and-needs-a-human
+(recovery is `arblab reconcile run`, never a re-run). Core **§6 step 6** gains
+the package rule; **§11** names the verb.
+
+**THE FINDING — the backstop that holds when the projection broke was
+process-wide only by ACCIDENT of there being one path.** `Dispatcher.authorized`
+exists for one case: a failed apply leaves a SENT order at `Planned`, the
+repository re-admits it, and only the in-process sent-set refuses the second
+`Place`. The executor is a second dispatch path, so a private map per
+dispatcher would have narrowed the guarantee to "this PATH never
+double-Places" — with nothing failing, because the abandoned case is itself an
+error path. Fixed twice: `DispatchAuthority` (one synchronised monotone set per
+process), and then — after the battery proved the WIRING untestable (a
+two-authorities mutant SURVIVED; the fragmentation is observable only through
+a broken projection no real repository produces on command) — structurally:
+`NewExecutor(d *Dispatcher)` inherits the dispatcher's authority, so a second
+authority stopped being expressible. A check nothing could make became a
+signature — slice B's own move, arriving as a fix.
+
+**THE SECOND FINDING — the collapse checklist's TENTH instance, and the first
+caught by the battery rather than before it.** The identical-base-quantity
+fixture varied only upward (0.6 vs 0.5), where `cmp != 0` and the one-sided
+`cmp > 0` are the same predicate; the mutant survived until the 0.4 case
+existed. Checklist-first is necessary and NOT sufficient.
+
+**THE CHAOS TEST** kills the real binary between the `DispatchAuthorized`
+fsync and the transport result — deterministically, the fake venue holds both
+IOCs open, so the window is a signalled state rather than a race — then
+reconciles the survivor journal: both absences resolve through §5.3's four
+gates to `AbsentAfterFinality`, the net-delta assertion explains every
+position, exit clean, and **exactly one `Place` per `ClientOrderID` across
+both runs**. A real testnet can do none of that; the venue-facts half of
+testnet validation stays #171's (§59e).
+
+**WHAT IS NEXT.** §47f is complete, so the next slice is chosen rather than
+inherited. The §9 acceptance campaign (≥100 cycles, 14 days, per-fault RTOs)
+is now RUNNABLE — an operational undertaking, not a code slice. The open tasks
+nearest the money: **#169** (act on `Outcome.Applied=false` — the executor now
+REPORTS the §6 step 7 hold and nothing yet acts on it), **#170** (the §7.6
+418/IP-ban alert no code raises), **#174** (persist `Ack.VenueOrderID`),
+**#179** (the spot leg's exposure baseline), **#171** (Bybit testnet
+credential). Record **§59h** lists what G3 deliberately left out.
+
+**Standing, unchanged:** capture **PID 8495**, never rebuild over `bin/arblab`
+(the chaos test builds into `t.TempDir()`), `make ci` runs `-race` and `go
+test` does not, cap `TLC_WORKERS` at 4, read TLC figures only from a COMPLETED
+invocation, docs/i18n parity is `bun test` (not node). **§38f (task #158) is
+still the only clock-bound user decision**: ≥2 TB off-host, gate ~2026-09-30.
+
+---
+
+## Status (2026-08-03, session 87 — HISTORICAL): **MILESTONE 3 SLICE G2 IS CLOSED — THE COMPOSITION ROOT EXISTS, §5.2 HAS AN OMS SCHEMA, `arblab reconcile run` IS REAL, AND §7.5's EXEMPTION FOR AN UNCOVERABLE INSTRUMENT WAS ARGUED FROM ONE CAUSE OVER A PREDICATE COLLECTING TWO. DOCS ARE v0.9.39; MARKER GREP IS ZERO.**
 
 **The slice is done end to end.** `make ci` green on both modules, marker grep
 **0**, **26 mutations / 26 kills** (six re-aimed from bad seds; six SURVIVED

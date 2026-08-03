@@ -57,6 +57,9 @@ func dispatch(args []string, stdout, stderr io.Writer) int {
 	if len(args) >= 2 && args[0] == "reconcile" && args[1] == "run" {
 		return reconcileRun(args[2:], stdout, stderr)
 	}
+	if len(args) >= 2 && args[0] == "exercise" && args[1] == "run" {
+		return exerciseRun(args[2:], stdout, stderr)
+	}
 	fmt.Fprint(stderr, usage)
 	return 64 // EX_USAGE: the caller's request was malformed, not a capture verdict
 }
@@ -76,6 +79,7 @@ usage:
   arblab crossvenue sim   -params <file> -out <file> [-root <dir>] [-rest <dir>]
   arblab crossvenue gate  -before <RFC3339> -out <file> [-root <dir>] [-rest <dir>] [-reference <file>]
   arblab reconcile run    -config <file>
+  arblab exercise run     -config <file>
 
 calibrate fetch commits one closed family-1 dataset identity (venue REST
 history, verbatim, digested) under datasets/; it refuses holdout-era
@@ -90,6 +94,14 @@ invariant asserted. Exit codes: 0 nothing needs a human, 1 a LATCHED gate
 not finish. The reported POSTURE is not the verdict — this binary declares
 all eight of §7.5's gates and produces four, so reconcile-only is the
 honest answer on a clean account.
+
+exercise run is §9's synthetic spot↔perp cycle driver: one reconcile-only
+boot to conclusion, and on a clean verdict one parallel marketable-IOC
+package from the config's trade block. Exit codes: reconcile's three, plus
+3 — the package was DISPATCHED and a leg needs a human (refused, rejected,
+unjournaled, or a stale projection holding new trading). After a 3 the
+recovery path is "reconcile run"; re-running exercise with the same trade
+id is refused by §5.3's id-reuse rule.
 
 capture verify exit codes: 0 clean, 1 integrity (the archive is lying),
 2 coverage (the archive is honest and thin). Integrity decides when both

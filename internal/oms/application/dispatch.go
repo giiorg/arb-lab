@@ -31,6 +31,12 @@ import (
 // layer out. A mutex here would make two concurrent dispatchers safe from the
 // race detector while leaving them exactly as wrong about that version — and
 // worse here than in the ledger, since the thing racing is a venue submission.
+//
+// Executor is that one layer for §6 step 6's parallel legs: it confines each
+// of several dispatchers to one goroutine. The one piece those dispatchers
+// share is the DispatchAuthority, which is synchronised for exactly that
+// reason and does not weaken this type's contract — see its doc for why the
+// two claims are compatible.
 type Dispatcher struct {
 	journal ports.Journal
 	placer  ports.OrderPlacer
@@ -43,9 +49,11 @@ type Dispatcher struct {
 	// the least room for one.
 	clk clock.Clock
 
-	// authorized is the in-process double-dispatch backstop. See Dispatch, where
-	// the reason it is a backstop rather than the mechanism is stated.
-	authorized map[ids.ClientOrderID]struct{}
+	// auth is the in-process double-dispatch backstop, one set per PROCESS and
+	// shared with every other dispatcher. See Dispatch, where the reason it is
+	// a backstop rather than the mechanism is stated, and DispatchAuthority,
+	// where the reason it is no longer a private map is.
+	auth *DispatchAuthority
 }
 
 // NewDispatcher constructs the use case, refusing a missing port.
@@ -60,7 +68,14 @@ type Dispatcher struct {
 // recovery could never resolve to StateAbsentAfterFinality. That is a defect
 // with no symptom until the day an ack is lost, which is the profile this
 // constructor's refusals exist for.
-func NewDispatcher(j ports.Journal, p ports.OrderPlacer, orders ports.OrderWriteRepository, clk clock.Clock) (*Dispatcher, error) {
+//
+// The authority is refused for the same profile one path over: a dispatcher
+// with a nil one would need to fall back to a private set, which is precisely
+// the per-path fragmentation DispatchAuthority exists to end — and the caller
+// who would discover the gap is a second dispatch path re-presenting an order
+// this one already sent, over a projection that broke.
+func NewDispatcher(j ports.Journal, p ports.OrderPlacer, orders ports.OrderWriteRepository,
+	clk clock.Clock, auth *DispatchAuthority) (*Dispatcher, error) {
 	if j == nil {
 		return nil, ErrJournalMissing
 	}
@@ -73,12 +88,15 @@ func NewDispatcher(j ports.Journal, p ports.OrderPlacer, orders ports.OrderWrite
 	if clk == nil {
 		return nil, ErrClockMissing
 	}
+	if auth == nil {
+		return nil, ErrAuthorityMissing
+	}
 	return &Dispatcher{
-		journal:    j,
-		placer:     p,
-		orders:     orders,
-		clk:        clk,
-		authorized: make(map[ids.ClientOrderID]struct{}),
+		journal: j,
+		placer:  p,
+		orders:  orders,
+		clk:     clk,
+		auth:    auth,
 	}, nil
 }
 
@@ -237,12 +255,14 @@ func (o Outcome) HoldsNewTrading() bool { return !o.Applied }
 //
 // The repository now refuses a second dispatch too — the record sits at
 // StateDispatchAuthorized, and domain.CanTransition answers ErrTransitionNoOp
-// for that edge — which looks like grounds to delete this map. It is not, and
-// the reason is the case where BOTH would otherwise be needed at once: if the
-// apply failed (see Outcome.Applied) the record is still at StatePlanned, so the
-// repository would happily admit the order a second time, for an order that has
-// already been sent. The map is the mechanism that holds precisely when the
-// projection is the thing that broke.
+// for that edge — which looks like grounds to delete the authority. It is not,
+// and the reason is the case where BOTH would otherwise be needed at once: if
+// the apply failed (see Outcome.Applied) the record is still at StatePlanned, so
+// the repository would happily admit the order a second time, for an order that
+// has already been sent. The authority is the mechanism that holds precisely
+// when the projection is the thing that broke — and it is shared across every
+// dispatcher in the process for that same case's sake, since a backstop scoped
+// to one path abandons exactly the re-presentation it exists for (§59b).
 // # The urgency argument is the caller's, and it is checked BEFORE the fsync
 //
 // [SPEC EDIT LANDED — v0.9.32] §6 step 6 described this method as taking the
@@ -317,7 +337,7 @@ func (d *Dispatcher) Dispatch(id ids.ClientOrderID, expected int64, urgency port
 	// Recorded only now. Everything above sent nothing, so a caller that fixes
 	// its order and calls again has not double-dispatched anything — and marking
 	// it earlier would burn the id on a refusal.
-	d.authorized[id] = struct{}{}
+	d.auth.mark(id)
 
 	// The apply half of §6's journal-then-apply, in that order and on the far
 	// side of the commitment. Its failure does NOT abort the send, and that is
@@ -387,7 +407,7 @@ func (d *Dispatcher) admit(id ids.ClientOrderID, expected int64) (domain.Order, 
 	// First because it is the only check needing nothing loaded, and because a
 	// second dispatch is the one refusal that must not depend on the projection
 	// being intact.
-	if _, dispatched := d.authorized[id]; dispatched {
+	if d.auth.dispatched(id) {
 		return domain.Order{}, fmt.Errorf("dispatch order %q: %w", id, ErrOrderAlreadyDispatched)
 	}
 

@@ -176,21 +176,14 @@ func (e ExitClass) String() string {
 func Run(ctx context.Context, snap config.Snapshot[Config], wall *clock.Wall,
 	reg *observability.Registry, stderr io.Writer) (Report, error) {
 
-	r := &runner{
-		cfg: snap.Value, clk: wall, reg: reg, stderr: stderr,
-		rev: snap.Rev.HashString(), storageCheck: checkJournalStorage,
-	}
-
-	checklist, err := boot.NewChecklist(declaredGates()...)
+	r, err := NewRunner(snap, wall, reg, stderr)
 	if err != nil {
 		return Report{}, err
 	}
-	r.checklist = checklist
 
-	seq := r.sequence()
-	running, err := seq.Run(ctx)
+	running, err := r.Sequence().Run(ctx)
 	if err != nil {
-		return r.report(), err
+		return r.BootReport(), err
 	}
 	// The teardown runs on the same budget the sequence validated against the
 	// watchdog threshold, and its failures are reported rather than returned: a
@@ -202,7 +195,27 @@ func Run(ctx context.Context, snap config.Snapshot[Config], wall *clock.Wall,
 			fmt.Fprintf(stderr, "reconcile: phase %q close: %v\n", p.Name, p.Err)
 		}
 	}
-	return r.report(), nil
+	return r.BootReport(), nil
+}
+
+// NewRunner assembles §7.5's boot for a caller that needs to hold it open —
+// the exercise root runs this same sequence and then acts on its verdict, so
+// the phases, the checklist and the module have to be reachable as one value
+// rather than sealed inside Run. Run remains the whole story for a caller that
+// only reconciles.
+func NewRunner(snap config.Snapshot[Config], wall *clock.Wall,
+	reg *observability.Registry, stderr io.Writer) (*Runner, error) {
+
+	r := &Runner{
+		cfg: snap.Value, clk: wall, reg: reg, stderr: stderr,
+		rev: snap.Rev.HashString(), storageCheck: checkJournalStorage,
+	}
+	checklist, err := boot.NewChecklist(declaredGates()...)
+	if err != nil {
+		return nil, err
+	}
+	r.checklist = checklist
+	return r, nil
 }
 
 // declaredGates is §7.5's full roster, which this root declares in full and
@@ -226,11 +239,17 @@ func declaredGates() []boot.Gate {
 	}
 }
 
-// runner holds what the phases hand each other. A composition root's phases are
+// Runner holds what the phases hand each other. A composition root's phases are
 // closures over one struct rather than a pipeline of return values, because
 // boot.Phase's Start returns a closer and nothing else — the values are the
 // root's business.
-type runner struct {
+//
+// It is exported for exactly one composing caller — the exercise root, which
+// runs this same boot and then executes on its verdict — and the exported
+// surface is deliberately read-mostly: Sequence to run, Module, Halted and
+// BootReport to read. The phases stay unexported; a caller cannot reorder
+// them.
+type Runner struct {
 	cfg    Config
 	clk    *clock.Wall
 	reg    *observability.Registry
@@ -257,7 +276,9 @@ type runner struct {
 	signals        chan os.Signal
 }
 
-func (r *runner) sequence() boot.Sequence {
+// Sequence is §3.2's phase list in the one order it is correct in; the
+// KindReconcile phase is last, which boot.Sequence enforces.
+func (r *Runner) Sequence() boot.Sequence {
 	budget := r.cfg.StopBudget.Duration()
 	return boot.Sequence{
 		WatchdogSilence: r.cfg.WatchdogSilence.Duration(),
@@ -290,7 +311,7 @@ func (r *runner) sequence() boot.Sequence {
 // journal handle released by the kernel rather than by Close, with the WAL
 // unlanded. The window where a boot is slowest is the window where an operator
 // interrupts it, and this tool's whole runtime IS that window.
-func (r *runner) startSignal(context.Context) (boot.StopFunc, error) {
+func (r *Runner) startSignal(context.Context) (boot.StopFunc, error) {
 	r.signals = make(chan os.Signal, boot.SignalBufferMin)
 	stop, err := boot.Install(r.signals)
 	if err != nil {
@@ -312,7 +333,7 @@ func (r *runner) startSignal(context.Context) (boot.StopFunc, error) {
 // and not a report, because a process with no credential cannot establish ANY of
 // §7.5's venue preconditions — there is no verdict to carry, only an inability to
 // start.
-func (r *runner) startConfig(context.Context) (boot.StopFunc, error) {
+func (r *Runner) startConfig(context.Context) (boot.StopFunc, error) {
 	if _, err := r.cfg.Venue.credential(); err != nil {
 		return nil, err
 	}
@@ -326,7 +347,7 @@ func (r *runner) startConfig(context.Context) (boot.StopFunc, error) {
 // later phase would report its failure into and lose it, which is §3.2's whole
 // argument for the position: a boot that dies in the journal join must die with a
 // diagnosis rather than with an exit code.
-func (r *runner) startObservability(context.Context) (boot.StopFunc, error) {
+func (r *Runner) startObservability(context.Context) (boot.StopFunc, error) {
 	if r.reg == nil {
 		return nil, ErrConfigFieldUnset
 	}
@@ -346,7 +367,7 @@ func (r *runner) startObservability(context.Context) (boot.StopFunc, error) {
 // says happened, and the DeactivationPending re-drive is terminal with no
 // reactivation. Exposure-neutrality is a property of the act given trustworthy
 // inputs, and this is the gate whose failure means they are not.
-func (r *runner) startStorage(context.Context) (boot.StopFunc, error) {
+func (r *Runner) startStorage(context.Context) (boot.StopFunc, error) {
 	if err := r.storageCheck(r.cfg.JournalPath); err != nil {
 		r.storageErr = err
 		r.halted = true
@@ -363,7 +384,7 @@ func (r *runner) startStorage(context.Context) (boot.StopFunc, error) {
 // permissions fault on a file is not a reason to fence a bot. OutcomeFailed
 // rather than OutcomeEvidenceUnusable, because nothing about the RECORDS is in
 // question — the process could not reach them, which a retry may fix.
-func (r *runner) startOMS(context.Context) (boot.StopFunc, error) {
+func (r *Runner) startOMS(context.Context) (boot.StopFunc, error) {
 	if r.halted {
 		return nil, nil
 	}
@@ -398,7 +419,7 @@ func (r *runner) startOMS(context.Context) (boot.StopFunc, error) {
 // It is last, which boot.Sequence enforces — a phase after the one whose result
 // decides the posture would be running while the process is already reporting a
 // verdict about whether it may trade.
-func (r *runner) startReconcile(context.Context) (boot.StopFunc, error) {
+func (r *Runner) startReconcile(context.Context) (boot.StopFunc, error) {
 	if r.halted {
 		return nil, nil
 	}
@@ -414,7 +435,19 @@ func (r *runner) startReconcile(context.Context) (boot.StopFunc, error) {
 	return nil, nil
 }
 
-func (r *runner) report() Report {
+// Module is the OMS this boot assembled, nil until the oms phase has run and
+// nil forever on a halted boot. The exercise root plans and executes through
+// it — via the module's own use cases, which is the only shape singlewriter
+// admits.
+func (r *Runner) Module() *oms.Module { return r.module }
+
+// Halted reports whether some phase concluded the ones after it must not run.
+func (r *Runner) Halted() bool { return r.halted }
+
+// BootReport is what the boot established so far, readable at any point — a
+// halted or failed sequence still carries its verdict, which is the
+// alive-halted-audible contract §7.5 puts on this whole package.
+func (r *Runner) BootReport() Report {
 	rep := Report{
 		Reconciliation: r.reconciliation,
 		Storage:        r.storageErr,
