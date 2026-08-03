@@ -3,10 +3,14 @@ package reconcile
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +21,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/config"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 	"github.com/giiorg/arb-lab/internal/platform/observability"
+	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
 )
 
 // This file checks the composition root (slice G2, record §58).
@@ -526,6 +531,28 @@ func TestExitClassIsNotThePosture(t *testing.T) {
 				Storage:  errors.New("nfs")},
 			want: ExitOperator,
 		},
+		{
+			// §7.6's alert with NOTHING else wrong: no gate carries the ban
+			// fact, so this row is the one where the counter is the only
+			// reading — the quieter shape where a fallback absorbed the
+			// banned call and every produced gate concluded clean.
+			name: "banned: §7.6's operator alert with every produced gate clean",
+			rep: Report{Posture: boot.PostureReconcileOnly, Blocking: structural,
+				RateLimit: ratelimit.Snapshot{Venue: ids.Venue("binance"), Bans: 1}},
+			want: ExitOperator,
+		},
+		{
+			// The row that pays for the branch: a banned join reports
+			// OutcomeFailed, which alone reads ExitIncomplete — "a retry may
+			// lift it" — and retrying into a Binance ban escalates it. Bans is
+			// 2 here and 1 above, so "at least one" and "exactly one" are
+			// different predicates across the pair.
+			name: "banned outranks incomplete: the retry it invites is what escalates a ban",
+			rep: Report{Posture: boot.PostureReconcileOnly,
+				Blocking:  append([]boot.Gate{boot.GateVenueJoined}, structural...),
+				RateLimit: ratelimit.Snapshot{Venue: ids.Venue("binance"), Bans: 2}},
+			want: ExitOperator,
+		},
 	}
 	for _, c := range cases {
 		if got := c.rep.ExitClass(); got != c.want {
@@ -616,6 +643,75 @@ func TestBootRunsEveryPhaseAndReportsClean(t *testing.T) {
 	// And the journal exists, which is the evidence the phase actually ran.
 	if _, err := os.Stat(filepath.Join(dir, "journal.db")); err != nil {
 		t.Errorf("journal not created: %v", err)
+	}
+	// The governor's snapshot reaches the report — the positive control for
+	// §7.6's alert wiring, without which the ban test below could pass against
+	// a report that never carried the snapshot at all (a zero snapshot has
+	// zero bans too). Venue proves the wiring; Bans proves the clean answer.
+	if rep.RateLimit.Venue != cfg.Venue.Venue {
+		t.Errorf("RateLimit.Venue = %q, want %q — the governor's state must reach the report",
+			rep.RateLimit.Venue, cfg.Venue.Venue)
+	}
+	if rep.RateLimit.Bans != 0 {
+		t.Errorf("RateLimit.Bans = %d on a boot that made no venue call", rep.RateLimit.Bans)
+	}
+}
+
+// TestABanDuringTheBootIsAnOperatorAlert is §7.6's MUST delivered end to end:
+// the venue answers the position query with 418, the transport files
+// PenaltyBan into the governor, and the ROOT — the alert deliverer ratelimit's
+// own doc names — turns the counter into ExitOperator.
+//
+// The gate the failure lands on reads OutcomeFailed, which alone is
+// ExitIncomplete: "a retry may lift it". For a ban that advice is the harm —
+// Binance escalates repeat violations from two minutes toward three days — so
+// the assertion worth the fixture is the verdict, and the isolating fact is
+// that NOTHING LATCHED: the class can only have come from the bans counter.
+func TestABanDuringTheBootIsAnOperatorAlert(t *testing.T) {
+	t.Setenv(testKeyVar, "key")
+	t.Setenv(testSecretVar, "secret")
+
+	var banned atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/fapi/v3/positionRisk" {
+			banned.Add(1)
+			w.WriteHeader(http.StatusTeapot)
+			fmt.Fprint(w, `{"code":-1003,"msg":"Way too much request weight used; IP banned."}`)
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"code":-1000,"msg":"unexpected path in ban fake"}`)
+	}))
+	defer srv.Close()
+
+	cfg := validConfig(t, filepath.Join(t.TempDir(), "journal.db"))
+	host := strings.TrimPrefix(srv.URL, "http://")
+	for i := range cfg.Venue.Endpoints {
+		cfg.Venue.Endpoints[i].Scheme = "http"
+		cfg.Venue.Endpoints[i].Host = host
+	}
+	r := newRunnerFor(t, cfg, func(string) error { return nil })
+
+	rep, err := r.run(t)
+	if err != nil {
+		t.Fatalf("Run = %v — a banned boot is a report, not an error", err)
+	}
+	if banned.Load() == 0 {
+		t.Fatal("fixture: the fake was never asked for positions — the 418 arm is unreachable")
+	}
+	if rep.RateLimit.Bans != 1 {
+		t.Errorf("RateLimit.Bans = %d, want 1", rep.RateLimit.Bans)
+	}
+	if !rep.RateLimit.Paused || rep.RateLimit.PauseKind != ratelimit.PenaltyBan {
+		t.Errorf("pause = (%v, %s), want an in-force PenaltyBan pause",
+			rep.RateLimit.Paused, rep.RateLimit.PauseKind)
+	}
+	if len(rep.Latched) != 0 {
+		t.Errorf("latched = %v — with a latch the verdict below proves nothing about §7.6's branch",
+			rep.Latched)
+	}
+	if got := rep.ExitClass(); got != ExitOperator {
+		t.Errorf("ExitClass() = %s, want ExitOperator — ExitIncomplete invites the retry that escalates the ban", got)
 	}
 }
 

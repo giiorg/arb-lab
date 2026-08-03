@@ -105,6 +105,12 @@ func writeExerciseReport(w io.Writer, r appexercise.Report) {
 	if r.Execution.HoldsNewTrading() {
 		fmt.Fprintln(w, "execute:  HOLDS NEW TRADING — a sent leg's projection write failed; §6 step 7 applies until reconcile re-derives it")
 	}
+	// The POST-execute rate-limit state, printed only on the executed path: the
+	// boot's own line above rendered the pre-execute snapshot, and when nothing
+	// was executed the two are the same facts — a second line would say it
+	// twice. When the fan-out itself earned a ban, this line is the only one
+	// that can say so.
+	writeRateLimitStatus(w, r.RateLimit)
 }
 
 // loadExerciseConfig is loadReconcileConfig over the exercise document.

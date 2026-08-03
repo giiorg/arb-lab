@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	appreconcile "github.com/giiorg/arb-lab/internal/app/reconcile"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/config"
 	"github.com/giiorg/arb-lab/internal/platform/observability"
+	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
 )
 
 // reconcileRun is `arblab reconcile run -config <file>`: §11's reconcile
@@ -93,6 +95,7 @@ func writeReconcileReport(w io.Writer, r appreconcile.Report) {
 	} else {
 		fmt.Fprintln(w, "latched:  none")
 	}
+	writeRateLimitStatus(w, r.RateLimit)
 	fmt.Fprintf(w, "blocking: %v\n", r.Blocking)
 	if r.Storage != nil {
 		fmt.Fprintf(w, "storage:  %v\n", r.Storage)
@@ -125,6 +128,28 @@ func writeReconcileReport(w io.Writer, r appreconcile.Report) {
 	}
 	if rec.Cause != nil {
 		fmt.Fprintf(w, "cause:    %v\n", rec.Cause)
+	}
+}
+
+// writeRateLimitStatus renders §7.6's rate-limit facts, and it draws that
+// section's one line in the output: a ban is an OPERATOR ALERT, a throttle
+// pause is information. A zero snapshot — no venue client was ever built, so no
+// venue traffic happened — prints nothing at all, because a standing line that
+// is almost always "nothing" is how an operator learns to skip the one that
+// is not.
+func writeRateLimitStatus(w io.Writer, s ratelimit.Snapshot) {
+	if s.Bans > 0 {
+		fmt.Fprintf(w, "ratelimit: %s banned this IP %d time(s) (418/IP ban)  <- §7.6 OPERATOR ALERT: do not retry — repeat violations escalate the ban",
+			s.Venue, s.Bans)
+		if s.Paused {
+			fmt.Fprintf(w, "; paused until %s", s.PausedUntil.UTC().Format(time.RFC3339))
+		}
+		fmt.Fprintln(w)
+		return
+	}
+	if s.Paused {
+		fmt.Fprintf(w, "ratelimit: %s paused until %s (%s — a hard pause, not an operator matter)\n",
+			s.Venue, s.PausedUntil.UTC().Format(time.RFC3339), s.PauseKind)
 	}
 }
 

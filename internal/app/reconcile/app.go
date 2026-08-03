@@ -43,6 +43,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/config"
 	"github.com/giiorg/arb-lab/internal/platform/observability"
+	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
 )
 
 // Report is what one reconcile-only boot established, as an operator reads it.
@@ -62,6 +63,14 @@ type Report struct {
 
 	// Storage is #168's verdict on the journal's filesystem, nil when it holds.
 	Storage error
+
+	// RateLimit is the venue governor's state as this report was taken — §7.6's
+	// alert facts, read by ExitClass (Bans) and rendered for the operator. Zero
+	// when the boot halted before a venue client existed, and that zero is the
+	// true answer rather than a blind spot: a penalty is filed only by a
+	// transport, and every transport spends against this governor, so no
+	// governor means no venue traffic and therefore no ban to report.
+	RateLimit ratelimit.Snapshot
 }
 
 // ExitClass is what this run means, and it is deliberately NOT derived from the
@@ -90,9 +99,14 @@ const (
 	// must act on. It does NOT mean the process may trade.
 	ExitClean ExitClass = iota
 
-	// ExitOperator is §7.5's alert: a latched gate. A foreign order, an
-	// unexplained position delta, a journal whose chain does not verify, an
-	// instrument outside the invariant for a reason waiting cannot discharge.
+	// ExitOperator is an operator alert, from either of the two sections that
+	// mandate one. §7.5's: a latched gate — a foreign order, an unexplained
+	// position delta, a journal whose chain does not verify, an instrument
+	// outside the invariant for a reason waiting cannot discharge. §7.6's: the
+	// venue banned this IP (Binance 418, Bybit's 10018/403 gateway ban), which
+	// no retry may answer — on Binance a repeat violation escalates the ban
+	// from two minutes toward three days, so the retry ExitIncomplete invites
+	// is exactly the response the ban forbids.
 	ExitOperator
 
 	// ExitIncomplete is a reconciliation that could not finish: a venue that
@@ -109,6 +123,17 @@ const (
 // every retry the incompleteness invites.
 func (r Report) ExitClass() ExitClass {
 	if len(r.Latched) > 0 {
+		return ExitOperator
+	}
+	// §7.6's MUST: "surface 418 / IP ban as immediate operator alerts". This is
+	// NOT the second-reading trap the comment below records for Storage and
+	// Cause, because no gate carries this fact: a 418 during the join reports
+	// GateVenueJoined as OutcomeFailed, which alone reads ExitIncomplete —
+	// "a retry may lift it" — and retrying into a Binance ban is what escalates
+	// it toward three days. The counter is the ONLY reading of the ban, and it
+	// also covers the quieter shape where a fallback absorbed the banned call
+	// and every gate concluded clean.
+	if r.RateLimit.Bans > 0 {
 		return ExitOperator
 	}
 	// Storage and Reconciliation.Cause are deliberately NOT consulted, and a
@@ -259,6 +284,12 @@ type Runner struct {
 	checklist *boot.Checklist
 	module    *oms.Module
 
+	// governor is the venue's §7.6 budget, held here because the root is the
+	// alert deliverer ratelimit's Snapshot doc names: the transports spend
+	// against it, and BootReport reads it. Nil until the oms phase builds the
+	// venue client, nil forever on a boot that halted first.
+	governor *ratelimit.Governor
+
 	// storageCheck is #168's check, injected so the sequence's own tests do not
 	// depend on what filesystem the machine running them uses for temporary
 	// files. Production always passes checkJournalStorage; the real check has its
@@ -388,12 +419,13 @@ func (r *Runner) startOMS(context.Context) (boot.StopFunc, error) {
 	if r.halted {
 		return nil, nil
 	}
-	client, err := newOrderClient(r.cfg, r.clk)
+	client, governor, err := newOrderClient(r.cfg, r.clk)
 	if err != nil {
 		r.halted = true
 		r.reconciliation.Cause = err
 		return nil, r.checklist.Report(boot.GateVenueJoined, boot.OutcomeFailed)
 	}
+	r.governor = governor
 	module, err := oms.New(oms.Deps{
 		JournalPath:      r.cfg.JournalPath,
 		VenueOrders:      client,
@@ -456,6 +488,18 @@ func (r *Runner) Halted() bool { return r.halted }
 // unreachable.
 func (r *Runner) Checklist() *boot.Checklist { return r.checklist }
 
+// RateLimit is the venue governor's state now — §7.6's alert facts, live. The
+// zero snapshot when no venue client was ever built; see Report.RateLimit for
+// why that zero is an answer rather than a gap. A composing root reads this
+// AFTER its runtime work, because Bans is monotone and a report taken before a
+// dispatch cannot carry a ban the dispatch earned.
+func (r *Runner) RateLimit() ratelimit.Snapshot {
+	if r.governor == nil {
+		return ratelimit.Snapshot{}
+	}
+	return r.governor.Snapshot()
+}
+
 // BootReport is what the boot established so far, readable at any point — a
 // halted or failed sequence still carries its verdict, which is the
 // alive-halted-audible contract §7.5 puts on this whole package.
@@ -463,6 +507,7 @@ func (r *Runner) BootReport() Report {
 	rep := Report{
 		Reconciliation: r.reconciliation,
 		Storage:        r.storageErr,
+		RateLimit:      r.RateLimit(),
 	}
 	if r.checklist != nil {
 		rep.Posture = r.checklist.Posture()

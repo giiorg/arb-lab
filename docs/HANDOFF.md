@@ -1,6 +1,50 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-03, session 89): **#169 IS CLOSED — §6 STEP 7's HOLD HAS ITS LIVE PRODUCER AND ITS READER, BOTH INSIDE THE WRITE PATH: THE EXECUTOR FILES THE PROJECTION-STALE LATCH AT ITS FAN-IN AND REFUSES THE NEXT OPENING AT ITS OWN ADMISSION — AND BOTH OBVIOUS ADMISSION READS WERE WRONG, EACH IN ITS OWN DIRECTION. DOCS REMAIN v0.9.40; NO SPEC EDIT OWED; MARKER GREP IS ZERO.**
+## Status (2026-08-03, session 90): **#170 IS CLOSED — §7.6's 418/IP-BAN MUST-ALERT IS DELIVERED END TO END: THE ROOT HOLDS THE GOVERNOR IT USED TO DROP, `Report.RateLimit` CARRIES THE SNAPSHOT, BANS > 0 IS ExitOperator, AND THE FINDING IS THAT THE OLD ANSWER WAS NOT SILENT BUT WRONG — A BAN READ AS ExitIncomplete, WHOSE "RETRY MAY LIFT IT" IS THE RESPONSE THAT ESCALATES A BINANCE BAN TOWARD THREE DAYS. DOCS REMAIN v0.9.40; NO SPEC EDIT OWED; MARKER GREP IS ZERO.**
+
+**The slice is done end to end.** `make ci` green on both modules, marker grep
+**0**, **13 mutations / 13 kills** (including two aimed at the PRODUCER through
+the root's e2e test, so the HTTP-status→exit-code chain is checked at the
+consumer). Design record **§61**, battery **§61e**. Task **#170** is
+discharged. No spec document changed — the slice implements §7.6 as written —
+so the set stays **v0.9.40** and the Georgian needed no regeneration.
+
+**WHAT LANDED.** `reconcile.newOrderClient` returns the governor beside the
+client (the handle G2 dropped); `Runner.RateLimit()` reads the live snapshot;
+`reconcile.Report.RateLimit` carries it and `ExitClass` consults `Bans > 0 →
+ExitOperator` — NOT the Storage/Cause dead-branch trap, because no gate
+carries the ban fact (a banned join is `OutcomeFailed` → ExitIncomplete alone,
+and a fallback can absorb the banned call entirely). `exercise.Report` gains a
+POST-execute `RateLimit` beside the deliberately pre-execute `Boot` snapshot;
+its ExitClass deliberately does NOT read it — a fan-out ban IS a leg at
+SubmissionUnknown (RateLimited = EffectNotApplied without FLAG-2's rejection
+evidence), so the leg loop already answers ExitExecution, and the claim is
+pinned by `TestABanDuringDispatchIsSurfaced` with forced leg ordering. A
+boot-banned run now REFUSES to dispatch at the execute gate, pre-fsync. One
+shared `writeRateLimitStatus` draws §7.6's line in output: ban → OPERATOR
+ALERT line, throttle → information, zero snapshot → nothing; the exercise
+renderer's post-execute call is gated on Executed so the alert prints exactly
+once (counted, not just "contained"). CLI usage: exit 1 = latched gate OR IP
+ban.
+
+**WHAT IS NEXT.** The candidates nearest the money, unchanged: **#174**
+(persist `Ack.VenueOrderID`), **#179** (the spot leg's exposure baseline),
+**#171** (Bybit testnet credential — needs the USER), and the **unowned
+quantization slice** (lot/tick/min-notional; still the one genuine build
+blocker for the $20 live test — nothing in the order path reads
+`exchangeInfo`/`instruments-info`). The §9 acceptance campaign remains
+runnable. #173 (refuse a profile that cannot count a charged dimension) is the
+other §7.6 remnant.
+
+**Standing, unchanged:** capture **PID 8495**, never rebuild over `bin/arblab`,
+`make ci` runs `-race`, cap `TLC_WORKERS` at 4, docs/i18n parity is `bun test`.
+**§38f (task #158) is still the only clock-bound user decision** (≥2 TB
+off-host, gate ~2026-09-30). The live-test inventory and its governance gate
+are in session 89's block below.
+
+---
+
+## Status (2026-08-03, session 89 — HISTORICAL): **#169 IS CLOSED — §6 STEP 7's HOLD HAS ITS LIVE PRODUCER AND ITS READER, BOTH INSIDE THE WRITE PATH: THE EXECUTOR FILES THE PROJECTION-STALE LATCH AT ITS FAN-IN AND REFUSES THE NEXT OPENING AT ITS OWN ADMISSION — AND BOTH OBVIOUS ADMISSION READS WERE WRONG, EACH IN ITS OWN DIRECTION. DOCS REMAIN v0.9.40; NO SPEC EDIT OWED; MARKER GREP IS ZERO.**
 
 **The slice is done end to end.** `make ci` green on both modules, marker grep
 **0**, **16 mutations / 16 kills** (one `TIMEOUT!!` re-aimed with

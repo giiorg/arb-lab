@@ -144,22 +144,28 @@ func collaboratorsFor(d Dialect, v ids.Venue, cred transport.Credential) (collab
 // the traffic and neither seeing the ban coming. The profile carries both scopes,
 // so one governor is not a simplification — it is the only wiring that can hold
 // ScopeVenue at all.
-func newOrderClient(cfg Config, clk clock.Clock) (*venue.OrderClient, error) {
+//
+// The governor is returned BESIDE the client rather than sealed inside it,
+// because the two have different readers: the transports spend against it, and
+// the root reads Snapshot().Bans to deliver §7.6's operator alert — the half
+// ratelimit's own doc assigns to "the caller", which until this return value
+// existed was a caller with no handle to read.
+func newOrderClient(cfg Config, clk clock.Clock) (*venue.OrderClient, *ratelimit.Governor, error) {
 	cred, err := cfg.Venue.credential()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	parts, err := collaboratorsFor(cfg.Venue.Dialect, cfg.Venue.Venue, cred)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	profile, err := cfg.Venue.profile()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	governor, err := ratelimit.New(clk, profile)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	transports := make(map[ids.ProductCategory]*transport.SignedClient, len(cfg.Venue.Endpoints))
@@ -177,9 +183,13 @@ func newOrderClient(cfg Config, clk clock.Clock) (*venue.OrderClient, error) {
 			Clock:      clk,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("endpoint %s: %w", e.Product, err)
+			return nil, nil, fmt.Errorf("endpoint %s: %w", e.Product, err)
 		}
 		transports[e.Product] = client
 	}
-	return venue.NewOrderClient(venue.OrderClientConfig{Codec: parts.codec, Transports: transports})
+	client, err := venue.NewOrderClient(venue.OrderClientConfig{Codec: parts.codec, Transports: transports})
+	if err != nil {
+		return nil, nil, err
+	}
+	return client, governor, nil
 }

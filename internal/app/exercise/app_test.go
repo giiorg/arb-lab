@@ -2,7 +2,10 @@ package exercise
 
 import (
 	"errors"
+	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,6 +19,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/config"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 	"github.com/giiorg/arb-lab/internal/platform/observability"
+	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
 )
 
 // validConfig mirrors reconcile's own fixture — the embedded half is §5.2's
@@ -279,6 +283,18 @@ func TestExitClassPrecedence(t *testing.T) {
 			ExitOperator,
 		},
 		{
+			// §7.6 through the boot's own precedence: a banned boot is the
+			// operator's, and the execute gate reading the same class is what
+			// refuses to open exposure through a ban.
+			"a banned boot is the operator's — §7.6 outranks the execute step",
+			func() Report {
+				r := Report{Boot: cleanBoot()}
+				r.Boot.RateLimit = ratelimit.Snapshot{Venue: ids.Venue("binance"), Bans: 1}
+				return r
+			}(),
+			ExitOperator,
+		},
+		{
 			"a boot that could not finish is incomplete",
 			Report{Boot: reconcile.Report{Blocking: []boot.Gate{boot.GateJournalReplayed}}},
 			ExitIncomplete,
@@ -331,5 +347,116 @@ func TestExitClassPrecedence(t *testing.T) {
 				t.Errorf("ExitClass() = %s, want %s", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestABanDuringDispatchIsSurfaced holds Report.RateLimit's doc to its fixture,
+// both halves:
+//
+//   - the claim that excuses ExitClass from consulting the field — a ban
+//     during the fan-out IS a leg below StateSubmitted, because the 418 that
+//     files the penalty classifies that leg's Place to SubmissionUnknown, so
+//     the class must come out ExitExecution with no new branch anywhere;
+//   - the claim that requires the field to exist at all — Boot.RateLimit is
+//     the pre-execute snapshot, so the dispatch's own ban is visible ONLY in
+//     the post-execute read.
+//
+// The fake forces the ordering: the perp Place answers 418 only after the spot
+// Place has completed, so the spot leg's Acquire deterministically precedes
+// the pause and exactly one leg fails, by the venue's refusal rather than by a
+// race with the governor.
+func TestABanDuringDispatchIsSurfaced(t *testing.T) {
+	t.Setenv("ARBLAB_TEST_API_KEY", "k")
+	t.Setenv("ARBLAB_TEST_API_SECRET", "s")
+
+	spotDone := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v3/order":
+			fmt.Fprintf(w, `{"orderId":22542179,"clientOrderId":%q,"status":"NEW"}`,
+				r.Form.Get("newClientOrderId"))
+			close(spotDone)
+		case r.Method == http.MethodPost && r.URL.Path == "/fapi/v1/order":
+			select {
+			case <-spotDone:
+			case <-time.After(10 * time.Second):
+				// The bound §59f requires: if the spot Place never arrives the
+				// 418 still answers, and the spot-leg assertions below name
+				// the ordering failure instead of the suite hanging.
+			}
+			w.WriteHeader(http.StatusTeapot)
+			fmt.Fprint(w, `{"code":-1003,"msg":"Way too much request weight used; IP banned."}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/fapi/v3/positionRisk":
+			fmt.Fprint(w, `[]`)
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"code":-1000,"msg":"unexpected path in ban fake"}`)
+		}
+	}))
+	defer srv.Close()
+
+	cfg := validConfig(t)
+	cfg.OMS.JournalPath = filepath.Join(t.TempDir(), "journal.db")
+	host := strings.TrimPrefix(srv.URL, "http://")
+	for i := range cfg.OMS.Venue.Endpoints {
+		cfg.OMS.Venue.Endpoints[i].Scheme = "http"
+		cfg.OMS.Venue.Endpoints[i].Host = host
+	}
+	snap := config.Snapshot[Config]{Value: cfg}
+	wall, err := clock.NewWall(cfg.OMS.Calibrations())
+	if err != nil {
+		t.Fatalf("NewWall: %v", err)
+	}
+
+	report, err := Run(t.Context(), snap, wall, observability.NewRegistry(), io.Discard)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !report.Executed {
+		t.Fatalf("Executed = false (refusal %v) — the boot should be clean, the ban comes later", report.Refusal)
+	}
+	if report.Boot.RateLimit.Bans != 0 {
+		t.Errorf("Boot.RateLimit.Bans = %d, want 0 — the pre-execute snapshot cannot carry the dispatch's ban",
+			report.Boot.RateLimit.Bans)
+	}
+	if report.RateLimit.Bans != 1 {
+		t.Errorf("RateLimit.Bans = %d, want 1 — the post-execute read is where the ban lives", report.RateLimit.Bans)
+	}
+	if !report.RateLimit.Paused || report.RateLimit.PauseKind != ratelimit.PenaltyBan {
+		t.Errorf("pause = (%v, %s), want an in-force PenaltyBan pause",
+			report.RateLimit.Paused, report.RateLimit.PauseKind)
+	}
+	if got := report.ExitClass(); got != ExitExecution {
+		t.Errorf("ExitClass() = %s, want ExitExecution — the 418 errored a dispatched leg", got)
+	}
+	// Exactly one leg is below StateSubmitted and it carries the venue's own
+	// cause: the doc's claim checked per leg rather than believed in
+	// aggregate. SubmissionUnknown, not Rejected — a RateLimited Place is
+	// EffectNotApplied WITHOUT the explicit-rejection evidence class FLAG-2
+	// demands for the terminal, so §5.3's resolving query still owns it.
+	var banned, clean int
+	for _, leg := range report.Execution.Legs {
+		if leg.Err != nil {
+			t.Errorf("leg %s: Err = %v — a Place that RAN reports through its Outcome", leg.ID, leg.Err)
+			continue
+		}
+		switch leg.Outcome.State {
+		case domain.StateSubmitted:
+			clean++
+		case domain.StateSubmissionUnknown:
+			banned++
+			if leg.Outcome.Cause == nil {
+				t.Errorf("leg %s: SubmissionUnknown with a nil Cause — the 418 must travel with the leg", leg.ID)
+			}
+		case domain.StatePlanned, domain.StateDispatchAuthorized, domain.StateAcknowledged,
+			domain.StatePartiallyFilled, domain.StateFilled, domain.StateCancelPending,
+			domain.StateCancelUnknown, domain.StateCanceled, domain.StateRejected,
+			domain.StateAbsentAfterFinality:
+			t.Errorf("leg %s: state = %s, want StateSubmitted or StateSubmissionUnknown", leg.ID, leg.Outcome.State)
+		}
+	}
+	if banned != 1 || clean != 1 {
+		t.Errorf("legs = %d banned / %d clean, want exactly 1 / 1 — the fake's ordering did not hold", banned, clean)
 	}
 }

@@ -89,8 +89,9 @@ freeze.
 
 reconcile run performs §7.5's reconcile-only boot once: journal replayed,
 venue joined, every absence put to §5.3's stable-not-found rule, net-delta
-invariant asserted. Exit codes: 0 nothing needs a human, 1 a LATCHED gate
-(operator clearance; a retry will not lift it), 2 the reconciliation could
+invariant asserted. Exit codes: 0 nothing needs a human, 1 an operator
+alert — a LATCHED gate (§7.5; a retry will not lift it) or a venue IP ban
+(§7.6's 418/10018; a retry ESCALATES it), 2 the reconciliation could
 not finish. The reported POSTURE is not the verdict — this binary declares
 all eight of §7.5's gates and produces four, so reconcile-only is the
 honest answer on a clean account.

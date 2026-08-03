@@ -37,6 +37,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/config"
 	"github.com/giiorg/arb-lab/internal/platform/observability"
+	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
 )
 
 // Report is what one exercise run established: the boot's whole report, and
@@ -57,6 +58,19 @@ type Report struct {
 
 	// Execution is the per-leg outcome, meaningful only when Executed.
 	Execution application.Execution
+
+	// RateLimit is the governor's state AFTER the execute step — §7.6's alert
+	// facts for the whole run. It exists beside Boot.RateLimit because Boot
+	// deliberately stays the pre-execute snapshot (see ExitClass) while Bans is
+	// monotone: a ban the dispatch itself earned is visible only here. It is
+	// deliberately NOT consulted by ExitClass — a ban during the fan-out IS a
+	// leg below StateSubmitted, because the 418 that files the penalty is the
+	// same response that classifies that leg's Place to SubmissionUnknown
+	// (EffectNotApplied without a venue rejection), so the leg loop already
+	// answers ExitExecution and a second reading would be the dead branch
+	// reconcile.ExitClass declines for Storage.
+	// TestABanDuringDispatchIsSurfaced holds that claim to its fixture.
+	RateLimit ratelimit.Snapshot
 }
 
 // ExitClass is what this run means for the operator driving §9's campaign.
@@ -154,6 +168,10 @@ func Run(ctx context.Context, snap config.Snapshot[Config], wall *clock.Wall,
 
 	rep := Report{Boot: r.BootReport()}
 	rep.Executed, rep.Execution, rep.Refusal = execute(snap.Value, r)
+	// After the execute step, deliberately: Bans is monotone and the fan-out is
+	// venue traffic, so a snapshot taken beside Boot's would miss the one §7.6
+	// alert this binary can newly earn.
+	rep.RateLimit = r.RateLimit()
 
 	shutdown, _ := running.Shutdown(ctx, wall)
 	for _, p := range shutdown.Phases {
