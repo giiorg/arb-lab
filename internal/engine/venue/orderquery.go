@@ -31,10 +31,12 @@ import (
 // only to the endpoints would be frozen against nothing. Two of the three
 // findings below were found by asking the contract, not the venues.
 //
-// # [SPEC EDIT OWED] §4's two read signatures are both WIDER here, and both
-// # widenings are §6.7's requirements rather than conveniences
+// # §4's two read signatures are both WIDER here, and both widenings are
+// # §6.7's requirements rather than conveniences
 //
-// §4 declares:
+// The departures below are recorded in core §4 as of v0.9.33, which now states
+// the Cursor ruling, the sweep's horizon argument, the proved-watermark rule and
+// the refuse-don't-truncate rule normatively. §4's abbreviated signatures are:
 //
 //	OrderByClientID(OrderRef) (OrderStatus, error)
 //	Fills(VenueInstrument, since Cursor) ([]Fill, Cursor, error)
@@ -56,7 +58,8 @@ import (
 //
 // The result types are wider too: OrderStatus carries a PRESENCE and a REACH
 // (§52c, §52d), and the sweep returns a page carrying a watermark and its own
-// continuation. Owed to core §4, and to §5.3 for the retention bound.
+// continuation. Core §4 records the presence rule; §5.3 records the retention
+// bound the reach exists to feed.
 
 // OrderRef identifies one order to a venue.
 //

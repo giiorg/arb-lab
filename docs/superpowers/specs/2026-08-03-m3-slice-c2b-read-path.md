@@ -1,10 +1,12 @@
 # §52 — M3 slice C2b: the order read path, and the cursor that cannot answer §6.7
 
-**Date:** 2026-08-03 · **Session:** 79 · **Docs:** v0.9.33 (owed)
-**Task:** #172 · **Status: IN PROGRESS — record written mid-slice, per §51's practice.**
+**Date:** 2026-08-03 · **Sessions:** 79–80 · **Docs:** v0.9.33 (landed)
+**Task:** #172 · **Status: CLOSED — code half `b0f7f33`, docs half this session.**
 
 > §51 was written mid-slice deliberately and its §51h became the closing report.
-> Same shape here: **§52h is the remaining list**, and it closes as a report.
+> Same shape here: **§52h is that report**, and **§52i is the reading pass** —
+> which amended §52d's own premise, so read §52i before believing §52d's
+> opening sentence.
 
 ---
 
@@ -148,12 +150,17 @@ the one where the wrong thing is not expressible — §51e's argument for
 
 ---
 
-## §52d — FINDING 3: the stable-not-found rule has an EXPIRY DATE, and no
-## document records it — and each venue's cliff lands on this system's own
-## most common terminal state
+## §52d — FINDING 3: the stable-not-found rule has an EXPIRY DATE — and each
+## venue's cliff lands on this system's own most common terminal state
 
-The order surfaces do not retain orders forever, and neither venue's cliff is
-mentioned anywhere in the doc set (verified 2026-08-03, Profiles §8):
+> **Amended by the reading pass (§52i).** This section was written claiming that
+> neither venue's cliff was recorded anywhere in the doc set. **That was false
+> for Binance**, and the correction makes the finding worse rather than better —
+> see §52i. The venue facts below are unchanged; the claim about their absence
+> is the part that was wrong.
+
+The order surfaces do not retain orders forever (verified verbatim 2026-08-03,
+Profiles §8):
 
 | Surface | Drops an order when |
 |---|---|
@@ -321,29 +328,93 @@ to a `NOBUILD`.
 
 ---
 
-## §52h — What remains (the DOCS half, owed)
+## §52i — THE READING PASS: finding 3's own premise was false, and the
+## correction makes the finding worse
 
-The code half is committed on its own, deliberately, exactly as C2a's session 77
-did (`e152141`, *"WIP, docs owed"*): the marker grep is the gate that keeps that
-honest, and it currently returns the two markers below rather than zero.
+Per §51h-1 the closing pass is a **reading** of what the slice asserts
+normatively, not a transcription of it. It found one, and it is §52d's own
+premise.
 
-1. **`venue-profiles.md` §8** — the read surface: the three window caps
-   (24 h / 7 d / 7 d), the retention cliffs, the two not-found layers, the
-   per-family weights, the execution-row field lists, Bybit's descending sort and
-   non-unique `execTime`, and the ONE unverified assumption (Bybit's empty-list
-   absence, which needs #171's credential).
-2. **Core §4** — the two read signatures' widenings (`[SPEC EDIT OWED]` in
-   `orderquery.go`), the `Cursor`-is-a-server-instant paragraph, and finding 4's
-   correction to the `Ack.VenueOrderID` claim (`[SPEC EDIT OWED]` in
-   `ports/gateway.go`).
-3. **Core §5.3** — the retention bound on `AbsentAfterFinality` (§52d), stated
-   normatively; #163 builds it.
-4. §12's slice annotation; ADR §3 dated block; HANDOFF; **v0.9.33 across all
-   seven**; Georgian regenerated via `assemble.mjs`.
-5. A reading pass — **not transcription**, per §51h-1.
+**§52d claimed neither venue's cliff was recorded anywhere in the doc set. For
+Binance that is false.** `venue-profiles.md` §4's history-retention row has said
+this since **2026-07-20**:
 
-**Standing rituals.** Capture is PID **8495**; never rebuild over `bin/arblab`
-while it runs. `MUTATE_MODULE=tools/lint` for the analyzers.
+> *"order + algo-order history ≈**90 days** (**some unfilled-cancelled orders
+> purged in ~3 days**); trade (execution) history ≈**6 months**"* — followed by
+> *"(corroborated 2026-07-20 — **browser-confirm exact windows**)"*.
+
+So the fact was **written down**, and **self-flagged as needing exactly the
+verification §8 has now performed**, and its consequence went underived for a
+fortnight and several slices. That is not a smaller finding than the one §52d
+recorded — it is a larger one, because "nobody knew" is an information problem
+and "it was written down, marked as needing checking, and never composed with the
+clause it bites" is a process one.
+
+**What hid it is WHERE it sits.** §4's row is about **history enumeration for the
+§7.4 actuator** — paginated order history, prefix-complete association, the
+checkpoint rule. A reader arriving with §5.3's *stable-not-found* question has no
+reason to open a row about the actuator's enumeration budget, and the composition
+that bites needs **both halves at once**: the venue's purge condition, and §6
+step 6's fact that this system emits nothing but marketable IOCs. Neither half is
+alarming alone.
+
+**The transferable form: this is C1's `[[citation-to-a-section-that-does-not-
+exist]]` INVERTED.** There, a scope note cited a section that was not there, and
+opening it was the cheap falsification. Here the section **exists and says the
+thing**, and the failure is that nobody re-read it — which no grep can catch,
+because there is no marker, no departure and no missing citation. The cheap
+habit that would have caught it: when a slice is about to record *"X is written
+down nowhere"*, **grep the doc set for the venue's own noun** (`purge`,
+`retention`, `days`) before writing the sentence. The absence claim is a claim,
+and it is the one nobody verifies because it feels like the opposite of one.
+
+**Resolution.** Profiles §8 now carries the correction explicitly and states
+which section is authoritative: §8's **verbatim conditions** for any rule about
+proved absence, §4's approximations for the actuator's enumeration budget. That
+split matters in a direction worth naming — the 3-day drop is **conjunctive**
+(`CANCELED`-or-`EXPIRED` **and** no filled trade **and** created + 3 days), so a
+rule reading §4's shorthand as *"orders vanish after 3 days"* would refuse to
+claim absence it is entitled to claim. §12's annotation and ADR §3's block carry
+the correction rather than the original wording.
+
+**Everything else the pass checked held.** The normative sentences added to §4
+and §5.3 were each re-read against the code that must satisfy them: the
+proved-watermark rule (including the empty page taking the exhausted-window arm),
+refuse-don't-truncate on both codecs, the inclusive rewind to the tied instant,
+`Unpublished` carrying an unknown as an unknown, and the presence/error split.
+One accuracy fix landed in §8 from the same pass — Bybit's execution row carries
+`feeCurrency`, which the first draft of the field list omitted while the codec
+decodes it.
+
+---
+
+## §52h — CLOSING REPORT (the docs half, LANDED)
+
+The code half was committed on its own, deliberately, exactly as C2a's session 77
+did (`e152141`, *"WIP, docs owed"*), and the marker grep is what kept that
+honest. **It now returns ZERO**; both markers are discharged.
+
+1. **`venue-profiles.md` §8 — LANDED.** The five surfaces, the four values that
+   differ between Binance's own two families (order-status weight, executions
+   weight, window cap, retention), the `fromId`-vs-time mutual exclusion, the
+   descending sort and non-unique `execTime`, the execution-row field lists, the
+   two not-found layers, the retention cliffs, the terminal-status
+   non-normalization, the costs, the §52i correction, and **the one assumed fact
+   named as assumed** (Bybit's empty-list absence, #171's credential).
+2. **Core §4 — LANDED.** The `Cursor`-is-a-server-instant ruling with its
+   two-directions consequence, the sweep's horizon argument and proved-watermark
+   rule, refuse-don't-truncate with the non-uniform caps, the tied-instant
+   rewind, the absence-is-a-value ruling, and finding 4's **withdrawal** of the
+   `Ack.VenueOrderID` reassurance. Both `[SPEC EDIT OWED]` markers removed.
+3. **Core §5.3 — LANDED.** `AbsentAfterFinality` is bounded by the answering
+   surface's published retention, with the unpublished case carried as unknown;
+   #163 builds it.
+4. **§12's slice annotation, ADR §3's dated block, HANDOFF, v0.9.33 across all
+   seven docs, Georgian regenerated** (`node tools/assemble.mjs`, `bun test`
+   16/16).
+5. **The reading pass — §52i**, one finding.
+
+`make ci` green both modules; marker grep **zero**; capture untouched.
 
 **Standing rituals.** Capture is PID **8495**; never rebuild over `bin/arblab`
 while it runs. `MUTATE_MODULE=tools/lint` for the analyzers.

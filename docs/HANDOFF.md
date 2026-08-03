@@ -1,6 +1,111 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-03, session 78): **MILESTONE 3 SLICE C2a IS LANDED AND CLOSED — THE ORDER WRITE PATH EXISTS, AND ONE VENUE STATES A REFUSAL INSIDE A SUCCESS STATUS. DOCS ARE v0.9.32.**
+## Status (2026-08-03, session 80): **MILESTONE 3 SLICE C2b IS LANDED AND CLOSED — THE ORDER READ PATH EXISTS, §47e FINDING 1 IS FULLY DISCHARGED, AND §4's `Cursor` CANNOT BE EITHER VENUE'S CURSOR. DOCS ARE v0.9.33.**
+
+**Code landed in `b0f7f33` (session 79, "WIP, docs owed"); the docs half is this
+session.** New: `internal/engine/venue/orderquery{,_binance,_bybit}.go` +
+`orderquery_test.go`. Changed: `ports.Ack.VenueOrderID`'s comment (its claim is
+**withdrawn**, see below) and `orderquery.go`'s header (both `[SPEC EDIT OWED]`
+markers discharged). Design record is **§52**
+(`docs/superpowers/specs/2026-08-03-m3-slice-c2b-read-path.md`).
+**`venue-profiles.md` gains a whole new §8**; core **§4 and §5.3** are edited;
+§12's milestone 3 gains its slice-C2b annotation; ADR §3 has the dated block.
+**`make ci` green both modules; marker grep ZERO; 26 mutations, 26 kills; Georgian
+regenerated (`bun test` 16/16).**
+
+**`engine/venue`'s account/order half is now WHOLE.** §47e finding 1 — milestone
+1's undelivered `engine/venue` line — is closed across both directions of travel:
+C1 the signed transport, C2a `Place`, C2b `OrderByClientID` + the executions
+sweep + Bybit's normative history fallback. **Nothing was added to
+`oms/application/ports`**, deliberately: slice D declares `ports.OrderResolver`
+**with** its consumer, exactly as C2a's `ports.OrderPlacer` landed beside
+`dispatch.go`.
+
+**THE FINDING: the obvious `Cursor` satisfies §4 completely and makes §6.7
+inexpressible.** §4 declares `Fills(VenueInstrument, since Cursor)` and never says
+what a `Cursor` is. The three execution surfaces offer an **ascending trade id**
+(both Binance families) and an **opaque descending page token** (Bybit), and
+**none can be compared to a time** — while §6.7 step 3 sweeps *"through a
+venue/server watermark strictly later than"* a horizon. So "the venue's own
+handle", the idiomatic and documented choice, implements the signature
+**correctly on all three surfaces** and leaves the one clause that consumes it
+unwritable. The cursor is therefore a **server instant**; the venue's handle is
+demoted to within-sweep paging and carried in its own field. Corroborated
+independently from the venues: on **both** Binance families `fromId` and the time
+window are **mutually exclusive**. **Carry the tell: a cursor's DIRECTION is not
+in its type** — Bybit's `nextPageCursor` walks into **older** data, so storing it
+as the next `since` re-reads one window forever while every request succeeds,
+every page decodes, and dedup absorbs the duplicates. Sub-finding: the executions
+window cap is **24 hours on Binance spot against 7 days on USDⓈ-M** — same venue,
+same parameter name, factor of seven.
+
+**What found it: deriving the DTOs from State-Machines §2's four-step finality
+contract instead of from the endpoints.** That was the stated mitigation for
+freezing a schema whose Go consumer arrives in slice D, and it earned its keep —
+two of four findings came from asking the contract, not the venues, and this one
+before a line was written.
+
+**FINDING 2: not-found is a RESULT, not an error.** Binance states it in an error
+envelope (`-2013`), Bybit in a success with an empty list — C2a's finding with the
+venues swapped. As an error it is indistinguishable at the call site from a
+rate-limited query, the inference §5.3 forbids in terms. An absence is a value;
+only an unanswered query is an error.
+
+**FINDING 3: the stable-not-found rule has an EXPIRY DATE — and THE READING PASS
+CORRECTED THIS FINDING'S OWN PREMISE, which makes it worse.** USDⓈ-M drops an
+unfilled `CANCELED`/`EXPIRED` order after **3 days**; Bybit's history drops
+`Cancelled`/`Rejected`/`Deactivated` after **24 hours**; §6 step 6 sends only
+marketable IOCs, so **this system's commonest terminal outcome is the row that
+becomes unqueryable soonest on both venues**, while `AbsentAfterFinality` means
+**proved** absence. §5.3 now bounds it; #163 builds it. **The record claimed
+nobody had written the cliff down. False for Binance:** Profiles §4's
+history-retention row has carried *"some unfilled-cancelled orders purged in ~3
+days"* since **2026-07-20**, self-flagged *"browser-confirm exact windows"* — the
+exact verification §8 has now done. So the fact was recorded, was marked as
+needing checking, and **its consequence went underived for a fortnight**, because
+§4's row is about the §7.4 actuator's history enumeration and the reader carrying
+§5.3's question never had cause to open it. **This is C1's
+citation-to-a-section-that-does-not-exist tell INVERTED** — the section exists,
+says the thing, and nobody re-read it, which no grep can catch. **Cheap habit:
+before writing "X is recorded nowhere", grep the doc set for the venue's own noun.
+An absence claim is a claim, and it is the one nobody verifies.**
+
+**FINDING 4: on Binance a swept execution carries NO client order id at all.**
+Neither trade list returns a `clientOrderId` or an `origClientOrderId`, so the
+venue `orderId` is the only join key — and `ports.Ack.VenueOrderID` said in
+shipped code that *"nothing in this system REQUIRES the venue's id"*, justified by
+a parenthetical naming Bybit, the one venue where that holds. **Withdrawn in §4
+and in the code.** The composition closes only by a second venue fact (a filled
+order survives 90 days), which makes `Fills` and `OrderByClientID` a
+**composition** where §4's signatures suggest independence — and useless alone in
+exactly the scenario it exists for, a lost ack.
+
+**Evidence: 26 mutations, 26 kills; five survivors, four real gaps.** The one to
+carry: `bybitExecutionSide("Buy") → Sell` survived, which is **C2a's own §51g
+survivor one slice later on the mirror path** — C2a checked the mirror across
+**venues**; the one it missed is the other **direction of travel**. Every
+execution fixture SOLD, because the flagship's perp leg sells, and the spot leg of
+every cash-and-carry trade BUYS, so the unreached arm was half of all real fills.
+**The mirror rule has a second axis.** The fifth was an **equivalent mutant** and
+diagnosing it was the work: `AbsenceFromError`'s effect check is unreachable
+because every `apperror` constructor that sets a `Code` pins `Effect` to
+`EffectNotApplied`. Kept, and now reached via `apperror.New`, because its
+necessity rests on another package's unstated invariant.
+
+**START HERE: slice D is task #163 — the venue-specific stable-not-found rule.**
+It is the consumer C2b deliberately stopped short of: it declares
+`ports.OrderResolver` **with** its caller, writes the ACL adapter, and it is where
+**§52d's retention bound becomes executable** — `AbsentAfterFinality` may not be
+claimed past the answering surface's published reach, and `QueryReach` is the
+input already sitting there for it. Task **#171** still gates any real Bybit
+order, and it also closes §8's **one assumed venue fact** (that Bybit reports an
+unknown `orderLinkId` as `retCode` 0 with an empty list — the codec fails closed
+either way, stated in both the code and the record). **§38f (task #158) is still
+the only clock-bound item**: ≥2 TB recommended, gate at ~2026-09-30.
+
+---
+
+## Status (2026-08-03, session 78 — HISTORICAL): **MILESTONE 3 SLICE C2a IS LANDED AND CLOSED — THE ORDER WRITE PATH EXISTS, AND ONE VENUE STATES A REFUSAL INSIDE A SUCCESS STATUS. DOCS ARE v0.9.32.**
 
 **Code changed** (landed in the WIP commit `e152141`, docs completed this session).
 New: `internal/engine/venue/order{,_binance,_bybit}.go` + `order_test.go`,

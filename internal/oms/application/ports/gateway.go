@@ -123,36 +123,31 @@ func (u Urgency) String() string { return string(u) }
 type Ack struct {
 	// VenueOrderID is the venue's own identifier for the order.
 	//
-	// [SPEC EDIT OWED — slice C2b, record §52 finding 4] The paragraph below is
-	// FALSE on Binance, and the way it is false is the point.
+	// # It may be empty, and on ONE venue that costs more than it looks
 	//
-	// It generalized from the one venue where it holds. Bybit's
-	// GET /v5/execution/list returns `orderLinkId` on every row, so a fill there
-	// really is attributable without the venue's id. Binance's trade lists
-	// return NEITHER a clientOrderId NOR an origClientOrderId — not on
-	// /fapi/v1/userTrades and not on /api/v3/myTrades — so on Binance the
-	// venue's own orderId is the ONLY join key between a swept execution and one
-	// of our orders.
+	// This field once carried the claim that "nothing in this system REQUIRES
+	// the venue's id", justified by a parenthetical naming Bybit. The claim was
+	// generalized from the one venue where it holds, and §4 now records the
+	// correction (Profiles §8). Bybit's GET /v5/execution/list returns
+	// orderLinkId on every row, so a fill there is attributable by our own
+	// handle. Binance's trade lists return NEITHER a clientOrderId NOR an
+	// origClientOrderId — not on /fapi/v1/userTrades and not on
+	// /api/v3/myTrades — so on Binance this number is the ONLY join key between
+	// a swept execution and one of our orders.
 	//
-	// The composition still closes, and only because of a second venue fact:
-	// Binance retains an order with fills for 90 days, so OrderByClientID can
-	// always recover the orderId for any fill worth attributing. But that is a
-	// COMPOSITION of two methods, and §4's signatures suggest independence. It
-	// is what makes the sweep useless on its own in exactly the scenario it
-	// exists for — a lost ack, where §6.7 runs precisely because the Place
-	// response was never read.
+	// What closes the gap is a second venue fact rather than anything here:
+	// Binance retains an order WITH FILLS for 90 days, so OrderByClientID can
+	// recover the orderId for any fill worth attributing. That makes Fills and
+	// OrderByClientID a COMPOSITION where §4's signatures suggest independence,
+	// and it leaves the sweep useless alone in exactly the scenario it exists
+	// for — a lost ack, where §6.7 runs precisely because the Place response was
+	// never read.
 	//
-	// The shape is C2a's finding 1 in the reassuring direction: a claim verified
-	// for one input and generalized, where the hazard version at least announces
-	// itself. Owed to core §4 and §5.3; the field's own status is unchanged (it
-	// may still be empty on a venue that returns none), but "nothing in this
-	// system REQUIRES the venue's id" must go.
-	//
-	// It may legitimately be empty: §5.3's recovery path keys on ClientOrderID
-	// (Bybit resolves by orderLinkId, and its order-history fallback is what
-	// makes a filled order always recoverable), so nothing in this system
-	// REQUIRES the venue's id. It is carried because an operator reconciling
-	// against a venue UI has only this number to search by, and recovering it
-	// later means a query the ack already answered.
+	// So it is carried whenever the venue supplies it, and it is still not
+	// REQUIRED to be non-empty: a venue that returns none leaves it empty, and
+	// §5.3's recovery path keys on ClientOrderID. The reason to carry it has not
+	// changed — an operator reconciling against a venue UI has only this number
+	// to search by, and recovering it later means a query the ack already
+	// answered.
 	VenueOrderID string
 }
