@@ -61,6 +61,17 @@ func (s PositionScope) Validate() error {
 	if err := s.Product.Validate(); err != nil {
 		return fmt.Errorf("position scope product: %w", err)
 	}
+	if !s.Product.IsPerp() {
+		// The same normative fact engine/venue's own PositionScope refuses on, and
+		// it was stated only there: no venue publishes a position surface for spot
+		// — a spot balance is not a position. Left out here, a spot scope was
+		// constructible, survived NewJoiner, and was refused two layers down by the
+		// venue codec — which turns a configuration mistake into a FAILED
+		// net-delta gate on every boot, halting a healthy process for a line in a
+		// file. A rule enforced on one of two mirrors leaves the other holding
+		// exactly the shape the rule exists to eliminate.
+		return fmt.Errorf("position scope %s/%s: %w", s.Venue, s.Product, ErrPositionScopeSurfaceAbsent)
+	}
 	if s.Settle == "" {
 		return fmt.Errorf("position scope %s/%s: %w", s.Venue, s.Product, ErrPositionScopeSettleUnset)
 	}

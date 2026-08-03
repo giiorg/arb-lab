@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -461,36 +462,159 @@ func TestJoinRefusesAnOrderThatWasNeverDispatched(t *testing.T) {
 // TestJoinNamesTheLegItCannotAssert is finding 1 as an assertion: a spot leg has
 // no position surface anywhere, so the invariant covers one leg of a
 // cash-and-carry package and the report has to say so.
+//
+// # Slice G2 varied the fixture parameter this test had pinned
+//
+// It used to plant ONE order, on the spot leg, and assert that the Unasserted
+// list held it and did not block. Every instrument that could land in Unasserted
+// was therefore a spot one, so "unasserted because no surface exists anywhere"
+// and "unasserted because no scope covered it" were the same answer, and the
+// exemption §7.5 argues for the first applied to both. The fixture did not
+// contain the thing under test. It now plants BOTH legs against a scope that
+// covers the perp, so the spot leg is unasserted for its own reason while the
+// perp is asserted — and TestAPerpNoScopeCoversHoldsThePosture is the varied case.
 func TestJoinNamesTheLegItCannotAssert(t *testing.T) {
 	t.Parallel()
 
 	joiner, orders, venue, positions := newJoiner(t, perpScopeFor())
 	spotLeg := joinOrder(t, 1, spot(), domain.SideBuy, "0.5")
+	perpLeg := joinOrder(t, 2, perp(), domain.SideSell, "0.5")
 	plantJoinable(t, orders, spotLeg, domain.StateFilled)
+	plantJoinable(t, orders, perpLeg, domain.StateFilled)
 	venue.status[spotLeg.ClientOrderID] = present("V-1", "0.5", t)
+	venue.status[perpLeg.ClientOrderID] = present("V-2", "0.5", t)
 	venue.sweeps[spot()] = ports.ExecutionSweep{
 		Executions: []ports.VenueExecution{execution(t, "E-1", spotLeg.ClientOrderID, "V-1", "0.5")},
 	}
-	positions.reports[perpScopeFor()] = ports.PositionReport{}
+	venue.sweeps[perp()] = ports.ExecutionSweep{
+		Executions: []ports.VenueExecution{execution(t, "E-2", perpLeg.ClientOrderID, "V-2", "0.5")},
+	}
+	positions.reports[perpScopeFor()] = ports.PositionReport{
+		Positions: []ports.VenuePosition{{Instrument: perp(), Net: signed(t, "-0.5")}},
+	}
 
-	report, err := joiner.Join([]ids.ClientOrderID{spotLeg.ClientOrderID})
+	ids2 := []ids.ClientOrderID{spotLeg.ClientOrderID, perpLeg.ClientOrderID}
+	report, err := joiner.Join(ids2)
 	if err != nil {
 		t.Fatalf("Join: %v", err)
 	}
-	if report.Fills != 1 {
-		t.Errorf("fills = %d, want 1 — the spot leg's executions are still rebuilt", report.Fills)
+	if report.Fills != 2 {
+		t.Errorf("fills = %d, want 2 — the spot leg's executions are still rebuilt", report.Fills)
 	}
-	assertion, err := joiner.Assert([]ids.ClientOrderID{spotLeg.ClientOrderID})
+	assertion, err := joiner.Assert(ids2)
 	if err != nil {
 		t.Fatalf("Assert: %v", err)
 	}
-	if len(assertion.Unasserted) != 1 || assertion.Unasserted[0] != spot() {
-		t.Errorf("unasserted = %v, want the spot leg", assertion.Unasserted)
+	want := []application.UnassertedInstrument{
+		{Instrument: spot(), Reason: application.UnassertedNoPositionSurface},
+	}
+	if !reflect.DeepEqual(assertion.Unasserted, want) {
+		t.Errorf("unasserted = %+v, want %+v — the spot leg alone, for the reason that is permanent",
+			assertion.Unasserted, want)
 	}
 	// It must not block: a leg whose invariant can never be asserted would hold
 	// the posture below trading for ever.
 	if assertion.Holds() {
 		t.Errorf("assertion = %+v, want the limit reported rather than enforced", assertion)
+	}
+}
+
+// TestAPerpNoScopeCoversHoldsThePosture is slice G2's finding as an assertion,
+// and the control the finding was found by: the SAME bucket, reached by a
+// derivative instrument, must not inherit the spot leg's exemption.
+//
+// The setup is the one Deps.PositionScopes calls legal — no scopes at all — and
+// the harm is stated by what the venue holds: a real short position on an
+// instrument this system never asked about. Before the reason existed, Assert
+// reported it Unasserted and Holds() answered false, which is
+// GateNetDeltaAsserted reporting Passed on a boot that issued no position query.
+func TestAPerpNoScopeCoversHoldsThePosture(t *testing.T) {
+	t.Parallel()
+
+	joiner, orders, venue, positions := newJoiner(t)
+
+	perpLeg := joinOrder(t, 1, perp(), domain.SideSell, "0.5")
+	plantJoinable(t, orders, perpLeg, domain.StateFilled)
+	venue.status[perpLeg.ClientOrderID] = present("V-1", "0.5", t)
+	venue.sweeps[perp()] = ports.ExecutionSweep{
+		Executions: []ports.VenueExecution{execution(t, "E-1", perpLeg.ClientOrderID, "V-1", "0.5")},
+	}
+
+	if _, err := joiner.Join([]ids.ClientOrderID{perpLeg.ClientOrderID}); err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+	assertion, err := joiner.Assert([]ids.ClientOrderID{perpLeg.ClientOrderID})
+	if err != nil {
+		t.Fatalf("Assert: %v", err)
+	}
+	want := []application.UnassertedInstrument{
+		{Instrument: perp(), Reason: application.UnassertedScopeNotEnumerated},
+	}
+	if !reflect.DeepEqual(assertion.Unasserted, want) {
+		t.Errorf("unasserted = %+v, want %+v", assertion.Unasserted, want)
+	}
+	if !assertion.Holds() {
+		t.Errorf("assertion = %+v, want the invariant to HOLD: a position surface exists for this "+
+			"instrument and was never queried", assertion)
+	}
+	// The evidence that no query was issued, which is the whole harm: the fake
+	// records every scope it was asked for.
+	if len(positions.scopes) != 0 {
+		t.Errorf("position queries = %v, want none — that is what makes the pass a pass over nothing",
+			positions.scopes)
+	}
+}
+
+// TestUnassertedReasonsHoldOrExemptByTable pins the product this type decides,
+// so a member added later cannot inherit an answer by omission.
+//
+// Both halves are asserted for each member: the posture answer AND that the
+// reason validates. A table checking only HoldsPosture would pass against a
+// member whose Validate was never wired, and the zero value is exactly such a
+// member — it answers "holds" like the enumerated one and is an error besides.
+func TestUnassertedReasonsHoldOrExemptByTable(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		reason  application.UnassertedReason
+		holds   bool
+		wantErr bool
+	}{
+		{application.UnassertedNoPositionSurface, false, false},
+		{application.UnassertedScopeNotEnumerated, true, false},
+		{application.UnassertedReasonUnspecified, true, true},
+		{application.UnassertedReason(200), true, true},
+	}
+	for _, c := range cases {
+		holds, err := c.reason.HoldsPosture()
+		if holds != c.holds {
+			t.Errorf("%s.HoldsPosture() = %v, want %v", c.reason, holds, c.holds)
+		}
+		if (err != nil) != c.wantErr {
+			t.Errorf("%s.HoldsPosture() err = %v, wantErr %v", c.reason, err, c.wantErr)
+		}
+		if c.wantErr && !errors.Is(err, application.ErrUnassertedReasonInvalid) {
+			t.Errorf("%s.HoldsPosture() err = %v, want ErrUnassertedReasonInvalid", c.reason, err)
+		}
+	}
+}
+
+// TestAnUnclassifiableUnassertedReasonHolds is the direction that costs: a
+// report carrying a reason nothing recognises must alert rather than pass.
+//
+// It is asserted through Holds() rather than through HoldsPosture() alone,
+// because Holds is what Reconciler reads and it is the place the error result is
+// deliberately dropped — so this is the test that the drop kept the safe answer.
+func TestAnUnclassifiableUnassertedReasonHolds(t *testing.T) {
+	t.Parallel()
+
+	a := application.Assertion{
+		Unasserted: []application.UnassertedInstrument{
+			{Instrument: perp(), Reason: application.UnassertedReason(200)},
+		},
+	}
+	if !a.Holds() {
+		t.Errorf("Holds() = false for an unrecognised reason, want true")
 	}
 }
 

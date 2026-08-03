@@ -26,6 +26,31 @@ const (
 	// GateUnspecified is the zero value and names no precondition.
 	GateUnspecified Gate = iota
 
+	// GateJournalDurable is §11/§13's storage precondition on the write-ahead
+	// journal: SQLite's documented requirement that the database live on a LOCAL
+	// filesystem, never NFS or a network FS.
+	//
+	// [SPEC EDIT LANDED — v0.9.39] §11 already scheduled this check "to §7.5's
+	// boot posture list rather than to the adapter's constructor" and §7.5's gate
+	// roster did not have it. It is a gate rather than a condition folded into
+	// GateJournalReplayed for §7.5's own rule that a gate is reported about its
+	// OWN evidence: the replay's evidence is the records, and this one's is the
+	// filesystem under them. The merge is not merely untidy — the storage check
+	// runs FIRST and its refusal LATCHES, and the replay's own first report is
+	// OutcomePending, which Report refuses against a latched gate. One gate would
+	// turn a correct sequencing into an error from the phase that must not
+	// produce one.
+	//
+	// What it protects is the claim the tamper-evidence cannot make for itself.
+	// §7.5 states the limit in as many words — a chain "proves nothing about
+	// records that were never seen", so truncation at the tail is undetectable —
+	// and a network filesystem is precisely the condition under which records are
+	// lost with every remaining link still verifying. So a journal on NFS is not a
+	// storage-hygiene matter: it is a journal whose verification means less than
+	// it says, which is why its refusal is OutcomeEvidenceUnusable and not an
+	// ordinary failure.
+	GateJournalDurable
+
 	// GateJournalReplayed is state rebuilt from the write-ahead journal —
 	// §7.5's first half, before any venue call.
 	GateJournalReplayed
@@ -90,6 +115,8 @@ func (g Gate) String() string {
 	switch g {
 	case GateUnspecified:
 		return "GateUnspecified"
+	case GateJournalDurable:
+		return "GateJournalDurable"
 	case GateJournalReplayed:
 		return "GateJournalReplayed"
 	case GateVenueJoined:
@@ -521,6 +548,36 @@ func (c *Checklist) Posture() Posture {
 		postures = append(postures, c.outcomes[g].posture())
 	}
 	return Weakest(postures...)
+}
+
+// Latched returns the required gates whose outcome only an operator can lift, in
+// Gate order.
+//
+// # It exists because the question had no read-only answer, and Clear is not one
+//
+// latching is unexported and belongs to the outcome rather than to the gate, so
+// until this method the only way to discover whether a gate was latched was to
+// call Clear and see whether it succeeded — which is to say, by performing the
+// operator clearance that answers it. §7.5's whole point is that a latched
+// precondition waits for a human, and the tool that shows a human what is waiting
+// could not ask.
+//
+// It is a STRICT SUBSET of Blocking and reported beside it, never instead of it,
+// because the two answer different questions and a boot has both at once. Blocking
+// says what is holding the posture down — which on any real deployment includes
+// gates no code reports yet, so it is dominated by structure rather than by
+// findings. Latched says what will still be there after a restart with everything
+// healthy. An operator reading only the first learns that the process may not
+// trade; only the second says whether anything happened.
+func (c *Checklist) Latched() []Gate {
+	var latched []Gate
+	for g, o := range c.outcomes {
+		if o.latching() {
+			latched = append(latched, g)
+		}
+	}
+	sort.Slice(latched, func(i, j int) bool { return latched[i] < latched[j] })
+	return latched
 }
 
 // Blocking returns the required gates whose outcome is holding the posture

@@ -1,6 +1,68 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-03, session 86): **MILESTONE 3 SLICE G1 IS CLOSED — §7.5's RECONCILE-ONLY BOOT IS ONE USE CASE IN THE ONE ORDER ITS PHASES ARE CORRECT IN, AND THE FUSED READING ASSERTED THE NET-DELTA INVARIANT OVER A QUANTITY THE JOIN HAD DECLINED TO REBUILD. DOCS ARE v0.9.38; MARKER GREP IS ZERO.**
+## Status (2026-08-03, session 87): **MILESTONE 3 SLICE G2 IS CLOSED — THE COMPOSITION ROOT EXISTS, §5.2 HAS AN OMS SCHEMA, `arblab reconcile run` IS REAL, AND §7.5's EXEMPTION FOR AN UNCOVERABLE INSTRUMENT WAS ARGUED FROM ONE CAUSE OVER A PREDICATE COLLECTING TWO. DOCS ARE v0.9.39; MARKER GREP IS ZERO.**
+
+**The slice is done end to end.** `make ci` green on both modules, marker grep
+**0**, **26 mutations / 26 kills** (six re-aimed from bad seds; six SURVIVED
+first — three equivalent mutants that deleted DEAD code, three real gaps now
+closed), docs at **v0.9.39** across all five, the Georgian regenerated through
+its own checker (16/16 parity). Design record **§58**, battery **§58g**. Tasks
+**#166** and **#168** are discharged; **#181** (G3) is what remains of §47f's
+slice G.
+
+**WHAT LANDED.** `internal/app/reconcile` is new — `Config` + `Validate` (§5.2's
+OMS block), §5.2's key refs resolved into `transport.Credential`, a
+`venue.OrderClient` built from a file, `checkJournalStorage` (#168, per-GOOS),
+a `boot.Sequence` over §3.2's five phase kinds and a `boot.Checklist` over all
+**eight** of §7.5's gates. `platform/boot` gains `GateJournalDurable` and
+`Checklist.Latched`; `oms/application` gains `UnassertedReason`,
+`UnassertedInstrument`, `HoldsPosture`; `driven.NewVenuePositions` refuses a
+two-venue instrument table; `ports.PositionScope` refuses a spot scope.
+`cmd/arblab` gains `reconcile run`. Core **§5.2**, **§7.5** and **§11** edited.
+
+**THE FINDING — an exemption argued from ONE cause over a predicate that
+collects TWO.** F2 ruled that an instrument whose exposure cannot be compared is
+*reported* and does **not** hold the posture, reasoning entirely from the
+permanent, venue-imposed gap (no venue publishes a position surface for spot).
+The predicate implementing it is *no configured enumeration covered this
+instrument*, which a **derivative** reaches: a scope nobody declared, one
+declared for another venue, or an instrument dropped from the config while the
+journal still holds an open order on it. So `GateNetDeltaAsserted` reports
+**Passed on a boot that issued no position query at all** — and the degenerate
+case is the one `oms.Deps.PositionScopes` documented as legal, an empty list.
+Fixed by carrying the REASON and putting the exemption on it. *The general rule:
+when a rule EXEMPTS something, check what else lands in the bucket it is written
+over.* The tell was in the TEST — F2's fixture planted one order, on the spot
+leg, so the two causes were the same answer.
+
+**#168, AND THE CONDITION IS DURABILITY.** `GateJournalDurable` runs before the
+journal is opened and refuses halted-and-latching. §13's words are about
+LOCALITY, and `tmpfs` satisfies every one of them while losing the whole log at
+the reboot §7.5 exists for — so a volatile filesystem is refused under its own
+name, and an unrecognised filesystem or an uninspectable host is a refusal too.
+
+**THE POSTURE IS NOT THIS BINARY'S VERDICT.** It declares all eight gates and
+produces four, so reconcile-only is the honest answer on a clean account. What
+separates a clean boot from an alerting one is the LATCH — and until
+`Checklist.Latched` the only way to discover a latched gate was to call `Clear`
+and see whether it worked. `Report.ExitClass` is the verdict: 0 clean, 1
+operator, 2 incomplete.
+
+**WHAT IS NEXT: G3** — two-leg parallel marketable-IOC plus the
+process-kill-mid-IOC chaos test (task **#181**), which needed a process to kill
+and now has one. Record **§58h** lists everything else deliberately left out
+(the five gates with no producer, two venues, a §10 series for the gates, a
+measured clock calibration).
+
+**Standing, unchanged:** capture **PID 8495**, never rebuild over `bin/arblab`,
+`make ci` runs `-race` and `go test` does not, cap `TLC_WORKERS` at 4, read TLC
+figures only from a COMPLETED invocation, docs/i18n parity is `bun test` (not
+node). **§38f (task #158) is still the only clock-bound user decision**: ≥2 TB
+off-host, gate ~2026-09-30.
+
+---
+
+## Status (2026-08-03, session 86 — HISTORICAL): **MILESTONE 3 SLICE G1 IS CLOSED — §7.5's RECONCILE-ONLY BOOT IS ONE USE CASE IN THE ONE ORDER ITS PHASES ARE CORRECT IN, AND THE FUSED READING ASSERTED THE NET-DELTA INVARIANT OVER A QUANTITY THE JOIN HAD DECLINED TO REBUILD. DOCS ARE v0.9.38; MARKER GREP IS ZERO.**
 
 **The slice is done end to end.** `make ci` green on both modules, marker grep
 **0**, **23 mutations / 23 kills** (six re-aimed from bad seds; two SURVIVED

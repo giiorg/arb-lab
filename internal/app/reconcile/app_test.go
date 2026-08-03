@@ -1,0 +1,715 @@
+package reconcile
+
+import (
+	"context"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/giiorg/arb-lab/internal/engine/venue"
+	"github.com/giiorg/arb-lab/internal/engine/venue/transport"
+	"github.com/giiorg/arb-lab/internal/platform/boot"
+	"github.com/giiorg/arb-lab/internal/platform/clock"
+	"github.com/giiorg/arb-lab/internal/platform/config"
+	"github.com/giiorg/arb-lab/internal/platform/ids"
+	"github.com/giiorg/arb-lab/internal/platform/observability"
+)
+
+// This file checks the composition root (slice G2, record §58).
+//
+// # The collapse checklist, run before the tests were written
+//
+//  1. The valid fixture carries TWO instruments — a spot leg and a perp leg —
+//     and TWO endpoints, because a one-instrument document makes "every
+//     instrument agrees with the venue" and "the first instrument agrees" the
+//     same claim, and makes the scope-coverage rule vacuous (it only bites on a
+//     derivative). Every refusal test then mutates that fixture in ONE field.
+//  2. The two instruments have the SAME symbol, "BTCUSDT", differing only in
+//     product. That is the cash-and-carry pair as it really is, and it is the
+//     shape a duplicate check keyed on the symbol alone would wrongly refuse —
+//     the fixture contains the distinction the key has to make.
+//  3. The rate-limit profile carries a ScopeVenue limit AND two ScopeFamily
+//     limits, so "the profile was built" and "the venue envelope survived the
+//     translation" are different answers. A family-only profile would pass a
+//     parseScope that ignored its input.
+//  4. classify is tested on a name from each of the FOUR classes plus an
+//     unrecognised one, because the default is the interesting branch and a
+//     table with only the admitted names never reaches it.
+//  5. The end-to-end boot is run on a SPOT-ONLY deployment, which is the one
+//     shape whose reconcile makes no network call at all: no scope is required
+//     for spot, and an empty journal has no dispatched order to join. That is
+//     what makes it a test of the SEQUENCE rather than of a venue fake.
+
+func envRef(t *testing.T, name string) config.SecretRef {
+	t.Helper()
+	ref, err := config.ParseSecretRef("env:" + name)
+	if err != nil {
+		t.Fatalf("ParseSecretRef: %v", err)
+	}
+	return ref
+}
+
+func dur(t *testing.T, s string) config.Duration {
+	t.Helper()
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		t.Fatalf("ParseDuration: %v", err)
+	}
+	return config.NewDuration(d)
+}
+
+const (
+	testKeyVar    = "ARBLAB_TEST_API_KEY"
+	testSecretVar = "ARBLAB_TEST_API_SECRET"
+)
+
+// validConfig is the fixture every refusal test mutates one field of.
+func validConfig(t *testing.T, journal string) Config {
+	t.Helper()
+	return Config{
+		JournalPath: journal,
+		Account:     "sub-1",
+		Venue: VenueConfig{
+			Venue:        ids.Venue("binance"),
+			Dialect:      DialectBinance,
+			APIKeyRef:    envRef(t, testKeyVar),
+			APISecretRef: envRef(t, testSecretVar),
+			Endpoints: []EndpointConfig{
+				{Product: ids.ProductSpot, Scheme: "https", Host: "api.binance.com"},
+				{Product: ids.ProductLinearPerp, Scheme: "https", Host: "fapi.binance.com"},
+			},
+			Timeout:    dur(t, "5s"),
+			ReadLimit:  1 << 20,
+			RecvWindow: dur(t, "5s"),
+			Limits: []LimitConfig{
+				{Name: "ip_requests", Scope: "venue", Dimension: "requests", Interval: dur(t, "5s"),
+					OpeningCeiling: 300, RoutineCeiling: 400, Capacity: 500},
+				{Name: "spot_weight", Scope: "family", Product: ids.ProductSpot, Dimension: "weight",
+					Interval: dur(t, "1m"), OpeningCeiling: 4200, RoutineCeiling: 5400, Capacity: 6000},
+				{Name: "perp_orders", Scope: "family", Product: ids.ProductLinearPerp, Dimension: "orders",
+					Interval: dur(t, "1m"), OpeningCeiling: 840, RoutineCeiling: 1080, Capacity: 1200},
+				{Name: "perp_weight", Scope: "family", Product: ids.ProductLinearPerp, Dimension: "weight",
+					Interval: dur(t, "1m"), OpeningCeiling: 1680, RoutineCeiling: 2160, Capacity: 2400},
+				{Name: "spot_orders", Scope: "family", Product: ids.ProductSpot, Dimension: "orders",
+					Interval: dur(t, "10s"), OpeningCeiling: 70, RoutineCeiling: 90, Capacity: 100},
+			},
+			ThrottlePause:    dur(t, "2m"),
+			BanPause:         dur(t, "10m"),
+			ClockOffset:      dur(t, "0s"),
+			ClockUncertainty: dur(t, "250ms"),
+		},
+		Instruments: []InstrumentConfig{
+			{Venue: "binance", Product: ids.ProductSpot, Symbol: "BTCUSDT", Base: "BTC", Quote: "USDT"},
+			{Venue: "binance", Product: ids.ProductLinearPerp, Contract: ids.ContractLinear,
+				Symbol: "BTCUSDT", Base: "BTC", Quote: "USDT"},
+		},
+		PositionScopes: []ScopeConfig{
+			{Venue: "binance", Product: ids.ProductLinearPerp, Settle: "USDT"},
+		},
+		Resolution: ResolutionConfig{
+			MaxLanding:  dur(t, "30s"),
+			SweepMargin: dur(t, "5s"),
+			AssumedReach: []ReachConfig{
+				{Venue: "binance", Product: ids.ProductSpot, Reach: dur(t, "72h")},
+			},
+		},
+		WatchdogSilence: dur(t, "30s"),
+		StopBudget:      dur(t, "2s"),
+	}
+}
+
+// TestValidConfigValidates is the positive control every refusal below needs. A
+// Validate that objected to everything would otherwise read as a perfect score.
+func TestValidConfigValidates(t *testing.T) {
+	t.Parallel()
+	if err := validConfig(t, "/var/lib/arblab/journal.db").Validate(); err != nil {
+		t.Fatalf("the fixture must validate, or every refusal below proves nothing: %v", err)
+	}
+}
+
+func TestConfigRefusals(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		want error
+		mut  func(*Config)
+	}{
+		{"journal path unset", ErrConfigFieldUnset, func(c *Config) { c.JournalPath = "" }},
+		{"account unset", ErrConfigFieldUnset, func(c *Config) { c.Account = "" }},
+		{"dialect unknown", ErrDialectUnknown, func(c *Config) { c.Venue.Dialect = "kraken" }},
+		{"no endpoints", ErrConfigFieldUnset, func(c *Config) { c.Venue.Endpoints = nil }},
+		{"endpoint scheme", ErrConfigFieldInvalid, func(c *Config) { c.Venue.Endpoints[0].Scheme = "ftp" }},
+		{"endpoint repeated", ErrConfigDuplicate, func(c *Config) {
+			c.Venue.Endpoints = append(c.Venue.Endpoints, c.Venue.Endpoints[0])
+		}},
+		{"instrument on another venue", ErrVenueMismatch, func(c *Config) {
+			c.Instruments[1].Venue = "bybit"
+		}},
+		{"scope on another venue", ErrVenueMismatch, func(c *Config) {
+			c.PositionScopes[0].Venue = "bybit"
+		}},
+		{"instrument family unrouted", ErrFamilyUnrouted, func(c *Config) {
+			// Drop the perp endpoint and keep the perp instrument: on Binance the
+			// families are separate hosts, so this is not a missing base URL but a
+			// query that cannot be issued.
+			//
+			// The perp LIMITS go with it, and that is the recorded
+			// two-claims-one-checker trap rather than tidiness: a profile naming a
+			// family the endpoints do not declare is refused by ratelimit.Profile,
+			// which runs FIRST — so the version of this case that dropped only the
+			// endpoint passed while never reaching the rule it is named after. A
+			// checker that halts on the first violation never demonstrates the
+			// deeper claim.
+			c.Venue.Endpoints = c.Venue.Endpoints[:1]
+			c.Venue.Limits = []LimitConfig{c.Venue.Limits[0], c.Venue.Limits[1], c.Venue.Limits[4]}
+		}},
+		{"instrument repeated", ErrConfigDuplicate, func(c *Config) {
+			c.Instruments = append(c.Instruments, c.Instruments[0])
+		}},
+		{"scope repeated", ErrConfigDuplicate, func(c *Config) {
+			c.PositionScopes = append(c.PositionScopes, c.PositionScopes[0])
+		}},
+		{"derivative with no scope", ErrScopeNotCovered, func(c *Config) { c.PositionScopes = nil }},
+		// The two bounds are checked separately and each case moves the OTHER one
+		// out of the way, which is the two-claims-one-checker trap again: the
+		// fixture ships Timeout and RecvWindow at the same value, so a MaxLanding
+		// equal to both satisfies either check and a mutation weakening one of them
+		// SURVIVED against the version that only set MaxLanding. Equality is the
+		// boundary under test in both — "not above" is the requirement, so `<` and
+		// `<=` must be distinguishable.
+		{"max_landing equal to the timeout", ErrLandingBoundTooShort, func(c *Config) {
+			c.Venue.RecvWindow = dur(t, "1s")
+			c.Resolution.MaxLanding = c.Venue.Timeout
+		}},
+		{"max_landing equal to the recv window", ErrLandingBoundTooShort, func(c *Config) {
+			c.Venue.Timeout = dur(t, "1s")
+			c.Resolution.MaxLanding = c.Venue.RecvWindow
+		}},
+		{"assumed reach repeated", ErrConfigDuplicate, func(c *Config) {
+			c.Resolution.AssumedReach = append(c.Resolution.AssumedReach, c.Resolution.AssumedReach[0])
+		}},
+		{"limit scope unrecognised", ErrConfigFieldInvalid, func(c *Config) { c.Venue.Limits[0].Scope = "global" }},
+		{"limit dimension unrecognised", ErrConfigFieldInvalid, func(c *Config) {
+			c.Venue.Limits[1].Dimension = "bytes"
+		}},
+		{"watchdog silence unset", ErrConfigFieldUnset, func(c *Config) { c.WatchdogSilence = config.Duration{} }},
+		{"stop budget unset", ErrConfigFieldUnset, func(c *Config) { c.StopBudget = config.Duration{} }},
+	}
+	for _, c := range cases {
+		cfg := validConfig(t, "/var/lib/arblab/journal.db")
+		c.mut(&cfg)
+		err := cfg.Validate()
+		if !errors.Is(err, c.want) {
+			t.Errorf("%s: Validate() = %v, want %v", c.name, err, c.want)
+		}
+	}
+}
+
+// TestScopeCoverageIgnoresSpot is the other half of the coverage rule, and it is
+// the half a naive "every instrument needs a scope" would get wrong.
+//
+// The spot leg is deliberately in the valid fixture with no spot scope, so the
+// positive control above already depends on this — but only implicitly. Stated
+// here so a rule tightened to cover every instrument fails a test that says why.
+func TestScopeCoverageIgnoresSpot(t *testing.T) {
+	t.Parallel()
+
+	cfg := validConfig(t, "/var/lib/arblab/journal.db")
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("spot with no scope must validate — no venue publishes a position surface for it: %v", err)
+	}
+	// And a spot SCOPE is refused by the port's own validator, so the two halves
+	// cannot both be satisfied by adding one.
+	cfg.PositionScopes = append(cfg.PositionScopes,
+		ScopeConfig{Venue: "binance", Product: ids.ProductSpot, Settle: "USDT"})
+	if err := cfg.Validate(); err == nil {
+		t.Error("a spot position scope must be refused: there is no surface to enumerate")
+	}
+}
+
+// TestProfileCarriesBothScopes is checklist item 3: the §7.6 venue envelope must
+// survive the string→enum translation, not just the family budgets.
+func TestProfileCarriesBothScopes(t *testing.T) {
+	t.Parallel()
+
+	p, err := validConfig(t, "/j.db").Venue.profile()
+	if err != nil {
+		t.Fatalf("profile: %v", err)
+	}
+	var venueScoped, familyScoped, orderCounted int
+	for _, l := range p.Limits {
+		switch l.Scope.String() {
+		case "ScopeVenue":
+			venueScoped++
+		case "ScopeFamily":
+			familyScoped++
+		}
+		if l.Dimension.String() == "DimensionOrders" {
+			orderCounted++
+		}
+	}
+	if venueScoped != 1 || familyScoped != 4 {
+		t.Errorf("scopes = %d venue / %d family, want 1/4 — §7.6's shared IP-ban envelope is the venue-scoped one",
+			venueScoped, familyScoped)
+	}
+	// §7.6's worked failure: a profile budgeting no order-count dimension charges
+	// literally nothing for a Binance futures order, which is documented at zero
+	// weight. Two families, two order budgets.
+	if orderCounted != 2 {
+		t.Errorf("order-count budgets = %d, want 2 — one per family", orderCounted)
+	}
+	if len(p.Families) != 2 {
+		t.Errorf("families = %v, want the two the endpoints declare", p.Families)
+	}
+}
+
+// TestEachDialectSelectsAConsistentSet is what Dialect exists for, asserted on
+// the pieces rather than on the name.
+//
+// The envelope reader is the one that matters and the one a wrong wiring would
+// hide: on Bybit a refusal is stated in the BODY of an HTTP 200, so a Bybit
+// client holding BinanceEnvelope reads every rejection as an acceptance — an
+// order this system believes was refused and the venue believes it holds. The
+// assertion is on the concrete types, because that is the only place the
+// mismatch is visible; every one of the four satisfies its interface either way.
+func TestEachDialectSelectsAConsistentSet(t *testing.T) {
+	t.Parallel()
+
+	cred, err := transport.NewCredential("k", "s")
+	if err != nil {
+		t.Fatalf("NewCredential: %v", err)
+	}
+	binance, err := collaboratorsFor(DialectBinance, "binance", cred)
+	if err != nil {
+		t.Fatalf("collaboratorsFor(binance): %v", err)
+	}
+	if _, ok := binance.envelope.(transport.BinanceEnvelope); !ok {
+		t.Errorf("binance envelope = %T, want BinanceEnvelope", binance.envelope)
+	}
+	if _, ok := binance.limits.(transport.BinanceLimitReader); !ok {
+		t.Errorf("binance limits = %T, want BinanceLimitReader", binance.limits)
+	}
+	if _, ok := binance.codec.(*venue.BinanceOrderCodec); !ok {
+		t.Errorf("binance codec = %T, want *BinanceOrderCodec", binance.codec)
+	}
+
+	bybit, err := collaboratorsFor(DialectBybit, "bybit", cred)
+	if err != nil {
+		t.Fatalf("collaboratorsFor(bybit): %v", err)
+	}
+	if _, ok := bybit.envelope.(transport.BybitEnvelope); !ok {
+		t.Errorf("bybit envelope = %T, want BybitEnvelope", bybit.envelope)
+	}
+	if _, ok := bybit.limits.(transport.BybitLimitReader); !ok {
+		t.Errorf("bybit limits = %T, want BybitLimitReader", bybit.limits)
+	}
+	if _, ok := bybit.codec.(*venue.BybitOrderCodec); !ok {
+		t.Errorf("bybit codec = %T, want *BybitOrderCodec", bybit.codec)
+	}
+
+	if _, err := collaboratorsFor("kraken", "kraken", cred); !errors.Is(err, ErrDialectUnknown) {
+		t.Errorf("collaboratorsFor(unknown) = %v, want ErrDialectUnknown", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Secret resolution (§5.2's key refs)
+// ---------------------------------------------------------------------------
+
+func TestResolveSecretFromEnv(t *testing.T) {
+	t.Setenv(testKeyVar, "the-key")
+	got, err := resolveSecret(envRef(t, testKeyVar))
+	if err != nil || got != "the-key" {
+		t.Errorf("resolveSecret = %q, %v, want %q, nil", got, err, "the-key")
+	}
+}
+
+// TestResolveSecretRefusesASetButEmptyVariable is the case the third sentinel
+// exists for, and it is invisible in any fixture that only ever unsets.
+//
+// `export X=` is SET: os.LookupEnv reports it present and the value is "". A
+// credential built from it signs correctly over nothing, and the venue's answer
+// is an authentication failure — which reads as a revoked key rather than as an
+// unset variable on this host.
+func TestResolveSecretRefusesASetButEmptyVariable(t *testing.T) {
+	t.Setenv(testKeyVar, "")
+	_, err := resolveSecret(envRef(t, testKeyVar))
+	if !errors.Is(err, ErrSecretEmpty) {
+		t.Errorf("resolveSecret(set-but-empty) = %v, want ErrSecretEmpty", err)
+	}
+	if errors.Is(err, ErrSecretUnresolved) {
+		t.Error("a set-but-empty variable must not be reported as unresolved: the two send an operator to different places")
+	}
+}
+
+func TestResolveSecretRefusesAnUnsetVariable(t *testing.T) {
+	os.Unsetenv(testKeyVar)
+	_, err := resolveSecret(envRef(t, testKeyVar))
+	if !errors.Is(err, ErrSecretUnresolved) {
+		t.Errorf("resolveSecret(unset) = %v, want ErrSecretUnresolved", err)
+	}
+}
+
+// TestResolveSecretFromFileTrimsTheTrailingNewline pins the trim, which is not a
+// convenience: a secret file written by an editor or by `echo` carries one, and a
+// signature computed over it fails identically to a revoked key.
+func TestResolveSecretFromFileTrimsTheTrailingNewline(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(path, []byte("the-secret\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	ref, err := config.ParseSecretRef("file:" + path)
+	if err != nil {
+		t.Fatalf("ParseSecretRef: %v", err)
+	}
+	got, err := resolveSecret(ref)
+	if err != nil || got != "the-secret" {
+		t.Errorf("resolveSecret(file) = %q, %v, want %q, nil", got, err, "the-secret")
+	}
+
+	// A file holding only whitespace is empty, not a one-character secret.
+	if err := os.WriteFile(path, []byte("\n\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, err := resolveSecret(ref); !errors.Is(err, ErrSecretEmpty) {
+		t.Errorf("resolveSecret(whitespace file) = %v, want ErrSecretEmpty", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// #168: the journal's filesystem
+// ---------------------------------------------------------------------------
+
+// TestClassifyCoversEveryClass is checklist item 4: one name per class, plus the
+// default. Without the last row the table's whole default-deny direction — the
+// one thing this check is FOR — is never evaluated.
+func TestClassifyCoversEveryClass(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		want filesystemClass
+	}{
+		{"ext2/3/4", classLocal},
+		{"xfs", classLocal},
+		{"apfs", classLocal},
+		{"nfs", classRemote},
+		{"cifs", classRemote},
+		{"fuse", classRemote}, // sshfs and s3fs wear a local name
+		{"tmpfs", classVolatile},
+		{"ramfs", classVolatile},
+		{"overlay", classUnknown},    // a container's default, deliberately not admitted
+		{"0xdeadbeef", classUnknown}, // an unmapped Linux magic
+		{"NFS", classRemote},         // the lookup is case-insensitive
+	}
+	for _, c := range cases {
+		if got := classify(c.name); got != c.want {
+			t.Errorf("classify(%q) = %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+// TestCheckJournalStorageOnThisHost is the syscall half, and it deliberately
+// accepts more than one answer.
+//
+// The filesystem under a temporary directory is a property of the machine
+// running the test — apfs on the development host, ext4 or tmpfs on a CI runner
+// — so asserting "nil" would make the suite pass or fail on where it ran. What
+// IS asserted is that the check reaches a DECISION: either it admits the
+// filesystem, or it refuses with one of the three classified refusals. A stub
+// that returned a bare error, or one that admitted everything, fails this.
+func TestCheckJournalStorageOnThisHost(t *testing.T) {
+	t.Parallel()
+
+	err := checkJournalStorage(filepath.Join(t.TempDir(), "journal.db"))
+	if err == nil {
+		t.Log("this host's temp filesystem is admitted")
+		return
+	}
+	switch {
+	case errors.Is(err, ErrJournalStorageRemote),
+		errors.Is(err, ErrJournalStorageVolatile),
+		errors.Is(err, ErrJournalStorageUnknown):
+		t.Logf("this host's temp filesystem is refused, with a classified reason: %v", err)
+	default:
+		t.Errorf("checkJournalStorage = %v, want nil or one of the three classified refusals", err)
+	}
+}
+
+// TestCheckJournalStorageOnAMissingDirectory: statfs cannot answer about a
+// directory that is not there, and an unanswerable question is a refusal.
+func TestCheckJournalStorageOnAMissingDirectory(t *testing.T) {
+	t.Parallel()
+
+	err := checkJournalStorage(filepath.Join(t.TempDir(), "no-such-dir", "journal.db"))
+	if err == nil {
+		t.Error("checkJournalStorage on a missing directory = nil, want a refusal")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The exit class, which is the slice's second finding as a table
+// ---------------------------------------------------------------------------
+
+// TestExitClassIsNotThePosture is the finding stated as a test.
+//
+// Every row has the SAME posture — PostureReconcileOnly, which is what this
+// binary reports on every honest run — so a verdict derived from the posture
+// would answer identically to all of them. What separates them is the latch.
+//
+// Each of the FOUR gates this binary produces gets its own incomplete row, and
+// that is not padding: the produced set is a case list in a switch, and a
+// mutation dropping one member from it SURVIVED a table that exercised only
+// GateNetDeltaAsserted. One row per member is what makes the list checked rather
+// than sampled.
+func TestExitClassIsNotThePosture(t *testing.T) {
+	t.Parallel()
+
+	// The five gates with no producer, which block on every run and mean nothing.
+	structural := []boot.Gate{
+		boot.GateAccountPosture, boot.GateDeactivationsResolved,
+		boot.GateMarginOpsResolved, boot.GateWriterAuthority,
+	}
+	cases := []struct {
+		name string
+		rep  Report
+		want ExitClass
+	}{
+		{
+			name: "clean: only the gates nobody produces are blocking",
+			rep:  Report{Posture: boot.PostureReconcileOnly, Blocking: structural},
+			want: ExitClean,
+		},
+		{
+			name: "latched: an operator hold",
+			rep: Report{Posture: boot.PostureReconcileOnly,
+				Blocking: append([]boot.Gate{boot.GateVenueJoined}, structural...),
+				Latched:  []boot.Gate{boot.GateVenueJoined}},
+			want: ExitOperator,
+		},
+		{
+			name: "incomplete: a gate this binary produces did not conclude",
+			rep: Report{Posture: boot.PostureReconcileOnly,
+				Blocking: append([]boot.Gate{boot.GateNetDeltaAsserted}, structural...)},
+			want: ExitIncomplete,
+		},
+		{
+			name: "incomplete: the replay gate alone",
+			rep: Report{Posture: boot.PostureReconcileOnly,
+				Blocking: append([]boot.Gate{boot.GateJournalReplayed}, structural...)},
+			want: ExitIncomplete,
+		},
+		{
+			name: "incomplete: the durability gate alone",
+			rep: Report{Posture: boot.PostureReconcileOnly,
+				Blocking: append([]boot.Gate{boot.GateJournalDurable}, structural...)},
+			want: ExitIncomplete,
+		},
+		{
+			name: "incomplete: the join gate alone",
+			rep: Report{Posture: boot.PostureReconcileOnly,
+				Blocking: append([]boot.Gate{boot.GateVenueJoined}, structural...)},
+			want: ExitIncomplete,
+		},
+		{
+			name: "incomplete beats nothing, and latched beats incomplete",
+			rep: Report{Posture: boot.PostureReconcileOnly,
+				Blocking: append([]boot.Gate{boot.GateJournalDurable}, structural...),
+				Latched:  []boot.Gate{boot.GateJournalDurable},
+				Storage:  errors.New("nfs")},
+			want: ExitOperator,
+		},
+	}
+	for _, c := range cases {
+		if got := c.rep.ExitClass(); got != c.want {
+			t.Errorf("%s: ExitClass() = %s, want %s", c.name, got, c.want)
+		}
+		if c.rep.Posture != boot.PostureReconcileOnly {
+			t.Errorf("%s: the fixture must hold the posture constant, or it is not testing this", c.name)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The sequence, end to end
+// ---------------------------------------------------------------------------
+
+// spotOnly is the one deployment shape whose reconcile makes NO network call: no
+// scope is required for spot, so Assert enumerates nothing, and an empty journal
+// has no dispatched order to join.
+func spotOnly(t *testing.T, journal string) Config {
+	t.Helper()
+	cfg := validConfig(t, journal)
+	cfg.Instruments = cfg.Instruments[:1]
+	cfg.Venue.Endpoints = cfg.Venue.Endpoints[:1]
+	cfg.Venue.Limits = []LimitConfig{
+		{Name: "ip_requests", Scope: "venue", Dimension: "requests", Interval: dur(t, "5s"),
+			OpeningCeiling: 300, RoutineCeiling: 400, Capacity: 500},
+		{Name: "spot_weight", Scope: "family", Product: ids.ProductSpot, Dimension: "weight",
+			Interval: dur(t, "1m"), OpeningCeiling: 4200, RoutineCeiling: 5400, Capacity: 6000},
+		{Name: "spot_orders", Scope: "family", Product: ids.ProductSpot, Dimension: "orders",
+			Interval: dur(t, "10s"), OpeningCeiling: 70, RoutineCeiling: 90, Capacity: 100},
+	}
+	cfg.PositionScopes = nil
+	return cfg
+}
+
+func snapshotOf(t *testing.T, cfg Config) config.Snapshot[Config] {
+	t.Helper()
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	return config.Snapshot[Config]{Value: cfg, Rev: config.Revision{}}
+}
+
+func testWall(t *testing.T, cfg Config) *clock.Wall {
+	t.Helper()
+	w, err := clock.NewWall(cfg.Calibrations())
+	if err != nil {
+		t.Fatalf("NewWall: %v", err)
+	}
+	return w
+}
+
+// TestBootRunsEveryPhaseAndReportsClean is the positive control for the whole
+// sequence: an empty journal on this host's filesystem, no venue call, and the
+// four gates this binary produces all reported.
+func TestBootRunsEveryPhaseAndReportsClean(t *testing.T) {
+	t.Setenv(testKeyVar, "key")
+	t.Setenv(testSecretVar, "secret")
+
+	dir := t.TempDir()
+	cfg := spotOnly(t, filepath.Join(dir, "journal.db"))
+	r := newRunnerFor(t, cfg, func(string) error { return nil })
+
+	rep, err := r.run(t)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if rep.Posture != boot.PostureReconcileOnly {
+		t.Errorf("posture = %s, want PostureReconcileOnly — five gates have no producer", rep.Posture)
+	}
+	if len(rep.Latched) != 0 {
+		t.Errorf("latched = %v, want none on a clean boot", rep.Latched)
+	}
+	if got := rep.ExitClass(); got != ExitClean {
+		t.Errorf("ExitClass() = %s, want ExitClean; blocking = %v, cause = %v",
+			got, rep.Blocking, rep.Reconciliation.Cause)
+	}
+	// The four gates this binary produces must all have concluded, which is what
+	// makes the ExitClean above a statement rather than an accident of the
+	// structural five.
+	for _, g := range []boot.Gate{boot.GateJournalDurable, boot.GateJournalReplayed,
+		boot.GateVenueJoined, boot.GateNetDeltaAsserted} {
+		o, declared := r.checklist.Outcome(g)
+		if !declared || o != boot.OutcomePassed {
+			t.Errorf("%s = %s (declared %v), want OutcomePassed", g, o, declared)
+		}
+	}
+	// And the journal exists, which is the evidence the phase actually ran.
+	if _, err := os.Stat(filepath.Join(dir, "journal.db")); err != nil {
+		t.Errorf("journal not created: %v", err)
+	}
+}
+
+// TestAStorageRefusalLatchesAndTheJournalIsNeverOPENED is #168's whole point.
+//
+// The order is the content: a database CREATED on a network filesystem is
+// already the thing this refuses, so the check has to run before the open and the
+// evidence is that no file exists afterwards. The outcome is
+// OutcomeEvidenceUnusable — halted AND latching — because reconcile-only would
+// permit the reconciliation writes that re-drive what the untrustworthy journal
+// says happened.
+func TestAStorageRefusalLatchesAndTheJournalIsNeverOPENED(t *testing.T) {
+	t.Setenv(testKeyVar, "key")
+	t.Setenv(testSecretVar, "secret")
+
+	dir := t.TempDir()
+	journal := filepath.Join(dir, "journal.db")
+	cfg := spotOnly(t, journal)
+	r := newRunnerFor(t, cfg, func(string) error { return ErrJournalStorageRemote })
+
+	rep, err := r.run(t)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := rep.Posture; got != boot.PostureHalted {
+		t.Errorf("posture = %s, want PostureHalted", got)
+	}
+	if len(rep.Latched) != 1 || rep.Latched[0] != boot.GateJournalDurable {
+		t.Errorf("latched = %v, want [GateJournalDurable]", rep.Latched)
+	}
+	if got := rep.ExitClass(); got != ExitOperator {
+		t.Errorf("ExitClass() = %s, want ExitOperator", got)
+	}
+	if _, err := os.Stat(journal); !os.IsNotExist(err) {
+		t.Errorf("journal exists after a storage refusal (stat err %v) — the check must precede the open", err)
+	}
+	// The replay and join gates stay UNREPORTED rather than failed: they never
+	// ran, and unreported is the honest value that still holds the posture.
+	for _, g := range []boot.Gate{boot.GateJournalReplayed, boot.GateVenueJoined} {
+		if o, _ := r.checklist.Outcome(g); o != boot.OutcomeUnreported {
+			t.Errorf("%s = %s, want OutcomeUnreported", g, o)
+		}
+	}
+}
+
+// TestBootRefusesASequenceWhoseTeardownOutlastsTheWatchdog is §7.4's bound
+// reaching the wiring file: six phases at a two-second budget is twelve seconds,
+// and a ten-second silence threshold makes an ordinary restart present to the
+// watchdog exactly as a dead host.
+func TestBootRefusesASequenceWhoseTeardownOutlastsTheWatchdog(t *testing.T) {
+	t.Setenv(testKeyVar, "key")
+	t.Setenv(testSecretVar, "secret")
+
+	cfg := spotOnly(t, filepath.Join(t.TempDir(), "journal.db"))
+	cfg.WatchdogSilence = dur(t, "10s")
+	cfg.StopBudget = dur(t, "2s")
+	r := newRunnerFor(t, cfg, func(string) error { return nil })
+
+	if _, err := r.run(t); err == nil {
+		t.Error("Run with a teardown budget above the watchdog threshold = nil, want a refusal")
+	} else if !strings.Contains(err.Error(), "stop budget") {
+		t.Errorf("Run = %v, want a refusal naming the stop budget", err)
+	}
+}
+
+// newRunnerFor builds the root with the storage check injected.
+//
+// The seam exists because the real check's answer is a property of the machine
+// the test runs on — apfs here, ext4 or tmpfs on a runner — and a sequence test
+// that failed on a tmpfs /tmp would be testing the host. The real check has its
+// own tests above, including one that runs it against this host and accepts every
+// classified answer.
+func newRunnerFor(t *testing.T, cfg Config, check func(string) error) *runner {
+	t.Helper()
+	snap := snapshotOf(t, cfg)
+	return &runner{
+		cfg: snap.Value, clk: testWall(t, cfg), reg: observability.NewRegistry(),
+		stderr: io.Discard, rev: strings.Repeat("0", 64), storageCheck: check,
+	}
+}
+
+func (r *runner) run(t *testing.T) (Report, error) {
+	t.Helper()
+	checklist, err := boot.NewChecklist(declaredGates()...)
+	if err != nil {
+		t.Fatalf("NewChecklist: %v", err)
+	}
+	r.checklist = checklist
+	running, err := r.sequence().Run(context.Background())
+	if err != nil {
+		return r.report(), err
+	}
+	if _, err := running.Shutdown(context.Background(), r.clk); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	return r.report(), nil
+}

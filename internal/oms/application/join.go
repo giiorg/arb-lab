@@ -210,9 +210,10 @@ type Assertion struct {
 	Foreign []string
 
 	// Unasserted are the instruments this join rebuilt fills for and could NOT
-	// compare against a position, because no position surface covers them.
+	// compare against a position, each with the reason it could not.
 	//
-	// # It is a field rather than a doc comment because the gap is permanent
+	// # It is a field rather than a doc comment because ONE of its reasons is
+	// # permanent
 	//
 	// Every spot leg is in it. Neither venue has a position surface for spot — a
 	// spot balance is not a position — and the balance that exists instead
@@ -221,20 +222,161 @@ type Assertion struct {
 	// among the surfaces its join uses without saying that one of a
 	// cash-and-carry package's two legs is outside it.
 	//
-	// It does NOT block the gate, and that direction is deliberate: a leg whose
-	// invariant can never be asserted would hold the posture below trading for
-	// ever, which is this repo's recorded halts-itself-with-every-light-green
+	// That leg does NOT block the gate, and the direction is deliberate: a leg
+	// whose invariant can never be asserted would hold the posture below trading
+	// for ever, which is this repo's recorded halts-itself-with-every-light-green
 	// failure. So the limit is reported on every boot instead, where an operator
 	// sees it, rather than inherited silently by whoever reads a clean report.
-	Unasserted []ids.VenueInstrument
+	//
+	// # The reason is carried because the exemption was argued from ONE cause and
+	// # this bucket has two
+	//
+	// Slice F2 wrote the exemption above and computed membership as "no configured
+	// scope covered this instrument", which a DERIVATIVE reaches too — an
+	// enumeration the deployment did not configure, or a symbol dropped from the
+	// config while the journal still holds an open order on it. That instrument is
+	// not one whose invariant can never be asserted; it is one whose invariant did
+	// not run, over an account that may be holding exposure. Exempting it makes
+	// GateNetDeltaAsserted report Passed on a boot that issued no position query
+	// at all. See UnassertedReason, which is where the two causes were separated.
+	Unasserted []UnassertedInstrument
 }
 
-// Holds reports whether this assertion found exposure §7.5 refuses to
-// auto-correct: a position no order of ours explains, or a symbol this
-// deployment does not trade at all.
+// UnassertedInstrument is one instrument the net-delta invariant did not cover,
+// and why.
+type UnassertedInstrument struct {
+	Instrument ids.VenueInstrument
+	Reason     UnassertedReason
+}
+
+// UnassertedReason is why an instrument the join rebuilt fills for was left out
+// of the net-delta assertion.
 //
-// Unasserted is deliberately not in it — see that field.
-func (a Assertion) Holds() bool { return len(a.Unexplained) > 0 || len(a.Foreign) > 0 }
+// [SPEC EDIT LANDED — v0.9.39] §7.5 states the exemption over one cause — "an
+// instrument whose exposure cannot be compared MUST be reported … and MUST NOT
+// hold the posture", argued from the fact that no venue publishes a position
+// surface for spot — and the code that implemented it collected instruments by a
+// WIDER predicate. §7.5 now distinguishes the two and says which one holds.
+//
+// # Why the property is a method on the reason rather than a set the caller knows
+//
+// UnprovedReason's argument one type over, and it is the same failure it exists
+// to foreclose: a caller that recognised "the reasons that do not hold" would
+// give a reason added next year the permissive answer by omission — an instrument
+// silently outside the invariant, reported as ordinary boot progress for ever.
+// Naming every member here makes exhaustiveswitch force the choice instead.
+type UnassertedReason uint8
+
+const (
+	// UnassertedReasonUnspecified is the zero value and names no reason. Refused
+	// by Validate: an instrument outside the invariant with no account of why is
+	// exactly the state this type exists to make unwritable.
+	UnassertedReasonUnspecified UnassertedReason = iota
+
+	// UnassertedNoPositionSurface is §7.5's own case: the instrument's product
+	// family has no position surface at any venue, so no enumeration could ever
+	// cover it. Spot, and only spot.
+	//
+	// A spot balance is not a position — it holds coins this system never bought
+	// — so comparing it to our exposure needs a recorded baseline nothing in this
+	// spec defines (task #179). Until one exists the spot leg's exposure rests on
+	// the executions sweep alone.
+	UnassertedNoPositionSurface
+
+	// UnassertedScopeNotEnumerated is a DERIVATIVE instrument that no configured
+	// scope covers: an enumeration this deployment did not declare, or one it
+	// declared for a venue or family other than the instrument's.
+	//
+	// It is the same words as the case above — "we could not compare this" — about
+	// a completely different situation. A position surface EXISTS for it and was
+	// not asked. So the venue may be holding exposure on this instrument, and the
+	// only reason nothing reported it is that the query was never issued.
+	UnassertedScopeNotEnumerated
+)
+
+const maxUnassertedReason = UnassertedScopeNotEnumerated
+
+// Validate reports whether r names a reason, excluding the sentinel.
+func (r UnassertedReason) Validate() error {
+	if r == UnassertedReasonUnspecified || r > maxUnassertedReason {
+		return fmt.Errorf("unasserted reason %d: %w", uint8(r), ErrUnassertedReasonInvalid)
+	}
+	return nil
+}
+
+// String implements fmt.Stringer.
+func (r UnassertedReason) String() string {
+	switch r {
+	case UnassertedReasonUnspecified:
+		return "UnassertedReasonUnspecified"
+	case UnassertedNoPositionSurface:
+		return "UnassertedNoPositionSurface"
+	case UnassertedScopeNotEnumerated:
+		return "UnassertedScopeNotEnumerated"
+	}
+	return fmt.Sprintf("UnassertedReason(%d)", uint8(r))
+}
+
+// HoldsPosture reports whether an instrument left out for this reason must hold
+// the boot posture below trading.
+//
+// The two answers are not two degrees of the same thing. A permanent gap held
+// against the posture halts a correct system for ever, which is why §7.5 exempts
+// it; an unconfigured enumeration exempted is the invariant reporting a pass over
+// an account it did not read, which is the check saying "clear" about a question
+// it never asked.
+//
+// It mirrors UnprovedReason.RetryMayLift down to the signature, deliberately: the
+// two are the same shape of decision — a property of the reason, not of the
+// caller — and a reader who has understood one has understood this one.
+func (r UnassertedReason) HoldsPosture() (bool, error) {
+	switch r {
+	case UnassertedNoPositionSurface:
+		return false, nil
+	case UnassertedScopeNotEnumerated:
+		return true, nil
+	case UnassertedReasonUnspecified:
+		// Named rather than left to the trailing return (§3.6 rule 10). A zero
+		// reason holds, for the reason below, and it is a distinct fact from a
+		// corrupted one.
+		return true, r.Validate()
+	}
+	// Anything unrecognised holds AND reports. Holding is the safe direction — the
+	// permissive one is an instrument outside the invariant that nobody is told
+	// about — and the error is what stops a caller reading the bool alone.
+	return true, r.Validate()
+}
+
+// Holds reports whether this assertion found something §7.5 refuses to
+// auto-correct: a position no order of ours explains, a symbol this deployment
+// does not trade at all, or an instrument left outside the invariant for a reason
+// that is not the permanent one.
+//
+// The third disjunct is what slice G2 added. Without it the invariant answers
+// "clear" about instruments it never queried — see UnassertedReason.
+//
+// # The error result is discarded, and the reason it is SAFE to discard is a
+// # property of HoldsPosture rather than a hope
+//
+// HoldsPosture answers true for every value it also reports an error on — the
+// zero reason and any unrecognised one — so the bool alone is total in the
+// direction that matters, and its table test asserts both halves for exactly
+// those values. The first version of this loop tested `err != nil || holds`,
+// which reads as defence in depth and is not: no input reaches it with err
+// non-nil and holds false, so it is a branch nothing can execute, and a mutation
+// removing it SURVIVED. An unreachable guard is worse than no guard — it reads as
+// handled, and the next reader stops asking who guarantees the invariant.
+func (a Assertion) Holds() bool {
+	if len(a.Unexplained) > 0 || len(a.Foreign) > 0 {
+		return true
+	}
+	for _, u := range a.Unasserted {
+		if holds, _ := u.Reason.HoldsPosture(); holds {
+			return true
+		}
+	}
+	return false
+}
 
 // Join rebuilds executed quantity from the venue.
 //
@@ -314,12 +456,18 @@ func (j *Joiner) Assert(dispatched []ids.ClientOrderID) (Assertion, error) {
 		return report, err
 	}
 
+	// Sorted on the WHOLE instrument identity rather than on the symbol.
+	// A cash-and-carry package is spot BTCUSDT and perp BTCUSDT, so the symbol is
+	// the one component the two legs share — a symbol-keyed comparison makes them
+	// equal, sort.Slice is not stable, and the two legs then swap places between
+	// runs. That is Checklist.Blocking's argument arriving on a report whose most
+	// common content is exactly one such pair.
 	sort.Slice(report.Unexplained, func(a, b int) bool {
-		return report.Unexplained[a].Instrument.Symbol < report.Unexplained[b].Instrument.Symbol
+		return report.Unexplained[a].Instrument.String() < report.Unexplained[b].Instrument.String()
 	})
 	sort.Strings(report.Foreign)
 	sort.Slice(report.Unasserted, func(a, b int) bool {
-		return report.Unasserted[a].Symbol < report.Unasserted[b].Symbol
+		return report.Unasserted[a].Instrument.String() < report.Unasserted[b].Instrument.String()
 	})
 	return report, nil
 }
@@ -498,9 +646,30 @@ func (j *Joiner) assert(expected map[ids.VenueInstrument]fixedpoint.Quantity, re
 		if _, done := asserted[instrument]; done {
 			continue
 		}
-		report.Unasserted = append(report.Unasserted, instrument)
+		report.Unasserted = append(report.Unasserted, UnassertedInstrument{
+			Instrument: instrument,
+			Reason:     unassertedReason(instrument),
+		})
 	}
 	return nil
+}
+
+// unassertedReason says why no scope covered this instrument.
+//
+// The discriminator is the product family and it is a VENUE FACT rather than a
+// configuration one, which is what makes it decidable here: neither venue
+// publishes a position surface for spot, so a spot instrument is outside every
+// enumeration that could ever be configured. Anything else has a surface, and its
+// absence from the scope list is a statement about this deployment's wiring.
+//
+// It does not consult j.scopes, and that is not an omission: this function is
+// only ever reached for an instrument no scope covered, so asking again would
+// only re-derive the loop's own answer.
+func unassertedReason(instrument ids.VenueInstrument) UnassertedReason {
+	if instrument.Product.IsPerp() {
+		return UnassertedScopeNotEnumerated
+	}
+	return UnassertedNoPositionSurface
 }
 
 // compare records one instrument's disagreement, if there is one.

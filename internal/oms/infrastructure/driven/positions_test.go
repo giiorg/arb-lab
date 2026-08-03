@@ -3,6 +3,7 @@ package driven_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/giiorg/arb-lab/internal/engine/venue"
@@ -164,5 +165,55 @@ func TestNewVenuePositionsRefusals(t *testing.T) {
 	// deployment that declared nothing.
 	if _, err := driven.NewVenuePositions(&recordingPositionReader{}, nil); !errors.Is(err, driven.ErrInstrumentAssetsMissing) {
 		t.Errorf("NewVenuePositions(no assets) = %v, want ErrInstrumentAssetsMissing", err)
+	}
+}
+
+// TestNewVenuePositionsRefusesATableSpanningTwoVenues is the coin flip removed.
+//
+// venueOf returns the first key of a map, which is only a function at all while
+// every key agrees. A table naming two venues makes this adapter's identity
+// depend on Go's randomized map iteration, so the scope check below it admits a
+// scope on one boot and refuses it on the next — with no input having changed.
+//
+// It is Send-and-Receive's lesson applied to a map instead of a select: a claim
+// about code whose behaviour a coin flip decides needs repetitions, and one
+// construction would itself have been a coin flip about whether the refusal fired.
+func TestNewVenuePositionsRefusesATableSpanningTwoVenues(t *testing.T) {
+	t.Parallel()
+
+	// The message the first trial produced, compared against by every later one:
+	// the refusal must not name a different venue first on two identical calls.
+	var firstMixedMessage string
+
+	bybitPerp := ids.VenueInstrument{
+		Venue: "bybit", Product: ids.ProductLinearPerp, Symbol: "BTCUSDT", Contract: ids.ContractLinear,
+	}
+	mixed := map[ids.VenueInstrument]venue.InstrumentAssets{
+		perpInstrument(): {Base: "BTC", Quote: "USDT"},
+		bybitPerp:        {Base: "BTC", Quote: "USDT"},
+	}
+	// 30 trials: the defect it replaces was reachable only when the map yielded
+	// one particular key first, so a single construction would have been a coin
+	// flip about whether the refusal fired.
+	for i := 0; i < 30; i++ {
+		_, err := driven.NewVenuePositions(&recordingPositionReader{}, mixed)
+		if !errors.Is(err, driven.ErrInstrumentVenuesMixed) {
+			t.Fatalf("trial %d: NewVenuePositions(mixed table) = %v, want ErrInstrumentVenuesMixed", i, err)
+		}
+		// The message names BOTH venues and in a stable order, so an operator is
+		// not told only that something is mixed.
+		if got := err.Error(); !strings.Contains(got, "binance") || !strings.Contains(got, "bybit") {
+			t.Fatalf("trial %d: error %q names one venue, want both", i, got)
+		}
+		if i > 0 && err.Error() != firstMixedMessage {
+			t.Fatalf("trial %d: message %q differs from %q — the order is still map-dependent",
+				i, err.Error(), firstMixedMessage)
+		}
+		firstMixedMessage = err.Error()
+	}
+	// The positive control: the single-venue table this adapter is for still
+	// builds, so a constructor that refused everything would not read as a pass.
+	if _, err := driven.NewVenuePositions(&recordingPositionReader{}, positionAssets()); err != nil {
+		t.Errorf("NewVenuePositions(single-venue table) = %v, want success", err)
 	}
 }

@@ -201,6 +201,15 @@ type PositionCodec interface {
 // scheduled reconciliation is neither — OrderByClientID's argument unchanged, and
 // for the same reason the write path's narrowing does not carry: the narrowing
 // there was a venue fact about orders, not a house style.
+//
+// # There is no venue check here, and there could not be one
+//
+// Place, OrderByClientID and Executions all reach route(), which refuses a
+// reference for another venue. A PositionScope carries no venue at all — the
+// venue comes from the client — so the mismatch this call could suffer is not
+// expressible at this seam. It is checked one layer out, where a scope DOES carry
+// a venue: oms/infrastructure/driven.VenuePositions, whose own venue must
+// therefore be a fact and not a coincidence.
 func (c *OrderClient) Positions(ctx context.Context, scope PositionScope, assets map[ids.VenueInstrument]InstrumentAssets, urgency ratelimit.Priority) (PositionReport, error) {
 	op := string(c.codec.Venue()) + ".Positions"
 

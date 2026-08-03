@@ -2,6 +2,7 @@ package boot_test
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 // can only reach PostureTrading by satisfying every one of them.
 func allGates() []boot.Gate {
 	return []boot.Gate{
+		boot.GateJournalDurable,
 		boot.GateJournalReplayed,
 		boot.GateVenueJoined,
 		boot.GateNetDeltaAsserted,
@@ -46,8 +48,19 @@ func TestGateValidateAndString(t *testing.T) {
 	if err := boot.GateUnspecified.Validate(); !errors.Is(err, boot.ErrGateInvalid) {
 		t.Errorf("GateUnspecified.Validate() = %v, want ErrGateInvalid", err)
 	}
-	if err := boot.Gate(8).Validate(); !errors.Is(err, boot.ErrGateInvalid) {
-		t.Errorf("Gate(8).Validate() = %v, want ErrGateInvalid", err)
+	// One past the last declared gate, written as a literal rather than derived
+	// from allGates(): a bound computed from the same roster the loop below walks
+	// would follow maxGate wherever it went, and the check that the sentinel is
+	// refused would pass against any maxGate at all. The literal is what makes
+	// adding a member without updating this file a failing test.
+	if err := boot.Gate(9).Validate(); !errors.Is(err, boot.ErrGateInvalid) {
+		t.Errorf("Gate(9).Validate() = %v, want ErrGateInvalid", err)
+	}
+	// And the roster is the same length, so a member added to the enum and not to
+	// allGates() cannot hide behind a literal that happens to still be one past
+	// the end.
+	if len(allGates()) != 8 {
+		t.Errorf("allGates() has %d gates, want 8 — the roster and Gate(9) above must move together", len(allGates()))
 	}
 	for _, g := range allGates() {
 		if err := g.Validate(); err != nil {
@@ -538,6 +551,84 @@ func TestChecklistBlockingIsSorted(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("Blocking() = %v, want %v", got, want)
 		}
+	}
+}
+
+// TestLatchedIsASubsetOfBlockingAndNamesOnlyTheOperatorHolds is the read-only
+// answer to "what is waiting for a human".
+//
+// The fixture varies the parameter that makes the two methods different answers.
+// Four gates: one Passed (in neither list), one Unreported (Blocking only — the
+// structural case, and on a real deployment the commonest), one OutcomeFailed
+// (Blocking only, and the one a reader would most expect to be latched — it is
+// the MOST restrictive outcome and does not latch), and one OutcomeNeedsOperator
+// (both). Without the OutcomeFailed row, "blocking" and "latched" would agree on
+// every gate in the fixture and a Latched that simply returned Blocking would
+// pass.
+func TestLatchedIsASubsetOfBlockingAndNamesOnlyTheOperatorHolds(t *testing.T) {
+	t.Parallel()
+
+	c := newChecklistT(t,
+		boot.GateWriterAuthority,
+		boot.GateMarginOpsResolved,
+		boot.GateAccountPosture,
+		boot.GateJournalDurable,
+		boot.GateJournalReplayed,
+	)
+	if err := c.Report(boot.GateAccountPosture, boot.OutcomePassed); err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+	if err := c.Report(boot.GateJournalReplayed, boot.OutcomeFailed); err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+	if err := c.Report(boot.GateJournalDurable, boot.OutcomeEvidenceUnusable); err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+	if err := c.Report(boot.GateWriterAuthority, boot.OutcomeNeedsOperator); err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+
+	// GateMarginOpsResolved is unreported and GateJournalReplayed merely failed:
+	// both hold the posture and neither waits for a person.
+	//
+	// Asserted 50 times over the SAME checklist, because the answer is assembled
+	// by walking a Go map and the two latched gates are declared in the reverse of
+	// their Gate order. One call is a coin flip about whether an unsorted
+	// implementation happens to yield them the right way round — a mutation
+	// deleting the sort SURVIVED a single-call version of this test, which is this
+	// repo's recorded lesson about Send and Receive arriving on a map instead of a
+	// select.
+	wantLatched := []boot.Gate{boot.GateJournalDurable, boot.GateWriterAuthority}
+	for i := 0; i < 50; i++ {
+		if got := c.Latched(); !reflect.DeepEqual(got, wantLatched) {
+			t.Fatalf("trial %d: Latched() = %v, want %v — an alert that names a different "+
+				"first cause on two identical boots is one an operator learns to distrust",
+				i, got, wantLatched)
+		}
+	}
+	wantBlocking := []boot.Gate{
+		boot.GateJournalDurable,
+		boot.GateJournalReplayed,
+		boot.GateMarginOpsResolved,
+		boot.GateWriterAuthority,
+	}
+	if got := c.Blocking(); !reflect.DeepEqual(got, wantBlocking) {
+		t.Errorf("Blocking() = %v, want %v", got, wantBlocking)
+	}
+}
+
+// TestLatchedIsEmptyOnAFreshChecklist is the positive control the method needs:
+// a checklist nobody has reported on blocks everything and latches nothing, so a
+// Latched that answered "every required gate" would not read as correct.
+func TestLatchedIsEmptyOnAFreshChecklist(t *testing.T) {
+	t.Parallel()
+
+	c := newChecklistT(t, allGates()...)
+	if got := c.Latched(); len(got) != 0 {
+		t.Errorf("Latched() on a fresh checklist = %v, want none", got)
+	}
+	if got := c.Blocking(); len(got) != len(allGates()) {
+		t.Errorf("Blocking() on a fresh checklist = %v, want every gate", got)
 	}
 }
 

@@ -256,6 +256,16 @@ var (
 	// sequence — so the second subaccount's fills are dropped as duplicates.
 	ErrJoinAccountUnset = errors.New("oms: joiner has no account to attribute fills to")
 
+	// ErrUnassertedReasonInvalid reports an UnassertedReason that is the zero
+	// value or undeclared.
+	//
+	// It exists because the reason decides whether an instrument outside the
+	// net-delta invariant holds the boot posture, and an unclassifiable one has to
+	// reach a caller as an error rather than as the bool alone — see
+	// UnassertedReason.HoldsPosture, whose safe direction and whose reportable
+	// direction are the same only if this sentinel travels with it.
+	ErrUnassertedReasonInvalid = errors.New("oms: unasserted reason is empty or undeclared")
+
 	// ErrOrderNotAtVenue reports a join asked about an order whose state means no
 	// venue order can exist — StatePlanned, and only that.
 	//

@@ -140,4 +140,14 @@ var (
 	// the invariant assert cleanly on one venue and fail on the other, which is
 	// the failure that gets diagnosed as a Bybit problem.
 	ErrPositionScopeSettleUnset = errors.New("oms: position scope names no settlement asset")
+
+	// ErrPositionScopeSurfaceAbsent reports a scope naming a product family no
+	// venue publishes a position surface for — spot, and only spot.
+	//
+	// It is the mirror of engine/venue's own refusal, which is where the fact was
+	// stated when only that layer could express it. What an instrument outside
+	// every enumeration costs is a separate matter and has its own vocabulary
+	// (application.UnassertedReason); this is about a scope that could never be
+	// SERVED, which is a different mistake in a different field.
+	ErrPositionScopeSurfaceAbsent = errors.New("oms: position scope names a family with no position surface")
 )
