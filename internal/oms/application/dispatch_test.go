@@ -222,7 +222,18 @@ func (r *fakeOrders) ApplyPlanned(o domain.Order) (ports.OrderRecord, error) {
 	if _, ok := r.records[o.ClientOrderID]; ok {
 		return ports.OrderRecord{}, fmt.Errorf("fake repository: order %q already exists", o.ClientOrderID)
 	}
-	rec := ports.OrderRecord{Order: o, State: domain.StatePlanned, Version: 1}
+	// A zero OF THE ORDERED ASSET, mirroring the adapter: the real repository
+	// registers the order in the fill ledger here, and the ledger's zero is tagged
+	// at Register. A fake handing back an UNTAGGED zero is a double with a second
+	// opinion, and the difference is invisible until a use case does arithmetic on
+	// it — which is exactly what the net-delta assertion does to every order the
+	// replay rebuilt but nothing filled.
+	rec := ports.OrderRecord{
+		Order:      o,
+		State:      domain.StatePlanned,
+		Version:    1,
+		Cumulative: fixedpoint.ZeroQuantity(o.Quantity.Asset()),
+	}
 	r.records[o.ClientOrderID] = rec
 	return rec, nil
 }

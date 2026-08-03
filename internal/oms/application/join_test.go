@@ -253,8 +253,15 @@ func TestJoinRebuildsTheNetFromBothKeysAndAgreesWithTheVenue(t *testing.T) {
 		t.Errorf("orders/fills/duplicates = %d/%d/%d, want 2/2/0 — the third row belongs to venue order V-99 and must not be admitted",
 			report.Orders, report.Fills, report.Duplicates)
 	}
-	if report.NeedsOperator() || report.Retryable() {
+	if len(report.Absent) > 0 || len(report.Incomplete) > 0 || len(report.Unattributed) > 0 {
 		t.Errorf("report = %+v, want a clean join", report)
+	}
+	assertion, err := joiner.Assert([]ids.ClientOrderID{sell.ClientOrderID, buy.ClientOrderID})
+	if err != nil {
+		t.Fatalf("Assert: %v", err)
+	}
+	if assertion.Holds() {
+		t.Errorf("assertion = %+v, want a clean net-delta assertion", assertion)
 	}
 	if got := orders.records[sell.ClientOrderID].Cumulative.Decimal(); got != "0.5" {
 		t.Errorf("sell cumulative = %s, want 0.5 — attributed by client order id", got)
@@ -289,9 +296,12 @@ func TestJoinReportsTheSignedUnexplainedDelta(t *testing.T) {
 		Positions: []ports.VenuePosition{{Instrument: perp(), Net: signed(t, "-0.8")}},
 	}
 
-	report, err := joiner.Join([]ids.ClientOrderID{sell.ClientOrderID, buy.ClientOrderID})
-	if err != nil {
+	if _, err := joiner.Join([]ids.ClientOrderID{sell.ClientOrderID, buy.ClientOrderID}); err != nil {
 		t.Fatalf("Join: %v", err)
+	}
+	report, err := joiner.Assert([]ids.ClientOrderID{sell.ClientOrderID, buy.ClientOrderID})
+	if err != nil {
+		t.Fatalf("Assert: %v", err)
 	}
 	if len(report.Unexplained) != 1 {
 		t.Fatalf("unexplained = %+v, want one instrument", report.Unexplained)
@@ -308,8 +318,8 @@ func TestJoinReportsTheSignedUnexplainedDelta(t *testing.T) {
 	if got := delta.Unexplained.Decimal(); got != "-0.5" {
 		t.Errorf("unexplained = %s, want -0.5 (observed − expected)", got)
 	}
-	if !report.NeedsOperator() {
-		t.Error("NeedsOperator() = false — §7.5 alerts for operator clearance and does not auto-correct")
+	if !report.Holds() {
+		t.Error("Holds() = false — §7.5 alerts for operator clearance and does not auto-correct")
 	}
 }
 
@@ -324,9 +334,9 @@ func TestJoinFindsAPositionOnAnInstrumentWeHoldNoOrdersFor(t *testing.T) {
 		Unrecognized: []string{"SOLUSDT"},
 	}
 
-	report, err := joiner.Join(nil)
+	report, err := joiner.Assert(nil)
 	if err != nil {
-		t.Fatalf("Join: %v", err)
+		t.Fatalf("Assert: %v", err)
 	}
 	if len(report.Unexplained) != 1 || report.Unexplained[0].Unexplained.Decimal() != "1.25" {
 		t.Errorf("unexplained = %+v, want the whole 1.25 — nothing we joined accounts for any of it", report.Unexplained)
@@ -361,13 +371,15 @@ func TestJoinCrossChecksTheVenuesOwnTotal(t *testing.T) {
 	if len(report.Unattributed) != 1 || report.Unattributed[0] != sell.ClientOrderID {
 		t.Errorf("unattributed = %v, want the order whose totals disagree", report.Unattributed)
 	}
-	if !report.NeedsOperator() {
-		t.Error("NeedsOperator() = false — an execution that exists and cannot be named is exposure")
-	}
 	// The position agrees with what we rebuilt, so the delta check alone would
-	// have reported nothing. That is the whole reason the cross-check exists.
-	if len(report.Unexplained) != 0 {
-		t.Errorf("unexplained = %+v, want none — the position matches the rows we admitted", report.Unexplained)
+	// have reported nothing. That is the whole reason the cross-check exists —
+	// and the reason it belongs to the JOIN's gate rather than the invariant's.
+	assertion, err := joiner.Assert([]ids.ClientOrderID{sell.ClientOrderID})
+	if err != nil {
+		t.Fatalf("Assert: %v", err)
+	}
+	if len(assertion.Unexplained) != 0 {
+		t.Errorf("unexplained = %+v, want none — the position matches the rows we admitted", assertion.Unexplained)
 	}
 }
 
@@ -391,11 +403,8 @@ func TestJoinHandsAnAbsentOrderToTheStableNotFoundRule(t *testing.T) {
 	if len(report.Absent) != 1 || report.Absent[0] != order.ClientOrderID {
 		t.Errorf("absent = %v, want the order the venue does not hold", report.Absent)
 	}
-	if report.NeedsOperator() {
-		t.Error("NeedsOperator() = true — an absence is §5.3's four-gate question, not an operator alert")
-	}
-	if !report.Retryable() {
-		t.Error("Retryable() = false — the stable-not-found rule has not run yet")
+	if len(report.Unattributed) != 0 {
+		t.Errorf("unattributed = %v — an absence is §5.3's four-gate question, not an operator alert", report.Unattributed)
 	}
 	if len(venue.windows) != 0 {
 		t.Errorf("swept %d windows for an order the venue says it does not hold", len(venue.windows))
@@ -427,8 +436,8 @@ func TestJoinRefusesToConcludeOnATruncatedSweep(t *testing.T) {
 	if report.Fills != 0 {
 		t.Errorf("fills = %d, want 0 — a truncated sweep's rows rebuild a cumulative that is right about everything except what is missing", report.Fills)
 	}
-	if !report.Retryable() || report.NeedsOperator() {
-		t.Errorf("report = %+v, want retryable and no operator", report)
+	if len(report.Unattributed) != 0 || len(report.Absent) != 0 {
+		t.Errorf("report = %+v, want a short sweep and nothing else", report)
 	}
 }
 
@@ -471,13 +480,17 @@ func TestJoinNamesTheLegItCannotAssert(t *testing.T) {
 	if report.Fills != 1 {
 		t.Errorf("fills = %d, want 1 — the spot leg's executions are still rebuilt", report.Fills)
 	}
-	if len(report.Unasserted) != 1 || report.Unasserted[0] != spot() {
-		t.Errorf("unasserted = %v, want the spot leg", report.Unasserted)
+	assertion, err := joiner.Assert([]ids.ClientOrderID{spotLeg.ClientOrderID})
+	if err != nil {
+		t.Fatalf("Assert: %v", err)
+	}
+	if len(assertion.Unasserted) != 1 || assertion.Unasserted[0] != spot() {
+		t.Errorf("unasserted = %v, want the spot leg", assertion.Unasserted)
 	}
 	// It must not block: a leg whose invariant can never be asserted would hold
 	// the posture below trading for ever.
-	if report.NeedsOperator() || report.Retryable() {
-		t.Errorf("report = %+v, want the limit reported rather than enforced", report)
+	if assertion.Holds() {
+		t.Errorf("assertion = %+v, want the limit reported rather than enforced", assertion)
 	}
 }
 
@@ -516,7 +529,7 @@ func TestASecondJoinAdmitsNothingTwice(t *testing.T) {
 	if got := orders.records[order.ClientOrderID].Cumulative.Decimal(); got != "0.5" {
 		t.Errorf("cumulative after two joins = %s, want 0.5", got)
 	}
-	if second.NeedsOperator() {
+	if len(second.Unattributed) != 0 {
 		t.Errorf("second join = %+v, want the same clean answer as the first", second)
 	}
 }

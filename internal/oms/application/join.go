@@ -184,7 +184,22 @@ type Join struct {
 	// client order id for an order whose venue id we could not read — and the
 	// exposure it represents is real whether or not we can name its row.
 	Unattributed []ids.ClientOrderID
+}
 
+// Assertion is §7.5's net-delta invariant as this system can state it: what the
+// venue's position enumeration holds, against what our own orders account for.
+//
+// # It is a separate result from Join because it is a separate GATE
+//
+// Until slice G1 the two were one call and one report, and the fusion had a
+// consequence nothing could see from inside the join: §5.3's absence resolution
+// belongs BETWEEN them. An order the venue's order surface does not hold is
+// handed to Resolver, and Resolver is what sweeps its executions — so at the
+// instant the fused call asserted, every absent order contributed the zero
+// cumulative the replay gave it, while the position those executions produced was
+// standing at the venue and counted. See Reconciler, which is the composition
+// that made the ordering visible.
+type Assertion struct {
 	// Unexplained are the instruments whose venue position exceeds what our
 	// orders account for. §7.5's "unexplained position deltas", which "alert for
 	// operator clearance" and are "not auto-corrected".
@@ -214,32 +229,14 @@ type Join struct {
 	Unasserted []ids.VenueInstrument
 }
 
-// NeedsOperator reports whether this join found something §7.5 refuses to
-// auto-correct.
+// Holds reports whether this assertion found exposure §7.5 refuses to
+// auto-correct: a position no order of ours explains, or a symbol this
+// deployment does not trade at all.
 //
-// The three conditions are one answer because §7.5 gives them one: foreign
-// orders and unexplained position deltas "alert for operator clearance (they are
-// not auto-corrected)", and an unattributed execution is an unexplained delta
-// that has not reached the position surface yet. None of them is lifted by
-// running this join again — the same account answers the same way — which is
-// precisely what boot.OutcomeNeedsOperator means.
-func (j Join) NeedsOperator() bool {
-	return len(j.Unattributed) > 0 || len(j.Unexplained) > 0 || len(j.Foreign) > 0
-}
+// Unasserted is deliberately not in it — see that field.
+func (a Assertion) Holds() bool { return len(a.Unexplained) > 0 || len(a.Foreign) > 0 }
 
-// Retryable reports whether the join left work a later attempt could finish.
-//
-// Separate from NeedsOperator because the two map to different boot outcomes
-// with different clearance rules: this one IS lifted by a re-run — a sweep that
-// ran out of pages gets further next time, and an absence is resolved by the
-// rule §5.3 owns. Reporting it as the latching outcome would demand an operator
-// for a venue that was merely busy.
-func (j Join) Retryable() bool {
-	return len(j.Absent) > 0 || len(j.Incomplete) > 0
-}
-
-// Join rebuilds executed quantity from the venue and asserts the net-delta
-// invariant.
+// Join rebuilds executed quantity from the venue.
 //
 // # It takes the ids whose state means the venue MAY hold a record
 //
@@ -259,35 +256,48 @@ func (j Join) Retryable() bool {
 // exchange. The posture is what stops trading, not the emptiness of a map.
 func (j *Joiner) Join(dispatched []ids.ClientOrderID) (Join, error) {
 	report := Join{}
-	expected := make(map[ids.VenueInstrument]fixedpoint.Quantity, len(dispatched))
-
 	for _, id := range dispatched {
-		rec, err := j.orders.Load(id)
-		if err != nil {
-			return report, fmt.Errorf("join order %q: %w", id, err)
-		}
-		mayExist, err := rec.State.MayExistAtVenue()
-		if err != nil {
-			return report, fmt.Errorf("join order %q at %s: %w", id, rec.State, err)
-		}
-		if !mayExist {
-			// A Planned-only order was never dispatched, so there is nothing at the
-			// venue to ask about and a query would run to its deadline over an
-			// order this system merely has not sent. Refused rather than skipped:
-			// the caller derived this list from a state predicate, and one that
-			// disagrees means the two readings have drifted.
-			return report, fmt.Errorf("join order %q at %s: %w", id, rec.State, ErrOrderNotAtVenue)
-		}
-
-		rec, err = j.joinOne(rec, &report)
+		rec, err := j.load(id)
 		if err != nil {
 			return report, err
 		}
+		if _, err := j.joinOne(rec, &report); err != nil {
+			return report, err
+		}
 		report.Orders++
+	}
+	return report, nil
+}
 
+// Assert is §7.5's net-delta invariant: "every unit of the venue's position is
+// attributable to an order this system journaled", per derivative instrument in
+// the enumerated scopes.
+//
+// # It re-reads the projection rather than taking Join's arithmetic
+//
+// Join could have handed its running total over and the two would agree on the
+// boot where nothing else writes between them — which is exactly the boot this
+// system does not have. §5.3's absence resolution runs BETWEEN the two calls and
+// admits executions of its own, so a total computed during the join is a total
+// taken before the last writer finished. Re-deriving here makes the assertion a
+// function of the projection as it stands at the instant it is asserted, which is
+// the only reading §7.5's "before trading resumes" can mean.
+//
+// It takes the same dispatched set for the same reason Join does: a Planned-only
+// order was never sent, so it contributes no exposure and asking about it would
+// be asking the venue about an order this system has not placed.
+func (j *Joiner) Assert(dispatched []ids.ClientOrderID) (Assertion, error) {
+	report := Assertion{}
+	expected := make(map[ids.VenueInstrument]fixedpoint.Quantity, len(dispatched))
+
+	for _, id := range dispatched {
+		rec, err := j.load(id)
+		if err != nil {
+			return report, err
+		}
 		signed, err := signedQuantity(rec.Order.Side, rec.Cumulative)
 		if err != nil {
-			return report, fmt.Errorf("join order %q executed: %w", id, err)
+			return report, fmt.Errorf("assert order %q executed: %w", id, err)
 		}
 		running, ok := expected[rec.Order.Instrument]
 		if !ok {
@@ -295,7 +305,7 @@ func (j *Joiner) Join(dispatched []ids.ClientOrderID) (Join, error) {
 		}
 		running, err = running.Add(signed)
 		if err != nil {
-			return report, fmt.Errorf("join order %q: %w", id, err)
+			return report, fmt.Errorf("assert order %q: %w", id, err)
 		}
 		expected[rec.Order.Instrument] = running
 	}
@@ -312,6 +322,33 @@ func (j *Joiner) Join(dispatched []ids.ClientOrderID) (Join, error) {
 		return report.Unasserted[a].Symbol < report.Unasserted[b].Symbol
 	})
 	return report, nil
+}
+
+// load reads one order and refuses one the venue cannot hold.
+//
+// Shared by Join and Assert so the two cannot disagree about which orders are in
+// scope. That is not tidiness: they are handed the same list by the same caller
+// and a divergence would show up as an assertion computed over a different set
+// from the one whose quantity was rebuilt — a mismatch with no symptom except a
+// wrong number.
+func (j *Joiner) load(id ids.ClientOrderID) (ports.OrderRecord, error) {
+	rec, err := j.orders.Load(id)
+	if err != nil {
+		return rec, fmt.Errorf("join order %q: %w", id, err)
+	}
+	mayExist, err := rec.State.MayExistAtVenue()
+	if err != nil {
+		return rec, fmt.Errorf("join order %q at %s: %w", id, rec.State, err)
+	}
+	if !mayExist {
+		// A Planned-only order was never dispatched, so there is nothing at the
+		// venue to ask about and a query would run to its deadline over an
+		// order this system merely has not sent. Refused rather than skipped:
+		// the caller derived this list from a state predicate, and one that
+		// disagrees means the two readings have drifted.
+		return rec, fmt.Errorf("join order %q at %s: %w", id, rec.State, ErrOrderNotAtVenue)
+	}
+	return rec, nil
 }
 
 // joinOne reads one order's venue record and admits the executions belonging to
@@ -412,7 +449,7 @@ func (j *Joiner) joinOne(rec ports.OrderRecord, report *Join) (ports.OrderRecord
 // so absence from it is the venue's statement rather than a question we failed
 // to ask. An instrument the venue reported that we joined no orders on has an
 // expected of zero, and every unit of it is unexplained.
-func (j *Joiner) assert(expected map[ids.VenueInstrument]fixedpoint.Quantity, report *Join) error {
+func (j *Joiner) assert(expected map[ids.VenueInstrument]fixedpoint.Quantity, report *Assertion) error {
 	asserted := make(map[ids.VenueInstrument]struct{}, len(expected))
 
 	for _, scope := range j.scopes {
@@ -471,7 +508,7 @@ func (j *Joiner) assert(expected map[ids.VenueInstrument]fixedpoint.Quantity, re
 // A zero difference is not recorded, and that is the whole shape of the
 // invariant: §7.5 asserts it before trading resumes, so the ordinary answer is
 // an empty report and a report is a list of exceptions.
-func (j *Joiner) compare(instrument ids.VenueInstrument, mine, theirs fixedpoint.Quantity, report *Join) error {
+func (j *Joiner) compare(instrument ids.VenueInstrument, mine, theirs fixedpoint.Quantity, report *Assertion) error {
 	unexplained, err := theirs.Sub(mine)
 	if err != nil {
 		return fmt.Errorf("assert net delta on %s: %w", instrument.Symbol, err)

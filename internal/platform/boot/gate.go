@@ -138,12 +138,17 @@ func (g Gate) String() string {
 // lift.
 //
 // The product has six cells over the three constraining postures, and it took
-// two slices to fill them because the FIRST gap was closed without tabulating:
+// three slices to fill them — because the first gap was closed without
+// tabulating at all, and the tabulation that closed the second was drawn on TWO
+// axes when the type decides THREE:
 //
-//	                  freely re-reportable        latching
-//	halted            OutcomeFailed               OutcomeEvidenceUnusable  (F1)
-//	reconcile-only    OutcomeUnreported/Pending   OutcomeNeedsOperator
-//	stop-opening      OutcomeBlocksOpening        OutcomeProjectionStale   (F2)
+//	                  freely re-reportable   latching
+//	halted            OutcomeFailed          OutcomeEvidenceUnusable  (F1)
+//	reconcile-only    OutcomeIncomplete      OutcomeNeedsOperator     (G1)
+//	stop-opening      OutcomeBlocksOpening   OutcomeProjectionStale   (F2)
+//
+// with OutcomeUnreported, OutcomePending and OutcomePassed outside it: the first
+// two are PRE-verdict and the third constrains nothing.
 //
 // Slice F1 found the halted row's empty cell, added the member its own producer
 // needed, and stopped — leaving the stop-opening row in exactly the state the
@@ -155,6 +160,23 @@ func (g Gate) String() string {
 // that would lift it recomputes from the projection that is known stale. That is
 // this repo's mirror rule on the axis it keeps missing: a fix applied to one row
 // of a table gets applied to the table.
+//
+// # The third axis, and why a full-looking table still had a hole
+//
+// F2's tabulation drew the reconcile-only row's re-reportable cell as
+// "OutcomeUnreported/Pending" and read it as OCCUPIED. It was not. Both of those
+// members mean the check has produced NO VERDICT — one that it never ran, one
+// that it is running — and a cell filled by pre-verdict members is empty for
+// every producer that has an answer. The property the table was missing is
+// therefore the one every other cell has without saying so: whether the outcome
+// REPORTS A RESULT. Read on that axis the halted and stop-opening rows each had
+// a verdict-bearing re-reportable member and the reconcile-only row had none,
+// which is visible the moment the axis is named and invisible while it is not.
+//
+// The general rule, one turn past the one F2 earned: a product is only as
+// complete as the properties you tabulate it on, so when a cell is filled by a
+// member that answers a DIFFERENT question from its row-mates, that is the tell
+// that an axis is missing rather than that the cell is occupied.
 type Outcome uint8
 
 const (
@@ -219,6 +241,45 @@ const (
 	// the phase that verified the chain and found it broken; see
 	// oms/application.Replayer, its first and so far only producer.
 	OutcomeEvidenceUnusable
+
+	// OutcomeIncomplete is the gate's check having RUN, concluded, and not
+	// established its precondition — with nothing failed and no operator needed.
+	// A further attempt may satisfy it.
+	//
+	// [SPEC EDIT LANDED — v0.9.38] It is the THIRD empty cell of the product this
+	// type's doc tabulates, and the one the table's two axes hide: the
+	// reconcile-only row's re-reportable side held only OutcomeUnreported and
+	// OutcomePending, and BOTH of those are pre-verdict. Every other row has a
+	// re-reportable member that means "the check ran and refused" — OutcomeFailed
+	// on the halted row, OutcomeBlocksOpening on the stop-opening row. This row
+	// had none, so a check that ran to completion and left work had to be reported
+	// as one that had not run.
+	//
+	// Its producer is §7.5's own ordinary case. §5.3's stable-not-found rule
+	// answers UNPROVED for an order dispatched shortly before the crash — the
+	// propagation bound has not elapsed, so the venue's silence is not yet
+	// evidence — and that is not a failure in any direction: the venue answered,
+	// the log is intact, and the only thing wrong is that not enough time has
+	// passed. Reporting it as OutcomeFailed halts a process whose venue is
+	// healthy and forbids §7.5's own DeactivationPending re-drive; reporting it
+	// as OutcomeNeedsOperator demands a human for a timer.
+	//
+	// # Why the collapse into OutcomePending is not merely a naming preference
+	//
+	// The two are indistinguishable in the checklist, and the distinction they
+	// lose is the one an operator acts on: OutcomePending means WAIT, and this
+	// means ACT — retry, or look at why the wait is not ending. A boot that
+	// concluded and refuses, reported as a boot still running, leaves a process
+	// that is alive, audible and below PostureStopOpening: it may not reduce
+	// exposure, nobody escalates because the boot "has not finished", and §7.4's
+	// watchdog reads liveness, so it does not escalate either. That is precisely
+	// the alive-but-wedged state SignalImmediateHalt's doc calls an UNCOVERED
+	// failure, reached this time through a vocabulary rather than through a
+	// shutdown.
+	//
+	// Same posture as OutcomePending and the same clearance rule, deliberately:
+	// what is added is a verdict, not a restriction. See oms/application.Reconciler.
+	OutcomeIncomplete
 
 	// OutcomeNeedsOperator is the gate refusing in a way no retry may lift: a
 	// foreign order, an unexplained position delta, a latched takeover epoch.
@@ -286,6 +347,8 @@ func (o Outcome) String() string {
 		return "OutcomeFailed"
 	case OutcomeEvidenceUnusable:
 		return "OutcomeEvidenceUnusable"
+	case OutcomeIncomplete:
+		return "OutcomeIncomplete"
 	case OutcomeNeedsOperator:
 		return "OutcomeNeedsOperator"
 	case OutcomeBlocksOpening:
@@ -301,7 +364,7 @@ func (o Outcome) String() string {
 // posture is the ceiling this outcome alone imposes.
 func (o Outcome) posture() Posture {
 	switch o {
-	case OutcomeUnreported, OutcomePending, OutcomeNeedsOperator:
+	case OutcomeUnreported, OutcomePending, OutcomeIncomplete, OutcomeNeedsOperator:
 		return PostureReconcileOnly
 	case OutcomeBlocksOpening, OutcomeProjectionStale:
 		return PostureStopOpening
@@ -337,7 +400,7 @@ func (o Outcome) latching() bool {
 	switch o {
 	case OutcomeNeedsOperator, OutcomeEvidenceUnusable, OutcomeProjectionStale:
 		return true
-	case OutcomeUnreported, OutcomePending, OutcomeFailed, OutcomeBlocksOpening, OutcomePassed:
+	case OutcomeUnreported, OutcomePending, OutcomeIncomplete, OutcomeFailed, OutcomeBlocksOpening, OutcomePassed:
 		return false
 	}
 	// An unrecognised outcome, on posture's argument: Validate refuses it at the

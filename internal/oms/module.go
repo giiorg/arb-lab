@@ -311,6 +311,25 @@ type Module struct {
 	// GateNetDeltaAsserted, reduced to the weakest posture over both.
 	Join *application.Joiner
 
+	// Reconcile is §7.5's reconcile-only boot as ONE call, and it is what a
+	// composition root's boot.KindReconcile phase invokes.
+	//
+	// # Why it exists beside Recover, Join and Resolve rather than instead of them
+	//
+	// The three phases are separately meaningful — §7.5 gives each its own gate,
+	// and a root that only wants to replay a journal for inspection should be able
+	// to — but they are correct in exactly ONE order, and the order is not
+	// recoverable from their signatures. §5.3's absence resolution runs BETWEEN
+	// the join and the net-delta assertion, which no one of them can express and
+	// which the fused Join-that-also-asserted had wrong. So the ordering is a use
+	// case rather than a paragraph in a root's comment, where a second binary
+	// would re-derive it and the two would differ.
+	//
+	// It reports into the root's checklist and does not own one — §7.5's roster
+	// spans contexts and this one supplies three of its gates. See
+	// application.Reconciler.
+	Reconcile *application.Reconciler
+
 	// journal is held only so Close can release it, and it is unexported for
 	// the same reason ports.OrderWriteRepository never becomes a field here: a
 	// *driven.SQLiteJournal handed to a root is a write path to order state
@@ -426,14 +445,24 @@ func New(deps Deps) (*Module, error) {
 		return nil, errors.Join(fmt.Errorf("oms: joiner: %w", err), journal.Close())
 	}
 
+	// §7.5's three phases in the one order they are correct in. It holds the same
+	// three use cases the fields above expose, not copies: a reconcile that ran
+	// against a second replayer would rebuild a second projection and assert the
+	// invariant over neither of them.
+	reconciler, err := application.NewReconciler(replayer, joiner, resolver)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("oms: reconciler: %w", err), journal.Close())
+	}
+
 	return &Module{
-		Plan:     planner,
-		Dispatch: dispatcher,
-		Resolve:  resolver,
-		Classify: classifier,
-		Recover:  replayer,
-		Join:     joiner,
-		journal:  journal,
+		Plan:      planner,
+		Dispatch:  dispatcher,
+		Resolve:   resolver,
+		Classify:  classifier,
+		Recover:   replayer,
+		Join:      joiner,
+		Reconcile: reconciler,
+		journal:   journal,
 	}, nil
 }
 

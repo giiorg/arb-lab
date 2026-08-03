@@ -68,7 +68,7 @@ func TestOutcomeValidateAndString(t *testing.T) {
 	// The zero value is legal: "unreported" is the state of a fresh checklist.
 	for _, o := range []boot.Outcome{
 		boot.OutcomeUnreported, boot.OutcomePending, boot.OutcomeFailed,
-		boot.OutcomeEvidenceUnusable, boot.OutcomeNeedsOperator,
+		boot.OutcomeEvidenceUnusable, boot.OutcomeIncomplete, boot.OutcomeNeedsOperator,
 		boot.OutcomeBlocksOpening, boot.OutcomeProjectionStale, boot.OutcomePassed,
 	} {
 		if err := o.Validate(); err != nil {
@@ -80,11 +80,11 @@ func TestOutcomeValidateAndString(t *testing.T) {
 	}
 	// One past the last declared member. It moves when a member is added, which
 	// is the point: the check is that the LADDER ends where the enum does.
-	if err := boot.Outcome(8).Validate(); !errors.Is(err, boot.ErrOutcomeInvalid) {
-		t.Errorf("Outcome(8).Validate() = %v, want ErrOutcomeInvalid", err)
+	if err := boot.Outcome(9).Validate(); !errors.Is(err, boot.ErrOutcomeInvalid) {
+		t.Errorf("Outcome(9).Validate() = %v, want ErrOutcomeInvalid", err)
 	}
-	if got := boot.Outcome(8).String(); got != "Outcome(8)" {
-		t.Errorf("Outcome(8).String() = %q, want %q", got, "Outcome(8)")
+	if got := boot.Outcome(9).String(); got != "Outcome(9)" {
+		t.Errorf("Outcome(9).String() = %q, want %q", got, "Outcome(9)")
 	}
 }
 
@@ -187,7 +187,9 @@ func TestChecklistOutcomeToPosture(t *testing.T) {
 	}{
 		{boot.OutcomePassed, boot.PostureTrading},
 		{boot.OutcomeBlocksOpening, boot.PostureStopOpening},
+		{boot.OutcomeUnreported, boot.PostureReconcileOnly},
 		{boot.OutcomePending, boot.PostureReconcileOnly},
+		{boot.OutcomeIncomplete, boot.PostureReconcileOnly},
 		{boot.OutcomeNeedsOperator, boot.PostureReconcileOnly},
 		{boot.OutcomeFailed, boot.PostureHalted},
 		{boot.OutcomeEvidenceUnusable, boot.PostureHalted},
@@ -314,6 +316,44 @@ func TestChecklistNeedsOperatorLatches(t *testing.T) {
 	}
 	if got := c.Posture(); got != boot.PostureReconcileOnly {
 		t.Errorf("Posture() = %s, want PostureReconcileOnly", got)
+	}
+}
+
+// TestIncompleteRefusesWITHOUTLatching is the third empty cell's own claim, and
+// it asserts BOTH halves for TestEvidenceUnusableHaltsANDLatches' reason one row
+// over: the posture alone is already provided by OutcomePending and the
+// non-latching alone by OutcomeFailed, so a fixture checking either half would
+// pass against the wrong member.
+//
+// The producer is §7.5's boot finding work it could not finish — a sweep that
+// did not prove coverage, an absence whose finality timer has not elapsed.
+// Reconcile-only matters because halting a healthy process forbids §7.5's own
+// DeactivationPending re-drive; not latching matters because the condition
+// clears itself and demanding an operator for a timer is the
+// halts-itself-with-every-light-green failure.
+func TestIncompleteRefusesWITHOUTLatching(t *testing.T) {
+	t.Parallel()
+
+	c := newChecklistT(t, allGates()...)
+	reportAllT(t, c, boot.OutcomePassed)
+	if err := c.Report(boot.GateVenueJoined, boot.OutcomeIncomplete); err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+	if got := c.Posture(); got != boot.PostureReconcileOnly {
+		t.Errorf("Posture() = %s, want PostureReconcileOnly — halting forbids the reconcile writes that finish the work", got)
+	}
+	// The half no other reconcile-only member has: a later report lifts it, with
+	// no operator in the loop.
+	if err := c.Report(boot.GateVenueJoined, boot.OutcomePassed); err != nil {
+		t.Fatalf("Report(Passed) over Incomplete = %v, want nil — the retry is what lifts it", err)
+	}
+	if got := c.Posture(); got != boot.PostureTrading {
+		t.Errorf("Posture() = %s, want PostureTrading — %v is blocking", got, c.Blocking())
+	}
+	// And Clear must refuse it, which is the same claim from the other side: a
+	// non-latching outcome is not an operator hold, so there is nothing to clear.
+	if err := c.Clear(boot.GateVenueJoined); !errors.Is(err, boot.ErrGateNotLatched) {
+		t.Errorf("Clear(Incomplete) = %v, want ErrGateNotLatched", err)
 	}
 }
 

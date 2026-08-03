@@ -1,6 +1,73 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-03, session 85): **MILESTONE 3 SLICE F2 IS CLOSED — §7.5's VENUE JOIN IS EXECUTABLE, THE FILL LEDGER IS REBUILT FROM VENUE TRUTH, AND THE NET-DELTA INVARIANT TURNS OUT TO COVER ONE LEG OF A TWO-LEG PACKAGE. DOCS ARE v0.9.37; MARKER GREP IS ZERO.**
+## Status (2026-08-03, session 86): **MILESTONE 3 SLICE G1 IS CLOSED — §7.5's RECONCILE-ONLY BOOT IS ONE USE CASE IN THE ONE ORDER ITS PHASES ARE CORRECT IN, AND THE FUSED READING ASSERTED THE NET-DELTA INVARIANT OVER A QUANTITY THE JOIN HAD DECLINED TO REBUILD. DOCS ARE v0.9.38; MARKER GREP IS ZERO.**
+
+**The slice is done end to end.** `make ci` green on both modules, marker grep
+**0**, **23 mutations / 23 kills** (six re-aimed from bad seds; two SURVIVED
+first and are recorded), docs at **v0.9.38** across all five. Design record
+**§57**, battery **§57h**. Tasks **#175** and the recovery half of **#169** are
+discharged; **#166** is re-scoped into **G2** and **G3** (see below).
+
+**WHAT LANDED.** `oms/application` gains `Reconciler`, `Reconciliation` and
+`UnprovedOrder`; `Joiner.Join` is split from a new `Joiner.Assert` with its own
+`Assertion` report; `UnprovedReason` gains `RetryMayLift`; `platform/boot` gains
+`OutcomeIncomplete`; `oms.Module` gains `Reconcile`. Core **§7.5** edited.
+
+**THE FINDING — a contradiction between two clauses of ONE use case, visible only
+from the composition.** `Join` records an order in `Absent` *precisely because*
+§5.3 forbids inferring "no executions" from an absence — so it does not sweep it
+and it keeps the replay's zero cumulative — and `assert`, one function later,
+folded that zero in as a fact. The venue's standing position is the other side of
+the subtraction, so any fill such an order took reports as an **unexplained
+position delta**: §7.5's *alert for operator clearance*, which **latches**. The
+boot it fires on is the one §7.5 exists for — a dispatch that reached the venue,
+a crash seconds later, a propagation bound that has merely not elapsed — so a
+condition that discharges itself in seconds became an incident needing a human.
+Neither half is wrong alone, which is why four review rounds passed over it:
+**nothing owned the ORDER**, because §7.5's three phases were three unwired use
+cases. Fix: the sequence is a use case (replay → join → §5.3's rule on every
+absence → assert) **and** the assertion is gated on the rebuild having concluded
+— ordering alone is insufficient, because §5.3's rule does not admit executions.
+The rejected order is kept as a **control that runs**.
+
+**THE SECOND HALF — the outcome vocabulary's THIRD empty cell.** F2's own table
+showed the reconcile-only/re-reportable cell as occupied by
+`OutcomeUnreported`/`OutcomePending`, and **both are PRE-VERDICT** while every
+other row has a member meaning "it ran and it refuses". *A product is only as
+complete as the properties you tabulate it on — a cell filled by a member that
+answers a DIFFERENT question from its row-mates is the tell that an axis is
+missing.* `OutcomeIncomplete` is that member; reported as `Pending` instead, a
+concluded-and-refusing boot is indistinguishable from a hung one, which is the
+alive-but-wedged **uncovered** failure §7.4 names.
+
+**THE BATTERY'S TWO SURVIVORS WERE THE RECORDED SWITCH-DEFAULT TRAP.** Dropping
+`OutcomeIncomplete` from `posture()` and `latching()` falls through to the
+trailing `return`, and `platform/boot`'s suite had no fixture for the new member
+at all. Both became kills once the posture table and
+`TestIncompleteRefusesWITHOUTLatching` covered it. The collapse checklist, run
+first, found a **fake with a second opinion**: `fakeOrders.ApplyPlanned` returned
+an UNTAGGED zero cumulative where the real repository's ledger tags it at
+`Register` — invisible for four slices because nothing did arithmetic on a
+replayed-but-unfilled order's cumulative, which is exactly what the assertion
+does.
+
+**WHAT IS NEXT: G2, and it is still where the BOOT SEQUENCE lands.** Nothing
+constructs a `boot.Checklist` in production. The deferral now **names the
+construct** rather than the feature (§3.6's rule): it waits on a
+**`venue.OrderClient` built from configuration** — §5.2's OMS config schema does
+not exist and credential loading has no home outside `engine/venue`. G2 delivers
+the composition root, the `arblab reconcile` subcommand §11 names, and §13's
+local-filesystem precondition (**#168**). **G3** is parallel-IOC +
+process-kill-mid-IOC. Record **§57i** lists everything deliberately left out.
+
+**Standing, unchanged:** capture **PID 8495**, never rebuild over `bin/arblab`,
+`make ci` runs `-race` and `go test` does not, cap `TLC_WORKERS` at 4, read TLC
+figures only from a COMPLETED invocation. **§38f (task #158) is still the only
+clock-bound user decision**: ≥2 TB off-host, gate ~2026-09-30.
+
+---
+
+## Status (2026-08-03, session 85 — HISTORICAL): **MILESTONE 3 SLICE F2 IS CLOSED — §7.5's VENUE JOIN IS EXECUTABLE, THE FILL LEDGER IS REBUILT FROM VENUE TRUTH, AND THE NET-DELTA INVARIANT TURNS OUT TO COVER ONE LEG OF A TWO-LEG PACKAGE. DOCS ARE v0.9.37; MARKER GREP IS ZERO.**
 
 **The slice is done end to end.** `make ci` green on both modules, marker grep
 **0**, **31 mutations / 30 killed by the suite + 1 by the gate**, docs at

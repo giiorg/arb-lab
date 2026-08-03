@@ -264,4 +264,27 @@ var (
 	// readings have drifted, and the cost of guessing is a resolving query that
 	// runs to its deadline over an order this system has merely not sent.
 	ErrOrderNotAtVenue = errors.New("oms: order's state means no venue order can exist")
+
+	// ErrReplayerMissing, ErrJoinerMissing and ErrResolveUseCaseMissing report a
+	// reconciler constructed without one of §7.5's three phases.
+	//
+	// Three sentinels rather than one, because a root that supplied two of three
+	// gets told which one it forgot — and because the phases are not
+	// interchangeable: without the replay there is no dispatched set to join,
+	// without the join no absence is ever found, and without the resolver the
+	// absences that ARE found go to nobody, which is the one of the three that
+	// still produces a plausible report.
+	ErrReplayerMissing       = errors.New("oms: reconciler has no journal replayer")
+	ErrJoinerMissing         = errors.New("oms: reconciler has no venue joiner")
+	ErrResolveUseCaseMissing = errors.New("oms: reconciler has no stable-not-found resolver")
+
+	// ErrChecklistMissing reports a Reconcile called with no checklist to report
+	// into.
+	//
+	// It is an error rather than a silent run because the checklist is the only
+	// place the verdict goes: a reconcile that ran every phase and reported
+	// nowhere leaves a composition root reading a posture that was never
+	// constrained, which is the "nothing was checked and everything passed"
+	// collapse §7.5 argues about the fold's seed.
+	ErrChecklistMissing = errors.New("oms: reconcile has no boot checklist to report into")
 )

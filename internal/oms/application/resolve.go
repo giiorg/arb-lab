@@ -278,6 +278,45 @@ func (r UnprovedReason) Validate() error {
 
 func (r UnprovedReason) String() string { return string(r) }
 
+// RetryMayLift reports whether running the rule again could ever conclude about
+// an order this reason refused.
+//
+// # It is a method here rather than a set of reasons a caller recognises
+//
+// §7.5's boot has to answer a question the reasons already contain and nothing
+// stated: an absence the rule can NEVER prove is an order that will be exactly
+// as unresolvable on the next boot, so holding the posture at a re-reportable
+// outcome would leave a process retrying a refusal that cannot move — the
+// halts-itself-with-every-light-green shape, with the lights genuinely green.
+// Each constant's own doc already committed to an answer ("this one resolves
+// itself", "it never resolves itself and gets strictly worse with time",
+// "permanent, and fixed by configuration rather than by waiting"); this makes
+// those sentences a value the checklist can read, which is task #175's
+// condition — refuse to trade an instrument whose absences could never be
+// proved.
+//
+// It names every member rather than testing the two that lift, so
+// exhaustiveswitch forces a reason added later to choose. The direction that
+// costs something is the permissive one: a new gate defaulting to "a retry may
+// lift it" would be reported as ordinary boot progress for ever.
+func (r UnprovedReason) RetryMayLift() (bool, error) {
+	switch r {
+	case ReasonHorizonNotPassed, ReasonSweepIncomplete:
+		// Both are waiting on time: a fixed instant the clock reaches, and a sweep
+		// that gets further on the next attempt.
+		return true, nil
+	case ReasonNoAnchor, ReasonReachExceeded, ReasonReachUnknown, ReasonSweepInconclusive, ReasonExecutionsFound:
+		// None of these moves on a retry. The anchor is what the journal holds and
+		// the replay already supplied it; retention only grows worse; an
+		// unconfigured bound is configuration; an execution the sweep can neither
+		// attribute nor rule out is the same row next time; and executions found
+		// against a venue that reports no order are exposure waiting on the fill
+		// path's transaction, not on another query.
+		return false, nil
+	}
+	return false, fmt.Errorf("%q: %w", string(r), ErrUnprovedReasonInvalid)
+}
+
 // Resolution is what one run of the rule established.
 //
 // It is a value rather than an error for the reason Dispatch's Outcome is: the
