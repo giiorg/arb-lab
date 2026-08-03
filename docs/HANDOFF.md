@@ -45,6 +45,28 @@ credential). The §9 acceptance campaign remains runnable. A future `risk`
 context's pre-trade gate now has its seam (`admitPackage`) and its read
 (`PermitsNow`) — §60g.
 
+**THE LIVE-TEST PATH, from session 89's full-repo inventory.** The order path
+is REAL end to end — signed transports (submit-once by construction), real
+Binance/Bybit payloads for spot+perp, `env:`/`file:` key refs, hosts free-text
+per product family with **no mainnet guard anywhere** — so a config file
+(nearest template: `internal/app/exercise/app_test.go`'s fixture) plus
+withdrawal-disabled keys would mechanically send a real order today. What
+separates "sent" from "trustworthy": (1) **quantization is the one genuine
+build blocker** — nothing in the order path reads lot/tick/min-notional
+(`planning.go` passes the literal quantity verbatim; Binance's per-symbol
+NOTIONAL floor is $5–$20, exactly the $20-test's range) — about one slice,
+data via `exchangeInfo`/`instruments-info`; (2) **Binance before Bybit** —
+Binance's signer has verified evidence, Bybit's is #171's open question; (3)
+fills are visible only via `arblab reconcile` polling or the venue UI (no
+user-data stream, no `ApplyFill` producer); (4) knowingly-accepted gaps:
+hand-typed limit price, perp-only net-delta invariant (#179), no IP-ban alert
+(#170), no fence, no close path (flatten by hand). **The binding gate is
+governance, not code:** the M2 kill gate's authority stands ("no live capital,
+no mainnet keys, no promotion", BCHUSDT evidence ~2026-09-30), and the
+sub-$1K canary is approved only once the USER writes its risk-acceptance
+numbers — max notional, accepted worst-case loss (the uncovered leg's full
+notional), manual-recovery RTO, who signs.
+
 **Standing, unchanged:** capture **PID 8495**, never rebuild over `bin/arblab`,
 `make ci` runs `-race`, cap `TLC_WORKERS` at 4, docs/i18n parity is `bun test`.
 **§38f (task #158) is still the only clock-bound user decision** (≥2 TB
