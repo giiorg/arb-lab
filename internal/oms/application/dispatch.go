@@ -7,6 +7,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/oms/application/ports"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
 	"github.com/giiorg/arb-lab/internal/platform/apperror"
+	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
 
@@ -35,6 +36,13 @@ type Dispatcher struct {
 	placer  ports.OrderPlacer
 	orders  ports.OrderWriteRepository
 
+	// clk is read for exactly one thing: §5.3's authorization anchor, in the
+	// venue's own frame. Nothing else in this use case is time-dependent, and
+	// the narrowness is worth keeping — a second reader of this field would be
+	// a decision about time taken on the dispatch path, which is the path with
+	// the least room for one.
+	clk clock.Clock
+
 	// authorized is the in-process double-dispatch backstop. See Dispatch, where
 	// the reason it is a backstop rather than the mechanism is stated.
 	authorized map[ids.ClientOrderID]struct{}
@@ -46,7 +54,13 @@ type Dispatcher struct {
 // would discover a nil journal is the one that submits an order: the crash
 // boundary would be found not to exist at the moment it was needed, for an order
 // already on its way to a venue.
-func NewDispatcher(j ports.Journal, p ports.OrderPlacer, orders ports.OrderWriteRepository) (*Dispatcher, error) {
+//
+// The clock is refused on the same terms, and it earns them: without it the
+// authorization has no anchor, so every order this dispatcher sends is one
+// recovery could never resolve to StateAbsentAfterFinality. That is a defect
+// with no symptom until the day an ack is lost, which is the profile this
+// constructor's refusals exist for.
+func NewDispatcher(j ports.Journal, p ports.OrderPlacer, orders ports.OrderWriteRepository, clk clock.Clock) (*Dispatcher, error) {
 	if j == nil {
 		return nil, ErrJournalMissing
 	}
@@ -56,10 +70,14 @@ func NewDispatcher(j ports.Journal, p ports.OrderPlacer, orders ports.OrderWrite
 	if orders == nil {
 		return nil, ErrOrdersMissing
 	}
+	if clk == nil {
+		return nil, ErrClockMissing
+	}
 	return &Dispatcher{
 		journal:    j,
 		placer:     p,
 		orders:     orders,
+		clk:        clk,
 		authorized: make(map[ids.ClientOrderID]struct{}),
 	}, nil
 }
@@ -225,6 +243,37 @@ func (d *Dispatcher) Dispatch(id ids.ClientOrderID, expected int64, urgency port
 		return Outcome{}, err
 	}
 
+	// §5.3's anchor, read BEFORE the fsync and therefore before the send, which
+	// is the direction that makes it safe to be wrong in. Our authorization
+	// precedes the venue's creation of the order, so anchor ≤ venue_created and
+	// every bound measured from it — the landing horizon, the retention cliff —
+	// expires EARLIER than the venue's own. A resolver using it refuses slightly
+	// early, never late. See ports.OrderRecord.AuthorizedAt.
+	//
+	// An uncalibrated venue yields the ZERO ServerTime rather than an error
+	// (clock.serverNow: "the alternative — a zero offset and a zero band — would
+	// be indistinguishable from a venue calibrated as perfectly synchronised"),
+	// so the refusal has to be here, and it has to be ABOVE the fsync.
+	//
+	// That placement is §6 step 6's rule rather than a preference: "every check
+	// on the dispatch path that can fail for a reason the CALLER controls
+	// belongs on the same side of that fsync", because a refusal after it leaves
+	// a durable authorization for an order nothing ever sent — which §5.3 then
+	// resolves by querying a venue that never heard of the id, and which
+	// recovery may never resubmit. A missing calibration is exactly such a
+	// reason: it is deployment configuration, fixable, and costs nothing to
+	// refuse here.
+	//
+	// ApplyAuthorized refuses the same instant again, and the duplication is the
+	// ordinary one this file already carries for the marketable-IOC check: this
+	// guard protects the dispatch path's fsync ordering, that one protects the
+	// repository against every OTHER caller that will reach it.
+	authorizedAt := d.clk.ServerNow(o.Instrument.Venue)
+	if err := authorizedAt.Validate(); err != nil {
+		return Outcome{}, fmt.Errorf("authorize dispatch of order %q on %s: %w: %w",
+			id, o.Instrument.Venue, ports.ErrAuthorizationNeedsAnchor, err)
+	}
+
 	// §6 step 6: "immediately before the single Place, fsync
 	// DispatchAuthorized". ports.Journal returns only when the record is
 	// durable, so there is no Sync to pair with this.
@@ -244,7 +293,7 @@ func (d *Dispatcher) Dispatch(id ids.ClientOrderID, expected int64, urgency port
 	// order nothing ever sent — which §5.3 then resolves by querying a venue
 	// that never heard of it. Reported through Outcome.Applied instead, where
 	// the consequence is stated.
-	authorized, applyErr := d.orders.ApplyState(id, expected, domain.StateDispatchAuthorized)
+	authorized, applyErr := d.orders.ApplyAuthorized(id, expected, authorizedAt)
 
 	ack, placeErr := d.placer.Place(o, urgency)
 

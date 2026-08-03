@@ -77,9 +77,38 @@ func successors(from OrderState) ([]OrderState, error) {
 	// resolved is the outcome set of an OrderByClientID/Fills query on an order
 	// whose disposition is unknown. Named once because two states share it, and
 	// they must: the second is the finding recorded below.
+	//
+	// [SPEC EDIT OWED] StateCanceled was NOT in this set, and its
+	// absence is the v0.9.11 venue-initiated-termination finding repeating on the
+	// OTHER axis. That edit added Acknowledged → Canceled and PartiallyFilled →
+	// Canceled, because "an IOC is immediately terminal at the venue" (SM §2 step
+	// 1) and the venue cancels the unfilled remainder with no request from us —
+	// so without those edges "the only order type this system sends can never
+	// reach a terminal state on its ordinary outcome". Every word of that applies
+	// here, and the fix was carried across the LIVE states only.
+	//
+	// The recovery path is where it costs more. §6 step 6 sends nothing but
+	// marketable IOC limits, so the single most common thing a resolving query
+	// can find is an order the venue already terminated unfilled — Binance
+	// EXPIRED, Bybit Cancelled. Without this edge that answer has nowhere to go:
+	// the order stays at DispatchAuthorized or SubmissionUnknown, both of which
+	// ContributesPossibleDelta answers true for, so its hedge group is Ambiguous
+	// for ever, §6.7 holds new trading, and nothing reports an error.
+	//
+	// Worse than stuck, it MISDIRECTS. The nearest available terminal for "the
+	// venue has it and it ended with no fills" is StateAbsentAfterFinality, and
+	// reaching for it is the evidence-class conflation FLAG-2 exists to prevent:
+	// a venue-terminal record is not proved absence, and recording it as one
+	// tells §7.5 we never found the order we in fact found. A missing edge that
+	// leaves a wrong edge as the only legal one is worse than a missing edge.
+	//
+	// SM §1's transitions table now carries Canceled among the query-resolution
+	// targets for both source states. The evidence rule is unchanged and is the
+	// one this state has always carried: an explicit venue-terminal record PLUS
+	// the final executions sweep, never a cancel ack alone (SM §2 step 3).
 	resolved := []OrderState{
 		StateAcknowledged, StatePartiallyFilled, StateFilled,
-		StateRejected, StateAbsentAfterFinality,
+		StateCanceled, StateRejected, StateAbsentAfterFinality,
 	}
 
 	switch from {

@@ -2,6 +2,7 @@ package ports
 
 import (
 	"github.com/giiorg/arb-lab/internal/oms/domain"
+	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
@@ -43,6 +44,53 @@ type OrderRecord struct {
 	// missed one looks like from the quantity alone (domain.Ledger.FillCount
 	// makes the same point one layer down).
 	Fills int
+
+	// AuthorizedAt is the instant this system committed to the single Place,
+	// expressed in the VENUE's own clock frame. It is unset until the order
+	// reaches StateDispatchAuthorized.
+	//
+	// # It is the anchor BOTH time bounds of §5.3's stable-not-found rule are
+	// # measured from, and this system used to record it nowhere
+	//
+	// The rule has two clocks in it. SM §2 step 1 will not accept an absence
+	// until a still-in-flight send can no longer land ("a DispatchAuthorized
+	// send may land AFTER the query"), which is an instant plus a propagation
+	// bound. §5.3's retention paragraph will not accept one from a surface that
+	// has purged the row, which is an instant plus the venue's published reach.
+	// Both count from the same moment — this one — and before slice D nothing in
+	// the OMS held it: not domain.Order (the immutable plan-time half, which
+	// does not know when dispatch will happen), not this record, and not the
+	// journal, whose codec REJECTED a timestamp in slice A on the ground that
+	// "nothing reads it".
+	//
+	// # Why a clock.ServerTime and not a time.Time
+	//
+	// Gate 4's comparison is against the venue's own arithmetic — Binance's
+	// cliff is literally "created time + 3 days < current time", evaluated by
+	// Binance on Binance's clock. A local instant compared against a venue
+	// retention is this repo's recomputed-check-must-share-the-anchor defect:
+	// wrong by a small stable offset, and reading as correct. ServerTime carries
+	// the uncertainty band, and Passed returns a three-valued Certainty, so a
+	// bound that cannot be told from the band refuses instead of guessing.
+	//
+	// An UNSET value is therefore meaningful and safe: it answers Uncertain to
+	// every boundary, so a resolver refuses to prove absence rather than proving
+	// it from an instant nobody recorded. Two different causes produce it and
+	// both want the same refusal — an order not yet authorized, and an order
+	// whose anchor died with the process, since this projection is in memory.
+	//
+	// # The journal does not carry it yet, and that is the gap slice F closes
+	//
+	// [SPEC EDIT OWED] The consequence belongs in §5.3 rather than only here,
+	// because it belongs to recovery rather than to this struct: with
+	// the anchor held only in a memory projection, a crash-recovered order at
+	// StateDispatchAuthorized has none, so StateAbsentAfterFinality is
+	// UNREACHABLE for exactly the order §5.3 says recovery resolves that way.
+	// The order then sits in a state ContributesPossibleDelta answers true for,
+	// its hedge group is Ambiguous for ever, and new trading is held — not a
+	// wrong number, a system that halts itself with every light green. §7.5's
+	// replayer is the construct that must re-derive it (slice F).
+	AuthorizedAt clock.ServerTime
 
 	// Version is §5.1's OCC version, starting at 1 and incremented by every
 	// write that CHANGES the record.
@@ -153,6 +201,31 @@ type OrderWriteRepository interface {
 	// gets a projection, not this.
 	Load(ids.ClientOrderID) (OrderRecord, error)
 
+	// ApplyAuthorized moves the order to StateDispatchAuthorized AND records the
+	// instant §5.3's stable-not-found rule measures its two bounds from.
+	//
+	// # It is a separate method so that the anchorless authorization is
+	// # INEXPRESSIBLE, not merely discouraged
+	//
+	// The alternative was an optional instant on ApplyState, and it is refused on
+	// Journal's own argument for having two Append methods: a field that is
+	// meaningful for one target state and meaningless for eleven has a zero value
+	// that is legal and says nothing. Here that zero value is worse than
+	// meaningless — it is an order authorized at the epoch, which the retention
+	// bound then judges long purged.
+	//
+	// Split out, every caller that commits to a Place must produce an instant to
+	// do it, and ApplyState refuses the state outright. A misuse that a comment
+	// would have had to forbid is now a method that does not exist.
+	//
+	// at MUST be in the venue's clock frame — see OrderRecord.AuthorizedAt for
+	// why the frame is load-bearing rather than a formality. An implementation
+	// refuses an unset ServerTime: the whole purpose of the field is to be
+	// comparable against a venue retention, and an unset one answers Uncertain to
+	// every boundary, so accepting it here would durably record an authorization
+	// whose order can never be resolved.
+	ApplyAuthorized(id ids.ClientOrderID, expected int64, at clock.ServerTime) (OrderRecord, error)
+
 	// ApplyState moves the order to a new lifecycle state, refusing the write
 	// unless expected matches the record's current Version.
 	//
@@ -163,6 +236,15 @@ type OrderWriteRepository interface {
 	// this port holds the CURRENT state and is therefore the last place that can
 	// compare the two. A use case that forgot the check would otherwise store a
 	// transition no evidence supports, and §7.5 would replay it as fact.
+	//
+	// It MUST refuse StateDispatchAuthorized with ErrAuthorizationNeedsAnchor,
+	// whatever the current state and version. That target has its own method
+	// above, and leaving it reachable here would leave the shape this port is
+	// trying to eliminate: an order at the crash boundary with no instant to
+	// resolve it from. The refusal is on the TARGET alone, deliberately — it
+	// fires before the version and legality checks, because a caller that
+	// reached for the wrong method has made a mistake that a version conflict
+	// would misdiagnose as a race.
 	ApplyState(id ids.ClientOrderID, expected int64, to domain.OrderState) (OrderRecord, error)
 
 	// ApplyFill admits an execution, reporting whether it changed the record.

@@ -59,8 +59,11 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/giiorg/arb-lab/internal/engine/venue"
 	"github.com/giiorg/arb-lab/internal/oms/application"
 	"github.com/giiorg/arb-lab/internal/oms/infrastructure/driven"
+	"github.com/giiorg/arb-lab/internal/platform/clock"
+	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
 
 // Deps is what a composition root supplies.
@@ -145,6 +148,45 @@ type Deps struct {
 	// configured has disabled this context's central safety property without
 	// touching this context.
 	VenueOrders driven.VenueOrderPlacer
+
+	// VenueOrderReads is the venue's order READ surface — the same
+	// *venue.OrderClient, in practice, and a second field rather than a widened
+	// first one.
+	//
+	// The split is the write/read separation §5.3 requires, carried up to the
+	// wiring: application.Resolver must not be able to place an order, so the
+	// two adapters take two capabilities and a root that supplies one client
+	// twice is expressing that the client can do both while each use case still
+	// cannot.
+	VenueOrderReads driven.VenueOrderReader
+
+	// InstrumentAssets is the base/quote decomposition of every instrument this
+	// deployment resolves orders for.
+	//
+	// It is a root's business because it is a statement about which instruments
+	// this system trades. See driven.NewOrderResolver for why it cannot be
+	// derived from the symbol, and for the construct (§5.1's SymbolSpec) that
+	// will own it.
+	InstrumentAssets map[ids.VenueInstrument]venue.InstrumentAssets
+
+	// Clock is the time seam §11 requires and §5.3's stable-not-found rule
+	// depends on: the dispatcher stamps the authorization anchor in the venue's
+	// frame, and the resolver measures both of the rule's time bounds from it.
+	//
+	// A root supplies it because live-vs-backtest interchangeability is what the
+	// seam is FOR (§3.5) — this context has no basis for choosing which clock a
+	// binary runs on, and an ambient one here would be the parity mechanism
+	// quietly opted out of.
+	Clock clock.Clock
+
+	// Resolution is the local policy §5.3's rule needs and no venue publishes:
+	// the propagation bound, the sweep's strictness margin, and the assumed
+	// retention for a surface whose venue states none.
+	//
+	// application.ResolutionPolicy documents each field's normative source, and
+	// SurfaceKey documents why the third cannot be defaulted in either
+	// direction.
+	Resolution application.ResolutionPolicy
 }
 
 // Module is the context's driving surface.
@@ -181,6 +223,11 @@ type Module struct {
 	// Dispatch is §6 step 6's crash boundary: the one place in this system
 	// where an order becomes a request at a venue.
 	Dispatch *application.Dispatcher
+
+	// Resolve is §5.3's venue-specific stable-not-found rule: the only way an
+	// order that reached the crash boundary is ever answered for, and — by
+	// holding no placer — the reason "never resubmitted" is not expressible.
+	Resolve *application.Resolver
 
 	// journal is held only so Close can release it, and it is unexported for
 	// the same reason ports.OrderWriteRepository never becomes a field here: a
@@ -233,12 +280,27 @@ func New(deps Deps) (*Module, error) {
 		return nil, errors.Join(fmt.Errorf("oms: order gateway: %w", err), journal.Close())
 	}
 
-	dispatcher, err := application.NewDispatcher(journal, placer, orders)
+	dispatcher, err := application.NewDispatcher(journal, placer, orders, deps.Clock)
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("oms: dispatcher: %w", err), journal.Close())
 	}
 
-	return &Module{Plan: planner, Dispatch: dispatcher, journal: journal}, nil
+	// The read half's ACL, beside the write half's and never merged with it.
+	reader, err := driven.NewOrderResolver(deps.VenueOrderReads, deps.InstrumentAssets)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("oms: order resolver gateway: %w", err), journal.Close())
+	}
+	resolver, err := application.NewResolver(journal, orders, reader, deps.Clock, deps.Resolution)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("oms: resolver: %w", err), journal.Close())
+	}
+
+	return &Module{
+		Plan:     planner,
+		Dispatch: dispatcher,
+		Resolve:  resolver,
+		journal:  journal,
+	}, nil
 }
 
 // Close releases what New acquired.

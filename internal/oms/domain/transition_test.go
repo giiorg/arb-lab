@@ -19,7 +19,7 @@ import (
 // list of `from->to` strings, so a transposed pair or a state written into the
 // wrong case does not survive in both.
 //
-// Every entry cites the row it came from. The three groups marked OWED are the
+// Every entry cites the row it came from. The four groups marked OWED are the
 // ones no row states — see transition.go for what each costs when absent.
 var specEdges = []string{
 	// | Planned | authorize dispatch | DispatchAuthorized |
@@ -40,6 +40,14 @@ var specEdges = []string{
 	"dispatch_authorized->filled",
 	"dispatch_authorized->rejected",
 	"dispatch_authorized->absent_after_finality",
+
+	// OWED — the venue-initiated termination edge on the RECOVERY axis. The
+	// v0.9.11 edit below added it for the two LIVE states and stopped there; §6
+	// step 6 sends only marketable IOCs, so an order terminated unfilled is the
+	// commonest thing a resolving query can find, and without this edge that
+	// answer has no legal target at all.
+	"dispatch_authorized->canceled",
+	"submission_unknown->canceled",
 
 	// | Submitted | ack / reject / timeout-5xx | Acknowledged / Rejected / SubmissionUnknown |
 	"submitted->acknowledged",
@@ -102,8 +110,8 @@ func TestCanTransitionMatrix(t *testing.T) {
 		}
 		legal[e] = true
 	}
-	if got := len(legal); got != 30 {
-		t.Fatalf("transcribed %d edges, want 30 — the count is a check on the transcription", got)
+	if got := len(legal); got != 32 {
+		t.Fatalf("transcribed %d edges, want 32 — the count is a check on the transcription", got)
 	}
 
 	permitted, refused := 0, 0
@@ -133,9 +141,9 @@ func TestCanTransitionMatrix(t *testing.T) {
 	// Positive control on the matrix itself. A predicate that objected to
 	// everything would satisfy every assertion above if `permitted` were zero,
 	// and one that permitted everything would if `refused` were.
-	if permitted != 30 || refused != 12*12-12-30 {
-		t.Errorf("walked %d permitted and %d refused pairs, want 30 and %d",
-			permitted, refused, 12*12-12-30)
+	if permitted != 32 || refused != 12*12-12-32 {
+		t.Errorf("walked %d permitted and %d refused pairs, want 32 and %d",
+			permitted, refused, 12*12-12-32)
 	}
 }
 

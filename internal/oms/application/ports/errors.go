@@ -61,10 +61,49 @@ var (
 	// which is why this port does not retry for anyone.
 	ErrVersionConflict = errors.New("oms: write repository record has moved since it was read")
 
+	// ErrAuthorizationNeedsAnchor reports an attempt to reach
+	// StateDispatchAuthorized without the instant §5.3's stable-not-found rule
+	// measures its two bounds from — either through ApplyState, which does not
+	// carry one, or through ApplyAuthorized with an unset clock.ServerTime.
+	//
+	// It is one sentinel for both, and the joining is deliberate: a caller
+	// branching on it takes the same action either way — produce a calibrated
+	// venue instant and authorize again — and nothing was written in either case.
+	// What it protects is stated on OrderRecord.AuthorizedAt: an order at the
+	// crash boundary with no anchor cannot be resolved to StateAbsentAfterFinality
+	// by any evidence, so it holds its hedge group ambiguous for ever while every
+	// component reports healthy.
+	ErrAuthorizationNeedsAnchor = errors.New("oms: an order may not reach the dispatch boundary without a venue-frame authorization instant")
+
 	// ErrUrgencyInvalid reports a §7.6 shed class that is empty or outside the
 	// two an order can carry. Empty is the reachable one and is the reason this
 	// is checked at all: Urgency is a string, so a caller that never set it
 	// passes the compiler, and the zero value must not be readable as either
 	// class — one would shed a flatten and the other would spend the reserve.
 	ErrUrgencyInvalid = errors.New("oms: order urgency is empty or not a declared shed class")
+
+	// ErrVenuePresenceInvalid reports a resolution whose presence is empty or
+	// undeclared. Empty is the reachable one: an adapter that returned a
+	// zero-valued VenueOrder would otherwise present "we did not fill this in"
+	// as a reading of the venue's answer, and the two readings it sits between
+	// are "the order exists" and "prove it absent".
+	ErrVenuePresenceInvalid = errors.New("oms: venue presence is empty or not a declared reading")
+
+	// ErrSurfaceUnnamed reports a reach that does not say which surface produced
+	// it. It is the one field of SurfaceReach with no safe default, because
+	// every refusal the resolver writes about an absence names the surface that
+	// answered, and an unnamed one sends an operator to look at both.
+	ErrSurfaceUnnamed = errors.New("oms: surface reach does not name the surface that answered")
+
+	// ErrSurfaceReachUnset reports a reach claiming a published retention while
+	// carrying a zero duration for it — the zero-is-unusable rule at the one
+	// place where a zero would read as "this surface remembers nothing", which
+	// is the opposite of the unbounded promise it would actually license.
+	ErrSurfaceReachUnset = errors.New("oms: surface reach claims a published retention but states none")
+
+	// ErrSurfaceReachContradictory reports a reach that is unpublished and
+	// carries durations anyway. It is refused rather than ignored because the
+	// two fields would then disagree about whether the venue states a horizon,
+	// and the resolver's gate 4 branches on exactly that.
+	ErrSurfaceReachContradictory = errors.New("oms: surface reach states durations for an unpublished retention")
 )

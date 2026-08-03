@@ -4,11 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/giiorg/arb-lab/internal/oms/application"
 	"github.com/giiorg/arb-lab/internal/oms/application/ports"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
 	"github.com/giiorg/arb-lab/internal/platform/apperror"
+	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
@@ -205,7 +207,34 @@ func (r *fakeOrders) Load(id ids.ClientOrderID) (ports.OrderRecord, error) {
 	return rec, nil
 }
 
+// ApplyAuthorized mirrors the real adapter's split, including its refusal of an
+// unset instant. A fake that accepted one would let this suite pass against a
+// dispatcher that authorizes orders no resolver could ever answer for.
+func (r *fakeOrders) ApplyAuthorized(id ids.ClientOrderID, expected int64, at clock.ServerTime) (ports.OrderRecord, error) {
+	if err := at.Validate(); err != nil {
+		return ports.OrderRecord{}, fmt.Errorf("fake repository: %w: %w", ports.ErrAuthorizationNeedsAnchor, err)
+	}
+	rec, err := r.advance(id, expected, domain.StateDispatchAuthorized)
+	if err != nil {
+		return ports.OrderRecord{}, err
+	}
+	rec.AuthorizedAt = at
+	r.records[id] = rec
+	return rec, nil
+}
+
+// ApplyState refuses the authorization target, as the port requires of every
+// implementation — the fake holds no second opinion about that either.
 func (r *fakeOrders) ApplyState(id ids.ClientOrderID, expected int64, to domain.OrderState) (ports.OrderRecord, error) {
+	if to == domain.StateDispatchAuthorized {
+		return ports.OrderRecord{}, fmt.Errorf("advance order %q to %s: %w", id, to, ports.ErrAuthorizationNeedsAnchor)
+	}
+	return r.advance(id, expected, to)
+}
+
+// advance is the shared load-check-mutate, mirroring the adapter's own split so
+// that both entry points are policed identically here as there.
+func (r *fakeOrders) advance(id ids.ClientOrderID, expected int64, to domain.OrderState) (ports.OrderRecord, error) {
 	r.applied = append(r.applied, applyCall{id: id, expected: expected, to: to})
 	if err := r.failApplyState[to]; err != nil {
 		return ports.OrderRecord{}, err
@@ -335,32 +364,60 @@ func newDispatcher(t *testing.T) (*application.Dispatcher, *fakeJournal, *fakePl
 	j := newFakeJournal()
 	p := &fakePlacer{watch: j}
 	r := newFakeOrders()
-	d, err := application.NewDispatcher(j, p, r)
+	d, err := application.NewDispatcher(j, p, r, testClock(t))
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
 	return d, j, p, r
 }
 
+// testClock is calibrated for the venue every fixture here trades on, with a
+// NONZERO uncertainty band.
+//
+// The band is not decoration. A ServerTime built with zero uncertainty makes
+// Earliest, Instant and Latest the same value, so every claim about WHICH band
+// edge a rule takes collapses into one — and §5.3's two time bounds deliberately
+// take opposite edges. A zero-band fixture cannot tell the intended rule from
+// either wrong one.
+func testClock(t *testing.T) *clock.TestClock {
+	t.Helper()
+	clk, err := clock.NewTestClock(testNow, []clock.Calibration{
+		{Venue: perp().Venue, Offset: 250 * time.Millisecond, Uncertainty: 40 * time.Millisecond},
+		{Venue: spot().Venue + "-other", Offset: 0, Uncertainty: time.Second},
+	})
+	if err != nil {
+		t.Fatalf("NewTestClock: %v", err)
+	}
+	return clk
+}
+
+// testNow is the engine instant every clock fixture starts at. A fixed literal
+// rather than time.Now(), which §3.6 rule 5 forbids anyway, and which would make
+// every duration assertion below depend on when the suite ran.
+var testNow = time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+
 func TestNewDispatcherRefusesAMissingPort(t *testing.T) {
 	t.Parallel()
 
 	// One omission at a time and a DIFFERENT sentinel per case: together they
 	// catch a constructor that checks only the first port, and one that answers
-	// a single blanket refusal to all three.
-	if _, err := application.NewDispatcher(nil, &fakePlacer{}, newFakeOrders()); !errors.Is(err, application.ErrJournalMissing) {
-		t.Errorf("NewDispatcher(nil, placer, orders) = %v, want ErrJournalMissing", err)
+	// a single blanket refusal to all four.
+	if _, err := application.NewDispatcher(nil, &fakePlacer{}, newFakeOrders(), testClock(t)); !errors.Is(err, application.ErrJournalMissing) {
+		t.Errorf("NewDispatcher(nil, placer, orders, clock) = %v, want ErrJournalMissing", err)
 	}
-	if _, err := application.NewDispatcher(newFakeJournal(), nil, newFakeOrders()); !errors.Is(err, application.ErrPlacerMissing) {
-		t.Errorf("NewDispatcher(journal, nil, orders) = %v, want ErrPlacerMissing", err)
+	if _, err := application.NewDispatcher(newFakeJournal(), nil, newFakeOrders(), testClock(t)); !errors.Is(err, application.ErrPlacerMissing) {
+		t.Errorf("NewDispatcher(journal, nil, orders, clock) = %v, want ErrPlacerMissing", err)
 	}
-	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, nil); !errors.Is(err, application.ErrOrdersMissing) {
-		t.Errorf("NewDispatcher(journal, placer, nil) = %v, want ErrOrdersMissing", err)
+	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, nil, testClock(t)); !errors.Is(err, application.ErrOrdersMissing) {
+		t.Errorf("NewDispatcher(journal, placer, nil, clock) = %v, want ErrOrdersMissing", err)
+	}
+	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, newFakeOrders(), nil); !errors.Is(err, application.ErrClockMissing) {
+		t.Errorf("NewDispatcher(journal, placer, orders, nil) = %v, want ErrClockMissing", err)
 	}
 
 	// The positive control. Without it a constructor that refused everything
-	// would score three out of three above.
-	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, newFakeOrders()); err != nil {
+	// would score four out of four above.
+	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, newFakeOrders(), testClock(t)); err != nil {
 		t.Errorf("NewDispatcher with every port = %v, want nil", err)
 	}
 }
@@ -929,7 +986,7 @@ func TestASecondDispatcherOverTheSameRepositoryIsAlsoRefused(t *testing.T) {
 	o := dispatchableOrder(t)
 	plant(t, r, o)
 
-	first, err := application.NewDispatcher(j, p, r)
+	first, err := application.NewDispatcher(j, p, r, testClock(t))
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
@@ -937,7 +994,7 @@ func TestASecondDispatcherOverTheSameRepositoryIsAlsoRefused(t *testing.T) {
 		t.Fatalf("first Dispatch = %v", err)
 	}
 
-	second, err := application.NewDispatcher(j, p, r)
+	second, err := application.NewDispatcher(j, p, r, testClock(t))
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}

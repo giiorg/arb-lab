@@ -14,6 +14,15 @@ var (
 	ErrJournalMissing = errors.New("oms: dispatcher has no journal")
 	ErrPlacerMissing  = errors.New("oms: dispatcher has no order placer")
 
+	// ErrClockMissing reports a use case constructed with no clock.
+	//
+	// It is the dispatcher's because that is where §5.3's authorization anchor is
+	// read, and the failure it prevents has no symptom at dispatch time: an order
+	// sent without an anchor is one recovery can never resolve to
+	// StateAbsentAfterFinality, which surfaces on the day an ack is lost and not
+	// before. The resolver refuses for the same reason from the other end.
+	ErrClockMissing = errors.New("oms: use case has no clock")
+
 	// ErrOrdersMissing reports a use case constructed without the write
 	// repository — §6's APPLY half.
 	//
@@ -124,4 +133,41 @@ var (
 	// nothing any test could observe — the trailing-return trap this repo
 	// diagnosed in domain.IsTerminal, one layer up.
 	ErrEffectUnhandled = errors.New("oms: place failure carries an effect the classifier has no case for")
+
+	// ErrResolverMissing reports a Resolver constructed with no venue read
+	// surface. Named separately from ErrPlacerMissing for that sentinel's own
+	// reason: it belongs to one use case's job, and the two ports are
+	// deliberately not the same one — the resolver holds the read half and not
+	// the write half so that §5.3's "never resubmitted" is unexpressible rather
+	// than merely forbidden.
+	ErrResolverMissing = errors.New("oms: resolver has no venue order resolver")
+
+	// ErrResolutionPolicyUnset reports a resolution policy with a non-positive
+	// duration in it.
+	//
+	// Zero is the reachable value and the unsafe one in both fields it can
+	// appear in: a zero MaxLanding says a send stops being able to land the
+	// instant it is authorized, which is the assumption SM §2 step 1 exists to
+	// forbid, and a zero SweepMargin makes §6.7 step 3's "STRICTLY later than"
+	// an equality. Both read as a working configuration and both remove a gate.
+	ErrResolutionPolicyUnset = errors.New("oms: resolution policy duration is zero or negative")
+
+	// ErrOrderNotResolvable reports a resolution attempted on an order the
+	// domain would not accept proved absence for — StatePlanned, or any
+	// terminal. It wraps the domain's own transition error rather than
+	// restating the set, so the two cannot drift.
+	ErrOrderNotResolvable = errors.New("oms: order is not in a state the stable-not-found rule resolves")
+
+	// ErrResolutionOutcomeInvalid and ErrUnprovedReasonInvalid report a
+	// Resolution whose enum fields were never assigned — the zero value of a
+	// string type reaching a caller that branches on it.
+	ErrResolutionOutcomeInvalid = errors.New("oms: resolution outcome is empty or undeclared")
+	ErrUnprovedReasonInvalid    = errors.New("oms: unproved reason is empty or undeclared")
+
+	// ErrAttributionUnhandled reports an attribution verdict the absent path has
+	// no case for. It is this package's ErrEffectUnhandled: reachable only if a
+	// verdict is added without a case, and present so that the switch's final
+	// arm is distinguishable by a test from the arms above it rather than
+	// returning what one of them already returns.
+	ErrAttributionUnhandled = errors.New("oms: sweep attribution verdict has no case")
 )

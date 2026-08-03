@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/giiorg/arb-lab/internal/engine/venue"
 	"github.com/giiorg/arb-lab/internal/oms"
@@ -13,6 +14,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/oms/application/ports"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
 	"github.com/giiorg/arb-lab/internal/oms/infrastructure/driven"
+	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
@@ -71,7 +73,43 @@ func (p *countingPlacer) Place(_ context.Context, r venue.OrderRequest) (venue.O
 
 var _ driven.VenueOrderPlacer = (*countingPlacer)(nil)
 
+// silentReader is the venue's READ surface, wired so that New has something to
+// build the resolver over.
+//
+// It refuses every call rather than answering, and the refusal is the honest
+// fixture for this file: nothing here exercises §5.3's rule, whose behaviour
+// belongs to application/resolve_test.go against port fakes. What this file
+// claims about the read path is a WIRING claim — that New builds the resolver,
+// over the same journal and repository as the dispatcher — and a reader that
+// answered plausibly would invite assertions about the rule in the one file that
+// cannot check it properly.
+type silentReader struct{}
+
+func (silentReader) OrderByClientID(context.Context, venue.OrderRef, venue.InstrumentAssets, ratelimit.Priority) (venue.OrderStatus, error) {
+	return venue.OrderStatus{}, errors.New("module test: the venue read surface is not exercised here")
+}
+
+func (silentReader) Executions(context.Context, ids.VenueInstrument, venue.InstrumentAssets, venue.ExecutionWindow, ratelimit.Priority) (venue.ExecutionPage, error) {
+	return venue.ExecutionPage{}, errors.New("module test: the venue read surface is not exercised here")
+}
+
+var _ driven.VenueOrderReader = (*silentReader)(nil)
+
 const venueOrderID = "V-77"
+
+// spotInstrument and perpInstrument are the two legs every fixture here uses,
+// named once so that the asset table and the plan cannot disagree about which
+// instruments exist.
+func spotInstrument() ids.VenueInstrument {
+	return ids.VenueInstrument{Venue: "binance", Product: ids.ProductSpot, Symbol: "BTCUSDT"}
+}
+
+func perpInstrument() ids.VenueInstrument {
+	return ids.VenueInstrument{
+		Venue: "binance", Product: ids.ProductLinearPerp,
+		Symbol: "BTCUSDT", Contract: ids.ContractLinear,
+	}
+}
 
 // journalPath returns a fresh path under the test's own directory. Fresh per
 // test rather than shared, so a test that dispatches cannot be read as passing
@@ -85,9 +123,29 @@ func journalPath(t *testing.T) string {
 // breaks exactly one of.
 func fullDeps(t *testing.T) oms.Deps {
 	t.Helper()
+	clk, err := clock.NewTestClock(
+		time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC),
+		[]clock.Calibration{{Venue: "binance", Offset: 250 * time.Millisecond, Uncertainty: 40 * time.Millisecond}},
+	)
+	if err != nil {
+		t.Fatalf("NewTestClock: %v", err)
+	}
 	return oms.Deps{
-		JournalPath: journalPath(t),
-		VenueOrders: &countingPlacer{ack: venue.OrderAck{VenueOrderID: venueOrderID}},
+		JournalPath:     journalPath(t),
+		VenueOrders:     &countingPlacer{ack: venue.OrderAck{VenueOrderID: venueOrderID}},
+		VenueOrderReads: silentReader{},
+		InstrumentAssets: map[ids.VenueInstrument]venue.InstrumentAssets{
+			spotInstrument(): {Base: "BTC", Quote: "USDT"},
+			perpInstrument(): {Base: "BTC", Quote: "USDT"},
+		},
+		Clock: clk,
+		Resolution: application.ResolutionPolicy{
+			MaxLanding:  30 * time.Second,
+			SweepMargin: 5 * time.Second,
+			AssumedReach: map[application.SurfaceKey]time.Duration{
+				{Venue: "binance", Product: ids.ProductSpot}: 24 * time.Hour,
+			},
+		},
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/giiorg/arb-lab/internal/oms/application/ports"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
+	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
 
@@ -77,6 +78,13 @@ type record struct {
 	order   domain.Order
 	state   domain.OrderState
 	version int64
+
+	// authorizedAt is §5.3's anchor, unset until the order reaches
+	// StateDispatchAuthorized. It is written once and never rewritten: SM §1
+	// gives DispatchAuthorized no incoming edge from anywhere, so a second write
+	// could only come from a second authorization — which is the thing the whole
+	// dispatch path exists to prevent.
+	authorizedAt clock.ServerTime
 }
 
 // NewMemoryOrderWriteRepository returns an empty repository.
@@ -133,9 +141,46 @@ func (r *MemoryOrderWriteRepository) Load(id ids.ClientOrderID) (ports.OrderReco
 	return r.snapshot(rec)
 }
 
+// ApplyAuthorized moves the order to the crash boundary and records §5.3's
+// anchor.
+//
+// The instant is refused before anything is looked up, and refused for being
+// unset rather than for being implausible. There is no plausibility check
+// available — any instant a venue clock could be at is a legitimate value — so
+// the one thing this method can establish is that a caller supplied a
+// calibrated reading at all. An unset ServerTime reaches every later comparison
+// as Uncertain, which is safe but silent: the order would sit at the crash
+// boundary with an anchor that refuses every question, and nothing would say
+// when it stopped being answerable.
+func (r *MemoryOrderWriteRepository) ApplyAuthorized(id ids.ClientOrderID, expected int64, at clock.ServerTime) (ports.OrderRecord, error) {
+	if err := at.Validate(); err != nil {
+		return ports.OrderRecord{}, fmt.Errorf("authorize order %q: %w: %w", id, ports.ErrAuthorizationNeedsAnchor, err)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	rec, err := r.advance(id, expected, domain.StateDispatchAuthorized)
+	if err != nil {
+		return ports.OrderRecord{}, err
+	}
+	rec.authorizedAt = at
+	return r.snapshot(rec)
+}
+
 // ApplyState moves the order along SM §1, under OCC.
 //
-// # The two checks are ordered, and the order is the diagnosis a reader gets
+// # DispatchAuthorized is refused HERE, on the target alone
+//
+// The port requires it, and the ordering is the part worth reading: the refusal
+// is before the lookup, the version check and the legality check, so it fires
+// for a caller that reached for the wrong method regardless of what is stored.
+// Any later position would let a version conflict or a forbidden-edge error be
+// the diagnosis instead — both of which describe a race, when what happened is
+// that an authorization was attempted with no instant to resolve the order
+// from.
+//
+// # The two remaining checks are ordered, and the order is the diagnosis
 //
 // Version first, legality second. A caller holding a stale version has a stale
 // idea of the state as well, so the transition it computed may be illegal
@@ -148,28 +193,46 @@ func (r *MemoryOrderWriteRepository) Load(id ids.ClientOrderID) (ports.OrderReco
 // restated: SM §1's edge set has one home, and an adapter that inlined even a
 // subset of it would be the second.
 func (r *MemoryOrderWriteRepository) ApplyState(id ids.ClientOrderID, expected int64, to domain.OrderState) (ports.OrderRecord, error) {
+	if to == domain.StateDispatchAuthorized {
+		return ports.OrderRecord{}, fmt.Errorf("advance order %q to %s: %w",
+			id, to, ports.ErrAuthorizationNeedsAnchor)
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	rec, err := r.advance(id, expected, to)
+	if err != nil {
+		return ports.OrderRecord{}, err
+	}
+	return r.snapshot(rec)
+}
+
+// advance is the load-check-mutate the two Apply*State methods share.
+//
+// Shared rather than duplicated because the checks are one rule — SM §1's edge
+// set under OCC — and the two entry points differ only in what they do AFTER
+// it. The caller must hold r.mu.
+//
+// Mutation happens only once nothing further can fail — domain.Ledger.Apply's
+// discipline, for its reason: a refused write must leave no half-applied state,
+// and a caller's rollback cannot reach a map this method already wrote.
+func (r *MemoryOrderWriteRepository) advance(id ids.ClientOrderID, expected int64, to domain.OrderState) (*record, error) {
 	rec, ok := r.records[id]
 	if !ok {
-		return ports.OrderRecord{}, fmt.Errorf("advance order %q to %s: %w", id, to, ports.ErrOrderUnknown)
+		return nil, fmt.Errorf("advance order %q to %s: %w", id, to, ports.ErrOrderUnknown)
 	}
 	if rec.version != expected {
-		return ports.OrderRecord{}, fmt.Errorf("advance order %q: record is at version %d, write expected %d: %w",
+		return nil, fmt.Errorf("advance order %q: record is at version %d, write expected %d: %w",
 			id, rec.version, expected, ports.ErrVersionConflict)
 	}
 	if err := domain.CanTransition(rec.state, to); err != nil {
-		return ports.OrderRecord{}, fmt.Errorf("advance order %q: %w", id, err)
+		return nil, fmt.Errorf("advance order %q: %w", id, err)
 	}
 
-	// Mutation happens only once nothing further can fail — domain.Ledger.Apply's
-	// discipline, for its reason: a refused write must leave no half-applied
-	// state, and a caller's rollback cannot reach a map this method already
-	// wrote.
 	rec.state = to
 	rec.version++
-	return r.snapshot(rec)
+	return rec, nil
 }
 
 // ApplyFill admits an execution, reporting whether it changed the record.
@@ -243,10 +306,11 @@ func (r *MemoryOrderWriteRepository) snapshot(rec *record) (ports.OrderRecord, e
 	}
 
 	return ports.OrderRecord{
-		Order:      rec.order,
-		State:      rec.state,
-		Cumulative: cumulative,
-		Fills:      fills,
-		Version:    rec.version,
+		Order:        rec.order,
+		State:        rec.state,
+		Cumulative:   cumulative,
+		Fills:        fills,
+		AuthorizedAt: rec.authorizedAt,
+		Version:      rec.version,
 	}, nil
 }

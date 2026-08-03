@@ -10,6 +10,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/oms/application/ports"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
 	"github.com/giiorg/arb-lab/internal/oms/infrastructure/driven"
+	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
@@ -117,13 +118,42 @@ func advance(t *testing.T, repo *driven.MemoryOrderWriteRepository, o domain.Ord
 	t.Helper()
 	version := int64(1)
 	for _, s := range states {
-		rec, err := repo.ApplyState(o.ClientOrderID, version, s)
+		var rec ports.OrderRecord
+		var err error
+		// The authorization has its own method, so the helper routes to it
+		// rather than every caller remembering. It is a route and not a
+		// substitution: ApplyState still refuses that target, and the tests that
+		// are ABOUT the refusal call it directly.
+		if s == domain.StateDispatchAuthorized {
+			rec, err = repo.ApplyAuthorized(o.ClientOrderID, version, testAnchor(t))
+		} else {
+			rec, err = repo.ApplyState(o.ClientOrderID, version, s)
+		}
 		if err != nil {
-			t.Fatalf("ApplyState(%s): %v", s, err)
+			t.Fatalf("advance to %s: %v", s, err)
 		}
 		version = rec.Version
 	}
 	return version
+}
+
+// testAnchor is a calibrated venue instant with a NONZERO uncertainty band.
+//
+// The band is deliberate: a ServerTime with zero uncertainty has Earliest,
+// Instant and Latest all equal, so any claim about which edge a consumer reads
+// is untestable against it — and §5.3's two time bounds read opposite edges.
+// A repository fixture cannot check that, but it can avoid handing the rest of
+// the suite a value that quietly cannot.
+func testAnchor(t *testing.T) clock.ServerTime {
+	t.Helper()
+	at, err := clock.NewServerTime(
+		time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC),
+		40*time.Millisecond,
+	)
+	if err != nil {
+		t.Fatalf("NewServerTime: %v", err)
+	}
+	return at
 }
 
 func TestApplyPlannedCreatesTheRecordAtPlannedAndVersionOne(t *testing.T) {
@@ -272,9 +302,9 @@ func TestApplyStateAdvancesTheLifecycleAndBumpsTheVersionByOneEachTime(t *testin
 
 	repo, o := created(t)
 
-	first, err := repo.ApplyState(o.ClientOrderID, 1, domain.StateDispatchAuthorized)
+	first, err := repo.ApplyAuthorized(o.ClientOrderID, 1, testAnchor(t))
 	if err != nil {
-		t.Fatalf("first ApplyState: %v", err)
+		t.Fatalf("first advance: %v", err)
 	}
 	if first.State != domain.StateDispatchAuthorized || first.Version != 2 {
 		t.Fatalf("after the first advance: %s v%d, want %s v2",
@@ -402,9 +432,21 @@ func TestApplyStateRefusesAnOrderTheRepositoryNeverCreated(t *testing.T) {
 
 	repo := driven.NewMemoryOrderWriteRepository()
 
-	_, err := repo.ApplyState(mintedID(t, 1), 1, domain.StateDispatchAuthorized)
+	// StateSubmitted rather than the authorization target, because ApplyState now
+	// refuses that one on the TARGET ALONE and would answer this test with the
+	// anchor sentinel — which is a true statement about the call and nothing at
+	// all about the unknown record it is supposed to be about.
+	_, err := repo.ApplyState(mintedID(t, 1), 1, domain.StateSubmitted)
 	if !errors.Is(err, ports.ErrOrderUnknown) {
 		t.Fatalf("ApplyState error = %v, want %v", err, ports.ErrOrderUnknown)
+	}
+
+	// The same claim for the authorization path, which reaches the lookup by a
+	// different route. Without it, a repository that looked records up only in
+	// ApplyState would pass.
+	_, err = repo.ApplyAuthorized(mintedID(t, 1), 1, testAnchor(t))
+	if !errors.Is(err, ports.ErrOrderUnknown) {
+		t.Fatalf("ApplyAuthorized error = %v, want %v", err, ports.ErrOrderUnknown)
 	}
 }
 
@@ -601,7 +643,7 @@ func TestConcurrentApplyStateAdmitsExactlyOneWriterAtAVersion(t *testing.T) {
 		go func() {
 			defer done.Done()
 			start.Wait()
-			_, err := repo.ApplyState(o.ClientOrderID, 1, domain.StateDispatchAuthorized)
+			_, err := repo.ApplyAuthorized(o.ClientOrderID, 1, testAnchor(t))
 			results <- err
 		}()
 	}
@@ -660,6 +702,10 @@ func TestConcurrentWritesAndReadsAreFreeOfDataRaces(t *testing.T) {
 		}
 	}
 
+	// Built once, outside the goroutines: testAnchor calls t.Fatalf, and the
+	// testing package forbids that from a goroutine other than the test's own.
+	anchor := testAnchor(t)
+
 	var wg sync.WaitGroup
 	for g := range goroutines {
 		wg.Add(1)
@@ -671,7 +717,7 @@ func TestConcurrentWritesAndReadsAreFreeOfDataRaces(t *testing.T) {
 					continue
 				}
 				repo.ApplyFill(fills[g][i], rec.Version)
-				repo.ApplyState(o.ClientOrderID, rec.Version, domain.StateDispatchAuthorized)
+				repo.ApplyAuthorized(o.ClientOrderID, rec.Version, anchor)
 			}
 		}()
 	}
