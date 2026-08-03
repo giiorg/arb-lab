@@ -220,6 +220,16 @@ type OrderCodec interface {
 	// order, and the recovery handle §5.3 rests on would be recorded against the
 	// wrong one.
 	DecodePlaceAck(r OrderRequest, resp transport.Response) (OrderAck, error)
+
+	// OrderQueryCodec is the read half (slice C2b).
+	//
+	// Embedded rather than segregated into its own codec, because §5.3 requires
+	// a resolving query for every order this system places — "an order at
+	// DispatchAuthorized or beyond is resolved ONLY by OrderByClientID/Fills".
+	// A venue that could place but not resolve is not a venue this system may
+	// trade on, so a separate interface would model something that cannot exist
+	// and would give OrderClientConfig a nil case for it.
+	OrderQueryCodec
 }
 
 // OrderClient is §4's OrderGateway.Place for one venue.

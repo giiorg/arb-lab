@@ -129,6 +129,76 @@ var (
 	// or none at all. Distinct from a JSON failure: the bytes parsed, and what
 	// they say is about another order.
 	ErrAckUnreadable = errors.New("venue: order acknowledgement does not match the order sent")
+
+	// The read surface's refusals (slice C2b, Profiles §8).
+	//
+	// # None of these means "the order is not there"
+	//
+	// That answer is a VALUE — OrderPresence — and keeping it out of this list is
+	// the point of §52c: the two venues state an absence in opposite layers
+	// (Binance an error envelope, -2013 "Order does not exist."; Bybit a success
+	// with an empty list), and an absence arriving as an error is
+	// indistinguishable at the call site from a query that was rate-limited,
+	// which is the inference §5.3 forbids in terms.
+	ErrOrderPresenceInvalid = errors.New("venue: order presence is empty or outside the declared pair")
+	ErrOrderStateInvalid    = errors.New("venue: order state is empty or outside the declared set")
+	ErrQuerySurfaceInvalid  = errors.New("venue: query surface is empty or outside the declared set")
+
+	// ErrQueryReachUnset reports a surface whose retention nobody populated.
+	// Zero is not "forever" — an unpopulated horizon reads as an unbounded
+	// promise, and an unbounded promise is what makes a stale absence look like
+	// proved absence (§52d).
+	ErrQueryReachUnset = errors.New("venue: query surface reach is unset")
+
+	// ErrQueryReachContradictory reports a reach claiming both that the venue
+	// publishes no retention and a duration derived from one.
+	ErrQueryReachContradictory = errors.New("venue: query surface reach is unpublished and yet states a retention")
+
+	// ErrCursorUnset reports a resume point nobody populated. There is no zero
+	// cursor meaning "from the beginning", because every surface here is
+	// retention-bounded and the beginning does not exist.
+	ErrCursorUnset = errors.New("venue: execution cursor names no resume instant")
+
+	// ErrExecutionWindowUnset reports a sweep with no horizon. A defaulted
+	// window returns executions on all three surfaces and proves coverage
+	// through nothing, which is the only thing §6.7 step 3 wants.
+	ErrExecutionWindowUnset = errors.New("venue: execution window names no horizon")
+
+	// ErrExecutionWindowInverted reports a horizon at or before the resume point.
+	ErrExecutionWindowInverted = errors.New("venue: execution window ends at or before it starts")
+
+	// ErrExecutionWindowTooWide reports a window exceeding what the surface will
+	// serve — 24 HOURS on Binance spot, 7 days on Binance USDⓈ-M and on Bybit.
+	// Refused rather than truncated: a truncated sweep reporting success is a
+	// false watermark, and a false watermark is what §6.7 step 3 collapses a
+	// possible-delta interval on.
+	ErrExecutionWindowTooWide = errors.New("venue: execution window is wider than this surface serves")
+
+	// ErrExecutionsUnreadable reports a page that decoded but does not describe
+	// the sweep that was asked for — an execution for another instrument, or one
+	// outside the requested window.
+	ErrExecutionsUnreadable = errors.New("venue: execution page does not match the sweep requested")
+
+	// ErrExecutionsNoProgress reports a full page whose executions all share one
+	// instant, so the inclusive cursor cannot advance past them.
+	//
+	// A refusal rather than a loop: the alternative is a sweep that issues venue
+	// calls forever while every request succeeds and every page decodes. It is
+	// not reachable for this system's own traffic — one IOC per leg produces a
+	// bounded number of executions in one millisecond — and it is named because
+	// the assumption is about our order flow rather than about the venue's.
+	ErrExecutionsNoProgress = errors.New("venue: a full execution page shares one instant, so the cursor cannot advance")
+
+	// ErrInstrumentAssetsUnset reports a base/quote decomposition nobody
+	// populated. The read path MINTS money from venue strings and the kernel
+	// refuses to build a Quantity without its tag, so an empty asset is not a
+	// missing label — it is a Money whose runtime check will fail somewhere else.
+	ErrInstrumentAssetsUnset = errors.New("venue: instrument base/quote assets unset")
+
+	// ErrInstrumentAssetsIdentical reports base == quote, which no tradable
+	// instrument has and which makes the kernel's cross-asset check vacuous:
+	// a Price of BTC-per-BTC compares equal to everything it should refuse.
+	ErrInstrumentAssetsIdentical = errors.New("venue: instrument base and quote assets are the same")
 )
 
 // There is deliberately no sentinel here for "funding asked of a spot
