@@ -268,4 +268,105 @@ resolved state); the `driven.OrderResolverGateway` ACL over
 
 ## §53h — the build record
 
-*(filled at the close)*
+**Landed** in two commits: the code half (`6508fb1`, marked WIP with two
+`[SPEC EDIT OWED]` markers live) and this close. `make ci` green on both modules,
+marker grep back to **zero**, docs at **v0.9.34**.
+
+**Files.** New: `internal/oms/application/ports/resolver.go`,
+`internal/oms/application/resolve.go`,
+`internal/oms/infrastructure/driven/orderresolver.go`, plus `resolve_test.go` and
+`orderresolver_test.go`. Changed: `ports.OrderRecord` (+`AuthorizedAt`),
+`ports.OrderWriteRepository` (+`ApplyAuthorized`, `ApplyState` closed against
+`StateDispatchAuthorized`), `application.Dispatcher` (+`clock.Clock`),
+`domain.successors` (+the `Canceled` edge), `oms.Deps`/`Module`.
+
+**Spec edits landed.** Core **§4** (the consumer port narrows to the two read
+methods), core **§5.3** (the anchor, its durability requirement, the `min()`
+retention rule, the forced carrier for an unpublished reach), core **§12**
+(milestone-3 slice-D annotation), State-Machines **§1** (`Canceled` on both
+query-resolution rows, plus the anchor as an invariant). Both markers discharged
+as `[SPEC EDIT LANDED — v0.9.34]`.
+
+### The mutation battery — 28 aimed, 28 killed, and eight survived the first pass
+
+Every survivor was a **real gap**, none was an equivalent mutant. They fall into
+three families, and the families are more useful than the count.
+
+**(a) The mirror rule's second axis, INSIDE one rule.** §5.3's two time bounds
+read *opposite* edges of the same uncertainty band. Gate 1 had a fixture placing
+the clock inside that band — the only window one band wide where "latest edge"
+and "instant" give different answers. Gate 4 had none: every fixture sat hours
+from its cliff, so both `Earliest()`→`Latest()` and
+`!= CertainlyNotPassed`→`== CertainlyPassed` survived. The test file's own
+fixture header stated the pair and cited a single test, which is how the second
+came to be missing. A nonzero band makes the distinction **expressible**; only a
+clock placed inside it makes the distinction **observed**.
+
+**(b) Assertion-shaped, not fixture-shaped.** Both survivors here had correct
+fixtures and blind assertions. `ProvenThrough != horizon` on a truncated sweep is
+satisfied by **zero**, so a loop recording the watermark only on the final page
+(the page a truncated sweep never reaches) passed. `calls < hardStop` is
+satisfied by every wrong page bound between 1 and 199. Both were negative
+assertions; both are now positive ones against a known exact value — the page
+budget stated as a **literal**, since a constant shared with the code under test
+moves with it and checks nothing.
+
+**(c) The field the slice exists to add, never read back.** `AuthorizedAt` was
+passed by every repository test and asserted by none, so a repository that
+dropped it on the floor passed the whole suite. The unset-anchor refusal — the
+case `ErrAuthorizationNeedsAnchor` is *named* after — was asserted only for the
+wrong-method path. And the dispatcher's own anchor check was **masked one layer
+down**: `ApplyAuthorized` refuses the same instant, so deleting the dispatcher's
+check still produced an error and any test inspecting only the error passed. What
+changes is the **ordering** — with the check gone the authorization is journaled
+and the order is *sent* — so only "nothing journaled, nothing placed" could see
+it.
+
+One `NOBUILD!!` (`declared and not used: ok`) was a bad sed orphaning a
+neighbour, not a compiler-enforced claim; re-aimed to `ok || true` and killed.
+
+### What the checklist caught before the battery
+
+Dead code in the code just written: `attribute()` took a venue order id, and its
+only caller is the absent path, where the venue by definition supplies none —
+two unreachable arms reading as handled cases (§53e). Deleting them converted a
+vague hazard into a priced one, and the price is a raised task rather than a
+comment.
+
+### The reading pass — two findings, both citation-shaped
+
+The pass sits **beside** the marker grep because the grep gates *marked* claims and
+neither of these carried a marker.
+
+**1. Ten sites cited "§6.7 step 2" / "§6.7 step 3", and core §6.7 has no numbered
+steps.** The four steps are State-Machines §2's, and §6.7 says so itself — *"the
+contract's four steps: [mechanism: State-Machines §2]"*. The sharpest instance is a
+**verbatim quotation attributed to a section that does not contain it**: `Executed is
+§6.7 step 2's "authoritative final cumulative executed quantity"` — that phrase appears
+**nowhere** in the core. This is C1's citation-to-a-nonexistent-section tell, and the
+tell was visible *inside the same doc comment*, which cites "SM §2 step 1" correctly for
+gate 1 and "§6.7 step 3" for gate 3. Retargeted to `SM §2 step N`; the quotations that
+genuinely ARE §6.7's — *"a point-in-time not-found cannot collapse an in-flight
+order"* — were left as they were, and keeping both makes the difference legible.
+
+**2. State-Machines §1 stated two different evidence rules for the same target state.**
+`CancelPending`/`CancelUnknown` reach `Canceled` by *"explicit venue-terminal cancel +
+the final executions sweep"*. The **venue-initiated-termination** row — v0.9.11's, and
+the one that fires on this system's *ordinary* outcome — named no sweep. §2 admits no
+per-source exemption (*"the ONE canonical boundary … never a weaker cancel-ack-only
+variant"*), and this slice's own code already refuses one: `present()` runs the sweep
+before recording **every** terminal, explicitly rejecting a per-state exemption on the
+ground that it would be a second rule about evidence held in one function. The
+partially-filled IOC is where the gap bites — the status is terminal before the last
+fills have been read, so collapsing on status alone collapses early. The row now carries
+the rule. **No code changed**, because the code was stricter than the row it implements
+— which is why nothing failed and why only a reading pass could find it.
+
+### Tasks raised at the close
+
+- **Persist `Ack.VenueOrderID`** so a Binance sweep can rule out our *other*
+  orders — without it, any execution row in the window makes the absence
+  inconclusive (§53e).
+- **A §7.5 boot posture check** refusing to trade an instrument whose absences
+  could never be proved — the check that would be *in time*, where gate 4's
+  `ReasonReachUnknown` is safe but late (§53c).

@@ -1,6 +1,77 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-03, session 81): **MILESTONE 3 SLICE D IS BUILT AND *NOT CLOSED* — CODE IS IN `6508fb1`, DOCS ARE OWED, MUTATIONS HAVE NOT RUN. DOCS STAY AT v0.9.33; MARKER GREP IS **2**, DELIBERATELY.**
+## Status (2026-08-03, session 82): **MILESTONE 3 SLICE D IS CLOSED — THE STABLE-NOT-FOUND RULE IS EXECUTABLE, ITS ANCHOR EXISTS, AND THE READING PASS FOUND A VERBATIM QUOTE ATTRIBUTED TO A SECTION THAT DOES NOT CONTAIN IT. DOCS ARE v0.9.34; MARKER GREP IS ZERO.**
+
+**The slice is done end to end.** `make ci` green on both modules, marker grep **0**,
+28 mutations / 28 kills, docs at **v0.9.34** across all five, the Georgian regenerated
+through its own invariant checker. Design record **§53**, build record **§53h**. Tasks
+**#174** and **#175** were raised at the close and **#163** is complete.
+
+**THE RULE.** §5.3 names the venue-specific stable-not-found rule twice and never states
+its steps, so it is **composed**: State-Machines §2's four-step finality contract
+supplies three gates and §5.3's retention paragraph the fourth — the **landing horizon**
+has passed; the order is **absent from every surface**; an **executions sweep proved
+coverage** past that horizon with no unattributable row; the answering surface's
+**published reach** still covers the order. Any gate failing yields a named
+`UnprovedReason` and **no state change**. `Resolver` holds no `OrderPlacer`, so §5.3's
+"never resubmitted" is **inexpressible** rather than forbidden.
+
+**FINDING 1 — the anchor had no home, and slice A's rejection of it had EXPIRED.** The
+journal codec deliberately refused a timestamp because it would add *"a value the chain
+covers but nothing reads"* and because *"when an event time is genuinely needed it is
+the venue's, and it arrives on a fill"*. Both true then, both false now — and the case
+that needs it is an order with **no fill and no venue record at all**. **A rejection's
+REASON is a claim about the future, and nobody re-derives a rejection when the future
+arrives**; no grep can see it, because the clause is *absent*. Consequence: with the
+projection in memory, a crash-recovered order has no anchor and `AbsentAfterFinality` is
+unreachable for exactly the order §5.3 says recovery resolves that way — a quiet halt
+with every light green. Taken: `OrderRecord.AuthorizedAt` as a venue-frame
+`clock.ServerTime` above the fsync; **the journal column is slice F's, with its
+replayer**.
+
+**FINDING 2 — SM §1's query-resolution set had no `Canceled`**, so the commonest thing a
+resolving query can find had no legal target and the nearest available one was
+`AbsentAfterFinality` — FLAG-2's own evidence-class conflation. v0.9.11's fix added this
+edge for the LIVE states and stopped there: **the mirror rule's second axis,
+live-vs-recovery**.
+
+**THE READING PASS FOUND TWO MORE, and this is why it sits beside the grep.** (1) Ten
+sites cited *"§6.7 step 2/3"* — **core §6.7 has no numbered steps**; they are SM §2's,
+and §6.7 says so. The sharpest instance is a **verbatim quotation attributed to a
+section that does not contain the phrase at all** (`"authoritative final cumulative
+executed quantity"` appears nowhere in the core). C1's tell, and it was visible *inside
+the same doc comment*, which cited "SM §2 step 1" correctly one gate earlier.
+(2) **SM §1 stated two different evidence rules for the same target state** — the
+FLAG-1 rows gate `Canceled` on the executions sweep, v0.9.11's venue-initiated row named
+none, and §2 admits no per-source exemption. The code was already stricter than the row
+it implements, which is exactly why nothing failed.
+
+**THE BATTERY: 28 kills, but eight survived the first pass and every one was real.**
+Three families, all recorded shapes. **(a)** The mirror rule's second axis *inside one
+rule*: gate 1 had a clock placed inside the uncertainty band, gate 4 — the same band,
+the deliberately opposite edge — had every fixture hours from its boundary, and the test
+file's own fixture header named the pair while citing one test. **(b)**
+Assertion-shaped, not fixture-shaped: `ProvenThrough != horizon` is satisfied by
+**zero**, `calls < hardStop` by every wrong bound below it — both now positive
+assertions against known exact values. **(c)** `AuthorizedAt`, the field the slice
+exists to add, was **written by every repository test and read back by none**; and the
+dispatcher's own anchor check was masked by the repository refusing the same instant one
+layer down, so only the **ordering** claim (nothing journaled, nothing sent) could see
+it.
+
+**WHAT IS NEXT: slice E — the §6.7 classifier (task #164)**, where `FM-5`…`FM-9` become
+executable claims. It is the first slice whose subject is a formal model's findings, so
+read `docs/formal/ambiguous-order-model.md` **before** the `.tla`. Slice D hands it a
+`Resolution` and classifies nothing.
+
+**Standing, unchanged:** capture **PID 8495**, never rebuild over `bin/arblab`,
+`make ci` runs `-race` and `go test` does not, cap `TLC_WORKERS` at 4, read TLC figures
+only from a COMPLETED invocation. **§38f (task #158) is still the only clock-bound user
+decision**: ≥2 TB off-host, gate ~2026-09-30.
+
+---
+
+## Status (2026-08-03, session 81 — HISTORICAL): **MILESTONE 3 SLICE D IS BUILT AND *NOT CLOSED* — CODE IS IN `6508fb1`, DOCS ARE OWED, MUTATIONS HAVE NOT RUN. DOCS STAY AT v0.9.33; MARKER GREP IS **2**, DELIBERATELY.**
 
 **This is a mid-slice handoff at a green seam, not a close.** `make ci` is green
 on both modules, every test passes, the tree is clean at `6508fb1`, and the

@@ -549,6 +549,75 @@ func TestDispatchJournalsAuthorizationBeforePlacing(t *testing.T) {
 	}
 }
 
+// An UNCALIBRATED venue is refused ABOVE the fsync, and the assertion that
+// matters is what did NOT happen.
+//
+// The dispatcher's own anchor check survived the battery: ApplyAuthorized
+// refuses the same instant a second time, so deleting the check here still
+// produced an error and every test that only inspected the error passed. What
+// changes is the ORDER — with the check gone, the authorization is journaled and
+// the order is SENT, and only then does the projection write fail. §6 step 6
+// puts every caller-controlled refusal on the same side of that fsync precisely
+// because the other side leaves a durable authorization for an order §5.3 must
+// then resolve by querying a venue about an id it may never have seen.
+//
+// A missing calibration is caller-controlled: it is deployment configuration.
+func TestDispatchRefusesAnUncalibratedVenueAboveTheFsync(t *testing.T) {
+	t.Parallel()
+
+	j := newFakeJournal()
+	p := &fakePlacer{watch: j}
+	r := newFakeOrders()
+	// Calibrated for SOME venue — an empty calibration list would test a clock
+	// that knows nothing rather than one that does not know THIS venue, and the
+	// first is not a configuration a running system produces.
+	clk, err := clock.NewTestClock(testNow, []clock.Calibration{
+		{Venue: perp().Venue + "-elsewhere", Offset: 0, Uncertainty: time.Second},
+	})
+	if err != nil {
+		t.Fatalf("NewTestClock: %v", err)
+	}
+	d, err := application.NewDispatcher(j, p, r, clk)
+	if err != nil {
+		t.Fatalf("NewDispatcher: %v", err)
+	}
+
+	o := dispatchableOrder(t)
+	plant(t, r, o)
+
+	if _, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening); !errors.Is(err, ports.ErrAuthorizationNeedsAnchor) {
+		t.Fatalf("Dispatch on an uncalibrated venue = %v, want ErrAuthorizationNeedsAnchor", err)
+	}
+	if len(j.calls) != 0 {
+		t.Errorf("journaled %v, want nothing — the refusal belongs ABOVE the fsync", j.states())
+	}
+	if p.calls != 0 {
+		t.Errorf("placed %d orders, want 0", p.calls)
+	}
+
+	// And the record did not move, so the caller may fix the calibration and
+	// dispatch the same order.
+	rec, err := r.Load(o.ClientOrderID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if rec.State != domain.StatePlanned || rec.Version != 1 {
+		t.Errorf("record is at %s v%d, want %s v1", rec.State, rec.Version, domain.StatePlanned)
+	}
+
+	// The positive control: the SAME order through a calibrated clock sends.
+	// Without it, a dispatcher refusing every venue would pass every assertion
+	// above.
+	d2, j2, p2, r2 := newDispatcher(t)
+	plant(t, r2, o)
+	if _, err := d2.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening); err != nil {
+		t.Fatalf("Dispatch on a calibrated venue = %v, want nil", err)
+	}
+	if p2.calls != 1 || len(j2.calls) == 0 {
+		t.Errorf("calibrated: placed %d and journaled %v, want 1 place and a journal", p2.calls, j2.states())
+	}
+}
+
 // TestDispatchRefusesBeforeSendingAnything covers the checks admit makes on the
 // order it loaded.
 //

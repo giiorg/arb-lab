@@ -78,7 +78,7 @@ func successors(from OrderState) ([]OrderState, error) {
 	// whose disposition is unknown. Named once because two states share it, and
 	// they must: the second is the finding recorded below.
 	//
-	// [SPEC EDIT OWED] StateCanceled was NOT in this set, and its
+	// [SPEC EDIT LANDED — v0.9.34] StateCanceled was NOT in this set, and its
 	// absence is the v0.9.11 venue-initiated-termination finding repeating on the
 	// OTHER axis. That edit added Acknowledged → Canceled and PartiallyFilled →
 	// Canceled, because "an IOC is immediately terminal at the venue" (SM §2 step

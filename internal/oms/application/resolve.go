@@ -34,7 +34,7 @@ import (
 //  2. ABSENT FROM EVERY SURFACE — Bybit's realtime surface holds ~500 closed
 //     orders and clears on a server restart, so §5.3 makes the history fallback
 //     normative. The walk is engine/venue's; what arrives here is its answer.
-//  3. A CONCLUSIVE SWEEP PAST THE WATERMARK — §6.7 step 3, "never a synthetic
+//  3. A CONCLUSIVE SWEEP PAST THE WATERMARK — SM §2 step 3, "never a synthetic
 //     stable-not-found alone". Coverage must be PROVEN through an instant
 //     strictly later than gate 1's horizon, and must contain no execution this
 //     system cannot rule out for this order.
@@ -85,7 +85,7 @@ type ResolutionPolicy struct {
 	// It is a separate field from MaxLanding rather than being folded into it,
 	// even though the code only ever adds them, because they answer different
 	// normative sentences: MaxLanding is SM §2 step 1's propagation bound and
-	// this is §6.7 step 3's "STRICTLY later than". Folded together, a later
+	// this is SM §2 step 3's "STRICTLY later than". Folded together, a later
 	// reader shortening the sum could not tell which requirement they were
 	// violating. Kept apart, "strictly later" is enforced by a validated
 	// positive duration rather than by an inequality somebody has to notice.
@@ -511,7 +511,7 @@ func (r *Resolver) reachOf(instrument ids.VenueInstrument, reach ports.SurfaceRe
 	return assumed, ok
 }
 
-// sweep runs §6.7 step 3 for one order.
+// sweep runs SM §2 step 3 for one order.
 //
 // The window starts at the anchor's EARLIEST edge, which cannot be after the
 // venue created the order, so no execution of ours can precede it. It ends at

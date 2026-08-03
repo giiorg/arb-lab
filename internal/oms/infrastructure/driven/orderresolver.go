@@ -199,7 +199,7 @@ func (r *OrderResolver) SweepExecutions(o domain.Order, since, until time.Time) 
 
 	// The budget ran out. This is a successful call reporting less coverage, not
 	// a failure: ProvenThrough says how far we got, the caller compares it
-	// against its horizon, and §6.7 step 3 refuses to collapse an interval on a
+	// against its horizon, and SM §2 step 3 refuses to collapse an interval on a
 	// watermark that fell short. Returning an error here would lose the
 	// executions already read.
 	return sweep, nil

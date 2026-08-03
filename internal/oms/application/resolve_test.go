@@ -20,8 +20,12 @@ import (
 //     zero uncertainty has Earliest == Instant == Latest, so no test could tell
 //     which edge a gate reads — and §5.3's two time bounds deliberately read
 //     OPPOSITE edges (the horizon takes Latest, the retention cliff takes
-//     Earliest). See TestResolveMeasuresTheHorizonFromTheAnchorsLatestEdge,
-//     which passes only against the intended edge.
+//     Earliest). Each bound needs its OWN band-edge fixture, and the pair is
+//     TestResolveMeasuresTheHorizonFromTheAnchorsLatestEdge and
+//     TestResolveMeasuresTheCliffFromTheAnchorsEarliestEdge. This entry once
+//     named the pair and cited only the first, which is how the second came to
+//     be missing: a nonzero band makes the distinction EXPRESSIBLE, and only a
+//     clock placed inside that band makes it OBSERVED.
 //  2. The two retentions DIFFER, and one case inverts their order. Equal
 //     retentions make min(a,b), a and b the same answer, so the rule that gate 4
 //     takes the shorter would be untestable — and reading UnfilledRetention by
@@ -195,6 +199,30 @@ func engineTimeFor(boundary time.Time) time.Time {
 	return boundary.Add(testUncertainty - testVenueOffset).Add(time.Millisecond)
 }
 
+// engineTimeStraddling returns the engine instant at which the venue clock's
+// band CONTAINS boundary — its instant sits exactly on it, so Earliest is before
+// and Latest is at or past, and Passed answers Uncertain.
+//
+// It is the fixture no test in this file had before the battery, and two
+// surviving mutants needed it: a gate reading `== CertainlyPassed` instead of
+// `!= CertainlyNotPassed` differs from the intended rule on this input ALONE,
+// and nowhere else.
+func engineTimeStraddling(boundary time.Time) time.Time {
+	return boundary.Add(-testVenueOffset)
+}
+
+// engineTimeJustBefore returns the LAST engine instant at which the venue clock
+// certainly has not reached boundary — its Latest edge one nanosecond short.
+//
+// The tightest position from which a gate may still conclude, so a rule that
+// took the wrong band edge would conclude here too and the assertion pairs with
+// the straddle above.
+func engineTimeJustBefore(boundary time.Time) time.Time {
+	// CertainlyNotPassed needs venueNow.Latest() < boundary, i.e.
+	// engine + offset + uncertainty < boundary.
+	return boundary.Add(-testVenueOffset - testUncertainty - time.Nanosecond)
+}
+
 func TestNewResolverRefusesAMissingPortOrAnUnusablePolicy(t *testing.T) {
 	t.Parallel()
 
@@ -231,7 +259,7 @@ func TestNewResolverRefusesAMissingPortOrAnUnusablePolicy(t *testing.T) {
 // Each duration is zeroed SEPARATELY. A policy with both zeroed would be
 // satisfied by a Validate that checked only one, and both removals delete a
 // different gate: a zero MaxLanding says a send stops being able to land the
-// instant it is authorized, a zero SweepMargin makes §6.7 step 3's "strictly
+// instant it is authorized, a zero SweepMargin makes SM §2 step 3's "strictly
 // later" an equality.
 func TestResolutionPolicyValidateNamesEachMissingDuration(t *testing.T) {
 	t.Parallel()
@@ -564,8 +592,91 @@ func TestResolveRefusesAbsenceOutsideTheSurfacesReach(t *testing.T) {
 	})
 }
 
+// TestResolveMeasuresTheCliffFromTheAnchorsEarliestEdge is gate 4's band-edge
+// test, and it exists because the battery found its absence.
+//
+// TestResolveMeasuresTheHorizonFromTheAnchorsLatestEdge is the mirror of this
+// one, and it was written; this one was not. §5.3's two time bounds read
+// OPPOSITE edges of the same band, so a suite that pins one edge and leaves the
+// other unpinned has checked half a rule — and the fixture header above claimed
+// the pair while citing a single test. Two mutants lived in the gap:
+//
+//   - the cliff computed from the anchor's LATEST edge, which is one band-width
+//     LATER, so an order whose absence is no longer provable reads as provable;
+//   - `Passed(cliff) == CertainlyPassed` in place of `!= CertainlyNotPassed`,
+//     which admits the Uncertain answer as a proof.
+//
+// Both differ from the intended rule only while the clock's band contains the
+// cliff — a window exactly one band wide, which every other fixture here sits
+// hours away from. This is the repo's mirror-rule second axis again: the fix
+// (place the clock INSIDE the band) was applied to gate 1 and not carried to
+// gate 4.
+func TestResolveMeasuresTheCliffFromTheAnchorsEarliestEdge(t *testing.T) {
+	t.Parallel()
+
+	anchorAt := testNow
+	at, err := clock.NewServerTime(anchorAt, testUncertainty)
+	if err != nil {
+		t.Fatalf("NewServerTime: %v", err)
+	}
+	reach := publishedReach()
+
+	// Computed the way the rule computes it — from the EARLIEST edge and the
+	// SHORTER retention — and used only to place the clock, never to assert.
+	cliff := at.Earliest().Add(reach.UnfilledRetention)
+
+	// The band straddles the cliff: both readings are consistent with what we
+	// know, and §5.3's terminal is PROVED absence.
+	t.Run("straddling the cliff", func(t *testing.T) {
+		t.Parallel()
+
+		res, j, r, v := newResolver(t, engineTimeStraddling(cliff), testPolicy())
+		o := dispatchableOrder(t)
+		resolvableAt(t, r, o, domain.StateDispatchAuthorized, anchorAt)
+		v.status = absentVenue(reach)
+		v.sweeps = []ports.ExecutionSweep{provenSweep(horizonOf(at, testPolicy()))}
+
+		got, err := res.Resolve(o.ClientOrderID)
+		if err != nil {
+			t.Fatalf("Resolve = %v, want nil", err)
+		}
+		if got.Reason != application.ReasonReachExceeded {
+			t.Fatalf("Resolve = %s/%s/%s, want unproved/reach_exceeded — an absence may not be proved from a band that CONTAINS the retention cliff",
+				got.Outcome, got.State, got.Reason)
+		}
+		if v.sweepCall != 0 {
+			t.Errorf("swept %d times, want 0 — gate 4 refuses before the sweep is paid for", v.sweepCall)
+		}
+		if len(j.calls) != 0 {
+			t.Errorf("journaled %v, want nothing", j.states())
+		}
+	})
+
+	// One nanosecond earlier the whole band is short of the cliff, and the same
+	// fixture proves. Without this the assertion above is satisfied by a gate
+	// that refuses always — and it is one band-width away, so a rule reading the
+	// wrong edge cannot pass both.
+	t.Run("the whole band short of the cliff", func(t *testing.T) {
+		t.Parallel()
+
+		res, _, r, v := newResolver(t, engineTimeJustBefore(cliff), testPolicy())
+		o := dispatchableOrder(t)
+		resolvableAt(t, r, o, domain.StateDispatchAuthorized, anchorAt)
+		v.status = absentVenue(reach)
+		v.sweeps = []ports.ExecutionSweep{provenSweep(horizonOf(at, testPolicy()))}
+
+		got, err := res.Resolve(o.ClientOrderID)
+		if err != nil {
+			t.Fatalf("Resolve = %v, want nil", err)
+		}
+		if got.State != domain.StateAbsentAfterFinality {
+			t.Fatalf("Resolve = %s/%s/%s, want resolved/absent_after_finality", got.Outcome, got.State, got.Reason)
+		}
+	})
+}
+
 // Gate 3's coverage half. A sweep that stopped short proves nothing about the
-// window it did not reach, and §6.7 step 3 collapses a possible-delta interval
+// window it did not reach, and SM §2 step 3 collapses a possible-delta interval
 // on exactly this watermark.
 func TestResolveRefusesAbsenceOnASweepThatStoppedShort(t *testing.T) {
 	t.Parallel()
@@ -736,7 +847,7 @@ func TestResolveRecordsAPresentOrdersState(t *testing.T) {
 }
 
 // A terminal reading is NOT enough on its own: without the sweep's watermark,
-// §6.7 step 3 has not run and the order's interval has not collapsed.
+// SM §2 step 3 has not run and the order's interval has not collapsed.
 func TestResolveWithholdsAPresentTerminalUntilTheSweepReachesTheHorizon(t *testing.T) {
 	t.Parallel()
 

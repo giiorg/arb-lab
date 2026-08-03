@@ -81,8 +81,8 @@ type OrderRecord struct {
 	//
 	// # The journal does not carry it yet, and that is the gap slice F closes
 	//
-	// [SPEC EDIT OWED] The consequence belongs in §5.3 rather than only here,
-	// because it belongs to recovery rather than to this struct: with
+	// [SPEC EDIT LANDED — v0.9.34] §5.3 now carries the anchor and this
+	// consequence, because both belong to recovery rather than to this struct: with
 	// the anchor held only in a memory projection, a crash-recovered order at
 	// StateDispatchAuthorized has none, so StateAbsentAfterFinality is
 	// UNREACHABLE for exactly the order §5.3 says recovery resolves that way.

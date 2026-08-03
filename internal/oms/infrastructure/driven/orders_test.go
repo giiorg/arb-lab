@@ -328,6 +328,98 @@ func TestApplyStateAdvancesTheLifecycleAndBumpsTheVersionByOneEachTime(t *testin
 	}
 }
 
+// The anchor is the whole reason ApplyAuthorized exists as a second method, and
+// nothing here read it back until the battery said so: every call above passes
+// testAnchor and then asserts about the state and the version. A repository that
+// dropped the instant on the floor passed the entire suite — and §5.3's rule
+// measures BOTH of its time bounds from it, so the order would sit at the crash
+// boundary answering ReasonNoAnchor for ever, which is a refusal and therefore
+// silent.
+//
+// Read back through Load rather than only from the returned snapshot, because
+// Load is the method the resolver actually calls.
+func TestApplyAuthorizedRecordsTheAnchorLoadHandsToTheResolver(t *testing.T) {
+	t.Parallel()
+
+	repo, o := created(t)
+	anchor := testAnchor(t)
+
+	applied, err := repo.ApplyAuthorized(o.ClientOrderID, 1, anchor)
+	if err != nil {
+		t.Fatalf("ApplyAuthorized: %v", err)
+	}
+	loaded, err := repo.Load(o.ClientOrderID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// The whole band, not just the instant: the two gates read OPPOSITE edges of
+	// it, so a repository that kept the instant and dropped the uncertainty would
+	// hand the resolver a clock it could answer every question from.
+	for _, got := range []ports.OrderRecord{applied, loaded} {
+		if err := got.AuthorizedAt.Validate(); err != nil {
+			t.Fatalf("AuthorizedAt.Validate() = %v, want nil — the anchor was not recorded", err)
+		}
+		if !got.AuthorizedAt.Instant().Equal(anchor.Instant()) {
+			t.Errorf("AuthorizedAt = %v, want %v", got.AuthorizedAt.Instant(), anchor.Instant())
+		}
+		if !got.AuthorizedAt.Earliest().Equal(anchor.Earliest()) || !got.AuthorizedAt.Latest().Equal(anchor.Latest()) {
+			t.Errorf("AuthorizedAt band = [%v, %v], want [%v, %v]",
+				got.AuthorizedAt.Earliest(), got.AuthorizedAt.Latest(), anchor.Earliest(), anchor.Latest())
+		}
+	}
+
+	// A later state write must not disturb it. The anchor is written once, and
+	// every advance after the crash boundary goes through ApplyState, which never
+	// touches the field — so this is the assertion that a future edit to the
+	// shared `advance` helper cannot quietly break.
+	if _, err := repo.ApplyState(o.ClientOrderID, applied.Version, domain.StateSubmitted); err != nil {
+		t.Fatalf("ApplyState: %v", err)
+	}
+	after, err := repo.Load(o.ClientOrderID)
+	if err != nil {
+		t.Fatalf("Load after ApplyState: %v", err)
+	}
+	if !after.AuthorizedAt.Instant().Equal(anchor.Instant()) {
+		t.Errorf("AuthorizedAt after a later advance = %v, want %v", after.AuthorizedAt.Instant(), anchor.Instant())
+	}
+}
+
+// The port REQUIRES this refusal (ports.ErrAuthorizationNeedsAnchor), and it was
+// asserted for the wrong-method case — ApplyState reaching for
+// StateDispatchAuthorized — but never for the unset instant, which is the case
+// the sentinel is named after.
+//
+// The record must not move: an order at the crash boundary with an anchor that
+// refuses every question is precisely what §5.3 cannot resolve, and it is worse
+// than a refusal because nothing reports it.
+func TestApplyAuthorizedRefusesAnUnsetAnchorAndLeavesTheRecordWhereItWas(t *testing.T) {
+	t.Parallel()
+
+	repo, o := created(t)
+
+	_, err := repo.ApplyAuthorized(o.ClientOrderID, 1, clock.ServerTime{})
+	if !errors.Is(err, ports.ErrAuthorizationNeedsAnchor) {
+		t.Fatalf("ApplyAuthorized with an unset instant = %v, want ErrAuthorizationNeedsAnchor", err)
+	}
+
+	rec, err := repo.Load(o.ClientOrderID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if rec.State != domain.StatePlanned || rec.Version != 1 {
+		t.Errorf("record is at %s v%d, want %s v1 — a refused authorization must move nothing",
+			rec.State, rec.Version, domain.StatePlanned)
+	}
+
+	// The positive control: the same call with a calibrated instant applies.
+	// Without it a method that refused every anchor would pass the assertions
+	// above.
+	if _, err := repo.ApplyAuthorized(o.ClientOrderID, 1, testAnchor(t)); err != nil {
+		t.Fatalf("ApplyAuthorized with a calibrated instant = %v, want nil", err)
+	}
+}
+
 func TestApplyStateRefusesATransitionThatIsNotAnEdgeOfTheLifecycle(t *testing.T) {
 	t.Parallel()
 

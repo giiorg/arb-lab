@@ -148,7 +148,7 @@ var (
 	// Zero is the reachable value and the unsafe one in both fields it can
 	// appear in: a zero MaxLanding says a send stops being able to land the
 	// instant it is authorized, which is the assumption SM §2 step 1 exists to
-	// forbid, and a zero SweepMargin makes §6.7 step 3's "STRICTLY later than"
+	// forbid, and a zero SweepMargin makes SM §2 step 3's "STRICTLY later than"
 	// an equality. Both read as a working configuration and both remove a gate.
 	ErrResolutionPolicyUnset = errors.New("oms: resolution policy duration is zero or negative")
 

@@ -366,6 +366,16 @@ func TestSweepExecutionsWalksEveryPageAndReportsTheLastWatermark(t *testing.T) {
 		t.Errorf("ProvenThrough = %v, want the LAST page's watermark %v", got.ProvenThrough, testStart.Add(time.Hour))
 	}
 
+	// The FIRST window is the only one this adapter builds itself, and it was the
+	// only one this test did not look at — every assertion was about the windows
+	// handed BACK, so swapping since and until survived the battery. The bounds
+	// differ (an instant and an hour later), so the swapped window is a different
+	// value; equal bounds would make this assertion vacuous.
+	first := venue.ExecutionWindow{Since: venue.Cursor{At: testStart}, Until: testStart.Add(time.Hour)}
+	if r.windows[0] != first {
+		t.Errorf("opened with %+v, want %+v — since and until are the caller's bounds, in that order", r.windows[0], first)
+	}
+
 	// Verbatim continuation, including the venue's own paging token.
 	if r.windows[1] != second || r.windows[2] != third {
 		t.Errorf("continued with %+v, want the venue's own windows %+v and %+v", r.windows[1:], second, third)
@@ -411,8 +421,25 @@ func TestSweepExecutionsStopsAtItsPageBudgetAndReportsWhatItProved(t *testing.T)
 	if r.calls >= r.hardStop {
 		t.Fatalf("made %d calls — the page budget did not bind", r.calls)
 	}
-	if got.ProvenThrough.Equal(testStart.Add(time.Hour)) {
-		t.Error("ProvenThrough reached the requested horizon on a truncated sweep")
+
+	// The budget is a KNOWN EXACT COUNT, which makes it an instrument: any
+	// deviation is unambiguous, where "fewer than the hard stop" is satisfied by
+	// every wrong bound between 1 and 199 — an off-by-one survived the battery
+	// against that check. Stated as a literal rather than imported: the constant
+	// is unexported, and a shared one would move with the code and check nothing.
+	const wantPages = 32
+	if r.calls != wantPages {
+		t.Errorf("made %d calls, want exactly %d — maxSweepPages is what bounds this loop", r.calls, wantPages)
+	}
+
+	// Asserted POSITIVELY, against the watermark of the last page actually read.
+	// The negative form — "did not reach the requested horizon" — is satisfied by
+	// a zero watermark too, so it could not see a loop that recorded the
+	// watermark only on the page carrying no continuation. On a truncated sweep
+	// there IS no such page, which is exactly when the resolver needs the number.
+	if !got.ProvenThrough.Equal(testStart.Add(time.Minute)) {
+		t.Errorf("ProvenThrough = %v, want the last page READ %v — coverage is proved through the page that answered, not the window that was asked for",
+			got.ProvenThrough, testStart.Add(time.Minute))
 	}
 	if len(got.Executions) != r.calls {
 		t.Errorf("collected %d executions over %d pages, want one per page", len(got.Executions), r.calls)

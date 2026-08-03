@@ -43,7 +43,7 @@ type OrderResolver interface {
 	// SweepExecutions reads the venue's executions for one instrument across a
 	// closed window, and reports how far coverage was actually PROVEN.
 	//
-	// § 6.7 step 3 sweeps "through a venue/server watermark strictly LATER than
+	// SM §2 step 3 sweeps "through a venue/server watermark strictly LATER than
 	// the order's cancellation-effectiveness / max landing horizon", so the
 	// window's end is an input and the watermark reached is an output. They are
 	// not the same value: an implementation that runs out of pages, budget or
@@ -168,7 +168,7 @@ type VenueOrder struct {
 	// it wanted to compare against a stored state.
 	State domain.OrderState
 
-	// Executed is §6.7 step 2's "authoritative final cumulative executed
+	// Executed is SM §2 step 2's "authoritative final cumulative executed
 	// quantity".
 	Executed fixedpoint.Quantity
 
