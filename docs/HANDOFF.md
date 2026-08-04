@@ -1,6 +1,84 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-04, session 98): **#187 IS CLOSED — A MAPPED BYBIT RESPONSE THE API DEMONSTRABLY HANDLED THAT YIELDS NO USABLE RATE-LIMIT OBSERVATION IS A COUNTED PER-ENDPOINT FOLD MISS: MONOTONE IN `Snapshot` BESIDE `Bans`, DECIDED AFTER CLASSIFICATION (ANY 2xx NOT CLASSIFIED AS THE IP BAN, OR ANY THROTTLE-CLASSIFIED REFUSAL), RENDERED HISTORICALLY BY BOTH ROOTS WITH EXERCISE RENDER-ONCE, ADMISSION UNTOUCHED, DERIVE-NOTHING INTACT. DOCS ARE v0.9.46; MARKER GREP IS ZERO.**
+## Status (2026-08-04, session 99): **#188 IS MID-FLIGHT — THE DESIGN IS FOUR ADVERSARIAL ROUNDS IN AND NOT YET CONVERGED. RECORD §68 (`docs/superpowers/specs/2026-08-04-m3-188-package-reservation.md`) HOLDS THE FULL DESIGN AND THE ROUND-BY-ROUND ARC (§68f). APPENDIX A IS NOT WRITTEN. NOTHING IN `internal/` HAS BEEN TOUCHED.**
+
+**What the design is, as it stands after round 4.** A package's rate-limit
+charges are validated and PROVISIONALLY OCCUPIED as one governor operation
+before any leg's fsync (`Governor.Reserve`, all-or-nothing on the summed,
+overflow-checked batch; `window.reserved` — untimed occupancy, never
+evicted, invisible to the observe fold); each leg's transport CONSUMES its
+occupancy in `Do` instead of acquiring, converting it to an ordinary charge
+stamped at consume time; Consume re-checks ONLY the venue's word — the
+pause, and capacity on the folded count (non-wrapping arithmetic) — so the
+one surviving post-fsync governor refusal is venue-initiated by
+construction. Hold entries are a three-state machine (reserved → consumed |
+canceled) under the governor lock; the executor DEFERS a blanket Cancel of
+every distinct hold (occupancy does not self-heal — release of never-sent
+occupancy is mandatory, release of consumed charges inexpressible). The
+hold threads Executor → Dispatch → ports.Place → venue.OrderRequest →
+transport.Call — Urgency's exact path, nil = the single-order
+acquire-at-send mode. Wiring: ONE widened `Deps.VenueOrders` provider
+(Place + ReservePlace), one driven gateway narrowed into the two ports
+(round 4's blocker: an independent second carrier let reservation and
+placement land on different governors), hold-governor identity refused
+pre-send at `Do`, `OrderClientConfig.Governor` required and checked against
+every family transport (the shared-governor prose becomes a construction
+refusal). Two absorbed adjacencies: `NewSignedClient` refuses a
+configuration whose clock-uncertainty band cannot clear
+`min(RecvWindow, aheadTolerance)` (round 3's blocker: a config-static,
+deterministic post-fsync refusal on every order — checkServerTime reused,
+complete because wall.go's calibration is per-process constant), and the
+one-spender guard: `transport.SpendLock`, flock on a credential-derived
+fingerprint, `Signer.Fingerprint()` compared at `NewSignedClient`,
+`spend_lock_dir` a required config field, root-owned lifetime — §67's
+premise enforced at host scope, cross-host residual recorded.
+
+**The arc so far (all findings accepted, §68f has the full log):** round 1
+killed the charge-at-reserve-time model twice (expiry-before-consume;
+Observe→Cancel erasing venue readings) and unbound the spend lock; an
+orchestrator interim fix made Cancel mandatory (occupancy does not
+self-heal); round 2 added the fold-past-capacity consume refusal (taken as
+capacity-check, NOT the proposed epochs — §68d item 7), fixed the
+zero-NotBefore overload in `freeAt` (occupancy ignored — NOT a Decision
+vocabulary change, §68d item 8), and named the executor wiring; round 3
+absorbed the signing-readiness refusal, forced non-wrapping arithmetic
+(§66 round 6's lesson recurring), and demanded the composed
+Do-obeys-ReasonCeiling fixture; round 4 made the reserve/place split
+inexpressible and demanded the composed real-adapter test (skip-last-leg
+mutant). Rejections that must NOT be reopened without new evidence: §68d
+items 1–9.
+
+**What the next session does, in order:** (1) round 5 — a FRESH codex
+artifact-review (design_doc) of record §68, context: the shipped files
+§68 cites (ratelimit governor/window/limit/decision, oms
+execute/dispatch/ports/module, driven ordergateway, engine/venue order +
+transport signed/signing/credential, reconcile config/wire, cmd/arblab
+renderers, build-spec §7.6, records §66/§67), instruction "convergence
+check; do not re-litigate §68d items 1–9 without a concrete failure their
+recorded reason does not cover; if nothing rises above MINOR, say SHIP"; (2) on SHIP, write
+Appendix A (file-by-file implementation spec — the §66/§67 Appendix
+pattern; the file inventory is derivable from §68b's six numbered
+sections); (3) dispatch a codex implementation session from Appendix A
+verbatim, post-write review every changed file yourself; (4) run the
+collapse checklist BEFORE the mutation campaign, then the campaign per
+§68e (the named mutants: per-call-site hold arguments, holds[i]→holds[0]
+recorded expected-equivalent single-venue, skip-last-leg in the driven
+adapter, Consume→Acquire double-charge with exact-Used kills); (5) docs
+owed at close per §68e (v0.9.47: §7.6 package-reservation clause +
+spend-exclusivity scoping of §67's premise paragraph, §6 step 6 + §4
+signature edits, `spend_lock_dir` config schema, adr-history row,
+tutorial-parity check), close #188, replace §68's WIP banner.
+
+**Standing, unchanged:** capture **PID 8495**, never rebuild over
+`bin/arblab`, `make ci` runs `-race`, cap `TLC_WORKERS` at 4, docs/i18n
+parity is `bun test`, `MUTATE_TIMEOUT` 180s with the unit when mutating
+exercise. The **$20/$55 live-test decision** (now also carrying the
+single-spender confirmation) and **#171** still need the USER; **§38f
+(task #158)** still the only clock-bound user decision (~2026-09-30).
+
+---
+
+## Status (2026-08-04, session 98 — HISTORICAL): **#187 IS CLOSED — A MAPPED BYBIT RESPONSE THE API DEMONSTRABLY HANDLED THAT YIELDS NO USABLE RATE-LIMIT OBSERVATION IS A COUNTED PER-ENDPOINT FOLD MISS: MONOTONE IN `Snapshot` BESIDE `Bans`, DECIDED AFTER CLASSIFICATION (ANY 2xx NOT CLASSIFIED AS THE IP BAN, OR ANY THROTTLE-CLASSIFIED REFUSAL), RENDERED HISTORICALLY BY BOTH ROOTS WITH EXERCISE RENDER-ONCE, ADMISSION UNTOUCHED, DERIVE-NOTHING INTACT. DOCS ARE v0.9.46; MARKER GREP IS ZERO.**
 
 **The slice is done end to end.** `make ci` green on both modules under
 `-race` (run by the orchestrator), marker grep **0**, **26 targeted
