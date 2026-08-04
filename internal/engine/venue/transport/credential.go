@@ -1,6 +1,8 @@
 package transport
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 )
@@ -48,6 +50,12 @@ func NewCredential(key, secret string) (Credential, error) {
 	if secret == "" {
 		return Credential{}, ErrCredentialSecretUnset
 	}
+	if err := validateCredentialText("api key", key); err != nil {
+		return Credential{}, err
+	}
+	if err := validateCredentialText("secret", secret); err != nil {
+		return Credential{}, err
+	}
 	return Credential{key: key, secret: []byte(secret)}, nil
 }
 
@@ -55,6 +63,14 @@ func NewCredential(key, secret string) (Credential, error) {
 // plaintext header on every request, and on Bybit it is additionally part of the
 // signed string — so it is readable, unlike the secret beside it.
 func (c Credential) Key() string { return c.key }
+
+// Fingerprint identifies the credential without revealing it. The API key is
+// the identifier both venues already receive on every request; hashing it lets
+// a spend token bind to that identity without putting the key on disk.
+func (c Credential) Fingerprint() string {
+	sum := sha256.Sum256([]byte(c.key))
+	return hex.EncodeToString(sum[:])
+}
 
 // Validate reports whether the credential could sign. The zero value fails, so a
 // client constructed with the field forgotten refuses at boot rather than at the
@@ -65,6 +81,25 @@ func (c Credential) Validate() error {
 	}
 	if len(c.secret) == 0 {
 		return ErrCredentialSecretUnset
+	}
+	if err := validateCredentialText("api key", c.key); err != nil {
+		return err
+	}
+	if err := validateCredentialText("secret", string(c.secret)); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateCredentialText closes a deterministic post-fsync failure: Go's HTTP
+// transport refuses control bytes in authentication headers. The message names
+// where the byte sits without echoing any credential material.
+func validateCredentialText(field, value string) error {
+	for i := 0; i < len(value); i++ {
+		if value[i] < 0x20 || value[i] == 0x7f {
+			return fmt.Errorf("credential %s contains a control byte at offset %d: %w",
+				field, i, ErrCredentialControlByte)
+		}
 	}
 	return nil
 }
@@ -106,5 +141,6 @@ func (c Credential) MarshalJSON() ([]byte, error) {
 var (
 	ErrCredentialKeyUnset        = errors.New("transport: credential api key unset")
 	ErrCredentialSecretUnset     = errors.New("transport: credential secret unset")
+	ErrCredentialControlByte     = errors.New("transport: credential contains a control byte")
 	ErrCredentialNotSerializable = errors.New("transport: a credential must not be serialized")
 )

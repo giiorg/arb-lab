@@ -13,6 +13,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/boot"
 	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
+	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
 )
 
 // # The executor's fixtures, and the two collapses §59f names
@@ -60,11 +61,110 @@ func newExecutor(t *testing.T) (*application.Executor, *fakeJournal, *fakePlacer
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	e, err := application.NewExecutor(d, testFilters(t))
+	e, err := application.NewExecutor(d, testFilters(t), newFakeReserver(t))
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
 	return e, j, p, r, d
+}
+
+type fakeReserver struct {
+	governor *ratelimit.Governor
+	calls    int
+	err      error
+	vector   func(*ratelimit.Hold, int) []*ratelimit.Hold
+	returned []*ratelimit.Hold
+}
+
+func newFakeReserver(t *testing.T) *fakeReserver {
+	t.Helper()
+	g, err := ratelimit.New(testClock(t), ratelimit.Profile{
+		Venue: "binance", Families: []ids.ProductCategory{ids.ProductSpot, ids.ProductLinearPerp},
+		Limits: []ratelimit.Limit{{
+			Name: "ip_5s", Scope: ratelimit.ScopeVenue, Dimension: ratelimit.DimensionRequests,
+			Interval: time.Second, OpeningCeiling: 100, RoutineCeiling: 100, Capacity: 100,
+		}},
+		Uncounted: []ratelimit.Uncounted{
+			{Family: ids.ProductSpot, Dimension: ratelimit.DimensionWeight, Reason: "fixture requests are request-only"},
+			{Family: ids.ProductSpot, Dimension: ratelimit.DimensionOrders, Reason: "fixture requests are request-only"},
+			{Family: ids.ProductLinearPerp, Dimension: ratelimit.DimensionWeight, Reason: "fixture requests are request-only"},
+			{Family: ids.ProductLinearPerp, Dimension: ratelimit.DimensionOrders, Reason: "fixture requests are request-only"},
+		},
+		ThrottlePause: time.Second, BanPause: 2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("ratelimit.New: %v", err)
+	}
+	return &fakeReserver{governor: g}
+}
+
+func (r *fakeReserver) ReservePlacements(orders []domain.Order, u ports.Urgency) ([]*ratelimit.Hold, error) {
+	r.calls++
+	if r.err != nil {
+		return nil, r.err
+	}
+	if r.returned != nil {
+		return r.returned, nil
+	}
+	priority := ratelimit.PriorityOpening
+	if u == ports.UrgencySafety {
+		priority = ratelimit.PrioritySafety
+	}
+	reqs := make([]ratelimit.Request, len(orders))
+	for i, order := range orders {
+		reqs[i] = ratelimit.Request{
+			Family: order.Instrument.Product, Priority: priority, Cost: ratelimit.RequestOnly(),
+		}
+	}
+	hold, decision, err := r.governor.Reserve(reqs)
+	if err != nil {
+		return nil, err
+	}
+	if !decision.Admitted {
+		return nil, decision.Err()
+	}
+	if r.vector != nil {
+		return r.vector(hold, len(orders)), nil
+	}
+	holds := make([]*ratelimit.Hold, len(orders))
+	for i := range holds {
+		holds[i] = hold
+	}
+	return holds, nil
+}
+
+func executorWithReserver(t *testing.T, reserver ports.CapacityReserver) (*application.Executor, *fakeJournal, *fakePlacer, *fakeOrders) {
+	t.Helper()
+	j := newFakeJournal()
+	p := &fakePlacer{watch: j, ack: ports.Ack{VenueOrderID: "V-1"}}
+	r := newFakeOrders()
+	d, err := application.NewDispatcher(j, p, r, testClock(t), application.NewDispatchAuthority())
+	if err != nil {
+		t.Fatalf("NewDispatcher: %v", err)
+	}
+	e, err := application.NewExecutor(d, testFilters(t), reserver)
+	if err != nil {
+		t.Fatalf("NewExecutor: %v", err)
+	}
+	return e, j, p, r
+}
+
+func mintExecutorHold(t *testing.T, order domain.Order) (*ratelimit.Hold, *ratelimit.Governor) {
+	t.Helper()
+	r := newFakeReserver(t)
+	holds, err := r.ReservePlacements([]domain.Order{order}, ports.UrgencyOpening)
+	if err != nil {
+		t.Fatalf("ReservePlacements: %v", err)
+	}
+	return holds[0], r.governor
+}
+
+func reservedTotal(g *ratelimit.Governor) uint64 {
+	var total uint64
+	for _, l := range g.Snapshot().Limits {
+		total += l.Reserved
+	}
+	return total
 }
 
 // bootedChecklist is a checklist in the state a clean §7.5 boot leaves it for
@@ -115,7 +215,7 @@ func TestNewExecutorRefusesAMissingDispatcher(t *testing.T) {
 	// One refusal where five used to be: the executor is built FROM the
 	// dispatcher, whose own constructor already refused every nil port, so the
 	// only missing collaborator this constructor can meet is the dispatcher.
-	if _, err := application.NewExecutor(nil, testFilters(t)); !errors.Is(err, application.ErrDispatcherMissing) {
+	if _, err := application.NewExecutor(nil, testFilters(t), newFakeReserver(t)); !errors.Is(err, application.ErrDispatcherMissing) {
 		t.Errorf("NewExecutor(nil) = %v, want ErrDispatcherMissing", err)
 	}
 
@@ -126,8 +226,11 @@ func TestNewExecutorRefusesAMissingDispatcher(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	if _, err := application.NewExecutor(d, testFilters(t)); err != nil {
+	if _, err := application.NewExecutor(d, testFilters(t), newFakeReserver(t)); err != nil {
 		t.Errorf("NewExecutor(dispatcher) = %v, want nil", err)
+	}
+	if _, err := application.NewExecutor(d, testFilters(t), nil); !errors.Is(err, application.ErrReserverMissing) {
+		t.Errorf("NewExecutor without reserver = %v, want ErrReserverMissing", err)
 	}
 }
 
@@ -206,7 +309,7 @@ func TestExecuteRunsLegsInParallel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	e, err := application.NewExecutor(gated, testFilters(t))
+	e, err := application.NewExecutor(gated, testFilters(t), newFakeReserver(t))
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
@@ -259,7 +362,7 @@ type gatePlacer struct {
 	release  chan struct{}
 }
 
-func (p *gatePlacer) Place(o domain.Order, _ ports.Urgency) (ports.Ack, error) {
+func (p *gatePlacer) Place(o domain.Order, _ ports.Urgency, _ *ratelimit.Hold) (ports.Ack, error) {
 	p.arrivals <- o.ClientOrderID
 	<-p.release
 	return ports.Ack{VenueOrderID: "V-" + string(o.ClientOrderID)}, nil
@@ -288,6 +391,184 @@ func TestExecuteThreadsTheCallersUrgency(t *testing.T) {
 		}
 	}
 }
+
+func TestExecuteReservesAfterPreflightAndBeforeAnyWrite(t *testing.T) {
+	t.Parallel()
+	reserver := newFakeReserver(t)
+	e, j, p, r := executorWithReserver(t, reserver)
+	leg := packageOrder(t, 0, "0.5")
+	plant(t, r, leg)
+
+	bad := refsFor(leg)
+	bad[0].Version = 9
+	if _, err := e.Execute(bootedChecklist(t), bad, ports.UrgencyOpening); err == nil {
+		t.Fatal("preflight-invalid package was admitted")
+	}
+	if reserver.calls != 0 {
+		t.Fatalf("ReservePlacements called %d times before preflight passed, want 0", reserver.calls)
+	}
+	refusalAsserts(t, j, p)
+
+	reserver.err = errors.New("capacity unavailable")
+	if _, err := e.Execute(bootedChecklist(t), refsFor(leg), ports.UrgencyOpening); !errors.Is(err, reserver.err) {
+		t.Fatalf("reserve refusal = %v, want %v", err, reserver.err)
+	}
+	if reserver.calls != 1 {
+		t.Fatalf("ReservePlacements calls = %d, want 1", reserver.calls)
+	}
+	refusalAsserts(t, j, p)
+}
+
+func TestExecuteThreadsTheIndexAlignedHoldForEachLeg(t *testing.T) {
+	t.Parallel()
+	first := packageOrder(t, 0, "0.5")
+	second := packageOrder(t, 1, "0.5")
+	h0, _ := mintExecutorHold(t, first)
+	h1, _ := mintExecutorHold(t, second)
+	reserver := newFakeReserver(t)
+	reserver.returned = []*ratelimit.Hold{h0, h1}
+	e, _, p, r := executorWithReserver(t, reserver)
+	plant(t, r, first)
+	plant(t, r, second)
+
+	if _, err := e.Execute(bootedChecklist(t), refsFor(first, second), ports.UrgencyOpening); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(p.orders) != 2 || len(p.holds) != 2 {
+		t.Fatalf("Place observations = %d orders/%d holds, want 2/2", len(p.orders), len(p.holds))
+	}
+	want := map[ids.ClientOrderID]*ratelimit.Hold{first.ClientOrderID: h0, second.ClientOrderID: h1}
+	for i, order := range p.orders {
+		if p.holds[i] != want[order.ClientOrderID] {
+			t.Errorf("order %q received hold %p, want %p", order.ClientOrderID, p.holds[i], want[order.ClientOrderID])
+		}
+	}
+}
+
+func TestExecuteRefusesEveryInvalidHoldVectorAndCancelsDistinctHolds(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		shape func([]*ratelimit.Hold) []*ratelimit.Hold
+	}{
+		{"short", func(h []*ratelimit.Hold) []*ratelimit.Hold { return h[:1] }},
+		{"nil-bearing", func(h []*ratelimit.Hold) []*ratelimit.Hold { return []*ratelimit.Hold{h[0], nil} }},
+		{"long", func(h []*ratelimit.Hold) []*ratelimit.Hold { return h }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			first := packageOrder(t, 0, "0.5")
+			second := packageOrder(t, 1, "0.5")
+			extra := packageOrder(t, 2, "0.5")
+			h0, g0 := mintExecutorHold(t, first)
+			h1, g1 := mintExecutorHold(t, second)
+			h2, g2 := mintExecutorHold(t, extra)
+			all := []*ratelimit.Hold{h0, h1, h2}
+			reserver := newFakeReserver(t)
+			reserver.returned = tc.shape(all)
+			e, j, p, r := executorWithReserver(t, reserver)
+			plant(t, r, first)
+			plant(t, r, second)
+
+			if _, err := e.Execute(bootedChecklist(t), refsFor(first, second), ports.UrgencyOpening); !errors.Is(err, application.ErrHoldVectorInvalid) {
+				t.Fatalf("Execute = %v, want ErrHoldVectorInvalid", err)
+			}
+			refusalAsserts(t, j, p)
+			for i, g := range []*ratelimit.Governor{g0, g1, g2} {
+				want := uint64(0)
+				if tc.name != "long" && i == 2 {
+					want = 1 // this hold was not returned, so the executor does not own it.
+				}
+				if tc.name == "short" && i == 1 {
+					want = 1
+				}
+				if tc.name == "nil-bearing" && i == 1 {
+					want = 1
+				}
+				if got := reservedTotal(g); got != want {
+					t.Errorf("governor %d Reserved = %d, want %d", i, got, want)
+				}
+			}
+			for _, h := range all {
+				_ = h.Cancel()
+			}
+		})
+	}
+}
+
+type mixedHoldPlacer struct {
+	governor *ratelimit.Governor
+}
+
+func (p *mixedHoldPlacer) Place(o domain.Order, u ports.Urgency, hold *ratelimit.Hold) (ports.Ack, error) {
+	if o.Side == domain.SideSell {
+		// This is the leg's own pre-send admission refusal. Its entry remains
+		// reserved for Executor's blanket deferred Cancel to release.
+		return ports.Ack{}, apperror.Precondition("fixture.Place", "leg admission", errors.New("fixture refusal"))
+	}
+	priority := ratelimit.PriorityOpening
+	if u == ports.UrgencySafety {
+		priority = ratelimit.PrioritySafety
+	}
+	decision, err := hold.Consume(ratelimit.Request{
+		Family: o.Instrument.Product, Priority: priority, Cost: ratelimit.RequestOnly(),
+	})
+	if err != nil {
+		return ports.Ack{}, err
+	}
+	if !decision.Admitted {
+		return ports.Ack{}, decision.Err()
+	}
+	return ports.Ack{VenueOrderID: "V-consumed"}, nil
+}
+
+// TestExecuteCancelsOnlyTheUnsentRemainderOnAMixedResult is the load-bearing
+// blanket-cleanup fixture. One leg consumes its reservation and one refuses at
+// its own pre-send admit; after Execute returns the first leg's exact charge
+// survives while the second leg's untimed occupancy is gone.
+func TestExecuteCancelsOnlyTheUnsentRemainderOnAMixedResult(t *testing.T) {
+	t.Parallel()
+	reserver := newFakeReserver(t)
+	journal := newFakeJournal()
+	orders := newFakeOrders()
+	placer := &mixedHoldPlacer{governor: reserver.governor}
+	dispatcher, err := application.NewDispatcher(
+		journal, placer, orders, testClock(t), application.NewDispatchAuthority(),
+	)
+	if err != nil {
+		t.Fatalf("NewDispatcher: %v", err)
+	}
+	executor, err := application.NewExecutor(dispatcher, testFilters(t), reserver)
+	if err != nil {
+		t.Fatalf("NewExecutor: %v", err)
+	}
+	first := packageOrder(t, 0, "0.5")
+	second := packageOrder(t, 1, "0.5")
+	plant(t, orders, first)
+	plant(t, orders, second)
+	execution, err := executor.Execute(
+		bootedChecklist(t), refsFor(first, second), ports.UrgencyOpening,
+	)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(execution.Legs) != 2 {
+		t.Fatalf("Execution.Legs = %d, want 2", len(execution.Legs))
+	}
+	if got := legByID(t, execution, first.ClientOrderID).Outcome.State; got != domain.StateSubmitted {
+		t.Errorf("consumed leg state = %s, want StateSubmitted", got)
+	}
+	if got := legByID(t, execution, second.ClientOrderID).Outcome.State; got != domain.StateSubmissionUnknown {
+		t.Errorf("refused leg state = %s, want StateSubmissionUnknown", got)
+	}
+	for _, state := range reserver.governor.Snapshot().Limits {
+		if state.Used != 1 || state.Reserved != 0 {
+			t.Errorf("limit %s = Used %d Reserved %d, want exactly 1/0",
+				state.Name, state.Used, state.Reserved)
+		}
+	}
+}
+
+var _ ports.OrderPlacer = (*mixedHoldPlacer)(nil)
 
 // # The package refusals: every one refuses WHOLE, with nothing sent and
 // # nothing journaled — §59c's rule, asserted per case
@@ -687,11 +968,11 @@ func TestTheAuthorityIsSharedAcrossDispatchPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	if _, err := d.Dispatch(legSpot.ClientOrderID, 1, ports.UrgencyOpening); err != nil {
+	if _, err := d.Dispatch(legSpot.ClientOrderID, 1, ports.UrgencyOpening, nil); err != nil {
 		t.Fatalf("Dispatch = %v", err)
 	}
 
-	e, err := application.NewExecutor(d, testFilters(t))
+	e, err := application.NewExecutor(d, testFilters(t), newFakeReserver(t))
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
@@ -720,7 +1001,7 @@ func TestTheAuthorityIsSharedAcrossDispatchPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	split, err := application.NewExecutor(other, testFilters(t))
+	split, err := application.NewExecutor(other, testFilters(t), newFakeReserver(t))
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}

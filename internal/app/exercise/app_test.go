@@ -115,6 +115,7 @@ func reconcileConfig(t *testing.T) reconcile.Config {
 			Dialect:      reconcile.DialectBinance,
 			APIKeyRef:    ref(t, "env:ARBLAB_TEST_API_KEY"),
 			APISecretRef: ref(t, "env:ARBLAB_TEST_API_SECRET"),
+			SpendLockDir: t.TempDir(),
 			Endpoints: []reconcile.EndpointConfig{
 				{Product: ids.ProductSpot, Scheme: "https", Host: "api.binance.com"},
 				{Product: ids.ProductLinearPerp, Scheme: "https", Host: "fapi.binance.com"},

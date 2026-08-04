@@ -11,8 +11,10 @@ var (
 	// that would discover it is the one that submits an order. A nil journal
 	// found there means the crash boundary silently did not exist for an order
 	// already on its way to a venue.
-	ErrJournalMissing = errors.New("oms: dispatcher has no journal")
-	ErrPlacerMissing  = errors.New("oms: dispatcher has no order placer")
+	ErrJournalMissing    = errors.New("oms: dispatcher has no journal")
+	ErrPlacerMissing     = errors.New("oms: dispatcher has no order placer")
+	ErrReserverMissing   = errors.New("oms: executor has no capacity reserver")
+	ErrHoldVectorInvalid = errors.New("oms: capacity reserver returned an invalid hold vector")
 
 	// ErrClockMissing reports a use case constructed with no clock.
 	//

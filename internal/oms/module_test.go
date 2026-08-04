@@ -3,17 +3,24 @@ package oms_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/giiorg/arb-lab/internal/engine/venue"
+	"github.com/giiorg/arb-lab/internal/engine/venue/transport"
 	"github.com/giiorg/arb-lab/internal/oms"
 	"github.com/giiorg/arb-lab/internal/oms/application"
 	"github.com/giiorg/arb-lab/internal/oms/application/ports"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
 	"github.com/giiorg/arb-lab/internal/oms/infrastructure/driven"
+	"github.com/giiorg/arb-lab/internal/platform/boot"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
@@ -69,6 +76,10 @@ func (p *countingPlacer) Place(_ context.Context, r venue.OrderRequest) (venue.O
 	p.calls++
 	p.orders = append(p.orders, r)
 	return p.ack, nil
+}
+
+func (p *countingPlacer) ReservePlace([]venue.OrderRequest) (*ratelimit.Hold, ratelimit.Decision, error) {
+	return nil, ratelimit.Decision{}, errors.New("module test: package reservation is not exercised")
 }
 
 var _ driven.VenueOrderPlacer = (*countingPlacer)(nil)
@@ -411,7 +422,7 @@ func TestPlanThenDispatchWritesOneJournalAndOneProjection(t *testing.T) {
 	// The perp leg. Index 1 rather than 0 so that "the leg asked for" and "the
 	// first leg" are different records — a plan of one would make them the same.
 	perp := planned[1]
-	out, err := m.Dispatch.Dispatch(perp.Order.ClientOrderID, perp.Version, ports.UrgencyOpening)
+	out, err := m.Dispatch.Dispatch(perp.Order.ClientOrderID, perp.Version, ports.UrgencyOpening, nil)
 	if err != nil {
 		t.Fatalf("Dispatch = %v, want nil", err)
 	}
@@ -487,6 +498,186 @@ func TestPlanThenDispatchWritesOneJournalAndOneProjection(t *testing.T) {
 	}
 }
 
+// TestExecuteComposesReservationThroughTheRealVenueStack protects the seams
+// that no layer test can join: the driven adapter prices every leg through the
+// codecs, one governor reserves the whole package, and each transport consumes
+// its matching entry rather than acquiring again. Distinct families and bodies
+// make omitting the last adapter leg observable; exact counters make a hidden
+// second acquire observable.
+func TestExecuteComposesReservationThroughTheRealVenueStack(t *testing.T) {
+	const bybit ids.Venue = "bybit"
+
+	var (
+		mu         sync.Mutex
+		categories []string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Category    string `json:"category"`
+			OrderLinkID string `json:"orderLinkId"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		categories = append(categories, body.Category)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"retCode":0,"result":{"orderId":"77","orderLinkId":"` + body.OrderLinkID + `"}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	clk, err := clock.NewTestClock(time.UnixMilli(1700000000000).UTC(), []clock.Calibration{{
+		Venue: clock.Venue(bybit), Offset: 0, Uncertainty: time.Millisecond,
+	}})
+	if err != nil {
+		t.Fatalf("NewTestClock: %v", err)
+	}
+	limits := []ratelimit.Limit{{
+		Name: "ip_5s", Scope: ratelimit.ScopeVenue,
+		Dimension: ratelimit.DimensionRequests, Interval: 5 * time.Second,
+		OpeningCeiling: 8, RoutineCeiling: 9, Capacity: 10,
+	}}
+	for _, endpoint := range (transport.BybitLimitReader{}).Endpoints() {
+		limits = append(limits, ratelimit.Limit{
+			Name: endpoint.Name, Scope: ratelimit.ScopeEndpoint,
+			Dimension: endpoint.Dimension, Interval: time.Second,
+			OpeningCeiling: 8, RoutineCeiling: 9, Capacity: 10,
+		})
+	}
+	gov, err := ratelimit.New(clk, ratelimit.Profile{
+		Venue: bybit,
+		Families: []ids.ProductCategory{
+			ids.ProductSpot, ids.ProductLinearPerp,
+		},
+		Limits: limits,
+		Uncounted: []ratelimit.Uncounted{
+			{Family: ids.ProductSpot, Dimension: ratelimit.DimensionWeight, Reason: "Bybit publishes no per-endpoint weight"},
+			{Family: ids.ProductSpot, Dimension: ratelimit.DimensionOrders, Reason: "orders are metered by endpoint"},
+			{Family: ids.ProductLinearPerp, Dimension: ratelimit.DimensionWeight, Reason: "Bybit publishes no per-endpoint weight"},
+			{Family: ids.ProductLinearPerp, Dimension: ratelimit.DimensionOrders, Reason: "orders are metered by endpoint"},
+		},
+		ThrottlePause: 30 * time.Second,
+		BanPause:      2 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("ratelimit.New: %v", err)
+	}
+	cred, err := transport.NewCredential("composed-key", "composed-secret")
+	if err != nil {
+		t.Fatalf("NewCredential: %v", err)
+	}
+	signer, err := transport.NewBybitSigner(bybit, cred)
+	if err != nil {
+		t.Fatalf("NewBybitSigner: %v", err)
+	}
+	spend, err := transport.AcquireSpendLock(t.TempDir(), signer.SpendDomain(), cred)
+	if err != nil {
+		t.Fatalf("AcquireSpendLock: %v", err)
+	}
+	t.Cleanup(func() { _ = spend.Close() })
+	signed, err := transport.NewSignedClient(transport.SignedClientConfig{
+		Scheme: "http", Host: strings.TrimPrefix(srv.URL, "http://"),
+		Timeout: time.Second, ReadLimit: 1 << 16, RecvWindow: 500 * time.Millisecond,
+		Signer: signer, Limits: transport.BybitLimitReader{}, Envelope: transport.BybitEnvelope{},
+		Governor: gov, Clock: clk, Spend: spend,
+	})
+	if err != nil {
+		t.Fatalf("NewSignedClient: %v", err)
+	}
+	codec, err := venue.NewBybitOrderCodec(bybit)
+	if err != nil {
+		t.Fatalf("NewBybitOrderCodec: %v", err)
+	}
+	orders, err := venue.NewOrderClient(venue.OrderClientConfig{
+		Codec: codec, Governor: gov,
+		Transports: map[ids.ProductCategory]*transport.SignedClient{
+			ids.ProductSpot: signed, ids.ProductLinearPerp: signed,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewOrderClient: %v", err)
+	}
+
+	spot := ids.VenueInstrument{Venue: bybit, Product: ids.ProductSpot, Symbol: "BTCUSDT"}
+	perp := ids.VenueInstrument{Venue: bybit, Product: ids.ProductLinearPerp, Symbol: "BTCUSDT", Contract: ids.ContractLinear}
+	deps := fullDeps(t)
+	deps.Clock = clk
+	deps.VenueOrders = orders
+	deps.PositionScopes = []application.PositionScope{{Venue: bybit, Product: ids.ProductLinearPerp, Settle: "USDT"}}
+	deps.InstrumentAssets = map[ids.VenueInstrument]venue.InstrumentAssets{
+		spot: {Base: "BTC", Quote: "USDT"}, perp: {Base: "BTC", Quote: "USDT"},
+	}
+	deps.InstrumentFilters = map[ids.VenueInstrument]domain.TradingFilters{
+		spot: {
+			Step: mustQty(t, "0.025"), MinQty: mustQty(t, "0.05"),
+			Tick: mustPx(t, "25"), MinNotional: mustUSDT(t, "5000"),
+		},
+		perp: {
+			Step: mustQty(t, "0.05"), MinQty: mustQty(t, "0.1"),
+			Tick: mustPx(t, "20"), MinNotional: mustUSDT(t, "10000"),
+		},
+	}
+	m := newModule(t, deps)
+	plan := cashAndCarry(t)
+	plan.Legs[0].Instrument = spot
+	plan.Legs[1].Instrument = perp
+	planned, err := m.Plan.Plan(plan)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	refs := make([]application.DispatchRef, len(planned))
+	for i, record := range planned {
+		refs[i] = application.DispatchRef{ID: record.Order.ClientOrderID, Version: record.Version}
+	}
+	checklist, err := boot.NewChecklist(boot.GateNetDeltaAsserted, boot.GateWriterAuthority)
+	if err != nil {
+		t.Fatalf("NewChecklist: %v", err)
+	}
+	if err := checklist.Report(boot.GateNetDeltaAsserted, boot.OutcomePassed); err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+	execution, err := m.Execute.Execute(checklist, refs, ports.UrgencyOpening)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(execution.Legs) != 2 {
+		t.Fatalf("Execute returned %d legs, want 2", len(execution.Legs))
+	}
+	for i, leg := range execution.Legs {
+		if leg.Err != nil {
+			t.Errorf("leg %d: %v", i, leg.Err)
+		}
+	}
+	mu.Lock()
+	gotCategories := append([]string(nil), categories...)
+	mu.Unlock()
+	if len(gotCategories) != 2 {
+		t.Fatalf("HTTP requests = %v, want exactly two", gotCategories)
+	}
+	seen := map[string]int{}
+	for _, category := range gotCategories {
+		seen[category]++
+	}
+	if seen["spot"] != 1 || seen["linear"] != 1 {
+		t.Errorf("request categories = %v, want one spot and one linear", gotCategories)
+	}
+
+	for _, state := range gov.Snapshot().Limits {
+		wantUsed := uint64(0)
+		if state.Name == "ip_5s" || state.Name == transport.BybitOrderCreateLimit {
+			wantUsed = 2
+		}
+		if state.Used != wantUsed {
+			t.Errorf("limit %s Used = %d, want %d", state.Name, state.Used, wantUsed)
+		}
+		if state.Reserved != 0 {
+			t.Errorf("limit %s Reserved = %d, want 0", state.Name, state.Reserved)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // §7.5's first half: a second process over the same journal
 // ---------------------------------------------------------------------------
@@ -532,7 +723,7 @@ func TestASecondModuleRebuildsWhatTheFirstOneDid(t *testing.T) {
 	}
 	spot, perp := planned[0], planned[1]
 
-	if _, err := first.Dispatch.Dispatch(perp.Order.ClientOrderID, perp.Version, ports.UrgencyOpening); err != nil {
+	if _, err := first.Dispatch.Dispatch(perp.Order.ClientOrderID, perp.Version, ports.UrgencyOpening, nil); err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
 	// The crash, as closely as a test can stage one: this process stops. The
@@ -576,7 +767,7 @@ func TestASecondModuleRebuildsWhatTheFirstOneDid(t *testing.T) {
 	// domain.CanTransition has no edge back to the boundary and the dispatch
 	// path refuses — which is the durable half of the single-Place rule, since
 	// the in-process backstop died with the first module.
-	if _, err := second.Dispatch.Dispatch(perp.Order.ClientOrderID, 3, ports.UrgencyOpening); err == nil {
+	if _, err := second.Dispatch.Dispatch(perp.Order.ClientOrderID, 3, ports.UrgencyOpening, nil); err == nil {
 		t.Error("the recovered in-flight order was dispatched a second time")
 	}
 	if placer.calls != 0 {
@@ -586,7 +777,7 @@ func TestASecondModuleRebuildsWhatTheFirstOneDid(t *testing.T) {
 	// The positive control, and the other half of the recovery claim: the leg
 	// that was only ever planned is still dispatchable, at the version the
 	// replay rebuilt it to.
-	if _, err := second.Dispatch.Dispatch(spot.Order.ClientOrderID, spot.Version, ports.UrgencyOpening); err != nil {
+	if _, err := second.Dispatch.Dispatch(spot.Order.ClientOrderID, spot.Version, ports.UrgencyOpening, nil); err != nil {
 		t.Errorf("Dispatch of the recovered PLANNED leg = %v, want nil — §5.3 makes "+
 			"a Planned-only order safe to replan", err)
 	}
@@ -614,7 +805,7 @@ func TestDispatchRefusesAnOrderThisModuleNeverPlanned(t *testing.T) {
 		t.Fatalf("NewClientOrderID: %v", err)
 	}
 
-	if _, err := m.Dispatch.Dispatch(id, 1, ports.UrgencyOpening); !errors.Is(err, ports.ErrOrderUnknown) {
+	if _, err := m.Dispatch.Dispatch(id, 1, ports.UrgencyOpening, nil); !errors.Is(err, ports.ErrOrderUnknown) {
 		t.Fatalf("Dispatch of an unplanned order = %v, want ErrOrderUnknown", err)
 	}
 	if placer.calls != 0 {
@@ -728,7 +919,7 @@ func TestAnAckConflictLatchesLiveAndRefusesTheNextBoot(t *testing.T) {
 	// Both perp legs — the SAME instrument — and the counting placer answers
 	// every Place with the same venue id, which is exactly the venue
 	// misbehaviour the conflict design exists for.
-	clean, err := m.Dispatch.Dispatch(first[1].Order.ClientOrderID, first[1].Version, ports.UrgencyOpening)
+	clean, err := m.Dispatch.Dispatch(first[1].Order.ClientOrderID, first[1].Version, ports.UrgencyOpening, nil)
 	if err != nil {
 		t.Fatalf("first Dispatch = %v, want nil", err)
 	}
@@ -737,7 +928,7 @@ func TestAnAckConflictLatchesLiveAndRefusesTheNextBoot(t *testing.T) {
 			clean.AckApplied, clean.AckConflict)
 	}
 
-	conflicted, err := m.Dispatch.Dispatch(second[1].Order.ClientOrderID, second[1].Version, ports.UrgencyOpening)
+	conflicted, err := m.Dispatch.Dispatch(second[1].Order.ClientOrderID, second[1].Version, ports.UrgencyOpening, nil)
 	if err != nil {
 		t.Fatalf("second Dispatch = %v, want nil — the send happened", err)
 	}

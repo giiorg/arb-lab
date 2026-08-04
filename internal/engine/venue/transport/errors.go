@@ -56,10 +56,21 @@ var (
 	// endpoint or declares it under the wrong dimension. Construction refuses
 	// it because discovering the gap on a later recovery query would strand the
 	// order that query was meant to resolve.
-	ErrEndpointBudgetMissing = errors.New("transport: required endpoint budget missing or has the wrong dimension")
-	ErrEnvelopeReaderUnset   = errors.New("transport: envelope reader unset — a venue that states refusals in the body would read as accepting everything")
-	ErrGovernorUnset         = errors.New("transport: governor unset")
-	ErrClockUnset            = errors.New("transport: clock unset")
+	ErrEndpointBudgetMissing        = errors.New("transport: required endpoint budget missing or has the wrong dimension")
+	ErrEnvelopeReaderUnset          = errors.New("transport: envelope reader unset — a venue that states refusals in the body would read as accepting everything")
+	ErrGovernorUnset                = errors.New("transport: governor unset")
+	ErrClockUnset                   = errors.New("transport: clock unset")
+	ErrSpendDomainInvalid           = errors.New("transport: spend domain invalid")
+	ErrSpendLockDirUnset            = errors.New("transport: spend lock directory unset")
+	ErrSpendLockHeld                = errors.New("transport: spend lock already held")
+	ErrSpendLockUnsupported         = errors.New("transport: spend lock unsupported on this platform")
+	ErrSpendLockUnset               = errors.New("transport: spend lock unset")
+	ErrSpendLockDomainMismatch      = errors.New("transport: spend lock domain does not match signer")
+	ErrSpendLockFingerprintMismatch = errors.New("transport: spend lock fingerprint does not match signer")
+	ErrHostNotCanonical             = errors.New("transport: endpoint host is not canonical")
+	ErrHostUnserializable           = errors.New("transport: endpoint host cannot be serialized")
+	ErrCallUnpreparable             = errors.New("transport: signed call cannot be prepared")
+	ErrHoldForeignGovernor          = errors.New("transport: hold was minted by another governor")
 
 	// The server-clock refusals. Separate sentinels because they send the
 	// operator to different places: Unusable is a venue that was never

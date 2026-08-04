@@ -3,7 +3,9 @@ package driven_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/giiorg/arb-lab/internal/engine/venue"
 	"github.com/giiorg/arb-lab/internal/oms/application/ports"
@@ -19,14 +21,22 @@ import (
 // result. It is the far side of the ACL, which is the only place the
 // translation is observable.
 type recordingVenue struct {
-	ack  venue.OrderAck
-	err  error
-	seen []venue.OrderRequest
+	ack      venue.OrderAck
+	err      error
+	seen     []venue.OrderRequest
+	reserved []venue.OrderRequest
+	hold     *ratelimit.Hold
+	decision ratelimit.Decision
 }
 
 func (v *recordingVenue) Place(_ context.Context, r venue.OrderRequest) (venue.OrderAck, error) {
 	v.seen = append(v.seen, r)
 	return v.ack, v.err
+}
+
+func (v *recordingVenue) ReservePlace(reqs []venue.OrderRequest) (*ratelimit.Hold, ratelimit.Decision, error) {
+	v.reserved = append(v.reserved, reqs...)
+	return v.hold, v.decision, v.err
 }
 
 func gatewayOrder(t *testing.T) domain.Order {
@@ -85,7 +95,7 @@ func TestPlaceTranslatesEveryField(t *testing.T) {
 	v := &recordingVenue{ack: venue.OrderAck{VenueOrderID: "V-77"}}
 	o := gatewayOrder(t)
 
-	ack, err := newGateway(t, v).Place(o, ports.UrgencyOpening)
+	ack, err := newGateway(t, v).Place(o, ports.UrgencyOpening, nil)
 	if err != nil {
 		t.Fatalf("Place: %v", err)
 	}
@@ -107,6 +117,72 @@ func TestPlaceTranslatesEveryField(t *testing.T) {
 	}
 	if v.seen[0] != want {
 		t.Errorf("the venue received %+v, want %+v", v.seen[0], want)
+	}
+}
+
+func TestPlaceThreadsTheHoldBesideUrgency(t *testing.T) {
+	t.Parallel()
+	hold := &ratelimit.Hold{}
+	v := &recordingVenue{}
+	if _, err := newGateway(t, v).Place(gatewayOrder(t), ports.UrgencySafety, hold); err != nil {
+		t.Fatalf("Place: %v", err)
+	}
+	if len(v.seen) != 1 || v.seen[0].Hold != hold {
+		t.Fatalf("venue hold = %p over %d calls, want %p", v.seen[0].Hold, len(v.seen), hold)
+	}
+}
+
+func TestReservePlacementsTranslatesEveryLegAndIncludesTheLast(t *testing.T) {
+	t.Parallel()
+	hold := &ratelimit.Hold{}
+	v := &recordingVenue{hold: hold, decision: ratelimit.Decision{Admitted: true}}
+	first := gatewayOrder(t)
+	second := gatewayOrder(t)
+	trade, err := ids.ParseTradeID("018f0c1a-2b3c-7d4e-8f90-1a2b3c4d5e6f")
+	if err != nil {
+		t.Fatalf("ParseTradeID: %v", err)
+	}
+	second.ClientOrderID, err = ids.NewClientOrderID(ids.ClientOrderRef{Trade: trade, Leg: 2, Attempt: 3})
+	if err != nil {
+		t.Fatalf("NewClientOrderID: %v", err)
+	}
+	second.Instrument.Product = ids.ProductSpot
+	second.Instrument.Contract = ""
+	second.Side = domain.SideBuy
+
+	holds, err := newGateway(t, v).ReservePlacements([]domain.Order{first, second}, ports.UrgencyOpening)
+	if err != nil {
+		t.Fatalf("ReservePlacements: %v", err)
+	}
+	if len(v.reserved) != 2 {
+		t.Fatalf("venue received %d reservation legs, want 2", len(v.reserved))
+	}
+	if v.reserved[0].Instrument.Product != ids.ProductLinearPerp ||
+		v.reserved[1].Instrument.Product != ids.ProductSpot {
+		t.Fatalf("reserved products = %s/%s", v.reserved[0].Instrument.Product, v.reserved[1].Instrument.Product)
+	}
+	if len(holds) != 2 || holds[0] != hold || holds[1] != hold {
+		t.Fatalf("hold vector = %v, want [%p %p]", holds, hold, hold)
+	}
+}
+
+func TestReservePlacementsMapsCapacityRefusalWithoutSending(t *testing.T) {
+	t.Parallel()
+	notBefore := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	v := &recordingVenue{decision: ratelimit.Decision{
+		Venue: "binance", Reason: ratelimit.ReasonCeiling, Limit: "ip_5s", NotBefore: notBefore,
+	}}
+	_, err := newGateway(t, v).ReservePlacements([]domain.Order{gatewayOrder(t)}, ports.UrgencyOpening)
+	if !errors.Is(err, driven.ErrPackageCapacityRefused) {
+		t.Fatalf("ReservePlacements = %v, want ErrPackageCapacityRefused", err)
+	}
+	for _, want := range []string{"binance", "ip_5s", notBefore.String()} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q omits %q", err, want)
+		}
+	}
+	if len(v.seen) != 0 {
+		t.Fatalf("Place calls = %d, want 0", len(v.seen))
 	}
 }
 
@@ -139,7 +215,7 @@ func TestPlaceMapsBothSidesAndBothShedClasses(t *testing.T) {
 				o := gatewayOrder(t)
 				o.Side = side
 
-				if _, err := newGateway(t, v).Place(o, urgency); err != nil {
+				if _, err := newGateway(t, v).Place(o, urgency, nil); err != nil {
 					t.Fatalf("Place: %v", err)
 				}
 				if got := v.seen[0].Side; got != wantSide {
@@ -177,7 +253,7 @@ func TestPlaceRefusesWhatSixStepSixForbidsSending(t *testing.T) {
 			o := gatewayOrder(t)
 			mutate(&o)
 
-			_, err := newGateway(t, v).Place(o, ports.UrgencyOpening)
+			_, err := newGateway(t, v).Place(o, ports.UrgencyOpening, nil)
 			if !errors.Is(err, driven.ErrNotSendableAtVenue) {
 				t.Fatalf("Place = %v, want ErrNotSendableAtVenue", err)
 			}
@@ -199,7 +275,7 @@ func TestPlaceRefusesAnUnsetShedClass(t *testing.T) {
 	t.Parallel()
 
 	v := &recordingVenue{}
-	_, err := newGateway(t, v).Place(gatewayOrder(t), "")
+	_, err := newGateway(t, v).Place(gatewayOrder(t), "", nil)
 	if !errors.Is(err, ports.ErrUrgencyInvalid) {
 		t.Fatalf("Place = %v, want ErrUrgencyInvalid", err)
 	}
@@ -227,7 +303,7 @@ func TestPlacePassesTheVenuesEffectThroughUNCHANGED(t *testing.T) {
 			t.Parallel()
 
 			v := &recordingVenue{err: apperror.Transport("venue.Place", effect, errors.New("boom"))}
-			_, err := newGateway(t, v).Place(gatewayOrder(t), ports.UrgencySafety)
+			_, err := newGateway(t, v).Place(gatewayOrder(t), ports.UrgencySafety, nil)
 			if got := apperror.EffectOf(err); got != effect {
 				t.Errorf("Effect = %v, want %v — the adapter re-classified the venue's own answer", got, effect)
 			}

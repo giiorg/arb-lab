@@ -103,6 +103,11 @@ type OrderRequest struct {
 	// is acceptable silently, so this layer refuses to guess and the caller
 	// states it.
 	Urgency ratelimit.Priority
+
+	// Hold threads package occupancy to the transport. Nil keeps the single-order
+	// acquire-at-send mode; ReservePlace ignores this field because a request to
+	// reserve capacity cannot meaningfully carry an existing reservation.
+	Hold *ratelimit.Hold
 }
 
 // OrderSide is the direction of an order, in this seam's own vocabulary.
@@ -260,6 +265,7 @@ type OrderCodec interface {
 type OrderClient struct {
 	codec      OrderCodec
 	transports map[ids.ProductCategory]*transport.SignedClient
+	governor   *ratelimit.Governor
 }
 
 // OrderClientConfig is one venue's order surface.
@@ -280,6 +286,11 @@ type OrderClientConfig struct {
 	// envelope per venue. Two governors would be two IP envelopes for one IP,
 	// each seeing half the traffic and neither seeing the ban coming.
 	Transports map[ids.ProductCategory]*transport.SignedClient
+
+	// Governor owns the batch and must be the exact governor every family
+	// transport uses. Without the identity check, two individually valid
+	// clients could reserve on one envelope and send against another.
+	Governor *ratelimit.Governor
 }
 
 // NewOrderClient validates the surface and builds the client.
@@ -293,6 +304,9 @@ func NewOrderClient(cfg OrderClientConfig) (*OrderClient, error) {
 	if len(cfg.Transports) == 0 {
 		return nil, ErrOrderTransportsUnset
 	}
+	if cfg.Governor == nil {
+		return nil, ErrOrderGovernorUnset
+	}
 	routes := make(map[ids.ProductCategory]*transport.SignedClient, len(cfg.Transports))
 	for family, client := range cfg.Transports {
 		if err := family.Validate(); err != nil {
@@ -301,9 +315,12 @@ func NewOrderClient(cfg OrderClientConfig) (*OrderClient, error) {
 		if client == nil {
 			return nil, fmt.Errorf("order transport for %s: %w", family, ErrOrderTransportsUnset)
 		}
+		if !client.UsesGovernor(cfg.Governor) {
+			return nil, fmt.Errorf("order transport for %s: %w", family, ErrOrderGovernorMismatch)
+		}
 		routes[family] = client
 	}
-	return &OrderClient{codec: cfg.Codec, transports: routes}, nil
+	return &OrderClient{codec: cfg.Codec, transports: routes, governor: cfg.Governor}, nil
 }
 
 // Venue is which exchange this client places orders on.
@@ -345,6 +362,9 @@ func (c *OrderClient) Place(ctx context.Context, r OrderRequest) (OrderAck, erro
 	if err != nil {
 		return OrderAck{}, apperror.Precondition(op, "encode", err)
 	}
+	// The codec stays hold-blind; the client sets the token after encoding. A
+	// codec that could see the hold would also be a codec that could drop it.
+	call.Hold = r.Hold
 
 	resp, err := client.Do(ctx, call)
 	if err != nil {
@@ -362,4 +382,39 @@ func (c *OrderClient) Place(ctx context.Context, r OrderRequest) (OrderAck, erro
 		return OrderAck{}, transport.ClassifyAckDecodeFailure(call.Op, err)
 	}
 	return ack, nil
+}
+
+// ReservePlace prepares every leg through the same codecs and transports Place
+// uses, then reserves the batch once on the venue governor. Preparing first
+// keeps an unbuildable later leg from leaving occupancy behind, and request Hold
+// fields are ignored because this operation mints rather than consumes a hold.
+func (c *OrderClient) ReservePlace(reqs []OrderRequest) (*ratelimit.Hold, ratelimit.Decision, error) {
+	if len(reqs) == 0 {
+		return nil, ratelimit.Decision{}, ErrOrderReserveEmpty
+	}
+	batch := make([]ratelimit.Request, len(reqs))
+	for i, r := range reqs {
+		if err := r.Validate(); err != nil {
+			return nil, ratelimit.Decision{}, err
+		}
+		if r.Instrument.Venue != c.codec.Venue() {
+			return nil, ratelimit.Decision{}, fmt.Errorf("order %q is for %s: %w",
+				r.ClientOrderID, r.Instrument.Venue, ErrOrderVenueMismatch)
+		}
+		client, ok := c.transports[r.Instrument.Product]
+		if !ok {
+			return nil, ratelimit.Decision{}, fmt.Errorf("order %q on %s: %w",
+				r.ClientOrderID, r.Instrument.Product, ErrOrderFamilyUnrouted)
+		}
+		call, err := c.codec.EncodePlace(r)
+		if err != nil {
+			return nil, ratelimit.Decision{}, err
+		}
+		priced, err := client.Prepare(call)
+		if err != nil {
+			return nil, ratelimit.Decision{}, err
+		}
+		batch[i] = priced
+	}
+	return c.governor.Reserve(batch)
 }

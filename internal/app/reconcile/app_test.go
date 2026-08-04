@@ -84,6 +84,7 @@ func validConfig(t *testing.T, journal string) Config {
 			Dialect:      DialectBinance,
 			APIKeyRef:    envRef(t, testKeyVar),
 			APISecretRef: envRef(t, testSecretVar),
+			SpendLockDir: filepath.Dir(journal),
 			Endpoints: []EndpointConfig{
 				{Product: ids.ProductSpot, Scheme: "https", Host: "api.binance.com"},
 				{Product: ids.ProductLinearPerp, Scheme: "https", Host: "fapi.binance.com"},
@@ -153,6 +154,7 @@ func TestConfigRefusals(t *testing.T) {
 	}{
 		{"journal path unset", ErrConfigFieldUnset, func(c *Config) { c.JournalPath = "" }},
 		{"account unset", ErrConfigFieldUnset, func(c *Config) { c.Account = "" }},
+		{"spend lock directory unset", ErrConfigFieldUnset, func(c *Config) { c.Venue.SpendLockDir = "" }},
 		{"dialect unknown", ErrDialectUnknown, func(c *Config) { c.Venue.Dialect = "kraken" }},
 		{"no endpoints", ErrConfigFieldUnset, func(c *Config) { c.Venue.Endpoints = nil }},
 		{"endpoint scheme", ErrConfigFieldInvalid, func(c *Config) { c.Venue.Endpoints[0].Scheme = "ftp" }},
@@ -788,6 +790,138 @@ func TestBootRunsEveryPhaseAndReportsClean(t *testing.T) {
 	}
 	if rep.RateLimit.Bans != 0 {
 		t.Errorf("RateLimit.Bans = %d on a boot that made no venue call", rep.RateLimit.Bans)
+	}
+}
+
+// TestRunnerOwnsTheSpendLockUntilItsOMSCloserRuns joins the process lock to
+// the root lifecycle. The second acquisition happens after wiring has returned,
+// so it detects a helper that deferred Close on its successful return; the
+// reacquisition after shutdown proves the phase closer releases the same token.
+func TestRunnerOwnsTheSpendLockUntilItsOMSCloserRuns(t *testing.T) {
+	t.Setenv(testKeyVar, "key")
+	t.Setenv(testSecretVar, "secret")
+
+	dir := t.TempDir()
+	cfg := spotOnly(t, filepath.Join(dir, "journal.db"))
+	r := newRunnerFor(t, cfg, func(string) error { return nil })
+	checklist, err := boot.NewChecklist(declaredGates()...)
+	if err != nil {
+		t.Fatalf("NewChecklist: %v", err)
+	}
+	r.checklist = checklist
+	running, err := r.Sequence().Run(context.Background())
+	if err != nil {
+		t.Fatalf("Sequence.Run: %v", err)
+	}
+
+	cred, err := transport.NewCredential("key", "secret")
+	if err != nil {
+		t.Fatalf("NewCredential: %v", err)
+	}
+	if second, err := transport.AcquireSpendLock(cfg.Venue.SpendLockDir, transport.SpendDomainBinance, cred); !errors.Is(err, transport.ErrSpendLockHeld) {
+		if second != nil {
+			_ = second.Close()
+		}
+		t.Fatalf("second AcquireSpendLock while Runner is up = %v, want ErrSpendLockHeld", err)
+	}
+	if _, err := running.Shutdown(context.Background(), r.clk); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	reacquired, err := transport.AcquireSpendLock(cfg.Venue.SpendLockDir, transport.SpendDomainBinance, cred)
+	if err != nil {
+		t.Fatalf("AcquireSpendLock after normal shutdown: %v", err)
+	}
+	if err := reacquired.Close(); err != nil {
+		t.Fatalf("Close reacquired lock: %v", err)
+	}
+}
+
+// TestRunnerReleasesSpendLockWhenSignedClientConstructionFails exercises the
+// release site inside newOrderClient. The malformed host passes document
+// validation and reaches the stdlib serialization refusal only after the lock
+// has been acquired.
+func TestRunnerReleasesSpendLockWhenSignedClientConstructionFails(t *testing.T) {
+	t.Setenv(testKeyVar, "key")
+	t.Setenv(testSecretVar, "secret")
+
+	dir := t.TempDir()
+	cfg := spotOnly(t, filepath.Join(dir, "journal.db"))
+	cfg.Venue.Endpoints[0].Host = `ho"st`
+	r := newRunnerFor(t, cfg, func(string) error { return nil })
+	checklist, err := boot.NewChecklist(declaredGates()...)
+	if err != nil {
+		t.Fatalf("NewChecklist: %v", err)
+	}
+	r.checklist = checklist
+	running, err := r.Sequence().Run(context.Background())
+	if err != nil {
+		t.Fatalf("Sequence.Run: %v", err)
+	}
+	defer func() { _, _ = running.Shutdown(context.Background(), r.clk) }()
+	if !r.Halted() || r.BootReport().Reconciliation.Cause == nil {
+		t.Fatalf("Runner = halted %v, cause %v; want halted with wiring diagnosis",
+			r.Halted(), r.BootReport().Reconciliation.Cause)
+	}
+	cred, err := transport.NewCredential("key", "secret")
+	if err != nil {
+		t.Fatalf("NewCredential: %v", err)
+	}
+	reacquired, err := transport.AcquireSpendLock(cfg.Venue.SpendLockDir, transport.SpendDomainBinance, cred)
+	if err != nil {
+		t.Fatalf("AcquireSpendLock after newOrderClient failure: %v", err)
+	}
+	if err := reacquired.Close(); err != nil {
+		t.Fatalf("Close reacquired lock: %v", err)
+	}
+}
+
+// TestRunnerReleasesSpendLockWhenOMSConstructionFails exercises the distinct
+// release site in startOMS. An existing directory is not a SQLite journal, so
+// every venue collaborator—including the locked client—constructs before the
+// real OMS adapter refuses it; the root remains alive and halted with that
+// diagnosis while the now-unreachable capability's domain is immediately free.
+func TestRunnerReleasesSpendLockWhenOMSConstructionFails(t *testing.T) {
+	t.Setenv(testKeyVar, "key")
+	t.Setenv(testSecretVar, "secret")
+
+	dir := t.TempDir()
+	lockDir := filepath.Join(dir, "locks")
+	if err := os.Mkdir(lockDir, 0o755); err != nil {
+		t.Fatalf("Mkdir lock dir: %v", err)
+	}
+	cfg := spotOnly(t, dir)
+	cfg.Venue.SpendLockDir = lockDir
+	cfg.Venue.Endpoints[0].Scheme = "http"
+	cfg.Venue.Endpoints[0].Host = "127.0.0.1:1"
+	r := newRunnerFor(t, cfg, func(string) error { return nil })
+	checklist, err := boot.NewChecklist(declaredGates()...)
+	if err != nil {
+		t.Fatalf("NewChecklist: %v", err)
+	}
+	r.checklist = checklist
+	running, err := r.Sequence().Run(context.Background())
+	if err != nil {
+		t.Fatalf("Sequence.Run: %v", err)
+	}
+	defer func() { _, _ = running.Shutdown(context.Background(), r.clk) }()
+	rep := r.BootReport()
+	if !r.Halted() || rep.Reconciliation.Cause == nil {
+		t.Fatalf("Runner = halted %v, cause %v; want halted with oms.New diagnosis",
+			r.Halted(), rep.Reconciliation.Cause)
+	}
+	if outcome, _ := r.Checklist().Outcome(boot.GateJournalReplayed); outcome != boot.OutcomeFailed {
+		t.Errorf("GateJournalReplayed = %s, want OutcomeFailed", outcome)
+	}
+	cred, err := transport.NewCredential("key", "secret")
+	if err != nil {
+		t.Fatalf("NewCredential: %v", err)
+	}
+	reacquired, err := transport.AcquireSpendLock(lockDir, transport.SpendDomainBinance, cred)
+	if err != nil {
+		t.Fatalf("AcquireSpendLock after oms.New failure: %v", err)
+	}
+	if err := reacquired.Close(); err != nil {
+		t.Fatalf("Close reacquired lock: %v", err)
 	}
 }
 

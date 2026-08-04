@@ -2,6 +2,7 @@ package ratelimit
 
 import (
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -167,60 +168,12 @@ func (g *Governor) Acquire(r Request) (Decision, error) {
 }
 
 func (g *Governor) decide(r Request, charge bool) (Decision, error) {
-	if err := r.Validate(); err != nil {
-		return Decision{}, err
-	}
-
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	ws, ok := g.applicable[r.Family]
-	if !ok {
-		return Decision{}, fmt.Errorf("venue %q family %q: %w",
-			g.profile.Venue, r.Family, ErrFamilyUnknown)
-	}
-
-	var ep *window
-	if r.Endpoint == "" {
-		if g.hasEndpoints {
-			return Decision{}, fmt.Errorf("venue %q family %q: %w",
-				g.profile.Venue, r.Family, ErrEndpointUnnamed)
-		}
-	} else {
-		ep = g.endpoints[r.Endpoint]
-		if ep == nil {
-			return Decision{}, fmt.Errorf("venue %q endpoint %q: %w",
-				g.profile.Venue, r.Endpoint, ErrEndpointUnbudgeted)
-		}
-		if r.Cost.units(ep.limit.Dimension) == 0 {
-			return Decision{}, fmt.Errorf("venue %q endpoint limit %q counts %s but the request charges zero: %w",
-				g.profile.Venue, ep.limit.Name, ep.limit.Dimension, ErrCostEndpointUncounted)
-		}
-		ws = append(ws, ep)
-	}
-
-	// §7.6's headline sentence, enforced on the actual cost: a governor MUST
-	// refuse a cost it cannot count. Profile.Validate already made every
-	// caller-charged dimension either budgeted or written down as Uncounted, so
-	// this fires only under such a declaration — and the declaration was a
-	// claim that no such cost arrives, which the cost in hand has just
-	// falsified. The refusal is an error rather than a Decision because it is a
-	// profile-versus-adapter disagreement, like ErrFamilyUnknown: no amount of
-	// waiting changes it. DimensionRequests is exempt for the reason it is
-	// everywhere else in this file: the venue envelope is unconditional at
-	// construction, so its window cannot be absent here. A matched endpoint
-	// window is the venue's own meter for its dimension — Bybit's order budget
-	// is the create endpoint's budget — so a cost that it charges is counted for
-	// this request even though profile-level coverage remains family-scoped.
-	for d := DimensionUnspecified + 1; d <= maxDimension; d++ {
-		if d == DimensionRequests {
-			continue
-		}
-		if r.Cost.units(d) > 0 && !g.counted[r.Family][d] &&
-			!(ep != nil && ep.limit.Dimension == d) {
-			return Decision{}, fmt.Errorf("venue %q family %q: cost charges %s: %w",
-				g.profile.Venue, r.Family, d, ErrCostUncounted)
-		}
+	ws, err := g.admitRequest(r)
+	if err != nil {
+		return Decision{}, err
 	}
 
 	now := g.clk.Now()
@@ -263,6 +216,144 @@ func (g *Governor) decide(r Request, charge bool) (Decision, error) {
 		}
 	}
 	return d, nil
+}
+
+// admitRequest is the one spelling of the request gates shared by ordinary
+// admission and package reservation. A taxonomy that drifted between the two
+// paths would let the reservation approve a request the send later refuses.
+// The governor lock must be held by the caller.
+func (g *Governor) admitRequest(r Request) ([]*window, error) {
+	if err := r.Validate(); err != nil {
+		return nil, err
+	}
+
+	ws, ok := g.applicable[r.Family]
+	if !ok {
+		return nil, fmt.Errorf("venue %q family %q: %w",
+			g.profile.Venue, r.Family, ErrFamilyUnknown)
+	}
+
+	var ep *window
+	if r.Endpoint == "" {
+		if g.hasEndpoints {
+			return nil, fmt.Errorf("venue %q family %q: %w",
+				g.profile.Venue, r.Family, ErrEndpointUnnamed)
+		}
+	} else {
+		ep = g.endpoints[r.Endpoint]
+		if ep == nil {
+			return nil, fmt.Errorf("venue %q endpoint %q: %w",
+				g.profile.Venue, r.Endpoint, ErrEndpointUnbudgeted)
+		}
+		if r.Cost.units(ep.limit.Dimension) == 0 {
+			return nil, fmt.Errorf("venue %q endpoint limit %q counts %s but the request charges zero: %w",
+				g.profile.Venue, ep.limit.Name, ep.limit.Dimension, ErrCostEndpointUncounted)
+		}
+		ws = append(append([]*window(nil), ws...), ep)
+	}
+
+	// §7.6's headline sentence, enforced on the actual cost: a governor MUST
+	// refuse a cost it cannot count. Profile.Validate already made every
+	// caller-charged dimension either budgeted or written down as Uncounted, so
+	// this fires only under such a declaration — and the declaration was a
+	// claim that no such cost arrives, which the cost in hand has just
+	// falsified. The refusal is an error rather than a Decision because it is a
+	// profile-versus-adapter disagreement, like ErrFamilyUnknown: no amount of
+	// waiting changes it. DimensionRequests is exempt for the reason it is
+	// everywhere else in this file: the venue envelope is unconditional at
+	// construction, so its window cannot be absent here. A matched endpoint
+	// window is the venue's own meter for its dimension — Bybit's order budget
+	// is the create endpoint's budget — so a cost that it charges is counted for
+	// this request even though profile-level coverage remains family-scoped.
+	for d := DimensionUnspecified + 1; d <= maxDimension; d++ {
+		if d == DimensionRequests {
+			continue
+		}
+		if r.Cost.units(d) > 0 && !g.counted[r.Family][d] &&
+			!(ep != nil && ep.limit.Dimension == d) {
+			return nil, fmt.Errorf("venue %q family %q: cost charges %s: %w",
+				g.profile.Venue, r.Family, d, ErrCostUncounted)
+		}
+	}
+	return ws, nil
+}
+
+// Reserve provisionally occupies every budget a package will spend, atomically
+// across the whole batch. Occupancy is untimed because a timed reservation can
+// expire during a slow fsync before the venue has seen the call, and checked
+// arithmetic is mandatory because a saturated total would lie about both the
+// entries it summarizes and the amount Cancel later releases.
+func (g *Governor) Reserve(reqs []Request) (*Hold, Decision, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if len(reqs) == 0 {
+		return nil, Decision{}, ErrReserveEmpty
+	}
+
+	entries := make([]holdEntry, len(reqs))
+	for i, r := range reqs {
+		ws, err := g.admitRequest(r)
+		if err != nil {
+			return nil, Decision{}, err
+		}
+		entries[i] = holdEntry{req: r, windows: ws, state: holdReserved}
+	}
+
+	priority := reqs[0].Priority
+	for _, r := range reqs[1:] {
+		if r.Priority != priority {
+			return nil, Decision{}, ErrReservePriorityMixed
+		}
+	}
+
+	now := g.clk.Now()
+	d := Decision{Venue: g.profile.Venue, At: now}
+	if now.Before(g.pausedUntil) {
+		d.Reason = ReasonPaused
+		d.NotBefore = g.pausedUntil
+		return nil, d, nil
+	}
+
+	totals := make(map[*window]uint64, len(g.windows))
+	for _, entry := range entries {
+		for _, w := range entry.windows {
+			units := entry.req.Cost.units(w.limit.Dimension)
+			if totals[w] > math.MaxUint64-units {
+				return nil, Decision{}, ErrReserveOverflow
+			}
+			totals[w] += units
+		}
+	}
+
+	refused := false
+	for _, k := range g.order {
+		w := g.windows[k]
+		units, applies := totals[w]
+		if !applies || w.admits(now, units, w.limit.Ceiling(priority)) {
+			continue
+		}
+		at := w.freeAt(now, units, w.limit.Ceiling(priority))
+		if !refused || worseThan(at, d.NotBefore) {
+			d.NotBefore = at
+			d.Limit = w.limit.Name
+		}
+		refused = true
+	}
+	if refused {
+		d.Reason = ReasonCeiling
+		return nil, d, nil
+	}
+
+	for _, k := range g.order {
+		w := g.windows[k]
+		if units, ok := totals[w]; ok {
+			w.reserve(units)
+		}
+	}
+	d.Admitted = true
+	d.Reason = ReasonAdmitted
+	return &Hold{gov: g, entries: entries}, d, nil
 }
 
 // Observe folds a venue-reported consumption into a budget: the header-aware
@@ -395,6 +486,11 @@ type LimitState struct {
 	// venue reading ratcheted in.
 	Used uint64
 
+	// Reserved is untimed occupancy held for an in-flight package. It remains
+	// separate because the venue cannot report unsent reservations, and a
+	// snapshot must show capacity spoken for without claiming it was consumed.
+	Reserved uint64
+
 	// FoldMisses is §7.6's fold-health count of missing usable observations.
 	FoldMisses uint64
 
@@ -461,6 +557,7 @@ func (g *Governor) Snapshot() Snapshot {
 			Dimension:      w.limit.Dimension,
 			Interval:       w.limit.Interval,
 			Used:           w.usedAt(now),
+			Reserved:       w.reserved,
 			FoldMisses:     g.foldMisses[k],
 			OpeningCeiling: w.limit.OpeningCeiling,
 			RoutineCeiling: w.limit.RoutineCeiling,

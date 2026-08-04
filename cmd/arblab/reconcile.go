@@ -155,6 +155,12 @@ func writeRateLimitStatus(w io.Writer, s ratelimit.Snapshot) {
 				s.Venue, l.Name, l.FoldMisses)
 		}
 	}
+	for _, l := range s.Limits {
+		if l.Reserved > 0 {
+			fmt.Fprintf(w, "ratelimit: %s %s: %d unit(s) reserved for an in-flight package\n",
+				s.Venue, l.Name, l.Reserved)
+		}
+	}
 	if s.Bans > 0 {
 		fmt.Fprintf(w, "ratelimit: %s banned this IP %d time(s) (418/IP ban)  <- §7.6 OPERATOR ALERT: do not retry — repeat violations escalate the ban",
 			s.Venue, s.Bans)

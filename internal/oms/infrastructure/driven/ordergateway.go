@@ -53,6 +53,10 @@ type OrderGateway struct {
 // still supplies the value.
 type VenueOrderPlacer interface {
 	Place(ctx context.Context, r venue.OrderRequest) (venue.OrderAck, error)
+
+	// ReservePlace stays on the same venue capability as Place because an
+	// independent carrier could reserve on one governor and send on another.
+	ReservePlace([]venue.OrderRequest) (*ratelimit.Hold, ratelimit.Decision, error)
 }
 
 // NewOrderGateway builds the adapter, refusing one with nothing behind it.
@@ -79,7 +83,7 @@ func NewOrderGateway(client VenueOrderPlacer) (*OrderGateway, error) {
 // already says it is "a safety parameter, not a responsiveness one" — and
 // recvWindow beneath it, which bounds how long a delayed submission may still
 // execute at the venue after we stopped waiting.
-func (g *OrderGateway) Place(o domain.Order, u ports.Urgency) (ports.Ack, error) {
+func (g *OrderGateway) Place(o domain.Order, u ports.Urgency, hold *ratelimit.Hold) (ports.Ack, error) {
 	const op = "oms.Place"
 
 	req, err := toVenueOrder(o, u)
@@ -89,6 +93,7 @@ func (g *OrderGateway) Place(o domain.Order, u ports.Urgency) (ports.Ack, error)
 		// inferring from a cause.
 		return ports.Ack{}, apperror.Precondition(op, "translate order", err)
 	}
+	req.Hold = hold
 
 	ack, err := g.client.Place(context.Background(), req)
 	if err != nil {
@@ -98,6 +103,34 @@ func (g *OrderGateway) Place(o domain.Order, u ports.Urgency) (ports.Ack, error)
 		return ports.Ack{}, err
 	}
 	return ports.Ack{VenueOrderID: ack.VenueOrderID}, nil
+}
+
+// ReservePlacements translates the entire package before asking the one venue
+// client to reserve it once. A refusal is returned as an error because nothing
+// was sent, while admission expands the one venue hold into the port's per-leg,
+// index-aligned shape, including the last leg.
+func (g *OrderGateway) ReservePlacements(orders []domain.Order, u ports.Urgency) ([]*ratelimit.Hold, error) {
+	reqs := make([]venue.OrderRequest, len(orders))
+	for i, order := range orders {
+		req, err := toVenueOrder(order, u)
+		if err != nil {
+			return nil, err
+		}
+		reqs[i] = req
+	}
+	hold, decision, err := g.client.ReservePlace(reqs)
+	if err != nil {
+		return nil, err
+	}
+	if !decision.Admitted {
+		return nil, fmt.Errorf("venue %s limit %q not before %s: %w",
+			decision.Venue, decision.Limit, decision.NotBefore, ErrPackageCapacityRefused)
+	}
+	holds := make([]*ratelimit.Hold, len(orders))
+	for i := range holds {
+		holds[i] = hold
+	}
+	return holds, nil
 }
 
 // toVenueOrder is the translation, and every refusal in it names its rule.
@@ -188,7 +221,10 @@ var (
 	// learned that something reached the adapter without passing through
 	// Dispatch.
 	ErrNotSendableAtVenue = errors.New("oms: order is not a marketable-IOC limit and cannot be sent")
+
+	ErrPackageCapacityRefused = errors.New("oms: venue refused package capacity")
 )
 
 // Compile-time proof that the adapter satisfies the port (§3.6 rule 2).
 var _ ports.OrderPlacer = (*OrderGateway)(nil)
+var _ ports.CapacityReserver = (*OrderGateway)(nil)

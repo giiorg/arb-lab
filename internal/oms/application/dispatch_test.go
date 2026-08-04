@@ -14,6 +14,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
+	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
 )
 
 // # The fakes, and the three properties the checklist demanded of them
@@ -207,14 +208,16 @@ type fakePlacer struct {
 	// argument and a Dispatch that passed a constant look identical from the
 	// order list alone.
 	urgencies []ports.Urgency
+	holds     []*ratelimit.Hold
 }
 
-func (p *fakePlacer) Place(o domain.Order, u ports.Urgency) (ports.Ack, error) {
+func (p *fakePlacer) Place(o domain.Order, u ports.Urgency, hold *ratelimit.Hold) (ports.Ack, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.calls++
 	p.orders = append(p.orders, o)
 	p.urgencies = append(p.urgencies, u)
+	p.holds = append(p.holds, hold)
 	if p.watch != nil {
 		p.appendsBefore = append(p.appendsBefore, p.watch.appendCount())
 	}
@@ -691,7 +694,7 @@ func TestDispatchPlacesAValidOrderExactlyOnce(t *testing.T) {
 	o := dispatchableOrder(t)
 	plant(t, r, o)
 
-	out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening)
+	out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil)
 	if err != nil {
 		t.Fatalf("Dispatch = %v, want nil", err)
 	}
@@ -763,7 +766,7 @@ func TestDispatchThreadsTheCallersVersionThroughBothApplies(t *testing.T) {
 	o := dispatchableOrder(t)
 	plantAt(t, r, o, domain.StatePlanned, 5)
 
-	out, err := d.Dispatch(o.ClientOrderID, 5, ports.UrgencyOpening)
+	out, err := d.Dispatch(o.ClientOrderID, 5, ports.UrgencyOpening, nil)
 	if err != nil {
 		t.Fatalf("Dispatch = %v, want nil", err)
 	}
@@ -799,7 +802,7 @@ func TestDispatchJournalsAuthorizationBeforePlacing(t *testing.T) {
 	o := dispatchableOrder(t)
 	plant(t, r, o)
 
-	if _, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening); err != nil {
+	if _, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil); err != nil {
 		t.Fatalf("Dispatch = %v", err)
 	}
 	if len(p.appendsBefore) != 1 {
@@ -850,7 +853,7 @@ func TestDispatchRefusesAnUncalibratedVenueAboveTheFsync(t *testing.T) {
 	o := dispatchableOrder(t)
 	plant(t, r, o)
 
-	if _, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening); !errors.Is(err, ports.ErrAuthorizationNeedsAnchor) {
+	if _, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil); !errors.Is(err, ports.ErrAuthorizationNeedsAnchor) {
 		t.Fatalf("Dispatch on an uncalibrated venue = %v, want ErrAuthorizationNeedsAnchor", err)
 	}
 	if len(j.calls) != 0 {
@@ -875,7 +878,7 @@ func TestDispatchRefusesAnUncalibratedVenueAboveTheFsync(t *testing.T) {
 	// above.
 	d2, j2, p2, r2 := newDispatcher(t)
 	plant(t, r2, o)
-	if _, err := d2.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening); err != nil {
+	if _, err := d2.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil); err != nil {
 		t.Fatalf("Dispatch on a calibrated venue = %v, want nil", err)
 	}
 	if p2.calls != 1 || len(j2.calls) == 0 {
@@ -942,7 +945,7 @@ func TestDispatchRefusesBeforeSendingAnything(t *testing.T) {
 			tc.mutate(&o)
 			plant(t, r, o)
 
-			out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening)
+			out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil)
 			if err == nil {
 				t.Fatal("Dispatch = nil, want a refusal")
 			}
@@ -983,7 +986,7 @@ func TestDispatchRefusesAnOrderTheRepositoryCannotSupply(t *testing.T) {
 
 		d, j, p, _ := newDispatcher(t)
 
-		_, err := d.Dispatch(mintedID(t, 1), 1, ports.UrgencyOpening)
+		_, err := d.Dispatch(mintedID(t, 1), 1, ports.UrgencyOpening, nil)
 		if !errors.Is(err, ports.ErrOrderUnknown) {
 			t.Fatalf("Dispatch of an unplanned order = %v, want ErrOrderUnknown", err)
 		}
@@ -999,7 +1002,7 @@ func TestDispatchRefusesAnOrderTheRepositoryCannotSupply(t *testing.T) {
 		o := dispatchableOrder(t)
 		plantAt(t, r, o, domain.StatePlanned, 4)
 
-		_, err := d.Dispatch(o.ClientOrderID, 3, ports.UrgencyOpening)
+		_, err := d.Dispatch(o.ClientOrderID, 3, ports.UrgencyOpening, nil)
 		if !errors.Is(err, ports.ErrVersionConflict) {
 			t.Fatalf("Dispatch at a stale version = %v, want ErrVersionConflict", err)
 		}
@@ -1020,7 +1023,7 @@ func TestDispatchRefusesAnOrderTheRepositoryCannotSupply(t *testing.T) {
 		o := dispatchableOrder(t)
 		plantAt(t, r, o, domain.StateDispatchAuthorized, 2)
 
-		_, err := d.Dispatch(o.ClientOrderID, 2, ports.UrgencyOpening)
+		_, err := d.Dispatch(o.ClientOrderID, 2, ports.UrgencyOpening, nil)
 		if !errors.Is(err, domain.ErrTransitionNoOp) {
 			t.Fatalf("Dispatch of an already-authorized order = %v, want ErrTransitionNoOp", err)
 		}
@@ -1041,7 +1044,7 @@ func TestDispatchRefusesToPlaceWhenAuthorizationIsNotDurable(t *testing.T) {
 	o := dispatchableOrder(t)
 	plant(t, r, o)
 
-	out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening)
+	out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil)
 	if !errors.Is(err, diskFull) {
 		t.Fatalf("Dispatch = %v, want the journal's error", err)
 	}
@@ -1071,7 +1074,7 @@ func TestDispatchReportsAnUnjournaledResultWithoutFailing(t *testing.T) {
 	o := dispatchableOrder(t)
 	plant(t, r, o)
 
-	out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening)
+	out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil)
 	if err != nil {
 		t.Fatalf("Dispatch = %v, want nil — a lost result record is not a failed dispatch", err)
 	}
@@ -1115,7 +1118,7 @@ func TestDispatchSendsWhenTheProjectionFails(t *testing.T) {
 		o := dispatchableOrder(t)
 		plant(t, r, o)
 
-		out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening)
+		out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil)
 		if err != nil {
 			t.Fatalf("Dispatch = %v, want nil — the send was already authorized", err)
 		}
@@ -1143,7 +1146,7 @@ func TestDispatchSendsWhenTheProjectionFails(t *testing.T) {
 		o := dispatchableOrder(t)
 		plant(t, r, o)
 
-		out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening)
+		out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil)
 		if err != nil {
 			t.Fatalf("Dispatch = %v, want nil", err)
 		}
@@ -1231,7 +1234,7 @@ func TestDispatchClassifiesThePlaceOutcome(t *testing.T) {
 			o := dispatchableOrder(t)
 			plant(t, r, o)
 
-			out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening)
+			out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil)
 			if err != nil {
 				t.Fatalf("Dispatch = %v, want nil — Place ran, so there is a state to report", err)
 			}
@@ -1280,14 +1283,14 @@ func TestDispatchRefusesASecondDispatchOfTheSameOrder(t *testing.T) {
 	o := dispatchableOrder(t)
 	plant(t, r, o)
 
-	if _, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening); err != nil {
+	if _, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil); err != nil {
 		t.Fatalf("first Dispatch = %v, want nil", err)
 	}
 
 	// Version 3 is where the first dispatch left the record, so this second call
 	// is the one a caller who re-read the record would make — not one holding a
 	// stale number. The refusal is therefore the guard's, not the OCC's.
-	out, err := d.Dispatch(o.ClientOrderID, 3, ports.UrgencyOpening)
+	out, err := d.Dispatch(o.ClientOrderID, 3, ports.UrgencyOpening, nil)
 	if !errors.Is(err, application.ErrOrderAlreadyDispatched) {
 		t.Fatalf("second Dispatch = %v, want ErrOrderAlreadyDispatched", err)
 	}
@@ -1324,7 +1327,7 @@ func TestASecondDispatcherOverTheSameRepositoryIsAlsoRefused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	if _, err := first.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening); err != nil {
+	if _, err := first.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil); err != nil {
 		t.Fatalf("first Dispatch = %v", err)
 	}
 
@@ -1332,7 +1335,7 @@ func TestASecondDispatcherOverTheSameRepositoryIsAlsoRefused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	_, err = second.Dispatch(o.ClientOrderID, 3, ports.UrgencyOpening)
+	_, err = second.Dispatch(o.ClientOrderID, 3, ports.UrgencyOpening, nil)
 	if errors.Is(err, application.ErrOrderAlreadyDispatched) {
 		t.Fatal("a fresh dispatcher refused with ErrOrderAlreadyDispatched — its guard set must start empty")
 	}
@@ -1356,10 +1359,10 @@ func TestDispatchAdmitsADifferentOrder(t *testing.T) {
 	plant(t, r, first)
 	plant(t, r, second)
 
-	if _, err := d.Dispatch(first.ClientOrderID, 1, ports.UrgencyOpening); err != nil {
+	if _, err := d.Dispatch(first.ClientOrderID, 1, ports.UrgencyOpening, nil); err != nil {
 		t.Fatalf("first Dispatch = %v", err)
 	}
-	if _, err := d.Dispatch(second.ClientOrderID, 1, ports.UrgencyOpening); err != nil {
+	if _, err := d.Dispatch(second.ClientOrderID, 1, ports.UrgencyOpening, nil); err != nil {
 		t.Fatalf("Dispatch of the other leg = %v, want nil", err)
 	}
 	if p.calls != 2 {
@@ -1388,10 +1391,10 @@ func TestDispatchDoesNotBurnTheIDOnARefusal(t *testing.T) {
 		// The SAME id both times: the refusal is the caller's stale version, and
 		// the correction is re-reading it. A test using two different orders
 		// would prove only that the guard is keyed on something.
-		if _, err := d.Dispatch(o.ClientOrderID, 7, ports.UrgencyOpening); !errors.Is(err, ports.ErrVersionConflict) {
+		if _, err := d.Dispatch(o.ClientOrderID, 7, ports.UrgencyOpening, nil); !errors.Is(err, ports.ErrVersionConflict) {
 			t.Fatalf("Dispatch at a stale version = %v, want ErrVersionConflict", err)
 		}
-		if _, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening); err != nil {
+		if _, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil); err != nil {
 			t.Fatalf("Dispatch after re-reading = %v, want nil", err)
 		}
 		if p.calls != 1 {
@@ -1407,14 +1410,14 @@ func TestDispatchDoesNotBurnTheIDOnARefusal(t *testing.T) {
 		o := dispatchableOrder(t)
 		plant(t, r, o)
 
-		if _, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening); err == nil {
+		if _, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil); err == nil {
 			t.Fatal("Dispatch with a failing journal = nil, want a refusal")
 		}
 		// Nothing was sent, so a retry is legitimate — and this is the case the
 		// guard must NOT swallow, since the alternative is an order that can
 		// never be placed because its own journal hiccupped once.
 		delete(j.failOn, domain.StateDispatchAuthorized)
-		if _, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening); err != nil {
+		if _, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil); err != nil {
 			t.Fatalf("Dispatch after the journal recovered = %v, want nil", err)
 		}
 		if p.calls != 1 {
@@ -1435,14 +1438,14 @@ func TestDispatchGuardsAgainstARepeatAfterAFailedPlace(t *testing.T) {
 	o := dispatchableOrder(t)
 	plant(t, r, o)
 
-	out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening)
+	out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil)
 	if err != nil {
 		t.Fatalf("Dispatch = %v, want nil", err)
 	}
 	if out.Cause == nil {
 		t.Fatal("Cause = nil, want the timeout")
 	}
-	if _, err := d.Dispatch(o.ClientOrderID, 3, ports.UrgencyOpening); !errors.Is(err, application.ErrOrderAlreadyDispatched) {
+	if _, err := d.Dispatch(o.ClientOrderID, 3, ports.UrgencyOpening, nil); !errors.Is(err, application.ErrOrderAlreadyDispatched) {
 		t.Errorf("retry after a failed Place = %v, want ErrOrderAlreadyDispatched", err)
 	}
 	if p.calls != 1 {
@@ -1465,7 +1468,7 @@ func TestDispatchGuardHoldsWhenTheProjectionDidNot(t *testing.T) {
 	o := dispatchableOrder(t)
 	plant(t, r, o)
 
-	out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening)
+	out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil)
 	if err != nil {
 		t.Fatalf("Dispatch = %v, want nil", err)
 	}
@@ -1481,7 +1484,7 @@ func TestDispatchGuardHoldsWhenTheProjectionDidNot(t *testing.T) {
 		t.Fatalf("record = %s/v%d, want planned/v1 — the fixture's premise", rec.State, rec.Version)
 	}
 
-	if _, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening); !errors.Is(err, application.ErrOrderAlreadyDispatched) {
+	if _, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil); !errors.Is(err, application.ErrOrderAlreadyDispatched) {
 		t.Errorf("second Dispatch = %v, want ErrOrderAlreadyDispatched", err)
 	}
 	if p.calls != 1 {
@@ -1519,7 +1522,7 @@ func TestDispatchPersistsTheAcksVenueIdAckFirst(t *testing.T) {
 	o := dispatchableOrder(t)
 	plant(t, r, o)
 
-	out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening)
+	out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil)
 	if err != nil {
 		t.Fatalf("Dispatch = %v, want nil", err)
 	}
@@ -1556,7 +1559,7 @@ func TestDispatchWritesNoAckRecordWithoutAnId(t *testing.T) {
 	o := dispatchableOrder(t)
 	plant(t, r, o)
 
-	out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening)
+	out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil)
 	if err != nil {
 		t.Fatalf("Dispatch = %v, want nil", err)
 	}
@@ -1599,7 +1602,7 @@ func TestDispatchReportsADroppedAckWriteWithoutFailing(t *testing.T) {
 		o := dispatchableOrder(t)
 		plant(t, r, o)
 
-		out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening)
+		out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil)
 		if err != nil {
 			t.Fatalf("Dispatch = %v, want nil", err)
 		}
@@ -1623,7 +1626,7 @@ func TestDispatchReportsADroppedAckWriteWithoutFailing(t *testing.T) {
 		o := dispatchableOrder(t)
 		plant(t, r, o)
 
-		out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening)
+		out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil)
 		if err != nil {
 			t.Fatalf("Dispatch = %v, want nil", err)
 		}
@@ -1659,7 +1662,7 @@ func TestDispatchHoldsTradingOnAnAckConflict(t *testing.T) {
 	o := dispatchableOrder(t)
 	plant(t, r, o)
 
-	out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening)
+	out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening, nil)
 	if err != nil {
 		t.Fatalf("Dispatch = %v, want nil — the send happened, err must not discard it", err)
 	}

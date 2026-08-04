@@ -33,10 +33,12 @@ package reconcile
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 
+	"github.com/giiorg/arb-lab/internal/engine/venue/transport"
 	"github.com/giiorg/arb-lab/internal/oms"
 	"github.com/giiorg/arb-lab/internal/oms/application"
 	omsdomain "github.com/giiorg/arb-lab/internal/oms/domain"
@@ -322,6 +324,11 @@ type Runner struct {
 	// venue client, nil forever on a boot that halted first.
 	governor *ratelimit.Governor
 
+	// spend is owned for exactly as long as the reachable venue capability. The
+	// wiring helper returns it rather than deferring Close, and this root releases
+	// it after the module or immediately if module construction fails.
+	spend *transport.SpendLock
+
 	// storageCheck is #168's check, injected so the sequence's own tests do not
 	// depend on what filesystem the machine running them uses for temporary
 	// files. Production always passes checkJournalStorage; the real check has its
@@ -451,18 +458,19 @@ func (r *Runner) startOMS(context.Context) (boot.StopFunc, error) {
 	if r.halted {
 		return nil, nil
 	}
-	client, governor, err := newOrderClient(r.cfg, r.clk)
+	wiring, err := newOrderClient(r.cfg, r.clk)
 	if err != nil {
 		r.halted = true
 		r.reconciliation.Cause = err
 		return nil, r.checklist.Report(boot.GateVenueJoined, boot.OutcomeFailed)
 	}
-	r.governor = governor
+	r.governor = wiring.governor
+	r.spend = wiring.spend
 	module, err := oms.New(oms.Deps{
 		JournalPath:       r.cfg.JournalPath,
-		VenueOrders:       client,
-		VenueOrderReads:   client,
-		VenuePositions:    client,
+		VenueOrders:       wiring.client,
+		VenueOrderReads:   wiring.client,
+		VenuePositions:    wiring.client,
 		PositionScopes:    r.cfg.scopes(),
 		InstrumentAssets:  r.cfg.assets(),
 		InstrumentFilters: r.filters,
@@ -472,11 +480,18 @@ func (r *Runner) startOMS(context.Context) (boot.StopFunc, error) {
 	})
 	if err != nil {
 		r.halted = true
-		r.reconciliation.Cause = err
+		r.reconciliation.Cause = errors.Join(err, r.spend.Close())
+		r.spend = nil
 		return nil, r.checklist.Report(boot.GateJournalReplayed, boot.OutcomeFailed)
 	}
 	r.module = module
-	return func(context.Context) error { return module.Close() }, nil
+	return func(context.Context) error {
+		err := module.Close()
+		if r.spend != nil {
+			err = errors.Join(err, r.spend.Close())
+		}
+		return err
+	}, nil
 }
 
 // startReconcile is §7.5's phase: replay, join, resolve every absence, assert.

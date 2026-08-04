@@ -1,6 +1,68 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-04, session 100): **#188'S DESIGN IS CONVERGED — ROUND 11 RETURNED SHIP AFTER ELEVEN ADVERSARIAL ROUNDS. RECORD §68 HOLDS THE DESIGN, THE FULL ARC (§68f, ROUNDS 1–11), TWELVE RECORDED REJECTIONS (§68d) AND APPENDIX A, THE FILE-BY-FILE IMPLEMENTATION SPEC. NOTHING IN `internal/` HAS BEEN TOUCHED.**
+## Status (2026-08-05, session 100): **#188'S DESIGN CONVERGED (ROUND 11 SHIP) AND THE IMPLEMENTATION LANDED THE SAME SESSION — A-1…A-18 COMPLETE, `make ci` GREEN ON BOTH MODULES VERIFIED BY THE ORCHESTRATOR, MARKER GREP = EXACTLY THE ONE OWED. THE WORK IS UNCOMMITTED-THEN-COMMITTED AS THE SESSION-END SAFE POINT. TWO REVIEW FINDINGS ARE QUEUED AND NOT YET FIXED; THE MUTATION CAMPAIGN HAS NOT RUN; DOCS ARE STILL v0.9.46.**
+
+**Where the implementation came from.** A second-model codex session
+(`impl-188-reservation`) built Appendix A verbatim in two turns — the
+first crashed client-side at ~27min with ~950 insertions preserved in
+the tree; the resumed turn surveyed and finished (A-15…A-18, root
+lifecycle, renderers, acceptance/composed/boot tests). Its report:
+zero deviations from Appendix A; the §68b.5a wall.go
+calibration-constancy caveat re-verified (`Wall.cals` built once, no
+mutation path — the completeness claim stands). ~2,000 insertions
+across ~40 files.
+
+**THE TWO QUEUED FINDINGS (from the orchestrator's partial post-write
+review — fix FIRST, through the same codex session, before anything
+else):**
+1. **DEFECT — `Hold.Consume` refuses zero-unit windows**
+   (`internal/platform/ratelimit/hold.go`, capacity loop): the check
+   `used <= Capacity && units <= Capacity-used` fails its first
+   conjunct when a fold has ratcheted `used` past capacity on a window
+   this entry charges ZERO units on — refusing a leg whose charge
+   cannot violate that window, manufacturing the exact post-fsync
+   episode the slice removes. `admits` (window.go) guards with
+   `units == 0 → true`; Consume must mirror
+   (`if units == 0 { continue }`), WITH the fixture that catches it
+   (fold past capacity on window W, consume an entry charging 0 on W
+   and >0 on its sibling — must ADMIT; §68e's discrimination family).
+2. **NIT — signed.go's WriteProxy dry-run** discards the
+   `http.NewRequest` error (`req, _ :=`) before `req.WriteProxy` —
+   unreachable after the preceding parse succeeded, but the repo's
+   idiom names unreachability rather than discarding it.
+
+**What the next session does, in order:** (1) loop the two findings
+through codex session `impl-188-reservation` (context intact), re-run
+`make ci` YOURSELF; (2) finish the post-write review — read against
+Appendix A the files not yet reviewed: app/reconcile
+config.go/wire.go/app.go + app_test.go (the four root lifecycle
+fixtures), cmd/arblab/reconcile.go + test (golden intact?),
+module_test.go's composed two-leg test, the acceptance test,
+reservation_test.go, order_test.go, signed_internal_test.go,
+spendlock_internal_test.go, exercise test edits (already reviewed:
+window/governor/hold/errors in platform, credential/signing/spendlock*/
+signed in transport, order.go, ports/, execute.go, dispatch.go threading
+— all faithful); (3) run the COLLAPSE CHECKLIST on the new fixtures
+BEFORE mutating (§68e's named collapse dimensions per fixture); (4) the
+mutation campaign per §68e/A-19 — six named mutants: per-call-site
+`holds[i]`→nil, `holds[i]`→`holds[0]` EXPECTED-EQUIVALENT (record, not
+kill), skip-last-leg in the driven adapter (composed test kills),
+Consume→Acquire in Do's hold branch (exact-Used kills),
+defer-Close-inside-newOrderClient (root fixture 1 kills), delete the
+oms.New error-arm release (root fixture 4 kills) — plus §68e's
+boundary/wrap mutants; `MUTATE_MODULE` unset, `MUTATE_TIMEOUT=180`
+where the exercise suite is in scope; (5) docs to v0.9.47 per §68e's
+inventory (build-spec §7.6 package-reservation clause +
+spend-exclusivity scoping of §67's premise, §6 step 6 + §4 Place
+signature [discharges the one SPEC EDIT OWED marker in
+ports/gateway.go], `spend_lock_dir` config schema + example,
+adr-history row, tutorial-parity check; ka is generated — never
+hand-edit); (6) close #188, replace §68's WIP banner, update this
+handoff. Rejections that must not be reopened: **§68d items 1–12**.
+
+---
+
+## Status (2026-08-04, session 100 mid-session — HISTORICAL): **#188'S DESIGN IS CONVERGED — ROUND 11 RETURNED SHIP AFTER ELEVEN ADVERSARIAL ROUNDS. RECORD §68 HOLDS THE DESIGN, THE FULL ARC (§68f, ROUNDS 1–11), TWELVE RECORDED REJECTIONS (§68d) AND APPENDIX A, THE FILE-BY-FILE IMPLEMENTATION SPEC. NOTHING IN `internal/` HAS BEEN TOUCHED.**
 
 **What sessions 99–100 settled beyond the session-99 block below.** Rounds
 5–10 each NO-SHIP, every finding adjudicated against the shipped code:

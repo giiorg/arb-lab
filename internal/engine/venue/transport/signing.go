@@ -179,6 +179,15 @@ type Signer interface {
 	// Venue is which exchange this signer speaks for.
 	Venue() ids.Venue
 
+	// Fingerprint binds the signer to the credential carried by its spend lock
+	// without exposing the credential itself.
+	Fingerprint() string
+
+	// SpendDomain is the compiled budget namespace this dialect spends. It is a
+	// constant rather than the configurable venue alias so two aliases cannot
+	// split one exchange's accounting.
+	SpendDomain() SpendDomain
+
 	// Sign composes the request at the given server time.
 	//
 	// The instant is a clock.ServerTime, not a time.Time, because the venue's
@@ -249,6 +258,12 @@ func NewBinanceSigner(venue ids.Venue, cred Credential) (*BinanceSigner, error) 
 // Venue implements Signer.
 func (s *BinanceSigner) Venue() ids.Venue { return s.venue }
 
+// Fingerprint implements Signer.
+func (s *BinanceSigner) Fingerprint() string { return s.cred.Fingerprint() }
+
+// SpendDomain implements Signer.
+func (s *BinanceSigner) SpendDomain() SpendDomain { return SpendDomainBinance }
+
 // Sign implements Signer.
 //
 // The composition, verbatim from the docs (Profiles §6): the HMAC-SHA256 key is
@@ -306,6 +321,12 @@ func NewBybitSigner(venue ids.Venue, cred Credential) (*BybitSigner, error) {
 
 // Venue implements Signer.
 func (s *BybitSigner) Venue() ids.Venue { return s.venue }
+
+// Fingerprint implements Signer.
+func (s *BybitSigner) Fingerprint() string { return s.cred.Fingerprint() }
+
+// SpendDomain implements Signer.
+func (s *BybitSigner) SpendDomain() SpendDomain { return SpendDomainBybit }
 
 // Sign implements Signer.
 //

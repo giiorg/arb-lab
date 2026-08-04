@@ -37,6 +37,12 @@ type window struct {
 	limit   Limit
 	charges []charge
 	used    uint64
+
+	// reserved is provisional occupancy held beside charges. It is untimed and
+	// invisible to observe because a venue report can never include calls that
+	// have not been sent; folding the two categories together would let Cancel
+	// erase consumption the venue actually reported.
+	reserved uint64
 }
 
 func newWindow(l Limit) *window {
@@ -103,7 +109,34 @@ func (w *window) admits(now time.Time, units, ceiling uint64) bool {
 	if used >= ceiling {
 		return false
 	}
-	return units <= ceiling-used
+	avail := ceiling - used
+	if w.reserved >= avail {
+		return false
+	}
+	return units <= avail-w.reserved
+}
+
+// reserve records untimed occupancy after Reserve has checked the batch sum.
+// That admission bounds the addition below capacity, so saturation here would
+// hide an invariant violation rather than make the governor safer.
+func (w *window) reserve(units uint64) {
+	w.reserved += units
+}
+
+// release removes occupancy for a still-reserved hold entry. Hold entries are
+// the only callers, and their terminal state makes a second release
+// inexpressible, so an underflow assertion here would duplicate that state
+// machine without strengthening it.
+func (w *window) release(units uint64) {
+	w.reserved -= units
+}
+
+// consume converts occupancy into a charge under the governor's one lock. The
+// conversion is one operation so no admission can observe a gap between its
+// halves, and the charge starts at consume rather than at reservation time.
+func (w *window) consume(now time.Time, units uint64) {
+	w.reserved -= units
+	w.charge(now, units)
 }
 
 // charge records units consumed at now.
@@ -127,6 +160,11 @@ func (w *window) charge(now time.Time, units uint64) {
 // The zero time means "not by waiting" — the need exceeds the ceiling outright,
 // so no amount of expiry helps. A caller must treat it as such rather than as
 // an instant already past, which is why Decision documents it explicitly.
+//
+// Occupancy is deliberately ignored. It can disappear at any instant through
+// Cancel, so the earliest instant a retry could succeed is the charges-only
+// answer. Subtracting reserved from the ceiling would either overload zero as a
+// false "never" or invent a release instant that occupancy does not have.
 func (w *window) freeAt(now time.Time, need, ceiling uint64) time.Time {
 	if need > ceiling {
 		return time.Time{}

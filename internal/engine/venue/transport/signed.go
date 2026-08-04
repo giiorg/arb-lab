@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -92,6 +93,10 @@ type SignedClientConfig struct {
 
 	// Clock is the injected time seam. ServerNow is what gets signed.
 	Clock clock.Clock
+
+	// Spend is the process-lifetime proof that this client's closed exchange
+	// domain has one spender on this host, bound to the signer's credential.
+	Spend *SpendLock
 }
 
 // Validate reports whether the client could ask.
@@ -189,6 +194,55 @@ func NewSignedClient(cfg SignedClientConfig) (*SignedClient, error) {
 				snapshot.Venue, endpoint.Name, d, endpoint.Dimension, ErrEndpointBudgetMissing)
 		}
 	}
+
+	base := cfg.Scheme + "://" + cfg.Host + "/"
+	u, err := url.Parse(base)
+	if err != nil {
+		return nil, fmt.Errorf("base URL parse: %w: %w", ErrHostNotCanonical, err)
+	}
+	switch {
+	case u.Scheme != cfg.Scheme:
+		return nil, fmt.Errorf("base URL scheme changed from %q to %q: %w", cfg.Scheme, u.Scheme, ErrHostNotCanonical)
+	case u.Host != cfg.Host:
+		return nil, fmt.Errorf("base URL host changed from %q to %q: %w", cfg.Host, u.Host, ErrHostNotCanonical)
+	case u.User != nil:
+		return nil, fmt.Errorf("base URL contains userinfo: %w", ErrHostNotCanonical)
+	case u.Path != "/":
+		return nil, fmt.Errorf("base URL path is %q, want /: %w", u.Path, ErrHostNotCanonical)
+	case u.Hostname() == "":
+		return nil, fmt.Errorf("base URL hostname is empty: %w", ErrHostNotCanonical)
+	}
+	if port := u.Port(); port != "" {
+		value, err := strconv.Atoi(port)
+		if err != nil || value < 1 || value > 65535 {
+			return nil, fmt.Errorf("base URL port %q is outside 1-65535: %w", port, ErrHostNotCanonical)
+		}
+	}
+	req, _ := http.NewRequest("GET", base, nil)
+	if err := req.WriteProxy(io.Discard); err != nil {
+		return nil, fmt.Errorf("base URL host %q: %w: %w", cfg.Host, ErrHostUnserializable, err)
+	}
+
+	serverTime := cfg.Clock.ServerNow(cfg.Signer.Venue())
+	bound := cfg.RecvWindow
+	if aheadTolerance < bound {
+		bound = aheadTolerance
+	}
+	if err := checkServerTime(serverTime, cfg.RecvWindow); err != nil {
+		return nil, fmt.Errorf("signing readiness band %s must be inside bound %s: %w",
+			serverTime.Uncertainty(), bound, err)
+	}
+
+	if cfg.Spend == nil {
+		return nil, ErrSpendLockUnset
+	}
+	if cfg.Spend.Domain() != cfg.Signer.SpendDomain() {
+		return nil, fmt.Errorf("lock domain %q, signer domain %q: %w",
+			cfg.Spend.Domain(), cfg.Signer.SpendDomain(), ErrSpendLockDomainMismatch)
+	}
+	if cfg.Spend.Fingerprint() != cfg.Signer.Fingerprint() {
+		return nil, ErrSpendLockFingerprintMismatch
+	}
 	return &SignedClient{
 		cfg: cfg,
 		client: &http.Client{
@@ -229,6 +283,10 @@ type Call struct {
 
 	// Cost is what the call charges.
 	Cost ratelimit.Cost
+
+	// Hold is package occupancy to consume at send. Nil preserves acquire-at-send
+	// for reads and single-order mode, where no package reservation exists.
+	Hold *ratelimit.Hold
 }
 
 // Response is what the venue answered.
@@ -244,7 +302,9 @@ type Response struct {
 // effect classification changes:
 //
 //  1. Validate — our own refusal, nothing sent, EffectNotApplied.
-//  2. Acquire from the governor — a local decline, nothing sent, EffectNotApplied.
+//  2. Prepare the exact rate-limit request, then either Acquire from the
+//     governor or consume the supplied package hold — a local decline in either
+//     branch means nothing was sent, EffectNotApplied.
 //  3. Read the server clock and sign — a refusal here is still pre-send.
 //  4. Send, ONCE. From this point "not sent" can no longer be inferred.
 //  5. Fold the venue's headers into the governor, whatever the status.
@@ -261,19 +321,25 @@ type Response struct {
 // read the status alone would return (Response, nil) for a rejected order. See
 // envelope.go.
 func (c *SignedClient) Do(ctx context.Context, call Call) (Response, error) {
-	req := ratelimit.Request{
-		Family:   call.Family,
-		Endpoint: c.cfg.Limits.Endpoint(call.Path),
-		Priority: call.Priority,
-		Cost:     call.Cost,
-	}
-	if err := req.Validate(); err != nil {
+	req, err := c.Prepare(call)
+	if err != nil {
 		return Response{}, apperror.Precondition(call.Op, "rate-limit request", err)
 	}
 
-	decision, err := c.cfg.Governor.Acquire(req)
-	if err != nil {
-		return Response{}, apperror.Precondition(call.Op, "governor", err)
+	var decision ratelimit.Decision
+	if call.Hold == nil {
+		decision, err = c.cfg.Governor.Acquire(req)
+		if err != nil {
+			return Response{}, apperror.Precondition(call.Op, "governor", err)
+		}
+	} else {
+		if !call.Hold.MintedBy(c.cfg.Governor) {
+			return Response{}, apperror.Precondition(call.Op, "hold", ErrHoldForeignGovernor)
+		}
+		decision, err = call.Hold.Consume(req)
+		if err != nil {
+			return Response{}, apperror.Precondition(call.Op, "hold", err)
+		}
 	}
 	if derr := decision.Err(); derr != nil {
 		// Refused locally: nothing left the process. RateLimited fixes Effect at
@@ -347,6 +413,35 @@ func (c *SignedClient) Do(ctx context.Context, call Call) (Response, error) {
 		return out, aerr
 	}
 	return out, nil
+}
+
+// Prepare is the shared reservation/send seam: it prices the exact request Do
+// will charge and proves the method plus constructed URL are acceptable to the
+// same standard-library constructor the send uses. One spelling prevents a
+// package from reserving a cheaper or more buildable call than it later sends.
+func (c *SignedClient) Prepare(call Call) (ratelimit.Request, error) {
+	req := ratelimit.Request{
+		Family:   call.Family,
+		Endpoint: c.cfg.Limits.Endpoint(call.Path),
+		Priority: call.Priority,
+		Cost:     call.Cost,
+	}
+	if err := req.Validate(); err != nil {
+		return ratelimit.Request{}, err
+	}
+	base := c.cfg.Scheme + "://" + c.cfg.Host
+	if _, err := http.NewRequest(call.Method, base+call.Path, nil); err != nil {
+		return ratelimit.Request{}, fmt.Errorf("method %q path %q: %w: %w",
+			call.Method, call.Path, ErrCallUnpreparable, err)
+	}
+	return req, nil
+}
+
+// UsesGovernor answers identity for venue-level construction without exposing
+// the governor value. Reservation correctness depends on every family transport
+// sharing the governor that owns the batch.
+func (c *SignedClient) UsesGovernor(g *ratelimit.Governor) bool {
+	return c.cfg.Governor == g
 }
 
 // observe folds the venue's rate-limit headers into the governor and reports

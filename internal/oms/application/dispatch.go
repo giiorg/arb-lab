@@ -9,6 +9,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/apperror"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
+	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
 )
 
 // Dispatcher is build-spec §6 step 6's crash boundary: the one place in this
@@ -321,7 +322,9 @@ func (o Outcome) HoldsNewTrading() bool { return !o.Applied || o.AckConflict }
 // the commitment to call Place exactly once: refusing after it would leave a
 // durable authorization for an order nothing ever sent, which §5.3 then resolves
 // by querying a venue that never heard of it.
-func (d *Dispatcher) Dispatch(id ids.ClientOrderID, expected int64, urgency ports.Urgency) (Outcome, error) {
+// A nil hold preserves acquire-at-send for the single-order resolution mode;
+// package execution supplies a hold and this method carries it untouched.
+func (d *Dispatcher) Dispatch(id ids.ClientOrderID, expected int64, urgency ports.Urgency, hold *ratelimit.Hold) (Outcome, error) {
 	if err := urgency.Validate(); err != nil {
 		return Outcome{}, fmt.Errorf("dispatch order %q urgency: %w", id, err)
 	}
@@ -395,7 +398,7 @@ func (d *Dispatcher) Dispatch(id ids.ClientOrderID, expected int64, urgency port
 	// the consequence is stated.
 	authorized, applyErr := d.orders.ApplyAuthorized(id, expected, authorizedAt)
 
-	ack, placeErr := d.placer.Place(o, urgency)
+	ack, placeErr := d.placer.Place(o, urgency, hold)
 
 	state, unhandled := classifyPlace(placeErr)
 

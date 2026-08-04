@@ -6,7 +6,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -735,6 +737,11 @@ func signedClient(t *testing.T, v ids.Venue, srv *httptest.Server, gov *ratelimi
 	if err != nil {
 		t.Fatalf("signer: %v", err)
 	}
+	spend, err := transport.AcquireSpendLock(t.TempDir(), signer.SpendDomain(), cred)
+	if err != nil {
+		t.Fatalf("AcquireSpendLock: %v", err)
+	}
+	t.Cleanup(func() { _ = spend.Close() })
 	c, err := transport.NewSignedClient(transport.SignedClientConfig{
 		Scheme:     "http",
 		Host:       strings.TrimPrefix(srv.URL, "http://"),
@@ -746,6 +753,7 @@ func signedClient(t *testing.T, v ids.Venue, srv *httptest.Server, gov *ratelimi
 		Envelope:   env,
 		Governor:   gov,
 		Clock:      testClock(t, v),
+		Spend:      spend,
 	})
 	if err != nil {
 		t.Fatalf("NewSignedClient: %v", err)
@@ -786,7 +794,7 @@ func TestBinancePlaceRoutesEachFamilyToItsOwnHost(t *testing.T) {
 	// envelopes for one IP, each seeing half the traffic.
 	gov := testGovernor(t, testBinance)
 	client, err := venue.NewOrderClient(venue.OrderClientConfig{
-		Codec: binanceCodec(t),
+		Codec: binanceCodec(t), Governor: gov,
 		Transports: map[ids.ProductCategory]*transport.SignedClient{
 			ids.ProductLinearPerp: signedClient(t, testBinance, futuresSrv, gov),
 			ids.ProductSpot:       signedClient(t, testBinance, spotSrv, gov),
@@ -818,10 +826,11 @@ func TestPlaceRefusesAnUnroutedFamily(t *testing.T) {
 	t.Parallel()
 
 	srv, paths := recordingServer(t, `{}`)
+	gov := testGovernor(t, testBinance)
 	client, err := venue.NewOrderClient(venue.OrderClientConfig{
-		Codec: binanceCodec(t),
+		Codec: binanceCodec(t), Governor: gov,
 		Transports: map[ids.ProductCategory]*transport.SignedClient{
-			ids.ProductLinearPerp: signedClient(t, testBinance, srv, testGovernor(t, testBinance)),
+			ids.ProductLinearPerp: signedClient(t, testBinance, srv, gov),
 		},
 	})
 	if err != nil {
@@ -846,10 +855,11 @@ func TestPlaceRefusesAnotherVenuesOrder(t *testing.T) {
 	t.Parallel()
 
 	srv, paths := recordingServer(t, `{}`)
+	gov := testGovernor(t, testBinance)
 	client, err := venue.NewOrderClient(venue.OrderClientConfig{
-		Codec: binanceCodec(t),
+		Codec: binanceCodec(t), Governor: gov,
 		Transports: map[ids.ProductCategory]*transport.SignedClient{
-			ids.ProductLinearPerp: signedClient(t, testBinance, srv, testGovernor(t, testBinance)),
+			ids.ProductLinearPerp: signedClient(t, testBinance, srv, gov),
 		},
 	})
 	if err != nil {
@@ -873,9 +883,10 @@ func TestBybitPlaceClassifiesARefusalUnderHTTP200(t *testing.T) {
 	t.Parallel()
 
 	srv, _ := recordingServer(t, `{"retCode":10001,"retMsg":"Illegal category","result":{},"retExtInfo":{}}`)
-	signed := signedClient(t, testBybit, srv, testGovernor(t, testBybit))
+	gov := testGovernor(t, testBybit)
+	signed := signedClient(t, testBybit, srv, gov)
 	client, err := venue.NewOrderClient(venue.OrderClientConfig{
-		Codec: bybitCodec(t),
+		Codec: bybitCodec(t), Governor: gov,
 		Transports: map[ids.ProductCategory]*transport.SignedClient{
 			ids.ProductLinearPerp: signed,
 			ids.ProductSpot:       signed, // one host serves both families
@@ -910,9 +921,11 @@ func TestBybitPlaceSendsTheSignedBodyVerbatim(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	signed := signedClient(t, testBybit, srv, testGovernor(t, testBybit))
+	gov := testGovernor(t, testBybit)
+	signed := signedClient(t, testBybit, srv, gov)
 	client, err := venue.NewOrderClient(venue.OrderClientConfig{
 		Codec:      bybitCodec(t),
+		Governor:   gov,
 		Transports: map[ids.ProductCategory]*transport.SignedClient{ids.ProductLinearPerp: signed},
 	})
 	if err != nil {
@@ -946,10 +959,11 @@ func TestPlaceReportsAnUndecodableAckAsApplied(t *testing.T) {
 	t.Parallel()
 
 	srv, _ := recordingServer(t, `{"orderId":1,"clientOrderId":"somebody-elses-order"}`)
+	gov := testGovernor(t, testBinance)
 	client, err := venue.NewOrderClient(venue.OrderClientConfig{
-		Codec: binanceCodec(t),
+		Codec: binanceCodec(t), Governor: gov,
 		Transports: map[ids.ProductCategory]*transport.SignedClient{
-			ids.ProductLinearPerp: signedClient(t, testBinance, srv, testGovernor(t, testBinance)),
+			ids.ProductLinearPerp: signedClient(t, testBinance, srv, gov),
 		},
 	})
 	if err != nil {
@@ -969,10 +983,11 @@ func TestNewOrderClientRefusesAnIncompleteSurface(t *testing.T) {
 	t.Parallel()
 
 	srv, _ := recordingServer(t, `{}`)
+	gov := testGovernor(t, testBinance)
 	good := venue.OrderClientConfig{
-		Codec: binanceCodec(t),
+		Codec: binanceCodec(t), Governor: gov,
 		Transports: map[ids.ProductCategory]*transport.SignedClient{
-			ids.ProductLinearPerp: signedClient(t, testBinance, srv, testGovernor(t, testBinance)),
+			ids.ProductLinearPerp: signedClient(t, testBinance, srv, gov),
 		},
 	}
 	if _, err := venue.NewOrderClient(good); err != nil {
@@ -987,10 +1002,140 @@ func TestNewOrderClientRefusesAnIncompleteSurface(t *testing.T) {
 	}
 	nilRoute := venue.OrderClientConfig{
 		Codec:      good.Codec,
+		Governor:   good.Governor,
 		Transports: map[ids.ProductCategory]*transport.SignedClient{ids.ProductSpot: nil},
 	}
 	if _, err := venue.NewOrderClient(nilRoute); !errors.Is(err, venue.ErrOrderTransportsUnset) {
 		t.Errorf("a client with a nil route = %v, want ErrOrderTransportsUnset", err)
+	}
+}
+
+func TestOrderClientReservesAndConsumesExactPlacementCosts(t *testing.T) {
+	t.Parallel()
+	id := string(mintedID(t))
+	ack := `{"orderId":22542179,"clientOrderId":"` + id + `"}`
+	perpSrv, _ := recordingServer(t, ack)
+	spotSrv, _ := recordingServer(t, ack)
+	g := testGovernor(t, testBinance)
+	client, err := venue.NewOrderClient(venue.OrderClientConfig{
+		Codec: binanceCodec(t), Governor: g,
+		Transports: map[ids.ProductCategory]*transport.SignedClient{
+			ids.ProductLinearPerp: signedClient(t, testBinance, perpSrv, g),
+			ids.ProductSpot:       signedClient(t, testBinance, spotSrv, g),
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewOrderClient: %v", err)
+	}
+	reqs := []venue.OrderRequest{perpRequest(t, testBinance), spotRequest(t, testBinance)}
+	h, d, err := client.ReservePlace(reqs)
+	if err != nil || !d.Admitted {
+		t.Fatalf("ReservePlace = (%v, %+v, %v)", h, d, err)
+	}
+	for _, l := range g.Snapshot().Limits {
+		want := uint64(0)
+		switch {
+		case l.Scope == ratelimit.ScopeVenue:
+			want = 2
+		case l.Family == ids.ProductLinearPerp && l.Dimension == ratelimit.DimensionOrders:
+			want = 1
+		case l.Family == ids.ProductSpot && l.Dimension == ratelimit.DimensionWeight:
+			want = 1
+		case l.Family == ids.ProductSpot && l.Dimension == ratelimit.DimensionOrders:
+			want = 1
+		}
+		if l.Reserved != want || l.Used != 0 {
+			t.Errorf("limit %q/%s = Reserved %d Used %d, want %d/0",
+				l.Name, l.Family, l.Reserved, l.Used, want)
+		}
+	}
+	for _, req := range reqs {
+		req.Hold = h
+		if _, err := client.Place(context.Background(), req); err != nil {
+			t.Fatalf("Place(%s): %v", req.Instrument.Product, err)
+		}
+	}
+	for _, l := range g.Snapshot().Limits {
+		if l.Reserved != 0 {
+			t.Errorf("limit %q residual Reserved = %d, want 0", l.Name, l.Reserved)
+		}
+	}
+}
+
+type secondLegUnpreparableCodec struct {
+	venue.OrderCodec
+}
+
+func (c secondLegUnpreparableCodec) EncodePlace(r venue.OrderRequest) (transport.Call, error) {
+	call, err := c.OrderCodec.EncodePlace(r)
+	if err == nil && r.Instrument.Product == ids.ProductSpot {
+		// Invalid URL escape, selected on the SECOND request in the fixture. The
+		// first call is fully encoded and prepared before this one refuses.
+		call.Path = "/%zz"
+	}
+	return call, err
+}
+
+// TestReservePlacePreparesEveryLegBeforeOccupyingCapacity is the prepare-seam
+// ordering fixture. Each request is valid and the first leg is buildable; only
+// the second codec result cannot compose into an HTTP URL, so a reserve-as-you-go
+// implementation would leave visible occupancy. No request may reach the wire.
+func TestReservePlacePreparesEveryLegBeforeOccupyingCapacity(t *testing.T) {
+	var requests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		requests.Add(1)
+	}))
+	t.Cleanup(srv.Close)
+
+	gov := testGovernor(t, testBinance)
+	signed := signedClient(t, testBinance, srv, gov)
+	client, err := venue.NewOrderClient(venue.OrderClientConfig{
+		Codec: secondLegUnpreparableCodec{OrderCodec: binanceCodec(t)}, Governor: gov,
+		Transports: map[ids.ProductCategory]*transport.SignedClient{
+			ids.ProductLinearPerp: signed, ids.ProductSpot: signed,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewOrderClient: %v", err)
+	}
+	before := gov.Snapshot()
+	_, _, err = client.ReservePlace([]venue.OrderRequest{
+		perpRequest(t, testBinance), spotRequest(t, testBinance),
+	})
+	if !errors.Is(err, transport.ErrCallUnpreparable) {
+		t.Fatalf("ReservePlace = %v, want ErrCallUnpreparable", err)
+	}
+	if after := gov.Snapshot(); !reflect.DeepEqual(after, before) {
+		t.Errorf("snapshot after prepare refusal = %+v, want byte-for-byte state %+v", after, before)
+	}
+	if got := requests.Load(); got != 0 {
+		t.Errorf("HTTP requests = %d, want 0", got)
+	}
+}
+
+func TestNewOrderClientChecksGovernorIdentity(t *testing.T) {
+	t.Parallel()
+	srv, _ := recordingServer(t, `{}`)
+	gA := testGovernor(t, testBinance)
+	gB := testGovernor(t, testBinance)
+	clientA := signedClient(t, testBinance, srv, gA)
+	if _, err := venue.NewOrderClient(venue.OrderClientConfig{
+		Codec: binanceCodec(t), Governor: gA,
+		Transports: map[ids.ProductCategory]*transport.SignedClient{ids.ProductLinearPerp: clientA},
+	}); err != nil {
+		t.Fatalf("matching governor refused: %v", err)
+	}
+	if _, err := venue.NewOrderClient(venue.OrderClientConfig{
+		Codec: binanceCodec(t), Governor: gB,
+		Transports: map[ids.ProductCategory]*transport.SignedClient{ids.ProductLinearPerp: clientA},
+	}); !errors.Is(err, venue.ErrOrderGovernorMismatch) {
+		t.Fatalf("mismatched governor = %v, want ErrOrderGovernorMismatch", err)
+	}
+	if _, err := venue.NewOrderClient(venue.OrderClientConfig{
+		Codec:      binanceCodec(t),
+		Transports: map[ids.ProductCategory]*transport.SignedClient{ids.ProductLinearPerp: clientA},
+	}); !errors.Is(err, venue.ErrOrderGovernorUnset) {
+		t.Fatalf("nil governor = %v, want ErrOrderGovernorUnset", err)
 	}
 }
 

@@ -252,7 +252,7 @@ func TestConstructionRefusesAnUnusableFiltersEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	if _, err := application.NewExecutor(d, broken()); !errors.Is(err, domain.ErrFilterStepNotPositive) {
+	if _, err := application.NewExecutor(d, broken(), newFakeReserver(t)); !errors.Is(err, domain.ErrFilterStepNotPositive) {
 		t.Errorf("NewExecutor over a zero-step entry = %v, want ErrFilterStepNotPositive", err)
 	}
 }

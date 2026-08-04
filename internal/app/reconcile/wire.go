@@ -1,6 +1,7 @@
 package reconcile
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -150,22 +151,32 @@ func collaboratorsFor(d Dialect, v ids.Venue, cred transport.Credential) (collab
 // the root reads Snapshot().Bans to deliver §7.6's operator alert — the half
 // ratelimit's own doc assigns to "the caller", which until this return value
 // existed was a caller with no handle to read.
-func newOrderClient(cfg Config, clk clock.Clock) (*venue.OrderClient, *ratelimit.Governor, error) {
+type venueWiring struct {
+	client   *venue.OrderClient
+	governor *ratelimit.Governor
+	spend    *transport.SpendLock
+}
+
+func newOrderClient(cfg Config, clk clock.Clock) (venueWiring, error) {
 	cred, err := cfg.Venue.credential()
 	if err != nil {
-		return nil, nil, err
+		return venueWiring{}, err
 	}
 	parts, err := collaboratorsFor(cfg.Venue.Dialect, cfg.Venue.Venue, cred)
 	if err != nil {
-		return nil, nil, err
+		return venueWiring{}, err
 	}
 	profile, err := cfg.Venue.profile()
 	if err != nil {
-		return nil, nil, err
+		return venueWiring{}, err
 	}
 	governor, err := ratelimit.New(clk, profile)
 	if err != nil {
-		return nil, nil, err
+		return venueWiring{}, err
+	}
+	spend, err := transport.AcquireSpendLock(cfg.Venue.SpendLockDir, parts.signer.SpendDomain(), cred)
+	if err != nil {
+		return venueWiring{}, err
 	}
 
 	transports := make(map[ids.ProductCategory]*transport.SignedClient, len(cfg.Venue.Endpoints))
@@ -181,15 +192,18 @@ func newOrderClient(cfg Config, clk clock.Clock) (*venue.OrderClient, *ratelimit
 			Envelope:   parts.envelope,
 			Governor:   governor,
 			Clock:      clk,
+			Spend:      spend,
 		})
 		if err != nil {
-			return nil, nil, fmt.Errorf("endpoint %s: %w", e.Product, err)
+			return venueWiring{}, errors.Join(fmt.Errorf("endpoint %s: %w", e.Product, err), spend.Close())
 		}
 		transports[e.Product] = client
 	}
-	client, err := venue.NewOrderClient(venue.OrderClientConfig{Codec: parts.codec, Transports: transports})
+	client, err := venue.NewOrderClient(venue.OrderClientConfig{
+		Codec: parts.codec, Transports: transports, Governor: governor,
+	})
 	if err != nil {
-		return nil, nil, err
+		return venueWiring{}, errors.Join(err, spend.Close())
 	}
-	return client, governor, nil
+	return venueWiring{client: client, governor: governor, spend: spend}, nil
 }

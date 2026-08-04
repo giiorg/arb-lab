@@ -96,6 +96,9 @@ var (
 	ErrOrderQuantityNotPositive = errors.New("venue: order quantity is not positive")
 	ErrOrderCodecUnset          = errors.New("venue: order codec unset")
 	ErrOrderTransportsUnset     = errors.New("venue: order client has no signed transport for a product family")
+	ErrOrderGovernorUnset       = errors.New("venue: order governor unset")
+	ErrOrderGovernorMismatch    = errors.New("venue: order transport uses a different governor")
+	ErrOrderReserveEmpty        = errors.New("venue: order reservation batch is empty")
 
 	// ErrReduceOnlyOnSpot reports §5.3's flag on an instrument that has no
 	// position to reduce. Refused rather than dropped: an order sent without a

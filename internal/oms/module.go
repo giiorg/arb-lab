@@ -446,7 +446,9 @@ func New(deps Deps) (*Module, error) {
 		return nil, errors.Join(fmt.Errorf("oms: dispatcher: %w", err), journal.Close())
 	}
 
-	executor, err := application.NewExecutor(dispatcher, deps.InstrumentFilters)
+	// The same gateway is narrowed into placement and reservation capabilities;
+	// reserve-here/place-there cannot be wired by the root.
+	executor, err := application.NewExecutor(dispatcher, deps.InstrumentFilters, placer)
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("oms: executor: %w", err), journal.Close())
 	}

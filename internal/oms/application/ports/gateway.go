@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/giiorg/arb-lab/internal/oms/domain"
+	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
 )
 
 // OrderPlacer is §4's OrderGateway narrowed to its first method.
@@ -63,7 +64,10 @@ type OrderPlacer interface {
 	// codec, the planner and recovery. Landed as §4's Place signature, §5.3's
 	// command→class table and §7.6's carrier paragraph; the rejected field is
 	// recorded there too, so a later slice reopens it deliberately.
-	Place(o domain.Order, u Urgency) (Ack, error)
+	// [SPEC EDIT OWED] §4 must carry the package hold on this Place signature.
+	// A nil hold is the single-order acquire-at-send mode; package execution
+	// supplies the reservation minted before its first fsync.
+	Place(o domain.Order, u Urgency, hold *ratelimit.Hold) (Ack, error)
 }
 
 // Urgency is §7.6's shed class, narrowed to the two values an ORDER can carry.

@@ -145,6 +145,21 @@ func TestWriteRateLimitStatusDrawsSection76sLine(t *testing.T) {
 
 	buf.Reset()
 	writeRateLimitStatus(&buf, ratelimit.Snapshot{
+		Venue: ids.Venue("bybit"),
+		Limits: []ratelimit.LimitState{
+			{Name: "order_realtime", Reserved: 1},
+			{Name: "order_history", Reserved: 2},
+		},
+	})
+	wantReserved := "" +
+		"ratelimit: bybit order_realtime: 1 unit(s) reserved for an in-flight package\n" +
+		"ratelimit: bybit order_history: 2 unit(s) reserved for an in-flight package\n"
+	if got := buf.String(); got != wantReserved {
+		t.Errorf("reserved lines = %q, want %q", got, wantReserved)
+	}
+
+	buf.Reset()
+	writeRateLimitStatus(&buf, ratelimit.Snapshot{
 		Venue: ids.Venue("bybit"), Bans: 1,
 		Limits: []ratelimit.LimitState{{Name: "order_realtime", FoldMisses: 1}},
 	})

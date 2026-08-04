@@ -141,6 +141,11 @@ type VenueConfig struct {
 	APIKeyRef    config.SecretRef `json:"api_key_ref"`
 	APISecretRef config.SecretRef `json:"api_secret_ref"`
 
+	// SpendLockDir carries the one-spender namespace for this credentialed root.
+	// It is required beside the refs it protects; all lock-aware processes on one
+	// host must share it or they deliberately do not share the guard.
+	SpendLockDir string `json:"spend_lock_dir"`
+
 	// Endpoints is one entry per product family, and an unconfigured family is
 	// refused rather than defaulted anywhere below. On Binance the families are
 	// different HOSTS, and "BTCUSDT" exists on both: a spot order sent to the
@@ -422,6 +427,9 @@ func (v VenueConfig) validate() error {
 	}
 	if err := v.APISecretRef.Validate(); err != nil {
 		return fmt.Errorf("venue.api_secret_ref: %w", err)
+	}
+	if v.SpendLockDir == "" {
+		return fmt.Errorf("venue.spend_lock_dir: %w", ErrConfigFieldUnset)
 	}
 	if len(v.Endpoints) == 0 {
 		return fmt.Errorf("venue.endpoints: %w", ErrConfigFieldUnset)

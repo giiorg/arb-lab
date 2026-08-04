@@ -9,6 +9,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/boot"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
+	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
 )
 
 // Executor is §6 step 6's package half: "parallel marketable-IOC limit orders
@@ -43,12 +44,13 @@ import (
 // DispatchAuthority). Serialisation of Execute itself is the composition
 // root's, on the same terms the dispatcher states for Dispatch.
 type Executor struct {
-	journal ports.Journal
-	placer  ports.OrderPlacer
-	orders  ports.OrderWriteRepository
-	clk     clock.Clock
-	auth    *DispatchAuthority
-	filters map[ids.VenueInstrument]domain.TradingFilters
+	journal  ports.Journal
+	placer   ports.OrderPlacer
+	orders   ports.OrderWriteRepository
+	clk      clock.Clock
+	auth     *DispatchAuthority
+	filters  map[ids.VenueInstrument]domain.TradingFilters
+	reserver ports.CapacityReserver
 }
 
 // NewExecutor constructs the use case FROM the process's dispatcher, and the
@@ -75,21 +77,26 @@ type Executor struct {
 // pre-filters build) planned it, not by this process's. filters.go states the
 // argument in full. NewPlanner's nil-map contract holds here identically: a
 // nil map executes nothing, refusing each package on its first leg.
-func NewExecutor(d *Dispatcher, filters map[ids.VenueInstrument]domain.TradingFilters) (*Executor, error) {
+func NewExecutor(d *Dispatcher, filters map[ids.VenueInstrument]domain.TradingFilters,
+	reserver ports.CapacityReserver) (*Executor, error) {
 	if d == nil {
 		return nil, ErrDispatcherMissing
 	}
 	if err := validateFilters(filters); err != nil {
 		return nil, err
 	}
+	if reserver == nil {
+		return nil, ErrReserverMissing
+	}
 	// d's own constructor refused every nil, so these copies are known good.
 	return &Executor{
-		journal: d.journal,
-		placer:  d.placer,
-		orders:  d.orders,
-		clk:     d.clk,
-		auth:    d.auth,
-		filters: filters,
+		journal:  d.journal,
+		placer:   d.placer,
+		orders:   d.orders,
+		clk:      d.clk,
+		auth:     d.auth,
+		filters:  filters,
+		reserver: reserver,
 	}, nil
 }
 
@@ -248,8 +255,49 @@ func (e *Executor) Execute(c *boot.Checklist, refs []DispatchRef, urgency ports.
 		return Execution{}, err
 	}
 
-	if err := e.preflight(refs); err != nil {
+	records, err := e.preflight(refs)
+	if err != nil {
 		return Execution{}, err
+	}
+
+	orders := make([]domain.Order, len(records))
+	for i, record := range records {
+		orders[i] = record.Order
+	}
+	holds, err := e.reserver.ReservePlacements(orders, urgency)
+	if err != nil {
+		return Execution{}, err
+	}
+	// Occupancy never ages out, so cleanup is armed immediately after the
+	// successful reserve and before any dispatcher construction or fsync. Pointer
+	// identity avoids redundant calls today without assuming future per-venue
+	// holds are all the same token; Cancel cannot touch consumed entries.
+	distinct := make([]*ratelimit.Hold, 0, len(holds))
+	seenHolds := make(map[*ratelimit.Hold]struct{}, len(holds))
+	for _, h := range holds {
+		if h == nil {
+			continue
+		}
+		if _, seen := seenHolds[h]; seen {
+			continue
+		}
+		seenHolds[h] = struct{}{}
+		distinct = append(distinct, h)
+	}
+	defer func() {
+		for _, h := range distinct {
+			_ = h.Cancel()
+		}
+	}()
+	if len(holds) != len(refs) {
+		return Execution{}, fmt.Errorf("hold vector got %d entries, want %d: %w",
+			len(holds), len(refs), ErrHoldVectorInvalid)
+	}
+	for i, h := range holds {
+		if h == nil {
+			return Execution{}, fmt.Errorf("hold vector entry %d is nil, got %d entries, want %d non-nil: %w",
+				i, len(holds), len(refs), ErrHoldVectorInvalid)
+		}
 	}
 
 	// The per-leg dispatchers are constructed HERE, serially and before the
@@ -277,7 +325,7 @@ func (e *Executor) Execute(c *boot.Checklist, refs []DispatchRef, urgency ports.
 		wg.Add(1)
 		go func(i int, ref DispatchRef, d *Dispatcher) {
 			defer wg.Done()
-			outcome, err := d.Dispatch(ref.ID, ref.Version, urgency)
+			outcome, err := d.Dispatch(ref.ID, ref.Version, urgency, holds[i])
 			results[i] = LegResult{ID: ref.ID, Outcome: outcome, Err: err}
 		}(i, ref, dispatchers[i])
 	}
@@ -334,7 +382,7 @@ func actFor(u ports.Urgency) boot.Act {
 
 // preflight establishes that the whole package may be sent. Everything here is
 // a read.
-func (e *Executor) preflight(refs []DispatchRef) error {
+func (e *Executor) preflight(refs []DispatchRef) ([]ports.OrderRecord, error) {
 	seen := make(map[ids.ClientOrderID]struct{}, len(refs))
 	recs := make([]ports.OrderRecord, 0, len(refs))
 	var trade ids.TradeID
@@ -347,11 +395,11 @@ func (e *Executor) preflight(refs []DispatchRef) error {
 		// checked against what the ids themselves encode.
 		parsed, err := ids.ParseClientOrderID(string(ref.ID))
 		if err != nil {
-			return fmt.Errorf("execute package leg %d: %q: %w: %w",
+			return nil, fmt.Errorf("execute package leg %d: %q: %w: %w",
 				i, ref.ID, ErrOrderNotOMSMinted, err)
 		}
 		if _, dup := seen[ref.ID]; dup {
-			return fmt.Errorf("execute package leg %d: %q: %w", i, ref.ID, ErrPackageDuplicateLeg)
+			return nil, fmt.Errorf("execute package leg %d: %q: %w", i, ref.ID, ErrPackageDuplicateLeg)
 		}
 		seen[ref.ID] = struct{}{}
 
@@ -359,27 +407,27 @@ func (e *Executor) preflight(refs []DispatchRef) error {
 			trade, attempt = parsed.Trade, parsed.Attempt
 		} else {
 			if parsed.Trade != trade {
-				return fmt.Errorf("execute package leg %d: %q names trade %s, leg 0 names %s: %w",
+				return nil, fmt.Errorf("execute package leg %d: %q names trade %s, leg 0 names %s: %w",
 					i, ref.ID, parsed.Trade, trade, ErrPackageMixedTrades)
 			}
 			if parsed.Attempt != attempt {
-				return fmt.Errorf("execute package leg %d: %q is attempt %d, leg 0 is attempt %d: %w",
+				return nil, fmt.Errorf("execute package leg %d: %q is attempt %d, leg 0 is attempt %d: %w",
 					i, ref.ID, parsed.Attempt, attempt, ErrPackageMixedAttempts)
 			}
 		}
 		rec, err := e.orders.Load(ref.ID)
 		if err != nil {
-			return fmt.Errorf("execute package leg %d: %q: %w", i, ref.ID, err)
+			return nil, fmt.Errorf("execute package leg %d: %q: %w", i, ref.ID, err)
 		}
 		if rec.Version != ref.Version {
-			return fmt.Errorf("execute package leg %d: %q is at version %d, execute expected %d: %w",
+			return nil, fmt.Errorf("execute package leg %d: %q is at version %d, execute expected %d: %w",
 				i, ref.ID, rec.Version, ref.Version, ports.ErrVersionConflict)
 		}
 		if err := domain.CanTransition(rec.State, domain.StateDispatchAuthorized); err != nil {
-			return fmt.Errorf("execute package leg %d: %q: %w", i, ref.ID, err)
+			return nil, fmt.Errorf("execute package leg %d: %q: %w", i, ref.ID, err)
 		}
 		if rec.Order.Type != domain.OrderTypeLimit || rec.Order.TimeInForce != domain.TimeInForceIOC {
-			return fmt.Errorf("execute package leg %d: %q is %s/%s: %w",
+			return nil, fmt.Errorf("execute package leg %d: %q is %s/%s: %w",
 				i, ref.ID, rec.Order.Type, rec.Order.TimeInForce, ErrNotMarketableIOCLimit)
 		}
 		recs = append(recs, rec)
@@ -394,7 +442,7 @@ func (e *Executor) preflight(refs []DispatchRef) error {
 		// as a mismatch rather than comparing mantissas that happen to agree.
 		cmp, err := rec.Order.Quantity.Cmp(first.Order.Quantity)
 		if err != nil || cmp != 0 {
-			return fmt.Errorf("execute package leg %d: %q quantity %s, leg 0 quantity %s: %w",
+			return nil, fmt.Errorf("execute package leg %d: %q quantity %s, leg 0 quantity %s: %w",
 				i, ref.ID, rec.Order.Quantity, first.Order.Quantity,
 				joinNonNil(ErrPackageQuantityMismatch, err))
 		}
@@ -411,10 +459,10 @@ func (e *Executor) preflight(refs []DispatchRef) error {
 	for i, rec := range recs {
 		if err := conformsToFilters(e.filters, rec.Order.Instrument,
 			rec.Order.Quantity, rec.Order.LimitPrice); err != nil {
-			return fmt.Errorf("execute package leg %d: %q: %w", i, rec.Order.ClientOrderID, err)
+			return nil, fmt.Errorf("execute package leg %d: %q: %w", i, rec.Order.ClientOrderID, err)
 		}
 	}
-	return nil
+	return recs, nil
 }
 
 // joinNonNil wraps base with detail when there is one, so a caller always has

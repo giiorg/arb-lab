@@ -178,4 +178,24 @@ var (
 	// ErrClockNil reports a governor constructed with no clock. §3.6 rule 5
 	// forbids reading the ambient one, so there is no fallback to take.
 	ErrClockNil = errors.New("ratelimit: clock is nil")
+
+	// ErrReserveEmpty reports a package reservation with no requests. Such a
+	// hold cannot protect a send and would make a successful zero value look
+	// meaningful.
+	ErrReserveEmpty = errors.New("ratelimit: reserve batch is empty")
+
+	// ErrReservePriorityMixed reports requests from one package that name
+	// different priorities. A package is one command, so choosing a ceiling per
+	// window would make its urgency depend on iteration order.
+	ErrReservePriorityMixed = errors.New("ratelimit: reserve priorities differ")
+
+	// ErrReserveOverflow reports a batch whose per-window total cannot be stated
+	// in uint64. Saturating would make the summary disagree with both its entries
+	// and the occupancy later released from them.
+	ErrReserveOverflow = errors.New("ratelimit: reserve cost overflows")
+
+	// ErrHoldEntryUnmatched reports a request that has no still-reserved entry
+	// in the hold. Wrong, consumed, and canceled requests all fail closed at the
+	// last seam before a send.
+	ErrHoldEntryUnmatched = errors.New("ratelimit: hold entry unmatched")
 )

@@ -147,6 +147,7 @@ func chaosConfig(t *testing.T, dir, host string) string {
     "dialect": "binance",
     "api_key_ref": "env:ARBLAB_CHAOS_KEY",
     "api_secret_ref": "env:ARBLAB_CHAOS_SECRET",
+    "spend_lock_dir": %q,
     "endpoints": [
       {"product": "spot", "scheme": "http", "host": %q},
       {"product": "linear_perp", "scheme": "http", "host": %q}
@@ -199,7 +200,7 @@ func chaosConfig(t *testing.T, dir, host string) string {
     ]
   },
   "reference": {"path": %q, "max_age": "24h"}
-}`, filepath.Join(dir, "journal.db"), host, host, chaosReference(t, dir))
+}`, filepath.Join(dir, "journal.db"), dir, host, host, chaosReference(t, dir))
 
 	path := filepath.Join(dir, "exercise.json")
 	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {

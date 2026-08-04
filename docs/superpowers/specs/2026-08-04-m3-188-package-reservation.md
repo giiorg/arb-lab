@@ -40,10 +40,25 @@
 > record; §68f); **round 11 SHIP** (zero material findings; convergence
 > confirmed against the shipped governor, transport ordering, wiring
 > and both roots' lifecycles; items 10–12's reopening triggers checked
-> un-fired). **Appendix A is written. Next: dispatch the implementation
-> from Appendix A verbatim, post-write review every changed file,
-> collapse checklist before the mutation campaign per §68e/A-19, docs
-> to v0.9.47, close #188.** Nothing in `internal/` has been touched.
+> un-fired). **The implementation LANDED (session 100, second-model
+> codex session `impl-188-reservation`, two turns — the first cut off
+> by a client crash at ~27min with its partial tree preserved and
+> resumed): A-1…A-18 complete, zero stated deviations, the §68b.5a
+> wall.go constancy caveat re-verified by the builder, exactly one
+> [SPEC EDIT OWED] marker (ports.OrderPlacer.Place), `make ci` green on
+> both modules VERIFIED BY THE ORCHESTRATOR. Post-write review is
+> partially done (platform/transport/venue/oms layers read against
+> Appendix A) with TWO QUEUED FINDINGS, not yet fixed: (1) DEFECT —
+> `Hold.Consume` (hold.go, the capacity loop) lacks `admits`' `units ==
+> 0` guard, so a fold past capacity on a window an entry charges ZERO
+> units on refuses the leg — a §68e discrimination-fixture violation;
+> fix is `if units == 0 { continue }` plus its fixture; (2) NIT —
+> signed.go's WriteProxy dry-run discards the `http.NewRequest` error
+> before dereferencing (unreachable, but name the unreachability).
+> Next: loop both through the SAME codex session, re-verify, finish the
+> post-write review (root/renderer/test files unread), collapse
+> checklist, mutation campaign per §68e/A-19, docs to v0.9.47, close
+> #188.**
 
 **Task:** #188 — legs acquire rate-limit capacity independently after fan-out.
 Filed during #185's design review (round 4 classified the concurrent-leg

@@ -158,6 +158,7 @@ func testClient(t *testing.T, srv *httptest.Server, gov *ratelimit.Governor) *Si
 		Envelope:   BinanceEnvelope{},
 		Governor:   gov,
 		Clock:      clk,
+		Spend:      testSpendLock(t, signer, cred),
 	})
 	if err != nil {
 		t.Fatalf("NewSignedClient: %v", err)
@@ -185,7 +186,22 @@ func testSignedClientConfig(t *testing.T, gov *ratelimit.Governor, limits LimitR
 		Scheme: "https", Host: "example.com", Timeout: 5 * time.Second, ReadLimit: 1 << 16,
 		RecvWindow: 5000 * time.Millisecond, Signer: signer, Limits: limits,
 		Envelope: BinanceEnvelope{}, Governor: gov, Clock: clk,
+		Spend: testSpendLock(t, signer, cred),
 	}
+}
+
+func testSpendLock(t *testing.T, signer Signer, cred Credential) *SpendLock {
+	t.Helper()
+	lock, err := AcquireSpendLock(t.TempDir(), signer.SpendDomain(), cred)
+	if err != nil {
+		t.Fatalf("AcquireSpendLock: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := lock.Close(); err != nil {
+			t.Errorf("SpendLock.Close: %v", err)
+		}
+	})
+	return lock
 }
 
 func bybitTestClient(
@@ -1436,4 +1452,278 @@ func TestSignedClientConfigRefusesEveryMissingDependency(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewSignedClientRequiresMatchingSpendLock(t *testing.T) {
+	t.Parallel()
+
+	base := testSignedClientConfig(t, testGovernor(t), BinanceLimitReader{})
+	if _, err := NewSignedClient(base); err != nil {
+		t.Fatalf("matching lock refused: %v", err)
+	}
+
+	without := base
+	without.Spend = nil
+	if _, err := NewSignedClient(without); !errors.Is(err, ErrSpendLockUnset) {
+		t.Fatalf("nil lock = %v, want ErrSpendLockUnset", err)
+	}
+
+	cred, err := NewCredential("test-key", "test-secret")
+	if err != nil {
+		t.Fatalf("NewCredential: %v", err)
+	}
+	wrongDomain, err := AcquireSpendLock(t.TempDir(), SpendDomainBybit, cred)
+	if err != nil {
+		t.Fatalf("Acquire wrong-domain lock: %v", err)
+	}
+	t.Cleanup(func() { _ = wrongDomain.Close() })
+	domainCfg := base
+	domainCfg.Spend = wrongDomain
+	if _, err := NewSignedClient(domainCfg); !errors.Is(err, ErrSpendLockDomainMismatch) {
+		t.Fatalf("wrong domain = %v, want ErrSpendLockDomainMismatch", err)
+	}
+
+	other, err := NewCredential("different-key", "test-secret")
+	if err != nil {
+		t.Fatalf("NewCredential other: %v", err)
+	}
+	wrongFingerprint, err := AcquireSpendLock(t.TempDir(), SpendDomainBinance, other)
+	if err != nil {
+		t.Fatalf("Acquire wrong-fingerprint lock: %v", err)
+	}
+	t.Cleanup(func() { _ = wrongFingerprint.Close() })
+	fingerprintCfg := base
+	fingerprintCfg.Spend = wrongFingerprint
+	if _, err := NewSignedClient(fingerprintCfg); !errors.Is(err, ErrSpendLockFingerprintMismatch) {
+		t.Fatalf("wrong fingerprint = %v, want ErrSpendLockFingerprintMismatch", err)
+	}
+}
+
+func TestNewSignedClientChecksSigningReadinessAtConstruction(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name        string
+		uncertainty time.Duration
+		wantErr     bool
+	}{
+		{"below bound", time.Second - time.Nanosecond, false},
+		{"at bound", time.Second, true},
+		{"above bound", time.Second + time.Nanosecond, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testSignedClientConfig(t, testGovernor(t), BinanceLimitReader{})
+			clk, err := clock.NewTestClock(time.UnixMilli(1700000000000).UTC(), []clock.Calibration{{
+				Venue: testVenue, Uncertainty: tc.uncertainty,
+			}})
+			if err != nil {
+				t.Fatalf("NewTestClock: %v", err)
+			}
+			cfg.Clock = clk
+			_, err = NewSignedClient(cfg)
+			if tc.wantErr {
+				if !errors.Is(err, ErrServerTimeUncertain) {
+					t.Fatalf("NewSignedClient = %v, want ErrServerTimeUncertain", err)
+				}
+				for _, want := range []string{tc.uncertainty.String(), time.Second.String()} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q omits %q", err, want)
+					}
+				}
+			} else if err != nil {
+				t.Fatalf("NewSignedClient: %v", err)
+			}
+		})
+	}
+}
+
+func TestNewSignedClientRefusesNoncanonicalAndUnserializableHosts(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		host string
+		want error
+	}{
+		{"invalid escape", "%", ErrHostNotCanonical},
+		{"unclosed bracket", "[::1", ErrHostNotCanonical},
+		{"userinfo", "user@host", ErrHostNotCanonical},
+		{"port range", "host:99999", ErrHostNotCanonical},
+		{"empty hostname https", ":443", ErrHostNotCanonical},
+		{"empty hostname http", ":80", ErrHostNotCanonical},
+		{"quoted host", `ho"st`, ErrHostUnserializable},
+		{"angle host", "<host>", ErrHostUnserializable},
+		{"existing denylist", "host/x", ErrHostMalformed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testSignedClientConfig(t, testGovernor(t), BinanceLimitReader{})
+			cfg.Host = tc.host
+			if _, err := NewSignedClient(cfg); !errors.Is(err, tc.want) {
+				t.Fatalf("host %q = %v, want %v", tc.host, err, tc.want)
+			}
+		})
+	}
+	if _, err := NewSignedClient(testSignedClientConfig(t, testGovernor(t), BinanceLimitReader{})); err != nil {
+		t.Fatalf("plain host refused: %v", err)
+	}
+}
+
+func TestSignedClientDoWithHoldConsumesWithoutDoubleCharge(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	g := testGovernor(t)
+	c := testClient(t, srv, g)
+	call := testCall()
+	req, err := c.Prepare(call)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	h, d, err := g.Reserve([]ratelimit.Request{req})
+	if err != nil || !d.Admitted {
+		t.Fatalf("Reserve = (%v, %+v, %v)", h, d, err)
+	}
+	call.Hold = h
+	if _, err := c.Do(context.Background(), call); err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if got := hits.Load(); got != 1 {
+		t.Fatalf("hits = %d, want 1", got)
+	}
+	for _, l := range g.Snapshot().Limits {
+		want := uint64(1)
+		if l.Used != want || l.Reserved != 0 {
+			t.Errorf("limit %q = Used %d Reserved %d, want 1/0", l.Name, l.Used, l.Reserved)
+		}
+	}
+}
+
+func TestSignedClientHoldRefusalsArePreSend(t *testing.T) {
+	t.Parallel()
+	t.Run("pause is rate limited", func(t *testing.T) {
+		var hits atomic.Int64
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			hits.Add(1)
+		}))
+		defer srv.Close()
+		g := testGovernor(t)
+		c := testClient(t, srv, g)
+		call := testCall()
+		req, _ := c.Prepare(call)
+		h, _, _ := g.Reserve([]ratelimit.Request{req})
+		call.Hold = h
+		if err := g.Penalize(ratelimit.Penalty{Kind: ratelimit.PenaltyThrottle}); err != nil {
+			t.Fatalf("Penalize: %v", err)
+		}
+		_, err := c.Do(context.Background(), call)
+		if apperror.ClassOf(err) != apperror.ClassRateLimit || apperror.EffectOf(err) != apperror.EffectNotApplied {
+			t.Fatalf("Do = %v, want RateLimit/NotApplied", err)
+		}
+		if hits.Load() != 0 {
+			t.Fatalf("hits = %d, want 0", hits.Load())
+		}
+		_ = h.Cancel()
+	})
+
+	t.Run("mismatch is precondition", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			t.Fatal("mismatched hold reached HTTP")
+		}))
+		defer srv.Close()
+		g := testGovernor(t)
+		c := testClient(t, srv, g)
+		call := testCall()
+		req, _ := c.Prepare(call)
+		req.Cost.Weight = 2
+		h, _, _ := g.Reserve([]ratelimit.Request{req})
+		call.Hold = h
+		_, err := c.Do(context.Background(), call)
+		if apperror.ClassOf(err) != apperror.ClassPrecondition || apperror.EffectOf(err) != apperror.EffectNotApplied {
+			t.Fatalf("Do = %v, want Precondition/NotApplied", err)
+		}
+		_ = h.Cancel()
+	})
+
+	t.Run("foreign governor is precondition", func(t *testing.T) {
+		var hits atomic.Int64
+		srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			hits.Add(1)
+		}))
+		defer srv.Close()
+		minting := testGovernor(t)
+		spending := testGovernor(t)
+		c := testClient(t, srv, spending)
+		call := testCall()
+		req, err := c.Prepare(call)
+		if err != nil {
+			t.Fatalf("Prepare: %v", err)
+		}
+		h, decision, err := minting.Reserve([]ratelimit.Request{req})
+		if err != nil || !decision.Admitted {
+			t.Fatalf("Reserve = (%v, %+v, %v)", h, decision, err)
+		}
+		call.Hold = h
+		_, err = c.Do(context.Background(), call)
+		if !errors.Is(err, ErrHoldForeignGovernor) ||
+			apperror.ClassOf(err) != apperror.ClassPrecondition ||
+			apperror.EffectOf(err) != apperror.EffectNotApplied {
+			t.Fatalf("Do = %v, want ErrHoldForeignGovernor Precondition/NotApplied", err)
+		}
+		if hits.Load() != 0 {
+			t.Errorf("hits = %d, want 0", hits.Load())
+		}
+		for name, g := range map[string]*ratelimit.Governor{"minting": minting, "spending": spending} {
+			for _, state := range g.Snapshot().Limits {
+				if state.Used != 0 {
+					t.Errorf("%s governor limit %s Used = %d, want 0", name, state.Name, state.Used)
+				}
+			}
+		}
+		_ = h.Cancel()
+	})
+}
+
+func TestSignedClientComposesConsumeCapacityRefusal(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+	}))
+	defer srv.Close()
+	g := testGovernor(t)
+	c := testClient(t, srv, g)
+	call := testCall()
+	req, _ := c.Prepare(call)
+	h, _, err := g.Reserve([]ratelimit.Request{req})
+	if err != nil {
+		t.Fatalf("Reserve: %v", err)
+	}
+	if err := g.Observe(testFamily, "weight_1m", 2400); err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+	before := uint64(0)
+	for _, l := range g.Snapshot().Limits {
+		if l.Name == "weight_1m" {
+			before = l.Used
+		}
+	}
+	call.Hold = h
+	_, err = c.Do(context.Background(), call)
+	if apperror.ClassOf(err) != apperror.ClassRateLimit || apperror.EffectOf(err) != apperror.EffectNotApplied {
+		t.Fatalf("Do = %v, want RateLimit/NotApplied", err)
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("hits = %d, want 0", hits.Load())
+	}
+	for _, l := range g.Snapshot().Limits {
+		if l.Name == "weight_1m" && l.Used != before {
+			t.Fatalf("Used = %d, want unchanged %d", l.Used, before)
+		}
+	}
+	if got := g.Snapshot().Limits[0].Reserved; got != 1 {
+		t.Fatalf("Reserved = %d, want 1 until Cancel", got)
+	}
+	_ = h.Cancel()
 }
