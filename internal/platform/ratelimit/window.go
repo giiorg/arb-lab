@@ -132,7 +132,12 @@ func (w *window) freeAt(now time.Time, need, ceiling uint64) time.Time {
 		return time.Time{}
 	}
 	used := w.usedAt(now)
-	if need <= ceiling-used {
+	// Write this comparison in the non-underflowing direction, mirroring
+	// admits above. used may exceed ceiling after an observation or when a
+	// lower-priority request reaches its own ceiling; subtracting used from the
+	// ceiling would then wrap and falsely report that a retry succeeds now.
+	// need <= ceiling was established above, so ceiling-need is safe.
+	if used <= ceiling-need {
 		return now
 	}
 

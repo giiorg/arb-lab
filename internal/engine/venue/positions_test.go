@@ -209,9 +209,6 @@ func TestBybitPositionsScopesOnCategoryAndSettleCoin(t *testing.T) {
 	if call.Path != "/v5/position/list" {
 		t.Errorf("path = %q, want /v5/position/list", call.Path)
 	}
-	if call.Limit != venue.BybitPositionListLimit {
-		t.Errorf("limit = %q, want %q", call.Limit, venue.BybitPositionListLimit)
-	}
 	params := map[string]string{}
 	for _, p := range call.Params {
 		params[p.Key] = p.Value

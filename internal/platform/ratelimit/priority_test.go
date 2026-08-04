@@ -156,9 +156,10 @@ func TestScopeValidate(t *testing.T) {
 	}{
 		{"venue is usable", ratelimit.ScopeVenue, nil},
 		{"family is usable", ratelimit.ScopeFamily, nil},
+		{"endpoint is usable", ratelimit.ScopeEndpoint, nil},
 
 		{"the zero value is refused", ratelimit.ScopeUnspecified, ratelimit.ErrScopeInvalid},
-		{"a value past the set is refused", ratelimit.ScopeFamily + 1, ratelimit.ErrScopeInvalid},
+		{"a value past the set is refused", ratelimit.ScopeEndpoint + 1, ratelimit.ErrScopeInvalid},
 	}
 
 	for _, tc := range tests {
@@ -181,6 +182,7 @@ func TestScopeString(t *testing.T) {
 		{ratelimit.ScopeUnspecified, "ScopeUnspecified"},
 		{ratelimit.ScopeVenue, "ScopeVenue"},
 		{ratelimit.ScopeFamily, "ScopeFamily"},
+		{ratelimit.ScopeEndpoint, "ScopeEndpoint"},
 		{ratelimit.Scope(5), "Scope(5)"},
 	}
 

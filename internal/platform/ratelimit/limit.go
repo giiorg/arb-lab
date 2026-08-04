@@ -22,15 +22,16 @@ const MaxLimitNameLen = 64
 // outage while a forgotten one looked fine.
 type Limit struct {
 	// Name identifies the limit within its scope, and is what Observe folds a
-	// header reading into. A dialect that derives names from headers fixes the
-	// names of its family-scoped headered budgets: Binance weight and orders
-	// limits must bear the fold-derived name, and transport refuses a mismatch.
-	// Requests limits and Bybit names remain freely chosen until #185 gives
-	// Bybit's per-endpoint budgets a profile-side home.
+	// header reading into. For ScopeEndpoint it is also the charge discriminator
+	// a Request must match; the Bybit dialect derives that same name from the
+	// call path so the fold address and charge address cannot drift. A dialect
+	// that derives names from headers fixes the names of its family-scoped
+	// headered budgets: Binance weight and orders limits must bear the
+	// fold-derived name, and transport refuses a mismatch.
 	Name string
 
 	// Scope and Family say what the budget is shared across. Family is required
-	// for ScopeFamily and refused for ScopeVenue.
+	// for ScopeFamily and refused for ScopeVenue and ScopeEndpoint.
 	Scope  Scope
 	Family ids.ProductCategory
 
@@ -94,6 +95,13 @@ func (l Limit) Validate() error {
 		return fmt.Errorf("limit %q is venue-scoped and counts %s: %w",
 			l.Name, l.Dimension, ErrLimitScopeDimension)
 	}
+	// Endpoint meters count calls or orders carried by calls. Weight describes a
+	// different venue budget, and accepting it here would make an unverified
+	// meter shape look supported.
+	if l.Scope == ScopeEndpoint && l.Dimension == DimensionWeight {
+		return fmt.Errorf("limit %q is endpoint-scoped and counts %s: %w",
+			l.Name, l.Dimension, ErrLimitEndpointDimension)
+	}
 	if l.Interval <= 0 {
 		return fmt.Errorf("limit %q window %v: %w", l.Name, l.Interval, ErrLimitInterval)
 	}
@@ -105,6 +113,13 @@ func (l Limit) validateFamily() error {
 	case l.Scope == ScopeVenue && l.Family != "":
 		return fmt.Errorf("limit %q is venue-scoped but names family %q: %w",
 			l.Name, l.Family, ErrLimitFamily)
+	case l.Scope == ScopeEndpoint && l.Family != "":
+		// The endpoint meter's product-category split is unverified. A shared
+		// window is conservative whether the venue shares or splits the counter;
+		// a family-keyed window can instead let one leg of a two-family package
+		// send while refusing its sibling locally, leaving a naked leg.
+		return fmt.Errorf("limit %q is endpoint-scoped but names family %q: %w",
+			l.Name, l.Family, ErrLimitFamily)
 	case l.Scope == ScopeFamily && l.Family == "":
 		return fmt.Errorf("limit %q is family-scoped and names no family: %w",
 			l.Name, ErrLimitFamily)
@@ -112,6 +127,11 @@ func (l Limit) validateFamily() error {
 		if err := l.Family.Validate(); err != nil {
 			return fmt.Errorf("limit %q: %w", l.Name, err)
 		}
+	case l.Scope == ScopeVenue || l.Scope == ScopeEndpoint:
+		// Empty family is the required venue-level keyspace for both scopes.
+	case l.Scope == ScopeUnspecified:
+		// Unreachable after Scope.Validate; named so a new scope must choose its
+		// family semantics instead of inheriting one accidentally.
 	}
 	return nil
 }
@@ -181,19 +201,17 @@ func (l Limit) Reserve() uint64 {
 	return l.Capacity - l.RoutineCeiling
 }
 
-// key is the identity two limits collide on. Family is empty for ScopeVenue, so
-// a venue envelope and a family budget can share a name without sharing a
-// bucket.
+// key is the identity two limits collide on. Family is empty for ScopeVenue and
+// ScopeEndpoint, so endpoint budgets share the venue keyspace with the envelope
+// while family budgets remain separate.
 type limitKey struct {
 	family ids.ProductCategory
 	name   string
 }
 
-// key is taken AFTER Validate, which refuses a venue-scoped limit that names a
-// family. So a venue-scoped key has an empty family by construction and needs no
-// branch here — a `if l.Scope == ScopeVenue` special case was written first and
-// deleted when a mutation of it survived, which is the surviving mutant doing
-// its other job: reporting redundant code rather than a missing test.
+// key is taken AFTER Validate, which refuses venue- and endpoint-scoped limits
+// that name a family. Their keys therefore have an empty family by construction
+// and need no scope branch here.
 func (l Limit) key() limitKey {
 	return limitKey{family: l.Family, name: l.Name}
 }
@@ -201,9 +219,9 @@ func (l Limit) key() limitKey {
 // Cost is what one request charges.
 //
 // There is no Requests field, and its absence is the design. Every Acquire
-// charges exactly one request to every DimensionRequests limit, so the IP
-// envelope cannot be under-charged by a caller who forgot — and that is the one
-// budget with no header to correct the mistake afterwards.
+// charges exactly one request to every applicable DimensionRequests limit, so
+// the IP envelope and a matched requests-dimension endpoint cannot be
+// under-charged by a caller who forgot.
 type Cost struct {
 	// Weight is the venue-documented weight of the endpoint being called.
 	Weight uint64

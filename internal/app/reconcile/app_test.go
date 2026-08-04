@@ -206,6 +206,10 @@ func TestConfigRefusals(t *testing.T) {
 			c.Resolution.AssumedReach = append(c.Resolution.AssumedReach, c.Resolution.AssumedReach[0])
 		}},
 		{"limit scope unrecognised", ErrConfigFieldInvalid, func(c *Config) { c.Venue.Limits[0].Scope = "global" }},
+		{"endpoint-scoped limit naming a product is refused by the kernel", ratelimit.ErrLimitFamily, func(c *Config) {
+			c.Venue.Limits[0].Scope = "endpoint"
+			c.Venue.Limits[0].Product = ids.ProductSpot
+		}},
 		{"limit dimension unrecognised", ErrConfigFieldInvalid, func(c *Config) {
 			c.Venue.Limits[1].Dimension = "bytes"
 		}},
@@ -235,6 +239,52 @@ func TestConfigRefusals(t *testing.T) {
 			t.Errorf("%s: Validate() = %v, want %v", c.name, err, c.want)
 		}
 	}
+}
+
+func TestParseScope(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		text string
+		want ratelimit.Scope
+		err  bool
+	}{
+		{"venue", ratelimit.ScopeVenue, false},
+		{"family", ratelimit.ScopeFamily, false},
+		{"endpoint", ratelimit.ScopeEndpoint, false},
+		{"global", ratelimit.ScopeUnspecified, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.text, func(t *testing.T) {
+			t.Parallel()
+			got, err := parseScope(tc.text)
+			if got != tc.want || (err != nil) != tc.err {
+				t.Errorf("parseScope(%q) = (%s, %v), want (%s, error=%v)",
+					tc.text, got, err, tc.want, tc.err)
+			}
+		})
+	}
+}
+
+func TestProfileCarriesEndpointScopeWithoutAProduct(t *testing.T) {
+	t.Parallel()
+	cfg := validConfig(t, "/j.db")
+	cfg.Venue.Limits = append(cfg.Venue.Limits, LimitConfig{
+		Name: "endpoint_read", Scope: "endpoint", Dimension: "requests",
+		Interval: dur(t, "1s"), OpeningCeiling: 7, RoutineCeiling: 9, Capacity: 10,
+	})
+	p, err := cfg.Venue.profile()
+	if err != nil {
+		t.Fatalf("profile: %v", err)
+	}
+	for _, l := range p.Limits {
+		if l.Name == "endpoint_read" {
+			if l.Scope != ratelimit.ScopeEndpoint || l.Family != "" {
+				t.Errorf("endpoint_read = scope %s family %q, want ScopeEndpoint and no family", l.Scope, l.Family)
+			}
+			return
+		}
+	}
+	t.Fatal("endpoint_read missing from profile")
 }
 
 // TestScopeCoverageIgnoresSpot is the other half of the coverage rule, and it is

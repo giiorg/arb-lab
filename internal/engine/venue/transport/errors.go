@@ -51,9 +51,15 @@ var (
 	ErrSignerUnset            = errors.New("transport: signer unset")
 	ErrLimitReaderUnset       = errors.New("transport: limit reader unset")
 	ErrLimitFoldUnaddressable = errors.New("transport: profile limit can never receive the venue's own reading — its name does not agree with the dialect's fold-derived names")
-	ErrEnvelopeReaderUnset    = errors.New("transport: envelope reader unset — a venue that states refusals in the body would read as accepting everything")
-	ErrGovernorUnset          = errors.New("transport: governor unset")
-	ErrClockUnset             = errors.New("transport: clock unset")
+
+	// ErrEndpointBudgetMissing reports a profile that omits a dialect-required
+	// endpoint or declares it under the wrong dimension. Construction refuses
+	// it because discovering the gap on a later recovery query would strand the
+	// order that query was meant to resolve.
+	ErrEndpointBudgetMissing = errors.New("transport: required endpoint budget missing or has the wrong dimension")
+	ErrEnvelopeReaderUnset   = errors.New("transport: envelope reader unset — a venue that states refusals in the body would read as accepting everything")
+	ErrGovernorUnset         = errors.New("transport: governor unset")
+	ErrClockUnset            = errors.New("transport: clock unset")
 
 	// The server-clock refusals. Separate sentinels because they send the
 	// operator to different places: Unusable is a venue that was never

@@ -1,12 +1,77 @@
 # M3 task #185 — Bybit per-endpoint budgets: ScopeEndpoint (§66)
 
-**Date:** 2026-08-04 (session 96). **Task:** #185. **Status: DESIGN CONVERGED,
-IMPLEMENTATION NOT STARTED.** This record is deliberately committed
-mid-slice as the handoff artifact: the design survived six adversarial
-second-model review rounds (arc below), the implementation spec is Appendix B,
-and the next session implements from it. On close this record gains the
-implementation findings, the mutation table, and the docs-version note, and
-this WIP banner is replaced.
+**Date:** 2026-08-04 (design: session 96; implementation and close: session
+97). **Task:** #185 — **CLOSED.** The design survived six adversarial
+second-model review rounds before any code (arc in §66a), the implementation
+was built verbatim from Appendix B in a second-model session, and a fresh
+adversarial code_diff round then found two test-evidence defects (§66d). Docs
+are v0.9.45.
+
+## §66d — implementation findings and close evidence (session 97)
+
+**The build matched Appendix B with two argued deviations, both accepted:**
+(1) `bybitEndpoints` (path→name) is DERIVED from the single registry array
+rather than declared as a second literal map — two views over one registry
+cannot drift, which is the registry's own argument applied to itself; (2) the
+composed R1 test swaps the reader after construction, because a Bybit-shaped
+construction correctly refuses an incomplete roster before `Do` could ever
+exercise R1 — the request-time defense is unreachable through honest wiring,
+which is the boot check doing its job.
+
+**The code_diff review round (NO-SHIP → fixed in-session):**
+- MAJOR — the composed seam test asserted `Used == 40` after charge(1) +
+  fold(40), which the fold ALONE produces: replacing `Acquire` with `Check`
+  in `Do` left the whole suite green (demonstrated in an isolated copy). Fixed
+  with a headerless-success case asserting `Used == 1` and every sibling
+  endpoint at exactly zero; the mutation was then demonstrated to fail it and
+  reverted.
+- MINOR — the latest-refusal test made the envelope both FIRST-evaluated and
+  LATEST-releasing, so "name the first refusal" and "name the worst" agreed:
+  the collapse checklist's tenth instance, and a new DIMENSION of it —
+  evaluation ORDER, not a value boundary. Fixed with one subtest per ordering;
+  the skip-endpoint-after-refusal mutation demonstrated to fail the inverse
+  case, then reverted.
+- The reviewer also confirmed two orchestrator questions: `append(ws, ep)`
+  onto the applicable slice is safe (mutex-held, length never stored, Snapshot
+  walks `order`/`windows`), and the double-sentinel skip in the construction
+  walk is reachable only through Bybit's dimension-mismatch arm.
+
+**Mutation campaign: 19/19 kills, 0 survivors, 0 no-ops.** Collapse checklist
+run before mutating (the reviewer's pass found the ordering collapse above;
+value boundaries were already varied: 999ms/1001ms/2s around the 1s rule,
+unequal endpoint capacities, multi-element rosters).
+
+| # | Target | Mutation | Verdict |
+|---|---|---|---|
+| 1 | governor R2 | `if g.hasEndpoints` → `if false` | caught (2) |
+| 2 | governor R1 | sentinel swapped to `ErrEndpointUnnamed` | caught (2) |
+| 3 | governor R3 | zero-units predicate → `false` | caught (2) |
+| 4 | governor walk | `ws = append(ws, ep)` → `_ = ep` | caught (6) |
+| 5 | cannot-count ext. | `ep != nil` → `ep == nil` | caught (2) |
+| 6 | governor New | endpoint registration → `_ = w` | caught (10) |
+| 7 | window.freeAt | fix reverted to `need <= ceiling-used` | caught (2) |
+| 8 | limit.Validate | endpoint+weight refusal → `false` | caught (2) |
+| 9 | validateFamily | endpoint+family refusal → `false` | caught (2) |
+| 10 | signed.Do | pre-body fold deleted | caught (7) |
+| 11 | completeness | roster loop over empty slice | caught (3) |
+| 12 | completeness | dimension mismatch → `false` | caught (2) |
+| 13 | Bybit CheckFold | 1s rule → `false` | caught (6) |
+| 14 | Bybit CheckFold | squatter check disabled | caught (2) |
+| 15 | Observations | `Family: ""` → `call.Family` | caught (6) |
+| 16 | registry | realtime path corrupted | caught (9) |
+| 17 | parseScope | `"endpoint"` case renamed | caught (4) |
+| 18 | signed.Do | `Acquire` → `Check` (demonstrated in review, reverted) | caught |
+| 19 | governor walk | skip `ep` once refused (demonstrated in review, reverted) | caught |
+
+**Close evidence:** `make ci` green on both modules under `-race`, run by the
+orchestrator; marker grep 0 over `internal/` and `tools/`; nothing outside
+`internal/` changed by the implementation sessions. **Docs landed at close
+(v0.9.45):** core §7.6 endpoint-budget clause + the two by-reference updates
+(the `RequestOnly` parenthetical and the de-WIP'd #186 tail); venue-profiles
+§4 dated 2026-08-04 block (verified table, three verbatim sentences, WS-vs-API
+citation caveat, the named assumption as #171's loosening trigger);
+adr-history §3 block with the nine-row finding table. The tutorial's §7.6
+passage was not touched, so no ka parity was owed.
 
 **Follow-ups already filed with full context:** #187 (fold-health: a mapped
 Bybit response with missing/malformed rate-limit headers is silent — the

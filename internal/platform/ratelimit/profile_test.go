@@ -58,6 +58,13 @@ func binanceShaped() ratelimit.Profile {
 	}
 }
 
+func endpointLimit(name string, d ratelimit.Dimension) ratelimit.Limit {
+	return ratelimit.Limit{
+		Name: name, Scope: ratelimit.ScopeEndpoint, Dimension: d, Interval: time.Second,
+		OpeningCeiling: 7, RoutineCeiling: 9, Capacity: 10,
+	}
+}
+
 func TestProfileValidate(t *testing.T) {
 	t.Parallel()
 
@@ -100,6 +107,19 @@ func TestProfileValidate(t *testing.T) {
 			dup := p.Limits[3]
 			p.Limits = append(p.Limits, dup)
 		}, ratelimit.ErrLimitDuplicate, "ip_5s"},
+		{"an endpoint name colliding with the venue envelope is refused", func(p *ratelimit.Profile) {
+			p.Limits = append(p.Limits, endpointLimit("ip_5s", ratelimit.DimensionRequests))
+		}, ratelimit.ErrLimitDuplicate, "ip_5s"},
+		{"the same endpoint twice is refused", func(p *ratelimit.Profile) {
+			p.Limits = append(p.Limits,
+				endpointLimit("order_realtime", ratelimit.DimensionRequests),
+				endpointLimit("order_realtime", ratelimit.DimensionRequests))
+		}, ratelimit.ErrLimitDuplicate, "order_realtime"},
+		{"a family limit may reuse an endpoint name at the platform layer", func(p *ratelimit.Profile) {
+			// Dialect knowledge belongs to transport: Bybit CheckFold refuses the
+			// squatting family name, while the generic keyspace keeps it legal.
+			p.Limits = append(p.Limits, endpointLimit("weight_1m", ratelimit.DimensionRequests))
+		}, nil, ""},
 
 		// §7.6's coverage rule (task #173). The two uncovered-dimension cases
 		// drop DIFFERENT families' budgets: with both families uncovered, "the
@@ -132,6 +152,9 @@ func TestProfileValidate(t *testing.T) {
 				Dimension: ratelimit.DimensionRequests, Interval: 5 * time.Second,
 				OpeningCeiling: 42, RoutineCeiling: 54, Capacity: 60,
 			})
+		}, ratelimit.ErrProfileEnvelopeMissing, ""},
+		{"endpoint-scoped request limits do not satisfy the envelope", func(p *ratelimit.Profile) {
+			p.Limits[3] = endpointLimit("request_endpoint", ratelimit.DimensionRequests)
 		}, ratelimit.ErrProfileEnvelopeMissing, ""},
 		{"a venue-scoped weight limit is refused", func(p *ratelimit.Profile) {
 			p.Limits[3].Dimension = ratelimit.DimensionWeight
@@ -199,5 +222,33 @@ func TestProfileValidate(t *testing.T) {
 				t.Errorf("Profile.Validate() = %q, want the message to contain %q", err, tc.wantMsg)
 			}
 		})
+	}
+}
+
+func TestEndpointLimitsDoNotSatisfyProfileCoverage(t *testing.T) {
+	t.Parallel()
+
+	p := binanceShaped()
+	p.Limits = []ratelimit.Limit{
+		p.Limits[3],
+		endpointLimit("order_create", ratelimit.DimensionOrders),
+		endpointLimit("order_realtime", ratelimit.DimensionRequests),
+	}
+	err := p.Validate()
+	if !errors.Is(err, ratelimit.ErrProfileDimensionUncounted) {
+		t.Fatalf("Profile.Validate() = %v, want ErrProfileDimensionUncounted", err)
+	}
+	if !strings.Contains(err.Error(), "DimensionWeight") {
+		t.Errorf("Profile.Validate() = %q, want the missing family coverage dimension", err)
+	}
+
+	p.Uncounted = []ratelimit.Uncounted{
+		{Family: ids.ProductSpot, Dimension: ratelimit.DimensionWeight, Reason: "no family weight budget"},
+		{Family: ids.ProductSpot, Dimension: ratelimit.DimensionOrders, Reason: "orders are metered per endpoint"},
+		{Family: ids.ProductLinearPerp, Dimension: ratelimit.DimensionWeight, Reason: "no family weight budget"},
+		{Family: ids.ProductLinearPerp, Dimension: ratelimit.DimensionOrders, Reason: "orders are metered per endpoint"},
+	}
+	if err := p.Validate(); err != nil {
+		t.Fatalf("Profile.Validate() with written family waivers: %v", err)
 	}
 }

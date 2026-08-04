@@ -1,6 +1,52 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-04, session 96): **#185 IS MID-FLIGHT — THE DESIGN IS CONVERGED AND RECORDED, THE IMPLEMENTATION HAS NOT STARTED. START AT RECORD §66 (`docs/superpowers/specs/2026-08-04-m3-185-endpoint-budgets.md`): §66b IS THE CONVERGED DESIGN, APPENDIX B IS THE FILE-BY-FILE IMPLEMENTATION SPEC READY TO HAND TO AN IMPLEMENTING AGENT VERBATIM. NOTHING IN `internal/` HAS BEEN TOUCHED.**
+## Status (2026-08-04, session 97): **#185 IS CLOSED — BYBIT'S PER-ENDPOINT BUDGETS ARE EXPRESSIBLE, CHARGED, FOLDED AND REQUIRED: `ScopeEndpoint` IS A VENUE-LEVEL WINDOW PER ENDPOINT (FAMILY REFUSED), THE NAME IS PATH-DERIVED THROUGH THE DIALECT'S CLOSED REGISTRY WITH `Call.Limit` DELETED, THREE PRE-SEND REFUSALS GUARD THE REQUEST PATH, CONSTRUCTION REQUIRES THE COMPLETE DIMENSION-CHECKED ROSTER, THE HEADER FOLD NOW SURVIVES A LOST BODY, AND THE PRE-EXISTING `freeAt` UNDERFLOW IS FIXED. DOCS ARE v0.9.45; MARKER GREP IS ZERO.**
+
+**The slice is done end to end.** `make ci` green on both modules under
+`-race` (run by the orchestrator), marker grep **0**, **19 targeted
+mutations / 19 kills** (17 harness + 2 demonstrated-and-reverted in review),
+zero survivors, zero no-ops. Design record **§66** — §66a the six-round
+design arc, §66b the converged design, §66d the implementation findings and
+mutation table, Appendix B the spec the build followed verbatim. Finding
+table in adr-history §3. Task **#185** is discharged.
+
+**HOW IT LANDED.** Implementation was a second-model (codex) session working
+from Appendix B verbatim; the orchestrator reviewed every changed file
+against the spec, then a fresh adversarial code_diff round ran. That round
+found two TEST-EVIDENCE defects, both fixed and both bite-checked by
+demonstrating the killing mutation and reverting it: the composed seam test's
+`Used == 40` could not see the pre-send charge (the fold alone produces 40 —
+`Acquire`→`Check` survived the whole suite; fixed with a headerless case
+asserting `Used == 1`, siblings zero), and the latest-refusal fixture made
+the envelope both first-evaluated AND latest-releasing (the collapse
+checklist's TENTH instance and a new dimension of it — evaluation ORDER;
+fixed with one subtest per ordering). Two argued build deviations accepted:
+the path→name map derived from the registry array (two views that cannot
+drift), and the composed R1 test swapping the reader post-construction
+(honest wiring cannot reach R1 — the boot check working).
+
+**WHAT IS NEXT.** Unchanged: the **$20/$55 live-test decision** (Binance
+perp's 50 USDT floor — grow the package or move the leg to Bybit, blocked on
+**#171**, needs the USER), **#179** (spot leg's exposure baseline),
+**#183**/**#184** (filters follow-ons), **#187** (fold health on headerless
+mapped responses — the derivation this slice added is what makes it
+detectable), **#188** (package-level budget reservation; the losing leg is
+post-fsync `StateSubmissionUnknown`), **#167** (ka make target), **#177**,
+**#180**, or the **§9 acceptance campaign**. Note for Bybit work: #171's
+testnet validation now exercises the repaired read-path seam, the fold-check
+boot path, AND the endpoint-budget roster — and #171's measurement is
+recorded in venue-profiles §4 as the LOOSENING trigger for splitting endpoint
+windows per family, never a correctness prerequisite.
+
+**Standing, unchanged:** capture **PID 8495**, never rebuild over
+`bin/arblab`, `make ci` runs `-race`, cap `TLC_WORKERS` at 4, docs/i18n
+parity is `bun test`, `MUTATE_TIMEOUT` 180s with the unit when mutating
+exercise. **§38f (task #158) still the only clock-bound user decision**
+(~2026-09-30).
+
+---
+
+## Status (2026-08-04, session 96 — HISTORICAL): **#185 WAS MID-FLIGHT — THE DESIGN CONVERGED AND RECORDED, THE IMPLEMENTATION NOT STARTED. RECORD §66 (`docs/superpowers/specs/2026-08-04-m3-185-endpoint-budgets.md`): §66b THE CONVERGED DESIGN, APPENDIX B THE FILE-BY-FILE IMPLEMENTATION SPEC. NOTHING IN `internal/` HAD BEEN TOUCHED.**
 
 **What the design is.** `ratelimit.Scope` gains `ScopeEndpoint` — a VENUE-level per-endpoint budget (family refused, keyed `("", name)`, one shared window across product categories — conservative under either reading of Bybit's unverified per-category counting question, and it keeps a two-family package structurally routable). The endpoint name is DERIVED from the call path by a closed `{path, name, required dimension}` registry in `BybitLimitReader` (`Call.Limit` is DELETED — the #186 one-carrier lesson; wiring mistakes become inexpressible). Three request-time refusals in `Governor.decide` (R1 endpoint-unbudgeted, R2 endpoint-unnamed under a per-endpoint profile, R3 endpoint-window-uncharged-by-this-cost), the cannot-count check extended so a matched endpoint window counts its own dimension (Bybit's order meter IS the create endpoint's budget — without this every Bybit create is refused by #173's own rule), boot checks in Bybit's `CheckFold` (roster name + registry dimension + exactly-1s interval; family scope refuses roster names) plus a completeness check at `NewSignedClient` over `LimitReader.Endpoints()` (all five, dimension-checked). The header fold MOVES to immediately after `client.Do` returns (a body-read failure was discarding the 429's own reading). One PRE-EXISTING bug found by review round 6 gets fixed in-slice: `window.freeAt` wraps when `used > ceiling` (a state the observe ratchet explicitly produces) and reports a false retry-immediately.
 

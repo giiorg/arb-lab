@@ -55,7 +55,7 @@ func (c *BybitOrderCodec) EncodeOrderStatus(ref OrderRef, surface QuerySurface) 
 	if err != nil {
 		return transport.Call{}, err
 	}
-	path, limit, err := bybitOrderStatusRoute(surface)
+	path, err := bybitOrderStatusRoute(surface)
 	if err != nil {
 		return transport.Call{}, err
 	}
@@ -77,39 +77,24 @@ func (c *BybitOrderCodec) EncodeOrderStatus(ref OrderRef, surface QuerySurface) 
 		// add — and nothing to invent, which is the point: a fabricated weight
 		// would be charged against a budget the venue does not meter.
 		// RequestOnly is that claim with a carrier: the bare zero Cost reads as
-		// the field nobody filled in and Cost.Validate refuses it before
-		// Acquire, which made this call path always-refused until task #173.
-		Cost:  ratelimit.RequestOnly(),
-		Limit: limit,
+		// the field nobody filled in, and Cost.Validate refuses it before
+		// Acquire can price the call.
+		Cost: ratelimit.RequestOnly(),
 	}, nil
 }
 
-// bybitOrderStatusRoute is the path and §7.6 profile limit name per surface.
-//
-// Exhaustive over the enum-like (§3.6 rule 10). The two surfaces are separate
-// limit names because Bybit meters per endpoint — folding them into one budget
-// would let the fallback spend the primary's allowance during exactly the
-// incident (a Bybit restart) that makes every open order need the fallback at
-// once.
-func bybitOrderStatusRoute(s QuerySurface) (string, string, error) {
+// bybitOrderStatusRoute is the request path per query surface. Exhaustive over
+// the enum-like (§3.6 rule 10); transport derives the endpoint budget from this
+// path so routing and metering have one carrier.
+func bybitOrderStatusRoute(s QuerySurface) (string, error) {
 	switch s {
 	case SurfaceOrderStatus:
-		return "/v5/order/realtime", BybitOrderRealtimeLimit, nil
+		return "/v5/order/realtime", nil
 	case SurfaceOrderHistory:
-		return "/v5/order/history", BybitOrderHistoryLimit, nil
+		return "/v5/order/history", nil
 	}
-	return "", "", fmt.Errorf("%q: %w", string(s), ErrQuerySurfaceInvalid)
+	return "", fmt.Errorf("%q: %w", string(s), ErrQuerySurfaceInvalid)
 }
-
-// The §7.6 profile limit names Bybit's read surfaces report against. Exported
-// for the reason BybitOrderCreateLimit is: the profile that DECLARES the limit
-// and the call that charges it must agree on the string, and a second spelling
-// means the header fold attributes to a limit nobody declared.
-const (
-	BybitOrderRealtimeLimit = "order_realtime"
-	BybitOrderHistoryLimit  = "order_history"
-	BybitExecutionListLimit = "execution_list"
-)
 
 // bybitOrderWire is one row of either order surface. The two return the same
 // order object, which is why one struct serves both.
@@ -318,8 +303,7 @@ func (c *BybitOrderCodec) EncodeExecutions(instrument ids.VenueInstrument, w Exe
 		Params: params,
 		Family: instrument.Product,
 		// Request-only for OrderByClientID's reason, stated there.
-		Cost:  ratelimit.RequestOnly(),
-		Limit: BybitExecutionListLimit,
+		Cost: ratelimit.RequestOnly(),
 	}, nil
 }
 

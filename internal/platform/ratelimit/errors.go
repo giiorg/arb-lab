@@ -38,8 +38,9 @@ var (
 	// a zero opening ceiling, or a rung above the one that must contain it.
 	ErrLimitCeilings = errors.New("ratelimit: limit ceilings invalid")
 
-	// ErrLimitFamily reports a scope and a family that disagree — a
-	// venue-scoped limit naming a family, or a family-scoped limit naming none.
+	// ErrLimitFamily reports a scope and a family that disagree — a venue- or
+	// endpoint-scoped limit naming a family, or a family-scoped limit naming
+	// none.
 	ErrLimitFamily = errors.New("ratelimit: limit scope and family disagree")
 
 	// ErrLimitDuplicate reports two limits with the same key. The key is
@@ -94,6 +95,26 @@ var (
 	// so a venue-scoped product budget would silently never receive the venue's
 	// own reading.
 	ErrLimitScopeDimension = errors.New("ratelimit: venue-scoped limit counts a headered dimension")
+
+	// ErrLimitEndpointDimension reports an endpoint-scoped limit counting
+	// weight. No supported venue meters weight per endpoint; refusing the shape
+	// keeps it unavailable until a venue fact can define its semantics.
+	ErrLimitEndpointDimension = errors.New("ratelimit: endpoint-scoped limit counts weight")
+
+	// ErrEndpointUnbudgeted reports a request naming an endpoint for which the
+	// profile declares no endpoint-scoped budget. This is a configuration
+	// disagreement, not a temporary exhaustion, so waiting cannot repair it.
+	ErrEndpointUnbudgeted = errors.New("ratelimit: endpoint has no budget")
+
+	// ErrEndpointUnnamed reports an unnamed request against a profile that uses
+	// endpoint budgets. Admitting it would spend a venue-side endpoint meter
+	// without any local counter knowing which one to charge.
+	ErrEndpointUnnamed = errors.New("ratelimit: request names no endpoint")
+
+	// ErrCostEndpointUncounted reports a matched endpoint budget that receives
+	// zero units from the request cost. A zero charge is always admitted, so the
+	// declared budget could otherwise never refuse the call it purports to meter.
+	ErrCostEndpointUncounted = errors.New("ratelimit: endpoint budget cannot count request cost")
 
 	// ErrProfileEmpty reports a profile with no limits — a governor that admits
 	// everything, which is worse than no governor because it looks like one.

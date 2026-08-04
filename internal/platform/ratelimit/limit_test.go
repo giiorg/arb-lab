@@ -34,7 +34,7 @@ func TestLimitValidate(t *testing.T) {
 		want    error
 		wantMsg string
 	}{
-		// Positive controls, both scopes.
+		// Positive controls across every scope.
 		{"a family-scoped weight limit is usable", func(*ratelimit.Limit) {}, nil, ""},
 		{"a venue-scoped envelope is usable", func(l *ratelimit.Limit) {
 			l.Name = "ip_5s"
@@ -43,6 +43,14 @@ func TestLimitValidate(t *testing.T) {
 			l.Dimension = ratelimit.DimensionRequests
 			l.Interval = 5 * time.Second
 			l.OpeningCeiling, l.RoutineCeiling, l.Capacity = 420, 540, 600
+		}, nil, ""},
+		{"an endpoint-scoped request limit is usable", func(l *ratelimit.Limit) {
+			l.Name = "order_realtime"
+			l.Scope = ratelimit.ScopeEndpoint
+			l.Family = ""
+			l.Dimension = ratelimit.DimensionRequests
+			l.Interval = time.Second
+			l.OpeningCeiling, l.RoutineCeiling, l.Capacity = 35, 45, 50
 		}, nil, ""},
 		{"the three ceilings may coincide", func(l *ratelimit.Limit) {
 			l.OpeningCeiling, l.RoutineCeiling, l.Capacity = 1000, 1000, 1000
@@ -61,6 +69,10 @@ func TestLimitValidate(t *testing.T) {
 			ratelimit.ErrScopeInvalid, ""},
 		{"an unset dimension is refused", func(l *ratelimit.Limit) { l.Dimension = ratelimit.DimensionUnspecified },
 			ratelimit.ErrDimensionInvalid, ""},
+		{"an endpoint-scoped weight limit is refused", func(l *ratelimit.Limit) {
+			l.Scope = ratelimit.ScopeEndpoint
+			l.Family = ""
+		}, ratelimit.ErrLimitEndpointDimension, "endpoint"},
 
 		{"a zero interval is refused", func(l *ratelimit.Limit) { l.Interval = 0 },
 			ratelimit.ErrLimitInterval, ""},
@@ -91,6 +103,11 @@ func TestLimitValidate(t *testing.T) {
 		{"a family-scoped limit with an unknown family is refused", func(l *ratelimit.Limit) {
 			l.Family = ids.ProductCategory("perp")
 		}, ids.ErrProductUnknown, ""},
+		{"an endpoint-scoped limit naming a family is refused", func(l *ratelimit.Limit) {
+			// Family is held populated while only scope changes, so this checks
+			// the inversion of the family-scope rule rather than an empty fixture.
+			l.Scope = ratelimit.ScopeEndpoint
+		}, ratelimit.ErrLimitFamily, "endpoint"},
 	}
 
 	for _, tc := range tests {

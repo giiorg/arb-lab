@@ -559,10 +559,6 @@ func TestBybitEncodePlaceBody(t *testing.T) {
 	if perp.Path != "/v5/order/create" {
 		t.Errorf("path = %q, want /v5/order/create", perp.Path)
 	}
-	if perp.Limit != venue.BybitOrderCreateLimit {
-		t.Errorf("Limit = %q, want %q — Bybit's headers name no endpoint, so the caller must",
-			perp.Limit, venue.BybitOrderCreateLimit)
-	}
 	if want := (ratelimit.Cost{Orders: 1}); perp.Cost != want {
 		t.Errorf("cost = %+v, want %+v — Bybit publishes no per-endpoint weight", perp.Cost, want)
 	}
@@ -659,36 +655,58 @@ func testClock(t *testing.T, v ids.Venue) clock.Clock {
 	return c
 }
 
-// testGovernor declares BOTH families, because §7.6 keeps separate weight/order
-// budgets per family under one venue envelope — and on Binance the two families
-// are two clients that must share this one governor.
+// testGovernor declares BOTH families because the two signed clients share one
+// venue governor. Binance carries family budgets; Bybit carries its complete
+// venue-level endpoint roster so every recovery surface is routable at boot.
 func testGovernor(t *testing.T, v ids.Venue) *ratelimit.Governor {
 	t.Helper()
-	// Weight AND orders per family: this suite drives Place, whose costs charge
-	// an order slot (Bybit's at ZERO weight), so a weight-only profile here was
-	// §7.6's worked failure in miniature — and with #173's cannot-count refusal
-	// it would now fail the suite rather than silently count nothing. Ceilings
-	// are roomy: admission policy is governor_test's subject, not this file's.
 	limits := []ratelimit.Limit{{
 		Name: "ip_5s", Scope: ratelimit.ScopeVenue,
 		Dimension: ratelimit.DimensionRequests, Interval: 5 * time.Second,
 		OpeningCeiling: 100000, RoutineCeiling: 100000, Capacity: 100000,
 	}}
-	for _, f := range []ids.ProductCategory{ids.ProductSpot, ids.ProductLinearPerp} {
-		limits = append(limits, ratelimit.Limit{
-			Name: "weight_1m", Scope: ratelimit.ScopeFamily, Family: f,
-			Dimension: ratelimit.DimensionWeight, Interval: time.Minute,
-			OpeningCeiling: 1400, RoutineCeiling: 1800, Capacity: 2400,
-		}, ratelimit.Limit{
-			Name: "orders_10s", Scope: ratelimit.ScopeFamily, Family: f,
-			Dimension: ratelimit.DimensionOrders, Interval: 10 * time.Second,
-			OpeningCeiling: 700, RoutineCeiling: 900, Capacity: 1200,
-		})
+	var uncounted []ratelimit.Uncounted
+	if v == testBybit {
+		for _, endpoint := range (transport.BybitLimitReader{}).Endpoints() {
+			capacity := uint64(50)
+			opening, routine := uint64(40), uint64(45)
+			if endpoint.Name == transport.BybitOrderCreateLimit {
+				capacity, opening, routine = 10, 8, 9
+			}
+			limits = append(limits, ratelimit.Limit{
+				Name: endpoint.Name, Scope: ratelimit.ScopeEndpoint,
+				Dimension: endpoint.Dimension, Interval: time.Second,
+				OpeningCeiling: opening, RoutineCeiling: routine, Capacity: capacity,
+			})
+		}
+		for _, f := range []ids.ProductCategory{ids.ProductSpot, ids.ProductLinearPerp} {
+			uncounted = append(uncounted,
+				ratelimit.Uncounted{Family: f, Dimension: ratelimit.DimensionWeight, Reason: "bybit publishes no per-endpoint weight"},
+				ratelimit.Uncounted{Family: f, Dimension: ratelimit.DimensionOrders, Reason: "orders are metered per endpoint; order_create is the counter"},
+			)
+		}
+	} else {
+		// Weight and orders are both required: a futures place costs an order
+		// slot at zero weight, so either dimension omitted leaves a real call
+		// uncounted. Ceilings stay roomy because admission policy is tested in
+		// platform/ratelimit.
+		for _, f := range []ids.ProductCategory{ids.ProductSpot, ids.ProductLinearPerp} {
+			limits = append(limits, ratelimit.Limit{
+				Name: "weight_1m", Scope: ratelimit.ScopeFamily, Family: f,
+				Dimension: ratelimit.DimensionWeight, Interval: time.Minute,
+				OpeningCeiling: 1400, RoutineCeiling: 1800, Capacity: 2400,
+			}, ratelimit.Limit{
+				Name: "orders_10s", Scope: ratelimit.ScopeFamily, Family: f,
+				Dimension: ratelimit.DimensionOrders, Interval: 10 * time.Second,
+				OpeningCeiling: 700, RoutineCeiling: 900, Capacity: 1200,
+			})
+		}
 	}
 	g, err := ratelimit.New(testClock(t, v), ratelimit.Profile{
 		Venue:         v,
 		Families:      []ids.ProductCategory{ids.ProductSpot, ids.ProductLinearPerp},
 		Limits:        limits,
+		Uncounted:     uncounted,
 		ThrottlePause: 30 * time.Second,
 		BanPause:      2 * time.Minute,
 	})

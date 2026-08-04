@@ -3,10 +3,12 @@ package transport
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -144,11 +146,47 @@ func NewSignedClient(cfg SignedClientConfig) (*SignedClient, error) {
 	}
 	snapshot := cfg.Governor.Snapshot()
 	for _, l := range snapshot.Limits {
-		if l.Scope != ratelimit.ScopeFamily {
+		switch l.Scope {
+		case ratelimit.ScopeUnspecified:
+			// Unreachable after Profile.Validate; named so a new scope cannot
+			// silently inherit a fold policy.
 			continue
+		case ratelimit.ScopeVenue:
+			// The venue envelope is requests-only and no dialect folds headers
+			// into it.
+			continue
+		case ratelimit.ScopeFamily, ratelimit.ScopeEndpoint:
+			if err := cfg.Limits.CheckFold(l.Scope, l.Name, l.Dimension, l.Interval); err != nil {
+				// A dialect still rejects the wrong endpoint dimension directly,
+				// while construction lets the complete-roster check below issue the
+				// more specific missing-budget refusal with both dimensions named.
+				if l.Scope == ratelimit.ScopeEndpoint && errors.Is(err, ErrEndpointBudgetMissing) {
+					continue
+				}
+				return nil, fmt.Errorf("venue %q limit %q: %w", snapshot.Venue, l.Name, err)
+			}
 		}
-		if err := cfg.Limits.CheckFold(l.Name, l.Dimension, l.Interval); err != nil {
-			return nil, fmt.Errorf("venue %q limit %q: %w", snapshot.Venue, l.Name, err)
+	}
+
+	declared := make(map[string]ratelimit.Dimension)
+	for _, l := range snapshot.Limits {
+		if l.Scope == ratelimit.ScopeEndpoint {
+			declared[l.Name] = l.Dimension
+		}
+	}
+	// Request-time-only completeness strands recovery: a missing history budget
+	// can let a profile boot and trade, then refuse the Safety-priority fallback
+	// precisely when an ambiguous order needs resolution. The roster is
+	// venue-level, so every endpoint is required; an unused budget costs nothing.
+	for _, endpoint := range cfg.Limits.Endpoints() {
+		d, ok := declared[endpoint.Name]
+		if !ok {
+			return nil, fmt.Errorf("venue %q endpoint %q: %w",
+				snapshot.Venue, endpoint.Name, ErrEndpointBudgetMissing)
+		}
+		if d != endpoint.Dimension {
+			return nil, fmt.Errorf("venue %q endpoint %q counts %s, want %s: %w",
+				snapshot.Venue, endpoint.Name, d, endpoint.Dimension, ErrEndpointBudgetMissing)
 		}
 	}
 	return &SignedClient{
@@ -191,15 +229,6 @@ type Call struct {
 
 	// Cost is what the call charges.
 	Cost ratelimit.Cost
-
-	// Limit names the profile limit this endpoint's rate-limit headers refer
-	// to, for venues whose headers do not name it themselves.
-	//
-	// Binance's headers name their own window (X-MBX-USED-WEIGHT-1M carries
-	// "1m" in the key) and ignore this. Bybit's are anonymous — X-Bapi-Limit
-	// describes "current endpoint" without saying which — so on Bybit the name
-	// can only come from the caller that knew which endpoint it was calling.
-	Limit string
 }
 
 // Response is what the venue answered.
@@ -231,7 +260,12 @@ type Response struct {
 // read the status alone would return (Response, nil) for a rejected order. See
 // envelope.go.
 func (c *SignedClient) Do(ctx context.Context, call Call) (Response, error) {
-	req := ratelimit.Request{Family: call.Family, Priority: call.Priority, Cost: call.Cost}
+	req := ratelimit.Request{
+		Family:   call.Family,
+		Endpoint: c.cfg.Limits.Endpoint(call.Path),
+		Priority: call.Priority,
+		Cost:     call.Cost,
+	}
 	if err := req.Validate(); err != nil {
 		return Response{}, apperror.Precondition(call.Op, "rate-limit request", err)
 	}
@@ -278,6 +312,12 @@ func (c *SignedClient) Do(ctx context.Context, call Call) (Response, error) {
 	}
 	defer resp.Body.Close()
 
+	// Response headers are complete when Do returns, while reading the body can
+	// still fail. Folding here preserves the budget reading on exactly the
+	// refusal response that carried it; classification remains below because a
+	// Bybit refusal still requires the body.
+	c.observe(call, resp.Header)
+
 	// Read one past the limit so "exactly at" and "over" are distinguishable —
 	// the poller's argument, and the boundary is where a wrong comparison hides.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, c.cfg.ReadLimit+1))
@@ -290,8 +330,6 @@ func (c *SignedClient) Do(ctx context.Context, call Call) (Response, error) {
 		return Response{}, apperror.Transport(call.Op, apperror.EffectUnknown,
 			fmt.Errorf("%s body exceeds %d bytes: %w", url, c.cfg.ReadLimit, ErrBodyTooLarge))
 	}
-
-	c.observe(call, resp.Header)
 
 	out := Response{Status: resp.StatusCode, Body: body, Header: resp.Header}
 	aerr, penalty := ClassifyResponse(call.Op, c.cfg.Envelope, out, retryAfter(resp.Header))
@@ -349,13 +387,32 @@ type Observation struct {
 	Used   uint64
 }
 
+// EndpointBudget is one endpoint name and the dimension its venue meter
+// consumes. A dialect exposes the complete set so client construction can
+// refuse a profile that would strand a recovery call later.
+type EndpointBudget struct {
+	Name      string
+	Dimension ratelimit.Dimension
+}
+
 // LimitReader turns a venue's rate-limit response headers into observations.
+// Endpoint and Endpoints are two views over one dialect registry: the path a
+// call charges and the roster construction requires must not be derived by
+// independent spellings that can drift.
 type LimitReader interface {
 	Observations(h http.Header, call Call) []Observation
 
-	// CheckFold reports whether a family-scoped budget declared under name,
+	// Endpoint derives the endpoint-budget name from a call path. Empty means
+	// this dialect does not meter that path per endpoint.
+	Endpoint(path string) string
+
+	// Endpoints is the complete endpoint-budget roster the dialect requires a
+	// profile to declare. It is nil when the dialect has no such meter.
+	Endpoints() []EndpointBudget
+
+	// CheckFold reports whether a budget at scope, declared under name and
 	// counting d over window w, can receive this reader's venue readings.
-	CheckFold(name string, d ratelimit.Dimension, w time.Duration) error
+	CheckFold(scope ratelimit.Scope, name string, d ratelimit.Dimension, w time.Duration) error
 }
 
 // BinanceLimitReader reads X-MBX-USED-WEIGHT-* and X-MBX-ORDER-COUNT-*.
@@ -365,8 +422,29 @@ type LimitReader interface {
 // name is derived from the header rather than supplied by the caller.
 type BinanceLimitReader struct{}
 
+// Endpoint implements LimitReader. Binance's headers name their own folds, so
+// calls do not carry an endpoint discriminator.
+func (BinanceLimitReader) Endpoint(string) string { return "" }
+
+// Endpoints implements LimitReader.
+func (BinanceLimitReader) Endpoints() []EndpointBudget { return nil }
+
 // CheckFold implements LimitReader.
-func (BinanceLimitReader) CheckFold(name string, d ratelimit.Dimension, w time.Duration) error {
+func (BinanceLimitReader) CheckFold(
+	scope ratelimit.Scope,
+	name string,
+	d ratelimit.Dimension,
+	w time.Duration,
+) error {
+	switch scope {
+	case ratelimit.ScopeUnspecified, ratelimit.ScopeVenue:
+		return nil
+	case ratelimit.ScopeEndpoint:
+		return fmt.Errorf("endpoint-scoped limit %q cannot be charged or folded by binance: %w",
+			name, ErrLimitFoldUnaddressable)
+	case ratelimit.ScopeFamily:
+		// Header-derived family folds are checked below.
+	}
 	switch d {
 	case ratelimit.DimensionUnspecified:
 		return fmt.Errorf("limit %q has unspecified dimension: %w", name, ErrLimitFoldUnaddressable)
@@ -528,18 +606,101 @@ const (
 // a budget quietly rescaled.
 type BybitLimitReader struct{}
 
-// CheckFold implements LimitReader and accepts every input. Bybit's
-// per-endpoint fold names are caller-supplied from the venue package's roster,
-// which transport cannot see. Their profile-side home belongs to #185;
-// refusing non-roster names before then would refuse the only expressible
-// local budgets.
-func (BybitLimitReader) CheckFold(string, ratelimit.Dimension, time.Duration) error {
-	return nil
+const (
+	BybitOrderCreateLimit   = "order_create"
+	BybitOrderRealtimeLimit = "order_realtime"
+	BybitOrderHistoryLimit  = "order_history"
+	BybitExecutionListLimit = "execution_list"
+	BybitPositionListLimit  = "position_list"
+)
+
+type bybitEndpointRow struct {
+	Path string
+	EndpointBudget
+}
+
+// bybitEndpointRegistry keeps the path, fold name, and required dimension in
+// one closed roster. Bybit gives separate budgets to realtime, history, and
+// execution endpoints; keeping them distinct is what prevents a restart's
+// fallback query from spending the primary query's allowance.
+var bybitEndpointRegistry = [...]bybitEndpointRow{
+	{Path: "/v5/order/create", EndpointBudget: EndpointBudget{Name: BybitOrderCreateLimit, Dimension: ratelimit.DimensionOrders}},
+	{Path: "/v5/order/realtime", EndpointBudget: EndpointBudget{Name: BybitOrderRealtimeLimit, Dimension: ratelimit.DimensionRequests}},
+	{Path: "/v5/order/history", EndpointBudget: EndpointBudget{Name: BybitOrderHistoryLimit, Dimension: ratelimit.DimensionRequests}},
+	{Path: "/v5/execution/list", EndpointBudget: EndpointBudget{Name: BybitExecutionListLimit, Dimension: ratelimit.DimensionRequests}},
+	{Path: "/v5/position/list", EndpointBudget: EndpointBudget{Name: BybitPositionListLimit, Dimension: ratelimit.DimensionRequests}},
+}
+
+var bybitEndpoints = func() map[string]string {
+	out := make(map[string]string, len(bybitEndpointRegistry))
+	for _, row := range bybitEndpointRegistry {
+		out[row.Path] = row.Name
+	}
+	return out
+}()
+
+// Endpoint implements LimitReader.
+func (BybitLimitReader) Endpoint(path string) string { return bybitEndpoints[path] }
+
+// Endpoints implements LimitReader. Sorting makes construction failures stable
+// regardless of registry declaration order.
+func (BybitLimitReader) Endpoints() []EndpointBudget {
+	out := make([]EndpointBudget, 0, len(bybitEndpointRegistry))
+	for _, row := range bybitEndpointRegistry {
+		out = append(out, row.EndpointBudget)
+	}
+	slices.SortFunc(out, func(a, b EndpointBudget) int { return strings.Compare(a.Name, b.Name) })
+	return out
+}
+
+func bybitEndpoint(name string) (EndpointBudget, bool) {
+	for _, row := range bybitEndpointRegistry {
+		if row.Name == name {
+			return row.EndpointBudget, true
+		}
+	}
+	return EndpointBudget{}, false
+}
+
+// CheckFold implements LimitReader.
+func (BybitLimitReader) CheckFold(
+	scope ratelimit.Scope,
+	name string,
+	d ratelimit.Dimension,
+	w time.Duration,
+) error {
+	switch scope {
+	case ratelimit.ScopeUnspecified, ratelimit.ScopeVenue:
+		return nil
+	case ratelimit.ScopeFamily:
+		if _, ok := bybitEndpoint(name); ok {
+			return fmt.Errorf("family-scoped limit %q squats on a bybit endpoint fold: %w",
+				name, ErrLimitFoldUnaddressable)
+		}
+		return nil
+	case ratelimit.ScopeEndpoint:
+		endpoint, ok := bybitEndpoint(name)
+		if !ok {
+			return fmt.Errorf("endpoint-scoped limit %q is not in the bybit endpoint roster: %w",
+				name, ErrLimitFoldUnaddressable)
+		}
+		if d != endpoint.Dimension {
+			return fmt.Errorf("%w: endpoint-scoped limit %q counts %s, want %s: %w",
+				ErrEndpointBudgetMissing, name, d, endpoint.Dimension, ErrLimitFoldUnaddressable)
+		}
+		if w != time.Second {
+			return fmt.Errorf("endpoint-scoped limit %q has window %s, want %s: %w",
+				name, w, time.Second, ErrLimitFoldUnaddressable)
+		}
+		return nil
+	}
+	return fmt.Errorf("limit %q has scope %d: %w", name, uint8(scope), ErrLimitFoldUnaddressable)
 }
 
 // Observations implements LimitReader.
 func (BybitLimitReader) Observations(h http.Header, call Call) []Observation {
-	if call.Limit == "" {
+	name := (BybitLimitReader{}).Endpoint(call.Path)
+	if name == "" {
 		// Bybit's headers describe "current endpoint" without naming it, so
 		// with no name from the caller there is nothing to attribute the
 		// reading to. Guessing a name would charge the wrong budget.
@@ -557,7 +718,7 @@ func (BybitLimitReader) Observations(h http.Header, call Call) []Observation {
 		// we cannot interpret.
 		return nil
 	}
-	return []Observation{{Family: call.Family, Name: call.Limit, Used: limit - remaining}}
+	return []Observation{{Family: "", Name: name, Used: limit - remaining}}
 }
 
 func parseUintHeader(h http.Header, key string) (uint64, bool) {

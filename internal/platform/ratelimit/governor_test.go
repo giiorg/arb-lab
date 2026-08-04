@@ -29,6 +29,64 @@ func newGovernor(t *testing.T) (*ratelimit.Governor, *clock.TestClock) {
 	return g, tc
 }
 
+func endpointShaped() ratelimit.Profile {
+	return ratelimit.Profile{
+		Venue:    ids.Venue("bybit"),
+		Families: []ids.ProductCategory{ids.ProductSpot, ids.ProductLinearPerp},
+		Limits: []ratelimit.Limit{
+			{
+				Name: "ip_5s", Scope: ratelimit.ScopeVenue,
+				Dimension: ratelimit.DimensionRequests, Interval: 5 * time.Second,
+				OpeningCeiling: 80, RoutineCeiling: 90, Capacity: 100,
+			},
+			{
+				Name: "read_a", Scope: ratelimit.ScopeEndpoint,
+				Dimension: ratelimit.DimensionRequests, Interval: time.Second,
+				OpeningCeiling: 1, RoutineCeiling: 2, Capacity: 2,
+			},
+			{
+				// A different capacity makes an accidental cross-charge visible as
+				// arithmetic, rather than only as a refusal.
+				Name: "read_b", Scope: ratelimit.ScopeEndpoint,
+				Dimension: ratelimit.DimensionRequests, Interval: time.Second,
+				OpeningCeiling: 2, RoutineCeiling: 3, Capacity: 3,
+			},
+			{
+				Name: "order_create", Scope: ratelimit.ScopeEndpoint,
+				Dimension: ratelimit.DimensionOrders, Interval: time.Second,
+				OpeningCeiling: 7, RoutineCeiling: 9, Capacity: 10,
+			},
+		},
+		Uncounted: []ratelimit.Uncounted{
+			{Family: ids.ProductSpot, Dimension: ratelimit.DimensionWeight, Reason: "no weight budget exists"},
+			{Family: ids.ProductSpot, Dimension: ratelimit.DimensionOrders, Reason: "orders are metered per endpoint"},
+			{Family: ids.ProductLinearPerp, Dimension: ratelimit.DimensionWeight, Reason: "no weight budget exists"},
+			{Family: ids.ProductLinearPerp, Dimension: ratelimit.DimensionOrders, Reason: "orders are metered per endpoint"},
+		},
+		ThrottlePause: 30 * time.Second,
+		BanPause:      2 * time.Minute,
+	}
+}
+
+func newEndpointGovernor(t *testing.T) (*ratelimit.Governor, *clock.TestClock) {
+	t.Helper()
+	tc, err := clock.NewTestClock(start, nil)
+	if err != nil {
+		t.Fatalf("NewTestClock: %v", err)
+	}
+	g, err := ratelimit.New(tc, endpointShaped())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return g, tc
+}
+
+func endpointRead(f ids.ProductCategory, name string, p ratelimit.Priority) ratelimit.Request {
+	return ratelimit.Request{
+		Family: f, Endpoint: name, Priority: p, Cost: ratelimit.RequestOnly(),
+	}
+}
+
 func spotQuery(p ratelimit.Priority, weight uint64) ratelimit.Request {
 	return ratelimit.Request{
 		Family:   ids.ProductSpot,
@@ -817,6 +875,223 @@ func TestRequestOnlyChargesTheEnvelopeAlone(t *testing.T) {
 				l.Name, l.Family, l.Used)
 		}
 	}
+}
+
+func TestGovernorRefusesEndpointProfileDisagreements(t *testing.T) {
+	t.Parallel()
+
+	g, _ := newEndpointGovernor(t)
+	tests := []struct {
+		name    string
+		request ratelimit.Request
+		want    error
+		words   []string
+	}{
+		{
+			name:    "a named endpoint with no budget",
+			request: endpointRead(ids.ProductSpot, "unknown_read", ratelimit.PriorityRoutine),
+			want:    ratelimit.ErrEndpointUnbudgeted, words: []string{"bybit", "unknown_read"},
+		},
+		{
+			name:    "an unnamed request against an endpoint profile",
+			request: ratelimit.Request{Family: ids.ProductSpot, Priority: ratelimit.PriorityRoutine, Cost: ratelimit.RequestOnly()},
+			want:    ratelimit.ErrEndpointUnnamed, words: []string{"bybit", "spot"},
+		},
+		{
+			name:    "a request-only cost under an orders endpoint",
+			request: endpointRead(ids.ProductSpot, "order_create", ratelimit.PriorityRoutine),
+			want:    ratelimit.ErrCostEndpointUncounted, words: []string{"order_create", "DimensionOrders"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := g.Acquire(tc.request)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("Acquire() = %v, want %v", err, tc.want)
+			}
+			for _, word := range tc.words {
+				if !strings.Contains(err.Error(), word) {
+					t.Errorf("Acquire() = %q, want it to name %q", err, word)
+				}
+			}
+		})
+	}
+}
+
+func TestEndpointlessRequestRemainsLegalWithoutEndpointBudgets(t *testing.T) {
+	t.Parallel()
+
+	g, _ := newGovernor(t)
+	mustAcquire(t, g, ratelimit.Request{
+		Family: ids.ProductSpot, Priority: ratelimit.PriorityRoutine, Cost: ratelimit.RequestOnly(),
+	})
+}
+
+func TestEndpointWindowsDoNotCrossCharge(t *testing.T) {
+	t.Parallel()
+
+	g, _ := newEndpointGovernor(t)
+	mustAcquire(t, g, endpointRead(ids.ProductSpot, "read_a", ratelimit.PrioritySafety))
+	mustAcquire(t, g, endpointRead(ids.ProductSpot, "read_a", ratelimit.PrioritySafety))
+
+	if got := usedOf(t, g, "", "read_b"); got != 0 {
+		t.Fatalf("read_b used = %d, want 0 before its own call", got)
+	}
+	if d, err := g.Check(endpointRead(ids.ProductSpot, "read_a", ratelimit.PrioritySafety)); err != nil || d.Admitted {
+		t.Fatalf("read_a Check = (%+v, %v), want a ceiling refusal", d, err)
+	}
+	mustAcquire(t, g, endpointRead(ids.ProductSpot, "read_b", ratelimit.PrioritySafety))
+	if got := usedOf(t, g, "", "read_b"); got != 1 {
+		t.Errorf("read_b used = %d, want exactly its own one request", got)
+	}
+	if got := usedOf(t, g, "", "ip_5s"); got != 3 {
+		t.Errorf("envelope used = %d, want the three admitted requests", got)
+	}
+}
+
+func TestEndpointWindowIsSharedAcrossFamilies(t *testing.T) {
+	t.Parallel()
+
+	g, _ := newEndpointGovernor(t)
+	// A family-keyed endpoint window can make one package leg structurally
+	// routable while its sibling is not. One venue-level window is conservative
+	// under either venue counting model and makes both legs consult the same
+	// capacity instead.
+	mustAcquire(t, g, endpointRead(ids.ProductSpot, "read_a", ratelimit.PrioritySafety))
+	mustAcquire(t, g, endpointRead(ids.ProductLinearPerp, "read_a", ratelimit.PrioritySafety))
+	d, err := g.Check(endpointRead(ids.ProductLinearPerp, "read_a", ratelimit.PrioritySafety))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if d.Admitted || d.Limit != "read_a" {
+		t.Errorf("Check = admitted %v by %q, want shared read_a refusal", d.Admitted, d.Limit)
+	}
+}
+
+func TestMatchedEndpointCountsItsOwnDimension(t *testing.T) {
+	t.Parallel()
+
+	g, _ := newEndpointGovernor(t)
+	one := ratelimit.Request{
+		Family: ids.ProductSpot, Endpoint: "order_create", Priority: ratelimit.PrioritySafety,
+		Cost: ratelimit.Cost{Orders: 1},
+	}
+	mustAcquire(t, g, one)
+	if got := usedOf(t, g, "", "order_create"); got != 1 {
+		t.Errorf("order_create used = %d, want 1", got)
+	}
+
+	g, _ = newEndpointGovernor(t)
+	batch := one
+	batch.Cost = ratelimit.Cost{Orders: 5}
+	mustAcquire(t, g, batch)
+	if got := usedOf(t, g, "", "order_create"); got != 5 {
+		t.Errorf("order_create used = %d, want the five orders carried by the batch", got)
+	}
+
+	g, _ = newEndpointGovernor(t)
+	wrong := one
+	wrong.Endpoint = "read_b"
+	if _, err := g.Acquire(wrong); !errors.Is(err, ratelimit.ErrCostUncounted) {
+		t.Fatalf("Acquire against requests-dimension endpoint = %v, want ErrCostUncounted", err)
+	}
+}
+
+func TestEndpointObservationRatchetsTheMatchedWindow(t *testing.T) {
+	t.Parallel()
+
+	g, _ := newEndpointGovernor(t)
+	mustAcquire(t, g, endpointRead(ids.ProductSpot, "read_b", ratelimit.PrioritySafety))
+	if err := g.Observe("", "read_b", 3); err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+	if got := usedOf(t, g, "", "read_b"); got != 3 {
+		t.Errorf("read_b used = %d, want observed ratchet to 3", got)
+	}
+	if err := g.Observe("", "read_b", 1); err != nil {
+		t.Fatalf("Observe lower reading: %v", err)
+	}
+	if got := usedOf(t, g, "", "read_b"); got != 3 {
+		t.Errorf("read_b used = %d after lower reading, want upward-only 3", got)
+	}
+}
+
+func TestEndpointWindowEnforcesPriorityAndNamesRetry(t *testing.T) {
+	t.Parallel()
+
+	g, tc := newEndpointGovernor(t)
+	mustAcquire(t, g, endpointRead(ids.ProductSpot, "read_a", ratelimit.PriorityOpening))
+	if d, err := g.Check(endpointRead(ids.ProductSpot, "read_a", ratelimit.PriorityOpening)); err != nil || d.Admitted {
+		t.Fatalf("opening Check = (%+v, %v), want refusal at the opening ceiling", d, err)
+	}
+	mustAcquire(t, g, endpointRead(ids.ProductSpot, "read_a", ratelimit.PriorityRoutine))
+	d, err := g.Check(endpointRead(ids.ProductSpot, "read_a", ratelimit.PrioritySafety))
+	if err != nil {
+		t.Fatalf("safety Check: %v", err)
+	}
+	if d.Admitted || d.Limit != "read_a" || !d.NotBefore.Equal(start.Add(time.Second)) {
+		t.Fatalf("safety Check = %+v, want read_a refused until %v", d, start.Add(time.Second))
+	}
+	if err := tc.Advance(time.Second); err != nil {
+		t.Fatalf("Advance: %v", err)
+	}
+	mustAcquire(t, g, endpointRead(ids.ProductSpot, "read_a", ratelimit.PrioritySafety))
+}
+
+func TestGovernorNamesTheLatestOfEndpointAndEnvelopeRefusals(t *testing.T) {
+	t.Parallel()
+
+	// With only the envelope-later ordering, worst-selection and first-selection
+	// are indistinguishable: the envelope is both first-evaluated and latest.
+	t.Run("envelope releases later", func(t *testing.T) {
+		p := endpointShaped()
+		p.Limits[0].Interval = 2 * time.Second
+		p.Limits[0].OpeningCeiling, p.Limits[0].RoutineCeiling, p.Limits[0].Capacity = 1, 1, 1
+		p.Limits[1].OpeningCeiling, p.Limits[1].RoutineCeiling, p.Limits[1].Capacity = 1, 1, 1
+		tc, err := clock.NewTestClock(start, nil)
+		if err != nil {
+			t.Fatalf("NewTestClock: %v", err)
+		}
+		g, err := ratelimit.New(tc, p)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		mustAcquire(t, g, endpointRead(ids.ProductSpot, "read_a", ratelimit.PrioritySafety))
+		d, err := g.Check(endpointRead(ids.ProductSpot, "read_a", ratelimit.PrioritySafety))
+		if err != nil {
+			t.Fatalf("Check: %v", err)
+		}
+		if d.Limit != "ip_5s" || !d.NotBefore.Equal(start.Add(2*time.Second)) {
+			t.Errorf("Check = limit %q until %v, want latest release ip_5s at %v",
+				d.Limit, d.NotBefore, start.Add(2*time.Second))
+		}
+	})
+
+	t.Run("endpoint releases later", func(t *testing.T) {
+		p := endpointShaped()
+		p.Limits[0].Interval = time.Second
+		p.Limits[0].OpeningCeiling, p.Limits[0].RoutineCeiling, p.Limits[0].Capacity = 1, 1, 1
+		p.Limits[1].Interval = 2 * time.Second
+		p.Limits[1].OpeningCeiling, p.Limits[1].RoutineCeiling, p.Limits[1].Capacity = 1, 1, 1
+		tc, err := clock.NewTestClock(start, nil)
+		if err != nil {
+			t.Fatalf("NewTestClock: %v", err)
+		}
+		g, err := ratelimit.New(tc, p)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		mustAcquire(t, g, endpointRead(ids.ProductSpot, "read_a", ratelimit.PrioritySafety))
+		d, err := g.Check(endpointRead(ids.ProductSpot, "read_a", ratelimit.PrioritySafety))
+		if err != nil {
+			t.Fatalf("Check: %v", err)
+		}
+		if d.Limit != "read_a" || !d.NotBefore.Equal(start.Add(2*time.Second)) {
+			t.Errorf("Check = limit %q until %v, want latest release read_a at %v",
+				d.Limit, d.NotBefore, start.Add(2*time.Second))
+		}
+	})
 }
 
 func TestSnapshot(t *testing.T) {

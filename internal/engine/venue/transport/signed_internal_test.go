@@ -82,6 +82,53 @@ func testGovernor(t *testing.T) *ratelimit.Governor {
 	return g
 }
 
+func bybitTestProfile() ratelimit.Profile {
+	limits := []ratelimit.Limit{{
+		Name: "ip_5s", Scope: ratelimit.ScopeVenue,
+		Dimension: ratelimit.DimensionRequests, Interval: 5 * time.Second,
+		OpeningCeiling: 1000, RoutineCeiling: 1000, Capacity: 1000,
+	}}
+	for _, endpoint := range (BybitLimitReader{}).Endpoints() {
+		capacity := uint64(50)
+		if endpoint.Name == BybitOrderCreateLimit {
+			capacity = 10
+		}
+		limits = append(limits, ratelimit.Limit{
+			Name: endpoint.Name, Scope: ratelimit.ScopeEndpoint,
+			Dimension: endpoint.Dimension, Interval: time.Second,
+			OpeningCeiling: capacity, RoutineCeiling: capacity, Capacity: capacity,
+		})
+	}
+	return ratelimit.Profile{
+		Venue: testVenue, Families: []ids.ProductCategory{testFamily}, Limits: limits,
+		Uncounted: []ratelimit.Uncounted{
+			{Family: testFamily, Dimension: ratelimit.DimensionWeight, Reason: "bybit publishes no per-endpoint weight"},
+			{Family: testFamily, Dimension: ratelimit.DimensionOrders, Reason: "orders are metered by order_create"},
+		},
+		ThrottlePause: 30 * time.Second, BanPause: 2 * time.Minute,
+	}
+}
+
+func governorFromProfile(t *testing.T, p ratelimit.Profile) *ratelimit.Governor {
+	t.Helper()
+	clk, err := clock.NewTestClock(time.UnixMilli(1700000000000).UTC(), []clock.Calibration{
+		{Venue: testVenue, Offset: 0, Uncertainty: time.Millisecond},
+	})
+	if err != nil {
+		t.Fatalf("NewTestClock: %v", err)
+	}
+	g, err := ratelimit.New(clk, p)
+	if err != nil {
+		t.Fatalf("ratelimit.New: %v", err)
+	}
+	return g
+}
+
+func bybitTestGovernor(t *testing.T) *ratelimit.Governor {
+	t.Helper()
+	return governorFromProfile(t, bybitTestProfile())
+}
+
 func testClient(t *testing.T, srv *httptest.Server, gov *ratelimit.Governor) *SignedClient {
 	t.Helper()
 	clk, err := clock.NewTestClock(time.UnixMilli(1700000000000).UTC(), []clock.Calibration{
@@ -140,6 +187,42 @@ func testSignedClientConfig(t *testing.T, gov *ratelimit.Governor, limits LimitR
 	}
 }
 
+func bybitTestClient(
+	t *testing.T,
+	srv *httptest.Server,
+	gov *ratelimit.Governor,
+	readLimit int64,
+) *SignedClient {
+	t.Helper()
+	cfg := testSignedClientConfig(t, gov, BybitLimitReader{})
+	cfg.Scheme = "http"
+	cfg.Host = strings.TrimPrefix(srv.URL, "http://")
+	cfg.ReadLimit = readLimit
+	c, err := NewSignedClient(cfg)
+	if err != nil {
+		t.Fatalf("NewSignedClient: %v", err)
+	}
+	return c
+}
+
+func bybitReadCall() Call {
+	call := testCall()
+	call.Path = "/v5/order/realtime"
+	call.Cost = ratelimit.RequestOnly()
+	return call
+}
+
+func endpointUsed(t *testing.T, gov *ratelimit.Governor, name string) uint64 {
+	t.Helper()
+	for _, l := range gov.Snapshot().Limits {
+		if l.Scope == ratelimit.ScopeEndpoint && l.Name == name {
+			return l.Used
+		}
+	}
+	t.Fatalf("endpoint limit %q missing from snapshot", name)
+	return 0
+}
+
 func testCall() Call {
 	return Call{
 		Op:       "test.Call",
@@ -149,7 +232,6 @@ func testCall() Call {
 		Family:   testFamily,
 		Priority: ratelimit.PriorityOpening,
 		Cost:     ratelimit.Cost{Weight: 1},
-		Limit:    "weight_1m",
 	}
 }
 
@@ -195,7 +277,6 @@ func TestSignedClientAdmitsARequestOnlyCost(t *testing.T) {
 	gov := testGovernor(t)
 	call := testCall()
 	call.Cost = ratelimit.RequestOnly()
-	call.Limit = ""
 	if _, err := testClient(t, srv, gov).Do(context.Background(), call); err != nil {
 		t.Fatalf("Do: %v", err)
 	}
@@ -277,6 +358,122 @@ func TestSignedClientFoldsHeadersEvenOnARefusal(t *testing.T) {
 	}
 }
 
+func TestSignedClientFoldsBybitHeadersBeforeBodyFailures(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		readLimit int64
+		handler   http.HandlerFunc
+		wantErr   error
+	}{
+		{
+			name: "mid-stream read failure", readLimit: 100,
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("X-Bapi-Limit", "50")
+				w.Header().Set("X-Bapi-Limit-Status", "10")
+				w.Header().Set("Content-Length", "100")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("short"))
+			},
+		},
+		{
+			name: "body exceeds read limit", readLimit: 4, wantErr: ErrBodyTooLarge,
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("X-Bapi-Limit", "50")
+				w.Header().Set("X-Bapi-Limit-Status", "10")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("12345"))
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			srv := httptest.NewServer(tc.handler)
+			defer srv.Close()
+			gov := bybitTestGovernor(t)
+			_, err := bybitTestClient(t, srv, gov, tc.readLimit).Do(context.Background(), bybitReadCall())
+			if err == nil {
+				t.Fatal("Do() = nil, want body handling error")
+			}
+			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+				t.Errorf("Do() = %v, want %v", err, tc.wantErr)
+			}
+			if got := endpointUsed(t, gov, BybitOrderRealtimeLimit); got != 40 {
+				t.Errorf("order_realtime used = %d, want header ratchet to 40", got)
+			}
+		})
+	}
+}
+
+func TestSignedClientChargesAndFoldsTheSameBybitEndpointWindow(t *testing.T) {
+	t.Parallel()
+
+	t.Run("local charge without headers", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
+
+		gov := bybitTestGovernor(t)
+		if _, err := bybitTestClient(t, srv, gov, 1024).Do(context.Background(), bybitReadCall()); err != nil {
+			t.Fatalf("Do: %v", err)
+		}
+		for _, endpoint := range (BybitLimitReader{}).Endpoints() {
+			want := uint64(0)
+			if endpoint.Name == BybitOrderRealtimeLimit {
+				want = 1
+			}
+			if got := endpointUsed(t, gov, endpoint.Name); got != want {
+				t.Errorf("%s used = %d, want %d", endpoint.Name, got, want)
+			}
+		}
+	})
+
+	t.Run("header fold", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("X-Bapi-Limit", "50")
+			w.Header().Set("X-Bapi-Limit-Status", "10")
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
+
+		gov := bybitTestGovernor(t)
+		if _, err := bybitTestClient(t, srv, gov, 1024).Do(context.Background(), bybitReadCall()); err != nil {
+			t.Fatalf("Do: %v", err)
+		}
+		if got := endpointUsed(t, gov, BybitOrderRealtimeLimit); got != 40 {
+			t.Errorf("order_realtime used = %d, want local charge followed by header ratchet to 40", got)
+		}
+	})
+}
+
+func TestSignedClientRefusesAnUnbudgetedDerivedBybitEndpointBeforeSend(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// Construction normally enforces the complete roster. Replacing the reader
+	// after constructing a Binance-shaped fixture drives the governor's R1 as
+	// defense in depth, proving the disagreement still cannot reach the wire.
+	c := testClient(t, srv, testGovernor(t))
+	c.cfg.Limits = BybitLimitReader{}
+	_, err := c.Do(context.Background(), bybitReadCall())
+	if !errors.Is(err, ratelimit.ErrEndpointUnbudgeted) {
+		t.Fatalf("Do() = %v, want ErrEndpointUnbudgeted", err)
+	}
+	if got := hits.Load(); got != 0 {
+		t.Errorf("server received %d requests, want 0", got)
+	}
+}
+
 func TestNewSignedClientChecksFamilyFoldNames(t *testing.T) {
 	t.Parallel()
 	profile := testProfile(t)
@@ -319,6 +516,86 @@ func TestNewSignedClientSkipsVenueScopedFoldNames(t *testing.T) {
 	cfg.Governor = gov
 	if _, err := NewSignedClient(cfg); err != nil {
 		t.Fatalf("NewSignedClient: %v", err)
+	}
+}
+
+func TestNewSignedClientRequiresBybitEndpointRoster(t *testing.T) {
+	t.Parallel()
+
+	t.Run("all five construct", func(t *testing.T) {
+		t.Parallel()
+		gov := bybitTestGovernor(t)
+		if _, err := NewSignedClient(testSignedClientConfig(t, gov, BybitLimitReader{})); err != nil {
+			t.Fatalf("NewSignedClient: %v", err)
+		}
+	})
+
+	t.Run("one missing is refused", func(t *testing.T) {
+		t.Parallel()
+		p := bybitTestProfile()
+		for i, l := range p.Limits {
+			if l.Name == BybitOrderHistoryLimit {
+				p.Limits = append(p.Limits[:i], p.Limits[i+1:]...)
+				break
+			}
+		}
+		_, err := NewSignedClient(testSignedClientConfig(t, governorFromProfile(t, p), BybitLimitReader{}))
+		if !errors.Is(err, ErrEndpointBudgetMissing) {
+			t.Fatalf("NewSignedClient = %v, want ErrEndpointBudgetMissing", err)
+		}
+		if !strings.Contains(err.Error(), BybitOrderHistoryLimit) {
+			t.Errorf("NewSignedClient = %q, want missing endpoint name", err)
+		}
+	})
+
+	t.Run("wrong dimension is refused", func(t *testing.T) {
+		t.Parallel()
+		p := bybitTestProfile()
+		for i := range p.Limits {
+			if p.Limits[i].Name == BybitOrderHistoryLimit {
+				p.Limits[i].Dimension = ratelimit.DimensionOrders
+			}
+		}
+		_, err := NewSignedClient(testSignedClientConfig(t, governorFromProfile(t, p), BybitLimitReader{}))
+		if !errors.Is(err, ErrEndpointBudgetMissing) {
+			t.Fatalf("NewSignedClient = %v, want ErrEndpointBudgetMissing", err)
+		}
+		for _, want := range []string{BybitOrderHistoryLimit, "DimensionOrders", "DimensionRequests"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("NewSignedClient = %q, want %q", err, want)
+			}
+		}
+	})
+
+	t.Run("wrong interval is refused by the dialect walk", func(t *testing.T) {
+		t.Parallel()
+		p := bybitTestProfile()
+		for i := range p.Limits {
+			if p.Limits[i].Name == BybitOrderRealtimeLimit {
+				p.Limits[i].Interval = 2 * time.Second
+			}
+		}
+		_, err := NewSignedClient(testSignedClientConfig(t, governorFromProfile(t, p), BybitLimitReader{}))
+		if !errors.Is(err, ErrLimitFoldUnaddressable) {
+			t.Fatalf("NewSignedClient = %v, want ErrLimitFoldUnaddressable", err)
+		}
+		if !strings.Contains(err.Error(), BybitOrderRealtimeLimit) {
+			t.Errorf("NewSignedClient = %q, want limit name", err)
+		}
+	})
+}
+
+func TestNewSignedClientRefusesEndpointBudgetsForBinance(t *testing.T) {
+	t.Parallel()
+	p := testProfile(t)
+	p.Limits = append(p.Limits, ratelimit.Limit{
+		Name: "local_endpoint", Scope: ratelimit.ScopeEndpoint,
+		Dimension: ratelimit.DimensionRequests, Interval: time.Second,
+		OpeningCeiling: 10, RoutineCeiling: 10, Capacity: 10,
+	})
+	_, err := NewSignedClient(testSignedClientConfig(t, governorFromProfile(t, p), BinanceLimitReader{}))
+	if !errors.Is(err, ErrLimitFoldUnaddressable) {
+		t.Fatalf("NewSignedClient = %v, want ErrLimitFoldUnaddressable", err)
 	}
 }
 
@@ -487,15 +764,54 @@ func TestBybitLimitReaderConvertsRemainingToUsed(t *testing.T) {
 	h.Set("X-Bapi-Limit", fmt.Sprint(limit))
 	h.Set("X-Bapi-Limit-Status", fmt.Sprint(remaining))
 
-	obs := BybitLimitReader{}.Observations(h, Call{Family: testFamily, Limit: "orders_5s"})
+	obs := BybitLimitReader{}.Observations(h, Call{Family: testFamily, Path: "/v5/order/realtime"})
 	if len(obs) != 1 {
 		t.Fatalf("got %d observations, want 1", len(obs))
 	}
 	if obs[0].Used != wantUsed {
 		t.Errorf("Used = %d, want %d (raw remaining is %d, cap is %d)", obs[0].Used, wantUsed, remaining, limit)
 	}
-	if obs[0].Name != "orders_5s" {
-		t.Errorf("Name = %q, want the caller's limit name", obs[0].Name)
+	if obs[0].Name != "order_realtime" {
+		t.Errorf("Name = %q, want the path-derived endpoint name", obs[0].Name)
+	}
+	if obs[0].Family != "" {
+		t.Errorf("Family = %q, want the venue-level endpoint keyspace", obs[0].Family)
+	}
+}
+
+func TestLimitReadersDeriveEndpointNames(t *testing.T) {
+	t.Parallel()
+	bybit := BybitLimitReader{}
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"/v5/order/create", "order_create"},
+		{"/v5/order/realtime", "order_realtime"},
+		{"/v5/order/history", "order_history"},
+		{"/v5/execution/list", "execution_list"},
+		{"/v5/position/list", "position_list"},
+		{"/v5/order/unknown", ""},
+	}
+	for _, tc := range cases {
+		if got := bybit.Endpoint(tc.path); got != tc.want {
+			t.Errorf("Bybit Endpoint(%q) = %q, want %q", tc.path, got, tc.want)
+		}
+		if got := (BinanceLimitReader{}).Endpoint(tc.path); got != "" {
+			t.Errorf("Binance Endpoint(%q) = %q, want empty", tc.path, got)
+		}
+	}
+}
+
+func TestBinanceLimitReaderRefusesEndpointScope(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"anything", "weight_1m"} {
+		err := (BinanceLimitReader{}).CheckFold(
+			ratelimit.ScopeEndpoint, name, ratelimit.DimensionRequests, time.Second,
+		)
+		if !errors.Is(err, ErrLimitFoldUnaddressable) {
+			t.Errorf("CheckFold(%q) = %v, want ErrLimitFoldUnaddressable", name, err)
+		}
 	}
 }
 
@@ -519,10 +835,10 @@ func TestBybitLimitReaderDerivesNothingWithoutBothHeaders(t *testing.T) {
 		h    http.Header
 		call Call
 	}{
-		"cap only":            {capOnly, Call{Family: testFamily, Limit: "x"}},
-		"remaining only":      {remainingOnly, Call{Family: testFamily, Limit: "x"}},
-		"remaining above cap": {inverted, Call{Family: testFamily, Limit: "x"}},
-		"no limit name":       {both, Call{Family: testFamily}},
+		"cap only":            {capOnly, Call{Family: testFamily, Path: "/v5/order/realtime"}},
+		"remaining only":      {remainingOnly, Call{Family: testFamily, Path: "/v5/order/realtime"}},
+		"remaining above cap": {inverted, Call{Family: testFamily, Path: "/v5/order/realtime"}},
+		"unmapped path":       {both, Call{Family: testFamily, Path: "/v5/order/unknown"}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -677,7 +993,7 @@ func TestBinanceLimitReaderChecksFoldNames(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err := (BinanceLimitReader{}).CheckFold(tc.limitName, tc.dimension, tc.interval)
+			err := (BinanceLimitReader{}).CheckFold(ratelimit.ScopeFamily, tc.limitName, tc.dimension, tc.interval)
 			if !tc.wantErr {
 				if err != nil {
 					t.Fatalf("CheckFold: %v", err)
@@ -719,26 +1035,45 @@ func TestBinanceWindowRendersCanonically(t *testing.T) {
 	}
 }
 
-// TestBybitLimitReaderDefersFoldNameAgreement records the transport boundary:
-// endpoint names belong to the caller-side roster and cannot be judged here.
-func TestBybitLimitReaderDefersFoldNameAgreement(t *testing.T) {
+func TestBybitLimitReaderChecksFoldAgreement(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name      string
+		scope     ratelimit.Scope
 		dimension ratelimit.Dimension
 		interval  time.Duration
+		wantErr   bool
 	}{
-		{"weight_1m", ratelimit.DimensionWeight, time.Minute},
-		{"orders_10s", ratelimit.DimensionOrders, 10 * time.Second},
-		{"spot_weight", ratelimit.DimensionWeight, time.Minute},
-		{"weight_1m", ratelimit.DimensionRequests, 5 * time.Second},
-		{"weight_guardrail", ratelimit.DimensionRequests, time.Minute},
-		{"weight_500ms", ratelimit.DimensionWeight, 500 * time.Millisecond},
+		{name: "endpoint row agrees", scope: ratelimit.ScopeEndpoint, dimension: ratelimit.DimensionRequests, interval: time.Second},
+		{name: "non-roster endpoint", scope: ratelimit.ScopeEndpoint, dimension: ratelimit.DimensionRequests, interval: time.Second, wantErr: true},
+		{name: "history wrong dimension", scope: ratelimit.ScopeEndpoint, dimension: ratelimit.DimensionOrders, interval: time.Second, wantErr: true},
+		{name: "create wrong dimension", scope: ratelimit.ScopeEndpoint, dimension: ratelimit.DimensionRequests, interval: time.Second, wantErr: true},
+		{name: "999ms", scope: ratelimit.ScopeEndpoint, dimension: ratelimit.DimensionRequests, interval: 999 * time.Millisecond, wantErr: true},
+		{name: "1001ms", scope: ratelimit.ScopeEndpoint, dimension: ratelimit.DimensionRequests, interval: 1001 * time.Millisecond, wantErr: true},
+		{name: "2s", scope: ratelimit.ScopeEndpoint, dimension: ratelimit.DimensionRequests, interval: 2 * time.Second, wantErr: true},
+		{name: "family roster squatter", scope: ratelimit.ScopeFamily, dimension: ratelimit.DimensionRequests, interval: time.Second, wantErr: true},
+		{name: "ordinary family name", scope: ratelimit.ScopeFamily, dimension: ratelimit.DimensionWeight, interval: time.Minute},
 	}
 	for _, tc := range cases {
-		if err := (BybitLimitReader{}).CheckFold(tc.name, tc.dimension, tc.interval); err != nil {
-			t.Errorf("CheckFold(%q, %s, %s): %v", tc.name, tc.dimension, tc.interval, err)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			limitName := BybitOrderHistoryLimit
+			switch tc.name {
+			case "endpoint row agrees", "history wrong dimension", "999ms", "1001ms", "2s", "family roster squatter":
+				limitName = BybitOrderHistoryLimit
+			case "create wrong dimension":
+				limitName = BybitOrderCreateLimit
+			case "non-roster endpoint", "ordinary family name":
+				limitName = "ordinary_limit"
+			}
+			err := (BybitLimitReader{}).CheckFold(tc.scope, limitName, tc.dimension, tc.interval)
+			if tc.wantErr && !errors.Is(err, ErrLimitFoldUnaddressable) {
+				t.Fatalf("CheckFold() = %v, want ErrLimitFoldUnaddressable", err)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("CheckFold() = %v, want nil", err)
+			}
+		})
 	}
 }
 

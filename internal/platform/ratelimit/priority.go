@@ -80,8 +80,9 @@ const (
 	DimensionUnspecified Dimension = iota
 
 	// DimensionWeight is the venue's own request-weight unit — Binance's
-	// used-weight budget, Bybit's headered limit. Per-endpoint and unequal:
-	// a deep order-book read weighs many times a ticker.
+	// used-weight budget. It is endpoint-dependent as a COST — a deep order-book
+	// read weighs many times a ticker — but the budget it spends is a family
+	// counter rather than one independent window per endpoint.
 	DimensionWeight
 
 	// DimensionOrders is the separate order-count budget. Binance meters it
@@ -93,10 +94,11 @@ const (
 	// gateway ban actually meters — Bybit's ~600/5s (retCode 10018) is a
 	// request rate with no weighting and no header.
 	//
-	// Every Acquire charges exactly one to every limit of this dimension, and
-	// Cost has no field for it. That is deliberate: this is the dimension with
-	// no header to correct a mistake, so it is also the one a caller must not
-	// be able to forget.
+	// Every Acquire charges exactly one to each applicable limit of this
+	// dimension, including the one endpoint window the request names, and Cost
+	// has no field for it. That is deliberate: this is the dimension with no
+	// caller-supplied quantity to correct, so it is also the one a caller must
+	// not be able to forget.
 	DimensionRequests
 )
 
@@ -127,8 +129,11 @@ func (d Dimension) String() string {
 
 // Scope is what a limit is shared across.
 //
-// The two are §7.6's own distinction: "separate product weight/order counters"
-// at family scope, and one "shared IP-ban safety envelope per venue" above them.
+// The scopes separate a venue envelope, a product family's counters, and an
+// endpoint's own meter. Endpoint scope is venue-level rather than family-level:
+// whether the venue splits that meter by product category is a venue fact this
+// package must not assume, and sharing locally is conservative under either
+// answer.
 type Scope uint8
 
 const (
@@ -144,9 +149,14 @@ const (
 
 	// ScopeFamily is one API family's own budget.
 	ScopeFamily
+
+	// ScopeEndpoint is one endpoint's own budget, shared across every API
+	// family at the venue. Limit.Name is the endpoint discriminator a request
+	// must match to charge it.
+	ScopeEndpoint
 )
 
-const maxScope = ScopeFamily
+const maxScope = ScopeEndpoint
 
 // Validate reports whether s names a scope, excluding the sentinel.
 func (s Scope) Validate() error {
@@ -165,6 +175,8 @@ func (s Scope) String() string {
 		return "ScopeVenue"
 	case ScopeFamily:
 		return "ScopeFamily"
+	case ScopeEndpoint:
+		return "ScopeEndpoint"
 	}
 	return fmt.Sprintf("Scope(%d)", uint8(s))
 }

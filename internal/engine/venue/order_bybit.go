@@ -122,27 +122,14 @@ func (c *BybitOrderCodec) EncodePlace(r OrderRequest) (transport.Call, error) {
 		Body:   raw,
 		Family: r.Instrument.Product,
 
-		// Bybit publishes no per-endpoint WEIGHT — its trade limits are
-		// requests per second per endpoint (10/s on order/create). Cost charges
-		// one order slot; every Acquire charges one request by construction, so
-		// the requests dimension the venue actually meters is covered without
-		// inventing a weight the venue never published.
+		// Bybit's consumption formula counts the orders carried by an order
+		// endpoint: one for this plain create, and N for a future batch. Carrying
+		// that count in Cost lets the endpoint's orders-dimension budget use the
+		// same units rule without inventing a weight the venue never published.
 		Priority: r.Urgency,
 		Cost:     ratelimit.Cost{Orders: 1},
-
-		// Bybit's rate-limit headers describe "current endpoint" without naming
-		// it, so the profile limit's name can only come from the caller that
-		// knew which endpoint it was calling (see BybitLimitReader).
-		Limit: BybitOrderCreateLimit,
 	}, nil
 }
-
-// BybitOrderCreateLimit names the §7.6 profile limit that POST /v5/order/create
-// reports against. Exported because the profile that DECLARES the limit and the
-// call that charges it must agree on the string, and two spellings would mean
-// the header fold silently attributes to a limit nobody declared — which
-// BybitLimitReader drops, leaving the budget locally-counted only.
-const BybitOrderCreateLimit = "order_create"
 
 // bybitCategory maps the canonical product family onto Bybit's `category`.
 //

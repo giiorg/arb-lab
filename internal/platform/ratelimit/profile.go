@@ -33,7 +33,7 @@ type Profile struct {
 	// still a family a request may legally name, and a typo is not.
 	Families []ids.ProductCategory
 
-	// Limits are the budgets, at both scopes.
+	// Limits are the budgets at venue, family, and endpoint scope.
 	Limits []Limit
 
 	// Uncounted is the written escape from the coverage rule below: each entry

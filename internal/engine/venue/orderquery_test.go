@@ -861,7 +861,7 @@ func TestBybitFallsBackFromRealtimeToHistoryAndBinanceHasNoFallback(t *testing.T
 	}
 }
 
-func TestTheTwoBybitSurfacesUseDifferentPathsAndBudgets(t *testing.T) {
+func TestTheTwoBybitSurfacesUseDifferentPaths(t *testing.T) {
 	codec := bybitCodec(t)
 	ref := perpRef(t, testBybit)
 
@@ -875,12 +875,6 @@ func TestTheTwoBybitSurfacesUseDifferentPathsAndBudgets(t *testing.T) {
 	}
 	if realtime.Path != "/v5/order/realtime" || history.Path != "/v5/order/history" {
 		t.Errorf("paths = %q and %q, want /v5/order/realtime and /v5/order/history", realtime.Path, history.Path)
-	}
-	// Separate budgets: a Bybit restart makes every open order need the fallback
-	// at once, and a shared limit would let it spend the primary's allowance
-	// during exactly that incident.
-	if realtime.Limit == history.Limit {
-		t.Errorf("both surfaces charge the limit %q; Bybit meters per endpoint", realtime.Limit)
 	}
 }
 

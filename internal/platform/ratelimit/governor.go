@@ -16,6 +16,11 @@ type Request struct {
 	// rather than treated as "no family budget applies".
 	Family ids.ProductCategory
 
+	// Endpoint is the per-endpoint budget this call charges, derived by the
+	// transport dialect from the call path. It is empty for venues that do not
+	// meter calls per endpoint.
+	Endpoint string
+
 	// Priority is what the call is for, and therefore which ceiling it may
 	// spend up to.
 	Priority Priority
@@ -65,6 +70,12 @@ type Governor struct {
 	// must clear: the venue-scoped ones plus that family's own.
 	applicable map[ids.ProductCategory][]*window
 
+	// endpoints are venue-level and keyed by the same name used for header
+	// folds. They stay outside applicable: putting them there would charge every
+	// same-family call against every endpoint's independent budget.
+	endpoints    map[string]*window
+	hasEndpoints bool
+
 	// counted is, per family, the set of dimensions some applicable window
 	// counts — what decide's cannot-count refusal reads. Precomputed beside
 	// applicable because they must agree: a dimension in this set and absent
@@ -93,18 +104,26 @@ func New(c clock.Clock, p Profile) (*Governor, error) {
 		windows:    make(map[limitKey]*window, len(p.Limits)),
 		order:      make([]limitKey, 0, len(p.Limits)),
 		applicable: make(map[ids.ProductCategory][]*window, len(p.Families)),
+		endpoints:  make(map[string]*window),
 		counted:    make(map[ids.ProductCategory]map[Dimension]bool, len(p.Families)),
 	}
 	for _, l := range p.Limits {
 		k := l.key()
-		g.windows[k] = newWindow(l)
+		w := newWindow(l)
+		g.windows[k] = w
 		g.order = append(g.order, k)
+		if l.Scope == ScopeEndpoint {
+			g.endpoints[l.Name] = w
+			g.hasEndpoints = true
+		}
 	}
 	for _, f := range p.Families {
 		var ws []*window
 		dims := make(map[Dimension]bool)
 		for _, k := range g.order {
 			w := g.windows[k]
+			// Endpoint windows are deliberately excluded. Their empty family does
+			// not match f, and only the matched Request.Endpoint may append one.
 			if w.limit.Scope == ScopeVenue || w.limit.Family == f {
 				ws = append(ws, w)
 				dims[w.limit.Dimension] = true
@@ -159,6 +178,25 @@ func (g *Governor) decide(r Request, charge bool) (Decision, error) {
 			g.profile.Venue, r.Family, ErrFamilyUnknown)
 	}
 
+	var ep *window
+	if r.Endpoint == "" {
+		if g.hasEndpoints {
+			return Decision{}, fmt.Errorf("venue %q family %q: %w",
+				g.profile.Venue, r.Family, ErrEndpointUnnamed)
+		}
+	} else {
+		ep = g.endpoints[r.Endpoint]
+		if ep == nil {
+			return Decision{}, fmt.Errorf("venue %q endpoint %q: %w",
+				g.profile.Venue, r.Endpoint, ErrEndpointUnbudgeted)
+		}
+		if r.Cost.units(ep.limit.Dimension) == 0 {
+			return Decision{}, fmt.Errorf("venue %q endpoint limit %q counts %s but the request charges zero: %w",
+				g.profile.Venue, ep.limit.Name, ep.limit.Dimension, ErrCostEndpointUncounted)
+		}
+		ws = append(ws, ep)
+	}
+
 	// §7.6's headline sentence, enforced on the actual cost: a governor MUST
 	// refuse a cost it cannot count. Profile.Validate already made every
 	// caller-charged dimension either budgeted or written down as Uncounted, so
@@ -168,12 +206,16 @@ func (g *Governor) decide(r Request, charge bool) (Decision, error) {
 	// profile-versus-adapter disagreement, like ErrFamilyUnknown: no amount of
 	// waiting changes it. DimensionRequests is exempt for the reason it is
 	// everywhere else in this file: the venue envelope is unconditional at
-	// construction, so its window cannot be absent here.
+	// construction, so its window cannot be absent here. A matched endpoint
+	// window is the venue's own meter for its dimension — Bybit's order budget
+	// is the create endpoint's budget — so a cost that it charges is counted for
+	// this request even though profile-level coverage remains family-scoped.
 	for d := DimensionUnspecified + 1; d <= maxDimension; d++ {
 		if d == DimensionRequests {
 			continue
 		}
-		if r.Cost.units(d) > 0 && !g.counted[r.Family][d] {
+		if r.Cost.units(d) > 0 && !g.counted[r.Family][d] &&
+			!(ep != nil && ep.limit.Dimension == d) {
 			return Decision{}, fmt.Errorf("venue %q family %q: cost charges %s: %w",
 				g.profile.Venue, r.Family, d, ErrCostUncounted)
 		}

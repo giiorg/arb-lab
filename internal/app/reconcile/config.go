@@ -207,13 +207,20 @@ type LimitConfig struct {
 	// Name is what a refusal and a §10 metric label say. Binance family-scoped
 	// weight and orders names are fixed as weight_<window> and orders_<window>,
 	// where the limit's own interval is spelled 10s/1m/1h/1d style; transport
-	// refuses any mismatch. Requests and Bybit names remain freely chosen until
-	// #185 gives Bybit's per-endpoint budgets a profile-side home.
+	// refuses any mismatch. For endpoint scope it is both the fold address and
+	// the request discriminator derived from the call path.
 	Name string `json:"name"`
 
 	// Scope is "venue" for §7.6's shared IP-ban envelope or "family" for one
-	// product family's own budget. Product is required for the second and refused
-	// for the first.
+	// product family's own budget. "endpoint" is one endpoint's venue-level
+	// window, shared across product categories. Product is required for family
+	// scope and refused for venue and endpoint scope.
+	//
+	// Where a venue publishes unequal category caps for one endpoint, the
+	// ceilings use the minimum across the categories this profile enables. A
+	// larger figure admits a burst the stricter category refuses. This stays an
+	// operator rule: platform holds no venue numbers, and upgraded accounts can
+	// legitimately have different caps.
 	Scope   string              `json:"scope"`
 	Product ids.ProductCategory `json:"product,omitempty"`
 
@@ -627,8 +634,11 @@ func parseScope(s string) (ratelimit.Scope, error) {
 		return ratelimit.ScopeVenue, nil
 	case "family":
 		return ratelimit.ScopeFamily, nil
+	case "endpoint":
+		return ratelimit.ScopeEndpoint, nil
 	}
-	return ratelimit.ScopeUnspecified, fmt.Errorf("%q (want \"venue\" or \"family\"): %w", s, ErrConfigFieldInvalid)
+	return ratelimit.ScopeUnspecified,
+		fmt.Errorf("%q (want \"venue\", \"family\" or \"endpoint\"): %w", s, ErrConfigFieldInvalid)
 }
 
 func parseDimension(s string) (ratelimit.Dimension, error) {

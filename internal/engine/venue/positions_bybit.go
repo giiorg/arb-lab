@@ -73,19 +73,11 @@ func (c *BybitOrderCodec) EncodePositions(scope PositionScope) (transport.Call, 
 		// at 50 requests per second per UID — so there is nothing to charge and
 		// nothing to invent. OrderByClientID's argument, unchanged. RequestOnly
 		// is that fact with a carrier: the bare zero Cost is the field nobody
-		// filled in, and Cost.Validate refuses it before Acquire — which made
-		// this call path always-refused until task #173 gave the claim a form
-		// the validator can tell apart from the accident.
-		Cost:  ratelimit.RequestOnly(),
-		Limit: BybitPositionListLimit,
+		// filled in, and Cost.Validate refuses it before Acquire can price the
+		// call.
+		Cost: ratelimit.RequestOnly(),
 	}, nil
 }
-
-// BybitPositionListLimit is the §7.6 profile limit name this surface reports
-// against. Exported on BybitOrderRealtimeLimit's argument: the profile that
-// DECLARES the limit and the call that charges it must agree on the string, and a
-// second spelling means the header fold attributes to a limit nobody declared.
-const BybitPositionListLimit = "position_list"
 
 // bybitPositionWire is one row of the position list, narrowed to the three fields
 // §7.5 reads.

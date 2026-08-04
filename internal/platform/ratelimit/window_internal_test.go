@@ -185,6 +185,52 @@ func TestWindowFreeAtOnAnEmptyWindowIsNow(t *testing.T) {
 	}
 }
 
+func TestWindowFreeAtAfterObservationAboveCapacityIsFuture(t *testing.T) {
+	t.Parallel()
+
+	w := testWindow()
+	w.observe(base, 150)
+	want := base.Add(time.Minute)
+	if got := w.freeAt(base, 1, 100); !got.Equal(want) {
+		t.Errorf("freeAt after observation above capacity = %v, want %v", got, want)
+	}
+}
+
+func TestWindowFreeAtAfterSafetySpendsPastRoutineCeilingIsFuture(t *testing.T) {
+	t.Parallel()
+
+	w := testWindow()
+	// Safety may spend to Capacity while Routine stops lower. Asking when a
+	// Routine unit fits therefore exercises used above the requested ceiling,
+	// not merely above the limit's absolute capacity.
+	w.charge(base, 90)
+	want := base.Add(time.Minute)
+	if got := w.freeAt(base, 1, 70); !got.Equal(want) {
+		t.Errorf("freeAt above the routine ceiling = %v, want %v", got, want)
+	}
+}
+
+func TestEndpointStyleWindowFreeAtNamesTheOldestRequiredExpiry(t *testing.T) {
+	t.Parallel()
+
+	w := newWindow(Limit{
+		Name: "order_realtime", Scope: ScopeEndpoint,
+		Dimension: DimensionRequests, Interval: time.Second,
+		OpeningCeiling: 3, RoutineCeiling: 4, Capacity: 5,
+	})
+	w.charge(base, 2)
+	w.charge(base.Add(100*time.Millisecond), 1)
+	w.charge(base.Add(200*time.Millisecond), 2)
+
+	// Three units must expire before a three-unit retry fits. The oldest charge
+	// alone is insufficient, so the answer is the second charge's expiry rather
+	// than now, the first expiry, or the newest charge's later expiry.
+	want := base.Add(1100 * time.Millisecond)
+	if got := w.freeAt(base.Add(200*time.Millisecond), 3, 5); !got.Equal(want) {
+		t.Errorf("freeAt endpoint-style refusal = %v, want %v", got, want)
+	}
+}
+
 // The ratchet: a reading above the local count is adopted, one below it is not.
 func TestWindowObserveRatchetsUpwardOnly(t *testing.T) {
 	t.Parallel()
