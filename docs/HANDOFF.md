@@ -1,6 +1,61 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-04, session 97): **#185 IS CLOSED — BYBIT'S PER-ENDPOINT BUDGETS ARE EXPRESSIBLE, CHARGED, FOLDED AND REQUIRED: `ScopeEndpoint` IS A VENUE-LEVEL WINDOW PER ENDPOINT (FAMILY REFUSED), THE NAME IS PATH-DERIVED THROUGH THE DIALECT'S CLOSED REGISTRY WITH `Call.Limit` DELETED, THREE PRE-SEND REFUSALS GUARD THE REQUEST PATH, CONSTRUCTION REQUIRES THE COMPLETE DIMENSION-CHECKED ROSTER, THE HEADER FOLD NOW SURVIVES A LOST BODY, AND THE PRE-EXISTING `freeAt` UNDERFLOW IS FIXED. DOCS ARE v0.9.45; MARKER GREP IS ZERO.**
+## Status (2026-08-04, session 98): **#187 IS CLOSED — A MAPPED BYBIT RESPONSE THE API DEMONSTRABLY HANDLED THAT YIELDS NO USABLE RATE-LIMIT OBSERVATION IS A COUNTED PER-ENDPOINT FOLD MISS: MONOTONE IN `Snapshot` BESIDE `Bans`, DECIDED AFTER CLASSIFICATION (ANY 2xx NOT CLASSIFIED AS THE IP BAN, OR ANY THROTTLE-CLASSIFIED REFUSAL), RENDERED HISTORICALLY BY BOTH ROOTS WITH EXERCISE RENDER-ONCE, ADMISSION UNTOUCHED, DERIVE-NOTHING INTACT. DOCS ARE v0.9.46; MARKER GREP IS ZERO.**
+
+**The slice is done end to end.** `make ci` green on both modules under
+`-race` (run by the orchestrator), marker grep **0**, **26 targeted
+mutations / 26 kills** (25 harness + 1 demonstrated-SURVIVED-then-killed),
+zero survivors, zero no-ops. Design record **§67**
+(`docs/superpowers/specs/2026-08-04-m3-187-fold-health.md`): four
+adversarial design rounds to SHIP, Appendix A the implementation spec a
+second-model session built verbatim, §67d the evidence plan the campaign
+executed. Finding table in adr-history §3. Task **#187** is discharged.
+
+**THE DECISION AND ITS BOUNDARY.** Count-and-alert; stop-opening and hold
+REJECTED with recorded arguments (§67c). The proportionality argument rests
+on a RECORDED OPERATIONAL premise — exactly one consumer spends the Bybit
+UID at a time — which no code enforces (every root builds a process-local
+governor): its enforcement home is **#188**, its reopening trigger is the
+first deployment shape with a second concurrent spender, and the
+**$20/$55 live-execution decision must confirm single-spender deployment**
+before any live Bybit spend. #171's role for this seam is baseline
+measurement of the miss rate (rate needs its external denominator; the
+rendered line is deliberately historical).
+
+**THE REVIEW ARC'S KEEPERS.** Round 1: a pure 2xx guard missed 403+10006 —
+the endpoint meter ITSELF refusing headerless, the exact filed scenario;
+the predicate now reads the classified penalty. Round 2: the header-time
+decision counted 200+10018 (the ban wearing a success status, provable only
+after the body) — the decision moved after ClassifyResponse with a
+PenaltyBan suppression, surviving at header time only on the two
+body-failure exits where it is the response's ONLY signal (Penalize never
+ran either). Round 3: call-site ARGUMENTS are claims helper tests cannot
+see — per-site hardcoded-argument mutations, all caught. code_diff round:
+"byte-identical reconcile output" was a claim with no test, demonstrated
+with a surviving format mutant — now pinned by a golden full-report test.
+One rebuttal survived: retCode-provenance for the non-2xx arm (blinding a
+diagnostic on an unverified venue claim; #171 arbitrates).
+
+**WHAT IS NEXT.** The **$20/$55 live-test decision** (Binance perp's 50
+USDT floor — grow the package or move the leg to Bybit, blocked on **#171**,
+needs the USER — and it now also carries the single-spender confirmation
+above), **#188** (package-level budget reservation — now ALSO the named
+enforcement home for the one-spender premise), **#179** (spot leg's
+exposure baseline), **#183**/**#184** (filters follow-ons), **#167** (ka
+make target), **#177**, **#180**, or the **§9 acceptance campaign**. Note
+for Bybit work: #171's testnet run now exercises the read-path seam, the
+fold-check boot path, the endpoint-budget roster, AND supplies the
+fold-miss baseline.
+
+**Standing, unchanged:** capture **PID 8495**, never rebuild over
+`bin/arblab`, `make ci` runs `-race`, cap `TLC_WORKERS` at 4, docs/i18n
+parity is `bun test`, `MUTATE_TIMEOUT` 180s with the unit when mutating
+exercise. **§38f (task #158) still the only clock-bound user decision**
+(~2026-09-30).
+
+---
+
+## Status (2026-08-04, session 97 — HISTORICAL): **#185 IS CLOSED — BYBIT'S PER-ENDPOINT BUDGETS ARE EXPRESSIBLE, CHARGED, FOLDED AND REQUIRED: `ScopeEndpoint` IS A VENUE-LEVEL WINDOW PER ENDPOINT (FAMILY REFUSED), THE NAME IS PATH-DERIVED THROUGH THE DIALECT'S CLOSED REGISTRY WITH `Call.Limit` DELETED, THREE PRE-SEND REFUSALS GUARD THE REQUEST PATH, CONSTRUCTION REQUIRES THE COMPLETE DIMENSION-CHECKED ROSTER, THE HEADER FOLD NOW SURVIVES A LOST BODY, AND THE PRE-EXISTING `freeAt` UNDERFLOW IS FIXED. DOCS ARE v0.9.45; MARKER GREP IS ZERO.**
 
 **The slice is done end to end.** `make ci` green on both modules under
 `-race` (run by the orchestrator), marker grep **0**, **19 targeted

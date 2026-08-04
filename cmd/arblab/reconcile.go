@@ -88,6 +88,15 @@ func reconcileRun(args []string, stdout, stderr io.Writer) int {
 // binary declares all eight of §7.5's gates and produces four of them, so
 // reconcile-only is the honest answer on a completely clean account.
 func writeReconcileReport(w io.Writer, r appreconcile.Report) {
+	writeReconcileVerdict(w, r)
+	writeRateLimitStatus(w, r.RateLimit)
+	writeReconcileDiagnosis(w, r)
+}
+
+// writeReconcileVerdict is the report's judgement half: posture, exit class,
+// and what latched. Split from the diagnosis so the exercise renderer can
+// place the rate-limit section once, after its execute half.
+func writeReconcileVerdict(w io.Writer, r appreconcile.Report) {
 	fmt.Fprintf(w, "posture:  %s (this binary reports 4 of §7.5's 8 gates; the rest have no producer yet)\n", r.Posture)
 	fmt.Fprintf(w, "verdict:  %s\n", r.ExitClass())
 	if len(r.Latched) > 0 {
@@ -95,7 +104,9 @@ func writeReconcileReport(w io.Writer, r appreconcile.Report) {
 	} else {
 		fmt.Fprintln(w, "latched:  none")
 	}
-	writeRateLimitStatus(w, r.RateLimit)
+}
+
+func writeReconcileDiagnosis(w io.Writer, r appreconcile.Report) {
 	fmt.Fprintf(w, "blocking: %v\n", r.Blocking)
 	if r.Storage != nil {
 		fmt.Fprintf(w, "storage:  %v\n", r.Storage)
@@ -138,6 +149,12 @@ func writeReconcileReport(w io.Writer, r appreconcile.Report) {
 // is almost always "nothing" is how an operator learns to skip the one that
 // is not.
 func writeRateLimitStatus(w io.Writer, s ratelimit.Snapshot) {
+	for _, l := range s.Limits {
+		if l.FoldMisses > 0 {
+			fmt.Fprintf(w, "ratelimit: %s %s: %d response(s) carried no usable budget reading this run (§7.6 fold-health — venue-side corrections were missed)\n",
+				s.Venue, l.Name, l.FoldMisses)
+		}
+	}
 	if s.Bans > 0 {
 		fmt.Fprintf(w, "ratelimit: %s banned this IP %d time(s) (418/IP ban)  <- §7.6 OPERATOR ALERT: do not retry — repeat violations escalate the ban",
 			s.Venue, s.Bans)

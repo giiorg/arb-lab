@@ -248,8 +248,9 @@ type Response struct {
 //  3. Read the server clock and sign — a refusal here is still pre-send.
 //  4. Send, ONCE. From this point "not sent" can no longer be inferred.
 //  5. Fold the venue's headers into the governor, whatever the status.
-//  6. Classify the RESPONSE — status and body together — and penalize the
-//     governor if it earned one.
+//  6. Classify the RESPONSE — status and body together — penalize the governor
+//     if it earned one, and record a mapped endpoint whose usable correction
+//     was missing after the API demonstrably handled the request.
 //
 // Step 5 runs before step 6 deliberately: a 429 carries the headers that say how
 // far over we went, and returning early on the status would discard exactly the
@@ -316,23 +317,26 @@ func (c *SignedClient) Do(ctx context.Context, call Call) (Response, error) {
 	// still fail. Folding here preserves the budget reading on exactly the
 	// refusal response that carried it; classification remains below because a
 	// Bybit refusal still requires the body.
-	c.observe(call, resp.Header)
+	folded := c.observe(call, resp.Header)
 
 	// Read one past the limit so "exactly at" and "over" are distinguishable —
 	// the poller's argument, and the boundary is where a wrong comparison hides.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, c.cfg.ReadLimit+1))
 	if err != nil {
+		c.noteFoldMiss(call, folded, resp.StatusCode, ratelimit.PenaltyUnspecified, false)
 		// The venue answered and we failed to read it. The request definitely
 		// went out, so this is not NotApplied; whether it applied is unknown.
 		return Response{}, apperror.Transport(call.Op, apperror.EffectUnknown, err)
 	}
 	if int64(len(body)) > c.cfg.ReadLimit {
+		c.noteFoldMiss(call, folded, resp.StatusCode, ratelimit.PenaltyUnspecified, false)
 		return Response{}, apperror.Transport(call.Op, apperror.EffectUnknown,
 			fmt.Errorf("%s body exceeds %d bytes: %w", url, c.cfg.ReadLimit, ErrBodyTooLarge))
 	}
 
 	out := Response{Status: resp.StatusCode, Body: body, Header: resp.Header}
 	aerr, penalty := ClassifyResponse(call.Op, c.cfg.Envelope, out, retryAfter(resp.Header))
+	c.noteFoldMiss(call, folded, resp.StatusCode, penalty, true)
 	if penalty != ratelimit.PenaltyUnspecified {
 		// A Penalize failure must not mask the venue's own refusal, which is the
 		// fact the caller has to act on. It is folded into nothing and the
@@ -345,7 +349,8 @@ func (c *SignedClient) Do(ctx context.Context, call Call) (Response, error) {
 	return out, nil
 }
 
-// observe folds the venue's rate-limit headers into the governor.
+// observe folds the venue's rate-limit headers into the governor and reports
+// whether the mapped endpoint received its usable observation.
 //
 // Errors are dropped on purpose, and this is the one place in the file where
 // that is right: Observe refuses a limit the profile does not declare, which is
@@ -355,10 +360,55 @@ func (c *SignedClient) Do(ctx context.Context, call Call) (Response, error) {
 // NewSignedClient already refused any profile whose family-scoped names the
 // reader could never address (CheckFold), so what remains at this seam is the
 // venue reporting a window the profile deliberately does not budget.
-func (c *SignedClient) observe(call Call, h http.Header) {
+func (c *SignedClient) observe(call Call, h http.Header) bool {
+	name := c.cfg.Limits.Endpoint(call.Path)
+	folded := false
 	for _, o := range c.cfg.Limits.Observations(h, call) {
 		_ = c.cfg.Governor.Observe(o.Family, o.Name, o.Used)
+		if o.Family == "" && o.Name == name {
+			folded = true
+		}
 	}
+	if name == "" {
+		return false
+	}
+	return folded
+}
+
+// noteFoldMiss records a mapped endpoint whose usable venue reading did not
+// arrive on a response the API demonstrably handled.
+//
+// "Demonstrably handled" is any 2xx not classified as the IP ban, or a
+// response classified as a throttle whatever its status — the throttle is the
+// endpoint meter itself refusing, which is the one response whose reading
+// matters most, while the IP ban is the gateway's own recorded unheadered
+// shape and counting it would teach an operator to skip the line. When the
+// body was never read (classified false) only the status can speak, so a
+// banned reading hidden under a 2xx is counted then; on that path the
+// penalty goes unrecorded too, so the miss is the only signal the response
+// leaves at all.
+func (c *SignedClient) noteFoldMiss(
+	call Call,
+	folded bool,
+	status int,
+	penalty ratelimit.PenaltyKind,
+	classified bool,
+) {
+	name := c.cfg.Limits.Endpoint(call.Path)
+	if folded || name == "" {
+		return
+	}
+	is2xx := status >= 200 && status < 300
+	miss := is2xx
+	if classified {
+		miss = penalty == ratelimit.PenaltyThrottle || (is2xx && penalty != ratelimit.PenaltyBan)
+	}
+	if !miss {
+		return
+	}
+	// NewSignedClient's complete-roster check guarantees every endpoint the
+	// reader derives has a declared limit, so this error is unreachable.
+	_ = c.cfg.Governor.FoldMiss("", name)
 }
 
 // retryAfter reads the venue's own hint. §7.6 treats it as a FLOOR, not a

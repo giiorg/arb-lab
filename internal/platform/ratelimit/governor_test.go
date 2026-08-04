@@ -571,6 +571,74 @@ func TestObserve(t *testing.T) {
 	})
 }
 
+func TestFoldMiss(t *testing.T) {
+	t.Parallel()
+
+	t.Run("two misses increment only the named limit", func(t *testing.T) {
+		t.Parallel()
+		g, _ := newEndpointGovernor(t)
+		if err := g.FoldMiss("", "read_a"); err != nil {
+			t.Fatalf("FoldMiss: %v", err)
+		}
+		if err := g.FoldMiss("", "read_a"); err != nil {
+			t.Fatalf("FoldMiss: %v", err)
+		}
+
+		for _, l := range g.Snapshot().Limits {
+			want := uint64(0)
+			if l.Name == "read_a" {
+				want = 2
+			}
+			if l.FoldMisses != want {
+				t.Errorf("limit %q FoldMisses = %d, want %d", l.Name, l.FoldMisses, want)
+			}
+		}
+	})
+
+	t.Run("an unknown limit is refused", func(t *testing.T) {
+		t.Parallel()
+		g, _ := newEndpointGovernor(t)
+		err := g.FoldMiss("", "read_unknown")
+		if !errors.Is(err, ratelimit.ErrLimitUnknown) {
+			t.Fatalf("FoldMiss = %v, want ErrLimitUnknown", err)
+		}
+	})
+
+	t.Run("an unknown family is refused", func(t *testing.T) {
+		t.Parallel()
+		g, _ := newEndpointGovernor(t)
+		err := g.FoldMiss(ids.ProductInversePerp, "weight_1m")
+		if !errors.Is(err, ratelimit.ErrFamilyUnknown) {
+			t.Fatalf("FoldMiss = %v, want ErrFamilyUnknown", err)
+		}
+	})
+}
+
+func TestFoldMissSurvivesSnapshotsAndWindowEviction(t *testing.T) {
+	t.Parallel()
+
+	g, tc := newEndpointGovernor(t)
+	mustAcquire(t, g, endpointRead(ids.ProductSpot, "read_a", ratelimit.PrioritySafety))
+	if err := g.FoldMiss("", "read_a"); err != nil {
+		t.Fatalf("FoldMiss: %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		if got := foldMissesOf(t, g, "", "read_a"); got != 1 {
+			t.Errorf("snapshot %d FoldMisses = %d, want 1", i+1, got)
+		}
+	}
+	if err := tc.Advance(time.Second); err != nil {
+		t.Fatalf("Advance: %v", err)
+	}
+	if got := usedOf(t, g, "", "read_a"); got != 0 {
+		t.Errorf("used after interval = %d, want 0", got)
+	}
+	if got := foldMissesOf(t, g, "", "read_a"); got != 1 {
+		t.Errorf("FoldMisses after interval = %d, want 1", got)
+	}
+}
+
 func TestPenalize(t *testing.T) {
 	t.Parallel()
 
@@ -1231,6 +1299,17 @@ func usedOf(t *testing.T, g *ratelimit.Governor, family ids.ProductCategory, nam
 	for _, l := range g.Snapshot().Limits {
 		if l.Name == name && l.Family == family {
 			return l.Used
+		}
+	}
+	t.Fatalf("no limit %q under family %q in the snapshot", name, family)
+	return 0
+}
+
+func foldMissesOf(t *testing.T, g *ratelimit.Governor, family ids.ProductCategory, name string) uint64 {
+	t.Helper()
+	for _, l := range g.Snapshot().Limits {
+		if l.Name == name && l.Family == family {
+			return l.FoldMisses
 		}
 	}
 	t.Fatalf("no limit %q under family %q in the snapshot", name, family)

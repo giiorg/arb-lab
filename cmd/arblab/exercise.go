@@ -75,17 +75,18 @@ func exerciseRun(args []string, stdout, stderr io.Writer) int {
 	return 70
 }
 
-// writeExerciseReport renders the boot exactly as reconcile does — one
-// renderer, so the two commands cannot describe the same boot differently —
-// then the execute step's own half.
+// writeExerciseReport renders reconcile's verdict and diagnosis around the
+// execute step, then reports the final rate-limit state once.
 func writeExerciseReport(w io.Writer, r appexercise.Report) {
-	writeReconcileReport(w, r.Boot)
+	writeReconcileVerdict(w, r.Boot)
+	writeReconcileDiagnosis(w, r.Boot)
 	if !r.Executed {
 		if r.Refusal != nil {
 			fmt.Fprintf(w, "execute:  refused, nothing sent: %v\n", r.Refusal)
 		} else {
 			fmt.Fprintln(w, "execute:  did not run")
 		}
+		writeRateLimitStatus(w, r.Boot.RateLimit)
 		return
 	}
 	fmt.Fprintf(w, "execute:  %d leg(s) dispatched\n", r.Execution.Dispatched())
@@ -115,11 +116,8 @@ func writeExerciseReport(w io.Writer, r appexercise.Report) {
 	if r.Execution.HoldsNewTrading() {
 		fmt.Fprintln(w, "execute:  HOLDS NEW TRADING — a sent leg's projection write failed; §6 step 7 applies until reconcile re-derives it")
 	}
-	// The POST-execute rate-limit state, printed only on the executed path: the
-	// boot's own line above rendered the pre-execute snapshot, and when nothing
-	// was executed the two are the same facts — a second line would say it
-	// twice. When the fan-out itself earned a ban, this line is the only one
-	// that can say so.
+	// The post-execute snapshot contains the boot's monotone counters plus any
+	// dispatch additions, so it is the one complete rate-limit history to print.
 	writeRateLimitStatus(w, r.RateLimit)
 }
 

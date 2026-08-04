@@ -87,6 +87,7 @@ type Governor struct {
 	pauseKind   PenaltyKind
 	bans        uint64
 	throttles   uint64
+	foldMisses  map[limitKey]uint64
 }
 
 // New builds a governor over a validated profile.
@@ -102,6 +103,7 @@ func New(c clock.Clock, p Profile) (*Governor, error) {
 		clk:        c,
 		profile:    p,
 		windows:    make(map[limitKey]*window, len(p.Limits)),
+		foldMisses: make(map[limitKey]uint64),
 		order:      make([]limitKey, 0, len(p.Limits)),
 		applicable: make(map[ids.ProductCategory][]*window, len(p.Families)),
 		endpoints:  make(map[string]*window),
@@ -295,6 +297,34 @@ func (g *Governor) Observe(family ids.ProductCategory, name string, used uint64)
 	return nil
 }
 
+// FoldMiss records that a limit's venue reading failed to arrive: the caller
+// mapped a response to this budget and could derive no observation from it.
+//
+// It is §7.6's fold-health signal, and it is observability ONLY — admission
+// state does not change, because the reading that is missing is the venue's
+// correction, not our own accounting, and refusing to trade over a broken
+// correction channel would turn a header regression into an outage. An
+// unknown family or limit is refused under the same contract as Observe: a
+// miss nobody can place is the same configuration mismatch as a reading
+// nobody can place.
+func (g *Governor) FoldMiss(family ids.ProductCategory, name string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if family != "" {
+		if _, ok := g.applicable[family]; !ok {
+			return fmt.Errorf("venue %q family %q: %w", g.profile.Venue, family, ErrFamilyUnknown)
+		}
+	}
+	k := limitKey{family: family, name: name}
+	if _, ok := g.windows[k]; !ok {
+		return fmt.Errorf("venue %q family %q limit %q: %w",
+			g.profile.Venue, family, name, ErrLimitUnknown)
+	}
+	g.foldMisses[k]++
+	return nil
+}
+
 // Penalize records a venue refusal and holds the venue off.
 //
 // The pause is venue-wide, across every family, and that is §7.6's own hedge
@@ -365,6 +395,9 @@ type LimitState struct {
 	// venue reading ratcheted in.
 	Used uint64
 
+	// FoldMisses is §7.6's fold-health count of missing usable observations.
+	FoldMisses uint64
+
 	OpeningCeiling uint64
 	RoutineCeiling uint64
 	Capacity       uint64
@@ -428,6 +461,7 @@ func (g *Governor) Snapshot() Snapshot {
 			Dimension:      w.limit.Dimension,
 			Interval:       w.limit.Interval,
 			Used:           w.usedAt(now),
+			FoldMisses:     g.foldMisses[k],
 			OpeningCeiling: w.limit.OpeningCeiling,
 			RoutineCeiling: w.limit.RoutineCeiling,
 			Capacity:       w.limit.Capacity,

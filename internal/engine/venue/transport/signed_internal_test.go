@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -194,10 +195,22 @@ func bybitTestClient(
 	readLimit int64,
 ) *SignedClient {
 	t.Helper()
-	cfg := testSignedClientConfig(t, gov, BybitLimitReader{})
+	return bybitTestClientWithReader(t, srv, gov, BybitLimitReader{}, readLimit)
+}
+
+func bybitTestClientWithReader(
+	t *testing.T,
+	srv *httptest.Server,
+	gov *ratelimit.Governor,
+	limits LimitReader,
+	readLimit int64,
+) *SignedClient {
+	t.Helper()
+	cfg := testSignedClientConfig(t, gov, limits)
 	cfg.Scheme = "http"
 	cfg.Host = strings.TrimPrefix(srv.URL, "http://")
 	cfg.ReadLimit = readLimit
+	cfg.Envelope = BybitEnvelope{}
 	c, err := NewSignedClient(cfg)
 	if err != nil {
 		t.Fatalf("NewSignedClient: %v", err)
@@ -221,6 +234,45 @@ func endpointUsed(t *testing.T, gov *ratelimit.Governor, name string) uint64 {
 	}
 	t.Fatalf("endpoint limit %q missing from snapshot", name)
 	return 0
+}
+
+func endpointFoldMisses(t *testing.T, gov *ratelimit.Governor, name string) uint64 {
+	t.Helper()
+	for _, l := range gov.Snapshot().Limits {
+		if l.Scope == ratelimit.ScopeEndpoint && l.Name == name {
+			return l.FoldMisses
+		}
+	}
+	t.Fatalf("endpoint limit %q missing from snapshot", name)
+	return 0
+}
+
+func assertOnlyEndpointFoldMisses(t *testing.T, gov *ratelimit.Governor, name string, want uint64) {
+	t.Helper()
+	for _, endpoint := range (BybitLimitReader{}).Endpoints() {
+		endpointWant := uint64(0)
+		if endpoint.Name == name {
+			endpointWant = want
+		}
+		if got := endpointFoldMisses(t, gov, endpoint.Name); got != endpointWant {
+			t.Errorf("%s FoldMisses = %d, want %d", endpoint.Name, got, endpointWant)
+		}
+	}
+}
+
+type bybitObservationOverride struct {
+	BybitLimitReader
+	observations []Observation
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func (r bybitObservationOverride) Observations(http.Header, Call) []Observation {
+	return r.observations
 }
 
 func testCall() Call {
@@ -366,9 +418,21 @@ func TestSignedClientFoldsBybitHeadersBeforeBodyFailures(t *testing.T) {
 		readLimit int64
 		handler   http.HandlerFunc
 		wantErr   error
+		wantUsed  uint64
+		wantMiss  uint64
 	}{
 		{
-			name: "mid-stream read failure", readLimit: 100,
+			name: "mid-stream read failure with no headers", readLimit: 100,
+			wantUsed: 1, wantMiss: 1,
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Length", "100")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("short"))
+			},
+		},
+		{
+			name: "mid-stream read failure with valid headers", readLimit: 100,
+			wantUsed: 40,
 			handler: func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("X-Bapi-Limit", "50")
 				w.Header().Set("X-Bapi-Limit-Status", "10")
@@ -378,11 +442,37 @@ func TestSignedClientFoldsBybitHeadersBeforeBodyFailures(t *testing.T) {
 			},
 		},
 		{
-			name: "body exceeds read limit", readLimit: 4, wantErr: ErrBodyTooLarge,
+			name: "mid-stream read failure outside 2xx", readLimit: 100,
+			wantUsed: 1,
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Length", "100")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte("short"))
+			},
+		},
+		{
+			name: "body exceeds read limit with no headers", readLimit: 4,
+			wantErr: ErrBodyTooLarge, wantUsed: 1, wantMiss: 1,
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("12345"))
+			},
+		},
+		{
+			name: "body exceeds read limit with valid headers", readLimit: 4,
+			wantErr: ErrBodyTooLarge, wantUsed: 40,
 			handler: func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("X-Bapi-Limit", "50")
 				w.Header().Set("X-Bapi-Limit-Status", "10")
 				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("12345"))
+			},
+		},
+		{
+			name: "body exceeds read limit outside 2xx", readLimit: 4,
+			wantErr: ErrBodyTooLarge, wantUsed: 1,
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte("12345"))
 			},
 		},
@@ -400,9 +490,10 @@ func TestSignedClientFoldsBybitHeadersBeforeBodyFailures(t *testing.T) {
 			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
 				t.Errorf("Do() = %v, want %v", err, tc.wantErr)
 			}
-			if got := endpointUsed(t, gov, BybitOrderRealtimeLimit); got != 40 {
-				t.Errorf("order_realtime used = %d, want header ratchet to 40", got)
+			if got := endpointUsed(t, gov, BybitOrderRealtimeLimit); got != tc.wantUsed {
+				t.Errorf("order_realtime used = %d, want %d", got, tc.wantUsed)
 			}
+			assertOnlyEndpointFoldMisses(t, gov, BybitOrderRealtimeLimit, tc.wantMiss)
 		})
 	}
 }
@@ -410,7 +501,7 @@ func TestSignedClientFoldsBybitHeadersBeforeBodyFailures(t *testing.T) {
 func TestSignedClientChargesAndFoldsTheSameBybitEndpointWindow(t *testing.T) {
 	t.Parallel()
 
-	t.Run("local charge without headers", func(t *testing.T) {
+	t.Run("two local charges without headers record two misses", func(t *testing.T) {
 		t.Parallel()
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -418,18 +509,22 @@ func TestSignedClientChargesAndFoldsTheSameBybitEndpointWindow(t *testing.T) {
 		defer srv.Close()
 
 		gov := bybitTestGovernor(t)
-		if _, err := bybitTestClient(t, srv, gov, 1024).Do(context.Background(), bybitReadCall()); err != nil {
-			t.Fatalf("Do: %v", err)
+		client := bybitTestClient(t, srv, gov, 1024)
+		for i := 0; i < 2; i++ {
+			if _, err := client.Do(context.Background(), bybitReadCall()); err != nil {
+				t.Fatalf("Do: %v", err)
+			}
 		}
 		for _, endpoint := range (BybitLimitReader{}).Endpoints() {
 			want := uint64(0)
 			if endpoint.Name == BybitOrderRealtimeLimit {
-				want = 1
+				want = 2
 			}
 			if got := endpointUsed(t, gov, endpoint.Name); got != want {
 				t.Errorf("%s used = %d, want %d", endpoint.Name, got, want)
 			}
 		}
+		assertOnlyEndpointFoldMisses(t, gov, BybitOrderRealtimeLimit, 2)
 	})
 
 	t.Run("header fold", func(t *testing.T) {
@@ -448,7 +543,141 @@ func TestSignedClientChargesAndFoldsTheSameBybitEndpointWindow(t *testing.T) {
 		if got := endpointUsed(t, gov, BybitOrderRealtimeLimit); got != 40 {
 			t.Errorf("order_realtime used = %d, want local charge followed by header ratchet to 40", got)
 		}
+		assertOnlyEndpointFoldMisses(t, gov, BybitOrderRealtimeLimit, 0)
 	})
+}
+
+func TestSignedClientRecordsBybitFoldMissesOnlyWhenTheAPIHandledTheRequest(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		status   int
+		body     string
+		headers  http.Header
+		wantErr  bool
+		wantUsed uint64
+		wantMiss uint64
+	}{
+		{name: "199 is outside 2xx", status: 199, wantErr: true, wantUsed: 1},
+		{name: "204 is inside 2xx", status: http.StatusNoContent, wantUsed: 1, wantMiss: 1},
+		{name: "299 is inside 2xx", status: 299, wantUsed: 1, wantMiss: 1},
+		{name: "300 is outside 2xx", status: 300, wantErr: true, wantUsed: 1},
+		{
+			name: "200 endpoint throttle", status: http.StatusOK,
+			body:    `{"retCode":10006,"retMsg":"rate limited","result":{}}`,
+			wantErr: true, wantUsed: 1, wantMiss: 1,
+		},
+		{
+			name: "403 endpoint throttle", status: http.StatusForbidden,
+			body:    `{"retCode":10006,"retMsg":"rate limited","result":{}}`,
+			wantErr: true, wantUsed: 1, wantMiss: 1,
+		},
+		{name: "bare 429 throttle", status: http.StatusTooManyRequests, wantErr: true, wantUsed: 1, wantMiss: 1},
+		{
+			name: "403 IP ban", status: http.StatusForbidden,
+			body:    `{"retCode":10018,"retMsg":"IP banned","result":{}}`,
+			wantErr: true, wantUsed: 1,
+		},
+		{
+			name: "200 IP ban", status: http.StatusOK,
+			body:    `{"retCode":10018,"retMsg":"IP banned","result":{}}`,
+			wantErr: true, wantUsed: 1,
+		},
+		{name: "empty 401", status: http.StatusUnauthorized, wantErr: true, wantUsed: 1},
+		{
+			name: "malformed header pair", status: http.StatusOK,
+			headers:  http.Header{"X-Bapi-Limit": {"not-a-number"}, "X-Bapi-Limit-Status": {"10"}},
+			wantUsed: 1, wantMiss: 1,
+		},
+		{
+			name: "valid headers on success", status: http.StatusOK,
+			headers:  http.Header{"X-Bapi-Limit": {"50"}, "X-Bapi-Limit-Status": {"10"}},
+			wantUsed: 40,
+		},
+		{
+			name: "valid headers on endpoint throttle", status: http.StatusForbidden,
+			body:    `{"retCode":10006,"retMsg":"rate limited","result":{}}`,
+			headers: http.Header{"X-Bapi-Limit": {"50"}, "X-Bapi-Limit-Status": {"10"}},
+			wantErr: true, wantUsed: 40,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				for k, values := range tc.headers {
+					for _, value := range values {
+						w.Header().Add(k, value)
+					}
+				}
+				w.WriteHeader(tc.status)
+				if tc.body != "" {
+					_, _ = w.Write([]byte(tc.body))
+				}
+			}))
+			defer srv.Close()
+
+			gov := bybitTestGovernor(t)
+			client := bybitTestClient(t, srv, gov, 1024)
+			if tc.status == 199 {
+				client.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: tc.status,
+						Header:     tc.headers.Clone(),
+						Body:       io.NopCloser(strings.NewReader(tc.body)),
+						Request:    r,
+					}, nil
+				})
+			}
+			_, err := client.Do(context.Background(), bybitReadCall())
+			if tc.wantErr && err == nil {
+				t.Fatal("Do() = nil, want an error")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("Do: %v", err)
+			}
+			if got := endpointUsed(t, gov, BybitOrderRealtimeLimit); got != tc.wantUsed {
+				t.Errorf("order_realtime used = %d, want %d", got, tc.wantUsed)
+			}
+			assertOnlyEndpointFoldMisses(t, gov, BybitOrderRealtimeLimit, tc.wantMiss)
+		})
+	}
+}
+
+func TestSignedClientRequiresAnExactMappedObservationToAvoidAFoldMiss(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		observation Observation
+	}{
+		{
+			name:        "a different endpoint name",
+			observation: Observation{Family: "", Name: BybitOrderHistoryLimit, Used: 30},
+		},
+		{
+			name:        "the mapped name under a non-empty family",
+			observation: Observation{Family: testFamily, Name: BybitOrderRealtimeLimit, Used: 30},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer srv.Close()
+
+			gov := bybitTestGovernor(t)
+			reader := bybitObservationOverride{observations: []Observation{tc.observation}}
+			client := bybitTestClientWithReader(t, srv, gov, reader, 1024)
+			if _, err := client.Do(context.Background(), bybitReadCall()); err != nil {
+				t.Fatalf("Do: %v", err)
+			}
+			assertOnlyEndpointFoldMisses(t, gov, BybitOrderRealtimeLimit, 1)
+		})
+	}
 }
 
 func TestSignedClientRefusesAnUnbudgetedDerivedBybitEndpointBeforeSend(t *testing.T) {

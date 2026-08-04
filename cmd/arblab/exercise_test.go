@@ -63,3 +63,51 @@ func TestExerciseReportPrintsTheBanAlertExactlyOnce(t *testing.T) {
 		t.Errorf("dispatch-banned report does not carry the ban:\n%s", buf.String())
 	}
 }
+
+func TestExerciseReportPrintsFoldHealthExactlyOnceFromTheFinalSnapshot(t *testing.T) {
+	bootSnapshot := ratelimit.Snapshot{
+		Venue:  ids.Venue("bybit"),
+		Limits: []ratelimit.LimitState{{Name: "order_realtime", FoldMisses: 1}},
+	}
+	final := ratelimit.Snapshot{
+		Venue:  ids.Venue("bybit"),
+		Limits: []ratelimit.LimitState{{Name: "order_realtime", FoldMisses: 2}},
+	}
+
+	var buf bytes.Buffer
+	writeExerciseReport(&buf, appexercise.Report{
+		Boot: appreconcile.Report{
+			Posture:   boot.PostureReconcileOnly,
+			Blocking:  []boot.Gate{boot.GateAccountPosture},
+			RateLimit: bootSnapshot,
+		},
+		Executed:  true,
+		RateLimit: final,
+	})
+	got := buf.String()
+	if n := strings.Count(got, "ratelimit:"); n != 1 {
+		t.Errorf("executed report contains %d rate-limit lines, want exactly 1:\n%s", n, got)
+	}
+	if !strings.Contains(got, "2 response(s) carried no usable budget reading this run") {
+		t.Errorf("executed report does not carry the final miss count:\n%s", got)
+	}
+
+	buf.Reset()
+	writeExerciseReport(&buf, appexercise.Report{
+		Boot: appreconcile.Report{
+			Posture:   boot.PostureReconcileOnly,
+			Blocking:  []boot.Gate{boot.GateAccountPosture},
+			RateLimit: bootSnapshot,
+		},
+		Executed:  false,
+		Refusal:   errors.New("boot did not conclude clean"),
+		RateLimit: final,
+	})
+	got = buf.String()
+	if n := strings.Count(got, "ratelimit:"); n != 1 {
+		t.Errorf("not-executed report contains %d rate-limit lines, want exactly 1:\n%s", n, got)
+	}
+	if !strings.Contains(got, "1 response(s) carried no usable budget reading this run") {
+		t.Errorf("not-executed report does not carry the boot miss count:\n%s", got)
+	}
+}

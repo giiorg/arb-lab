@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	appreconcile "github.com/giiorg/arb-lab/internal/app/reconcile"
+	"github.com/giiorg/arb-lab/internal/oms/application"
 	"github.com/giiorg/arb-lab/internal/platform/boot"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
@@ -118,9 +120,42 @@ func TestWriteRateLimitStatusDrawsSection76sLine(t *testing.T) {
 	}
 
 	buf.Reset()
-	writeRateLimitStatus(&buf, ratelimit.Snapshot{})
+	writeRateLimitStatus(&buf, ratelimit.Snapshot{
+		Venue:  ids.Venue("bybit"),
+		Limits: []ratelimit.LimitState{{Name: "order_realtime"}},
+	})
 	if buf.Len() != 0 {
-		t.Errorf("zero snapshot printed %q — no venue traffic means no line", buf.String())
+		t.Errorf("zero fold misses printed %q, want no line", buf.String())
+	}
+
+	buf.Reset()
+	writeRateLimitStatus(&buf, ratelimit.Snapshot{
+		Venue: ids.Venue("bybit"),
+		Limits: []ratelimit.LimitState{
+			{Name: "order_realtime", FoldMisses: 1},
+			{Name: "order_history", FoldMisses: 2},
+		},
+	})
+	wantMisses := "" +
+		"ratelimit: bybit order_realtime: 1 response(s) carried no usable budget reading this run (§7.6 fold-health — venue-side corrections were missed)\n" +
+		"ratelimit: bybit order_history: 2 response(s) carried no usable budget reading this run (§7.6 fold-health — venue-side corrections were missed)\n"
+	if got := buf.String(); got != wantMisses {
+		t.Errorf("fold-miss lines = %q, want %q", got, wantMisses)
+	}
+
+	buf.Reset()
+	writeRateLimitStatus(&buf, ratelimit.Snapshot{
+		Venue: ids.Venue("bybit"), Bans: 1,
+		Limits: []ratelimit.LimitState{{Name: "order_realtime", FoldMisses: 1}},
+	})
+	got = buf.String()
+	if strings.Count(got, "ratelimit:") != 2 ||
+		!strings.Contains(got, "carried no usable budget reading this run") ||
+		!strings.Contains(got, "OPERATOR ALERT") {
+		t.Errorf("ban-and-miss snapshot must print both lines:\n%s", got)
+	}
+	if strings.Index(got, "carried no usable budget reading") > strings.Index(got, "OPERATOR ALERT") {
+		t.Errorf("fold-miss line must precede the ban line:\n%s", got)
 	}
 }
 
@@ -149,5 +184,51 @@ func TestReconcileReportCarriesTheBanAlert(t *testing.T) {
 	}
 	if !strings.Contains(got, appreconcile.ExitOperator.String()) {
 		t.Errorf("a banned report's verdict is not ExitOperator:\n%s", got)
+	}
+}
+
+// TestReconcileReportGoldenNoMiss pins the COMPLETE no-miss report output.
+// The renderer was split (verdict + ratelimit + diagnosis) for the exercise
+// composition, and "the reconcile output is unchanged" is a claim substring
+// assertions cannot check — a format drift in any standing line survived
+// every test in this file until this one existed. Unexplained deltas are the
+// one section absent here: their fixture needs a position surface and their
+// format is owned by the join tests.
+func TestReconcileReportGoldenNoMiss(t *testing.T) {
+	var buf bytes.Buffer
+	writeReconcileReport(&buf, appreconcile.Report{
+		Posture: boot.PostureReconcileOnly,
+		Latched: []boot.Gate{boot.GateNetDeltaAsserted},
+		RateLimit: ratelimit.Snapshot{
+			Venue:  ids.Venue("bybit"),
+			Paused: true, PausedUntil: time.Date(2026, 8, 4, 16, 30, 0, 0, time.UTC),
+			PauseKind: ratelimit.PenaltyThrottle,
+			Limits:    []ratelimit.LimitState{{Name: "order_realtime"}},
+		},
+		Blocking: []boot.Gate{boot.GateAccountPosture},
+		Storage:  errors.New("journal on nfs"),
+		Reconciliation: application.Reconciliation{
+			Recovery: application.Recovery{Records: 7, Dispatched: []ids.ClientOrderID{"ord-1", "ord-2"}},
+			Join:     application.Join{Orders: 2, Fills: 3, Duplicates: 1, Absent: []ids.ClientOrderID{"ord-2"}},
+			Resolved: 0,
+			Unproved: []application.UnprovedOrder{{Order: "ord-2", Reason: application.ReasonNoAnchor}},
+			Stale:    []ids.ClientOrderID{"ord-1"},
+			Cause:    errors.New("venue join stopped early"),
+		},
+	})
+	want := "posture:  PostureReconcileOnly (this binary reports 4 of §7.5's 8 gates; the rest have no producer yet)\n" +
+		"verdict:  ExitOperator\n" +
+		"latched:  [GateNetDeltaAsserted]  <- operator clearance required; a retry will not lift these\n" +
+		"ratelimit: bybit paused until 2026-08-04T16:30:00Z (PenaltyThrottle — a hard pause, not an operator matter)\n" +
+		"blocking: [GateAccountPosture]\n" +
+		"storage:  journal on nfs\n" +
+		"replayed: 7 records, 2 dispatched orders\n" +
+		"joined:   2 orders, 3 fills admitted, 1 duplicates\n" +
+		"absent:   1 order(s) the venue does not hold; 0 resolved, 1 unproved\n" +
+		"  unproved ord-2: no_anchor\n" +
+		"  stale projection for ord-1\n" +
+		"cause:    venue join stopped early\n"
+	if got := buf.String(); got != want {
+		t.Errorf("report drifted from the golden output:\ngot:\n%s\nwant:\n%s", got, want)
 	}
 }
