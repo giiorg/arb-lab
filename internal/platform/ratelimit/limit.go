@@ -22,8 +22,11 @@ const MaxLimitNameLen = 64
 // outage while a forgotten one looked fine.
 type Limit struct {
 	// Name identifies the limit within its scope, and is what Observe folds a
-	// header reading into. It is ours to choose, not the venue's: the adapter
-	// maps `X-MBX-USED-WEIGHT-1M` onto whatever this profile calls it.
+	// header reading into. A dialect that derives names from headers fixes the
+	// names of its family-scoped headered budgets: Binance weight and orders
+	// limits must bear the fold-derived name, and transport refuses a mismatch.
+	// Requests limits and Bybit names remain freely chosen until #185 gives
+	// Bybit's per-endpoint budgets a profile-side home.
 	Name string
 
 	// Scope and Family say what the budget is shared across. Family is required

@@ -44,15 +44,16 @@ var (
 	// goes out — the same configuration/runtime line the sentinels above draw,
 	// held at the point where a bad request would otherwise become an
 	// authentication error and read as a credential fault.
-	ErrSignMethodUnset       = errors.New("transport: signed request method unset")
-	ErrSignMethodUnsupported = errors.New("transport: signed request method must be GET or POST")
-	ErrRecvWindowUnset       = errors.New("transport: recv window unset — no venue default is adopted, see SignedRequest.RecvWindow")
-	ErrRecvWindowRange       = errors.New("transport: recv window exceeds the venue ceiling")
-	ErrSignerUnset           = errors.New("transport: signer unset")
-	ErrLimitReaderUnset      = errors.New("transport: limit reader unset")
-	ErrEnvelopeReaderUnset   = errors.New("transport: envelope reader unset — a venue that states refusals in the body would read as accepting everything")
-	ErrGovernorUnset         = errors.New("transport: governor unset")
-	ErrClockUnset            = errors.New("transport: clock unset")
+	ErrSignMethodUnset        = errors.New("transport: signed request method unset")
+	ErrSignMethodUnsupported  = errors.New("transport: signed request method must be GET or POST")
+	ErrRecvWindowUnset        = errors.New("transport: recv window unset — no venue default is adopted, see SignedRequest.RecvWindow")
+	ErrRecvWindowRange        = errors.New("transport: recv window exceeds the venue ceiling")
+	ErrSignerUnset            = errors.New("transport: signer unset")
+	ErrLimitReaderUnset       = errors.New("transport: limit reader unset")
+	ErrLimitFoldUnaddressable = errors.New("transport: profile limit can never receive the venue's own reading — its name does not agree with the dialect's fold-derived names")
+	ErrEnvelopeReaderUnset    = errors.New("transport: envelope reader unset — a venue that states refusals in the body would read as accepting everything")
+	ErrGovernorUnset          = errors.New("transport: governor unset")
+	ErrClockUnset             = errors.New("transport: clock unset")
 
 	// The server-clock refusals. Separate sentinels because they send the
 	// operator to different places: Unusable is a venue that was never

@@ -93,11 +93,10 @@ func validConfig(t *testing.T, journal string) Config {
 			RecvWindow: dur(t, "5s"),
 			// The family limit names follow the FOLD-DERIVED convention
 			// (BinanceLimitReader turns X-Mbx-Used-Weight-1m into "weight_1m",
-			// addressed at the call's family): a profile spelling them any
-			// other way still validates and still counts locally, but every
-			// venue-reported reading is silently dropped at the observe seam —
-			// task #186 is the boot-time check; until it lands the convention
-			// is carried by this fixture being the shape operators copy.
+			// addressed at the call's family). Since #186 the convention is
+			// enforced: NewSignedClient refuses a family weight/orders budget
+			// under any other name, because the venue's readings could never
+			// reach it through the observe seam.
 			Limits: []LimitConfig{
 				{Name: "ip_requests", Scope: "venue", Dimension: "requests", Interval: dur(t, "5s"),
 					OpeningCeiling: 300, RoutineCeiling: 400, Capacity: 500},
@@ -630,9 +629,9 @@ func spotOnly(t *testing.T, journal string) Config {
 	cfg.Venue.Limits = []LimitConfig{
 		{Name: "ip_requests", Scope: "venue", Dimension: "requests", Interval: dur(t, "5s"),
 			OpeningCeiling: 300, RoutineCeiling: 400, Capacity: 500},
-		{Name: "spot_weight", Scope: "family", Product: ids.ProductSpot, Dimension: "weight",
+		{Name: "weight_1m", Scope: "family", Product: ids.ProductSpot, Dimension: "weight",
 			Interval: dur(t, "1m"), OpeningCeiling: 4200, RoutineCeiling: 5400, Capacity: 6000},
-		{Name: "spot_orders", Scope: "family", Product: ids.ProductSpot, Dimension: "orders",
+		{Name: "orders_10s", Scope: "family", Product: ids.ProductSpot, Dimension: "orders",
 			Interval: dur(t, "10s"), OpeningCeiling: 70, RoutineCeiling: 90, Capacity: 100},
 	}
 	cfg.PositionScopes = nil

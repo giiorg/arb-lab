@@ -117,6 +117,29 @@ func testClient(t *testing.T, srv *httptest.Server, gov *ratelimit.Governor) *Si
 	return c
 }
 
+func testSignedClientConfig(t *testing.T, gov *ratelimit.Governor, limits LimitReader) SignedClientConfig {
+	t.Helper()
+	clk, err := clock.NewTestClock(time.UnixMilli(1700000000000).UTC(), []clock.Calibration{
+		{Venue: testVenue, Offset: 0, Uncertainty: time.Millisecond},
+	})
+	if err != nil {
+		t.Fatalf("NewTestClock: %v", err)
+	}
+	cred, err := NewCredential("test-key", "test-secret")
+	if err != nil {
+		t.Fatalf("NewCredential: %v", err)
+	}
+	signer, err := NewBinanceSigner(testVenue, cred)
+	if err != nil {
+		t.Fatalf("NewBinanceSigner: %v", err)
+	}
+	return SignedClientConfig{
+		Scheme: "https", Host: "example.com", Timeout: 5 * time.Second, ReadLimit: 1 << 16,
+		RecvWindow: 5000 * time.Millisecond, Signer: signer, Limits: limits,
+		Envelope: BinanceEnvelope{}, Governor: gov, Clock: clk,
+	}
+}
+
 func testCall() Call {
 	return Call{
 		Op:       "test.Call",
@@ -251,6 +274,51 @@ func TestSignedClientFoldsHeadersEvenOnARefusal(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("weight_1m missing from the snapshot")
+	}
+}
+
+func TestNewSignedClientChecksFamilyFoldNames(t *testing.T) {
+	t.Parallel()
+	profile := testProfile(t)
+	profile.Limits[0].Name = "spot_weight"
+	cfg := testSignedClientConfig(t, testGovernor(t), BinanceLimitReader{})
+	gov, err := ratelimit.New(cfg.Clock, profile)
+	if err != nil {
+		t.Fatalf("ratelimit.New: %v", err)
+	}
+	cfg.Governor = gov
+	_, err = NewSignedClient(cfg)
+	if !errors.Is(err, ErrLimitFoldUnaddressable) {
+		t.Fatalf("NewSignedClient error = %v, want ErrLimitFoldUnaddressable", err)
+	}
+	for _, want := range []string{"spot_weight", "weight_1m"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("NewSignedClient error %q does not name %q", err, want)
+		}
+	}
+
+	if _, err := NewSignedClient(testSignedClientConfig(t, testGovernor(t), BinanceLimitReader{})); err != nil {
+		t.Errorf("conforming profile was refused: %v", err)
+	}
+}
+
+// TestNewSignedClientSkipsVenueScopedFoldNames.
+//
+// COLLAPSE CHECK: the venue envelope deliberately shares weight_1m with the
+// family budget. Checking every scope would mistake that legal, separately
+// keyed requests budget for a cross-dimension collision.
+func TestNewSignedClientSkipsVenueScopedFoldNames(t *testing.T) {
+	t.Parallel()
+	profile := testProfile(t)
+	profile.Limits[1].Name = "weight_1m"
+	cfg := testSignedClientConfig(t, testGovernor(t), BinanceLimitReader{})
+	gov, err := ratelimit.New(cfg.Clock, profile)
+	if err != nil {
+		t.Fatalf("ratelimit.New: %v", err)
+	}
+	cfg.Governor = gov
+	if _, err := NewSignedClient(cfg); err != nil {
+		t.Fatalf("NewSignedClient: %v", err)
 	}
 }
 
@@ -489,6 +557,187 @@ func TestBinanceLimitReaderNamesBothDimensions(t *testing.T) {
 	for k, v := range want {
 		if got[k] != v {
 			t.Errorf("%s = %d, want %d", k, got[k], v)
+		}
+	}
+}
+
+func TestBinanceLimitReaderCanonicalizesHeaderWindows(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		headerName string
+		wantName   string
+	}{
+		{name: "seconds become minutes", headerName: "X-MBX-USED-WEIGHT-60S", wantName: "weight_1m"},
+		{name: "minutes stay minutes", headerName: "X-MBX-USED-WEIGHT-1M", wantName: "weight_1m"},
+		{name: "unparseable suffix", headerName: "X-MBX-USED-WEIGHT-XYZ"},
+		{name: "overflowing suffix", headerName: "X-MBX-USED-WEIGHT-36028797018963969S"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := http.Header{}
+			h.Set(tc.headerName, "17")
+			obs := (BinanceLimitReader{}).Observations(h, Call{Family: testFamily})
+			if tc.wantName == "" {
+				if len(obs) != 0 {
+					t.Fatalf("got %+v, want no observations", obs)
+				}
+				return
+			}
+			if len(obs) != 1 {
+				t.Fatalf("got %d observations, want 1: %+v", len(obs), obs)
+			}
+			if obs[0].Name != tc.wantName {
+				t.Errorf("Name = %q, want %q", obs[0].Name, tc.wantName)
+			}
+		})
+	}
+}
+
+// TestBinanceLimitReaderMergesEquivalentHeaderWindows.
+//
+// COLLAPSE CHECK: the two duration-equivalent spellings carry different
+// readings. The observation count catches either one being dropped, and the
+// governor's exact maximum catches a split fold target.
+func TestBinanceLimitReaderMergesEquivalentHeaderWindows(t *testing.T) {
+	t.Parallel()
+	const (
+		secondsReading = 1700
+		minutesReading = 1900
+	)
+	h := http.Header{}
+	h.Set("X-MBX-USED-WEIGHT-60S", fmt.Sprint(secondsReading))
+	h.Set("X-MBX-USED-WEIGHT-1M", fmt.Sprint(minutesReading))
+	obs := (BinanceLimitReader{}).Observations(h, Call{Family: testFamily})
+	if len(obs) != 2 {
+		t.Fatalf("got %d observations, want 2: %+v", len(obs), obs)
+	}
+	for _, o := range obs {
+		if o.Name != "weight_1m" {
+			t.Errorf("Name = %q, want weight_1m", o.Name)
+		}
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-MBX-USED-WEIGHT-60S", fmt.Sprint(secondsReading))
+		w.Header().Set("X-MBX-USED-WEIGHT-1M", fmt.Sprint(minutesReading))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	gov := testGovernor(t)
+	if _, err := testClient(t, srv, gov).Do(context.Background(), testCall()); err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	var found bool
+	for _, l := range gov.Snapshot().Limits {
+		if l.Name == "weight_1m" {
+			found = true
+			if l.Used != minutesReading {
+				t.Errorf("weight_1m used = %d, want max reading %d", l.Used, minutesReading)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("weight_1m missing from the snapshot")
+	}
+}
+
+// TestBinanceLimitReaderChecksFoldNames.
+//
+// COLLAPSE CHECK: the mismatches separate prefix from window, and request-name
+// collisions vary the declared interval. A prefix-only check, a window-only
+// check, or a collision check coupled to the limit's interval fails a row.
+func TestBinanceLimitReaderChecksFoldNames(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		limitName  string
+		dimension  ratelimit.Dimension
+		interval   time.Duration
+		wantErr    bool
+		wantInText []string
+	}{
+		{name: "weight agrees", limitName: "weight_1m", dimension: ratelimit.DimensionWeight, interval: time.Minute},
+		{name: "orders agree", limitName: "orders_10s", dimension: ratelimit.DimensionOrders, interval: 10 * time.Second},
+		{name: "weight prefix mismatch", limitName: "spot_weight", dimension: ratelimit.DimensionWeight, interval: time.Minute, wantErr: true, wantInText: []string{"spot_weight", "weight_1m"}},
+		{name: "weight window mismatch", limitName: "weight_1m", dimension: ratelimit.DimensionWeight, interval: 10 * time.Second, wantErr: true, wantInText: []string{"weight_1m", "weight_10s"}},
+		{name: "weight cross prefix", limitName: "orders_1m", dimension: ratelimit.DimensionWeight, interval: time.Minute, wantErr: true, wantInText: []string{"orders_1m", "weight_1m"}},
+		{name: "requests collide with weight", limitName: "weight_1m", dimension: ratelimit.DimensionRequests, interval: time.Minute, wantErr: true},
+		{name: "requests collision ignores interval", limitName: "weight_1m", dimension: ratelimit.DimensionRequests, interval: 5 * time.Second, wantErr: true},
+		{name: "requests collide with orders", limitName: "orders_10s", dimension: ratelimit.DimensionRequests, interval: time.Minute, wantErr: true},
+		{name: "requests ordinary name", limitName: "ip_requests", dimension: ratelimit.DimensionRequests, interval: 5 * time.Second},
+		{name: "requests weight guardrail", limitName: "weight_guardrail", dimension: ratelimit.DimensionRequests, interval: time.Minute},
+		{name: "requests orders local", limitName: "orders_local", dimension: ratelimit.DimensionRequests, interval: 10 * time.Second},
+		{name: "requests noncanonical window", limitName: "weight_60s", dimension: ratelimit.DimensionRequests, interval: time.Minute},
+		{name: "weight unrenderable interval", limitName: "weight_500ms", dimension: ratelimit.DimensionWeight, interval: 500 * time.Millisecond, wantErr: true},
+		{name: "requests suffix exceeds uint64", limitName: "weight_18446744073709551616s", dimension: ratelimit.DimensionRequests, interval: time.Minute},
+		{name: "requests suffix multiplication overflows", limitName: "weight_36028797018963969s", dimension: ratelimit.DimensionRequests, interval: time.Minute},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := (BinanceLimitReader{}).CheckFold(tc.limitName, tc.dimension, tc.interval)
+			if !tc.wantErr {
+				if err != nil {
+					t.Fatalf("CheckFold: %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, ErrLimitFoldUnaddressable) {
+				t.Fatalf("CheckFold error = %v, want ErrLimitFoldUnaddressable", err)
+			}
+			for _, want := range tc.wantInText {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("CheckFold error %q does not name %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestBinanceWindowRendersCanonically(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		window time.Duration
+		want   string
+	}{
+		{10 * time.Second, "10s"},
+		{90 * time.Second, "90s"},
+		{time.Minute, "1m"},
+		{2 * time.Hour, "2h"},
+		{24 * time.Hour, "1d"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.want, func(t *testing.T) {
+			t.Parallel()
+			got, ok := binanceWindow(tc.window)
+			if !ok || got != tc.want {
+				t.Errorf("binanceWindow(%s) = %q, %t; want %q, true", tc.window, got, ok, tc.want)
+			}
+		})
+	}
+}
+
+// TestBybitLimitReaderDefersFoldNameAgreement records the transport boundary:
+// endpoint names belong to the caller-side roster and cannot be judged here.
+func TestBybitLimitReaderDefersFoldNameAgreement(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		dimension ratelimit.Dimension
+		interval  time.Duration
+	}{
+		{"weight_1m", ratelimit.DimensionWeight, time.Minute},
+		{"orders_10s", ratelimit.DimensionOrders, 10 * time.Second},
+		{"spot_weight", ratelimit.DimensionWeight, time.Minute},
+		{"weight_1m", ratelimit.DimensionRequests, 5 * time.Second},
+		{"weight_guardrail", ratelimit.DimensionRequests, time.Minute},
+		{"weight_500ms", ratelimit.DimensionWeight, 500 * time.Millisecond},
+	}
+	for _, tc := range cases {
+		if err := (BybitLimitReader{}).CheckFold(tc.name, tc.dimension, tc.interval); err != nil {
+			t.Errorf("CheckFold(%q, %s, %s): %v", tc.name, tc.dimension, tc.interval, err)
 		}
 	}
 }

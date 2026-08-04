@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -140,6 +141,15 @@ func (c SignedClientConfig) Validate() error {
 func NewSignedClient(cfg SignedClientConfig) (*SignedClient, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
+	}
+	snapshot := cfg.Governor.Snapshot()
+	for _, l := range snapshot.Limits {
+		if l.Scope != ratelimit.ScopeFamily {
+			continue
+		}
+		if err := cfg.Limits.CheckFold(l.Name, l.Dimension, l.Interval); err != nil {
+			return nil, fmt.Errorf("venue %q limit %q: %w", snapshot.Venue, l.Name, err)
+		}
 	}
 	return &SignedClient{
 		cfg: cfg,
@@ -301,9 +311,12 @@ func (c *SignedClient) Do(ctx context.Context, call Call) (Response, error) {
 //
 // Errors are dropped on purpose, and this is the one place in the file where
 // that is right: Observe refuses a limit the profile does not declare, which is
-// a configuration mismatch worth a boot-time check rather than a reason to fail
-// a request the venue already answered. The alternative — failing the call —
-// would turn a mislabelled header into a trading outage.
+// a configuration mismatch rather than a reason to fail a request the venue
+// already answered. The alternative — failing the call — would turn a
+// mislabelled header into a trading outage. Dropping here is safe because
+// NewSignedClient already refused any profile whose family-scoped names the
+// reader could never address (CheckFold), so what remains at this seam is the
+// venue reporting a window the profile deliberately does not budget.
 func (c *SignedClient) observe(call Call, h http.Header) {
 	for _, o := range c.cfg.Limits.Observations(h, call) {
 		_ = c.cfg.Governor.Observe(o.Family, o.Name, o.Used)
@@ -339,6 +352,10 @@ type Observation struct {
 // LimitReader turns a venue's rate-limit response headers into observations.
 type LimitReader interface {
 	Observations(h http.Header, call Call) []Observation
+
+	// CheckFold reports whether a family-scoped budget declared under name,
+	// counting d over window w, can receive this reader's venue readings.
+	CheckFold(name string, d ratelimit.Dimension, w time.Duration) error
 }
 
 // BinanceLimitReader reads X-MBX-USED-WEIGHT-* and X-MBX-ORDER-COUNT-*.
@@ -348,17 +365,126 @@ type LimitReader interface {
 // name is derived from the header rather than supplied by the caller.
 type BinanceLimitReader struct{}
 
+// CheckFold implements LimitReader.
+func (BinanceLimitReader) CheckFold(name string, d ratelimit.Dimension, w time.Duration) error {
+	switch d {
+	case ratelimit.DimensionUnspecified:
+		return fmt.Errorf("limit %q has unspecified dimension: %w", name, ErrLimitFoldUnaddressable)
+	case ratelimit.DimensionWeight:
+		return checkBinanceFoldName(name, "weight_", w)
+	case ratelimit.DimensionOrders:
+		return checkBinanceFoldName(name, "orders_", w)
+	case ratelimit.DimensionRequests:
+		if derived, ok := binanceDerivedName(name); ok && derived == name {
+			return fmt.Errorf("declared limit %q collides with derived name %q: %w",
+				name, derived, ErrLimitFoldUnaddressable)
+		}
+		return nil
+	}
+	return fmt.Errorf("limit %q has dimension %d: %w", name, uint8(d), ErrLimitFoldUnaddressable)
+}
+
+func checkBinanceFoldName(name, prefix string, w time.Duration) error {
+	window, ok := binanceWindow(w)
+	if !ok {
+		return fmt.Errorf("limit %q window %s cannot be rendered as a binance fold name: %w",
+			name, w, ErrLimitFoldUnaddressable)
+	}
+	want := prefix + window
+	if name != want {
+		return fmt.Errorf("declared limit %q does not agree with derived name %q: %w",
+			name, want, ErrLimitFoldUnaddressable)
+	}
+	return nil
+}
+
+func binanceDerivedName(name string) (string, bool) {
+	for _, prefix := range [...]string{"weight_", "orders_"} {
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		window, ok := parseBinanceWindow(strings.TrimPrefix(name, prefix))
+		if !ok {
+			return "", false
+		}
+		canonical, ok := binanceWindow(window)
+		if !ok {
+			return "", false
+		}
+		return prefix + canonical, true
+	}
+	return "", false
+}
+
+func binanceWindow(w time.Duration) (string, bool) {
+	if w <= 0 || w%time.Second != 0 {
+		return "", false
+	}
+	for _, candidate := range [...]struct {
+		unit   time.Duration
+		suffix string
+	}{
+		{24 * time.Hour, "d"},
+		{time.Hour, "h"},
+		{time.Minute, "m"},
+	} {
+		if w%candidate.unit == 0 {
+			return strconv.FormatInt(int64(w/candidate.unit), 10) + candidate.suffix, true
+		}
+	}
+	return strconv.FormatInt(int64(w/time.Second), 10) + "s", true
+}
+
+func parseBinanceWindow(s string) (time.Duration, bool) {
+	if len(s) < 2 {
+		return 0, false
+	}
+	for i := 0; i < len(s)-1; i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return 0, false
+		}
+	}
+	var unit time.Duration
+	switch s[len(s)-1] {
+	case 's':
+		unit = time.Second
+	case 'm':
+		unit = time.Minute
+	case 'h':
+		unit = time.Hour
+	case 'd':
+		unit = 24 * time.Hour
+	default:
+		return 0, false
+	}
+	n, err := strconv.ParseUint(s[:len(s)-1], 10, 64)
+	if err != nil || n == 0 || n > uint64(math.MaxInt64/int64(unit)) {
+		return 0, false
+	}
+	return time.Duration(n) * unit, true
+}
+
 // Observations implements LimitReader.
 func (BinanceLimitReader) Observations(h http.Header, call Call) []Observation {
 	var out []Observation
 	for key, vals := range h {
-		var name string
+		var namePrefix, suffix string
 		switch {
 		case strings.HasPrefix(key, binanceWeightPrefix):
-			name = "weight_" + strings.ToLower(strings.TrimPrefix(key, binanceWeightPrefix))
+			namePrefix = "weight_"
+			suffix = strings.TrimPrefix(key, binanceWeightPrefix)
 		case strings.HasPrefix(key, binanceOrderPrefix):
-			name = "orders_" + strings.ToLower(strings.TrimPrefix(key, binanceOrderPrefix))
+			namePrefix = "orders_"
+			suffix = strings.TrimPrefix(key, binanceOrderPrefix)
 		default:
+			continue
+		}
+		window, ok := parseBinanceWindow(strings.ToLower(suffix))
+		if !ok {
+			continue
+		}
+		canonical, ok := binanceWindow(window)
+		if !ok {
 			continue
 		}
 		if len(vals) == 0 {
@@ -372,7 +498,7 @@ func (BinanceLimitReader) Observations(h http.Header, call Call) []Observation {
 			// reporting no consumption at all.
 			continue
 		}
-		out = append(out, Observation{Family: call.Family, Name: name, Used: used})
+		out = append(out, Observation{Family: call.Family, Name: namePrefix + canonical, Used: used})
 	}
 	return out
 }
@@ -401,6 +527,15 @@ const (
 // with no cap beside it cannot become a consumption figure and a guessed cap is
 // a budget quietly rescaled.
 type BybitLimitReader struct{}
+
+// CheckFold implements LimitReader and accepts every input. Bybit's
+// per-endpoint fold names are caller-supplied from the venue package's roster,
+// which transport cannot see. Their profile-side home belongs to #185;
+// refusing non-roster names before then would refuse the only expressible
+// local budgets.
+func (BybitLimitReader) CheckFold(string, ratelimit.Dimension, time.Duration) error {
+	return nil
+}
 
 // Observations implements LimitReader.
 func (BybitLimitReader) Observations(h http.Header, call Call) []Observation {

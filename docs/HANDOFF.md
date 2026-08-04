@@ -1,6 +1,72 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-04, session 94): **#173 IS CLOSED — §7.6's CANNOT-COUNT REFUSAL IS TWO ENFORCED LAYERS (THE GOVERNOR ERRORS ON A COST CHARGING A DIMENSION ITS APPLICABLE BUDGETS DO NOT COUNT; A PROFILE IS REJECTED AT CONSTRUCTION UNLESS EVERY FAMILY BUDGETS EVERY CHARGEABLE DIMENSION OR WRITES DOWN WHY NOT, WITH THE VENUE REQUEST ENVELOPE MANDATORY AND NEVER WAIVABLE) — AND THE REVIEW SURFACED A LIVE DEFECT: EVERY BYBIT READ THROUGH THE SIGNED CLIENT FAILED ITS OWN PRECONDITION, BECAUSE THE TRUTHFUL REQUEST-ONLY COST WAS SPELLED AS THE ZERO Cost THE VALIDATOR REFUSES. DOCS ARE v0.9.43; MARKER GREP IS ZERO; SESSIONS 91–93 ARE COMMITTED AND PUSHED (274f944).**
+## Status (2026-08-04, session 95): **#186 IS CLOSED — A PROFILE LIMIT OF A HEADERED DIMENSION MUST BEAR EXACTLY THE FOLD-DERIVED NAME, CHECKED AT SIGNED-CLIENT CONSTRUCTION (WHERE THE READER/GOVERNOR PAIR IS FORMED, SO NO ROOT CAN FORGET IT), AND THE RUNTIME READER NOW CANONICALIZES HEADER WINDOWS THROUGH THE SAME RENDERER THE CHECK USES — AND THE DESIGN REVIEW FOUND THE DEFECT LIVE THREE MORE TIMES: THE EXERCISE CHAOS FIXTURE AND BOTH TYPED LimitConfig FIXTURES STILL CARRIED spot_weight-STYLE NAMES, SO EVERY EXERCISE RUN AND EVERY SPOT-ONLY RECONCILE RUN WAS SILENTLY DROPPING EVERY VENUE READING. DOCS ARE v0.9.44; MARKER GREP IS ZERO.**
+
+**The slice is done end to end.** `make ci` green on both modules, marker grep
+**0**, **13 targeted mutations: 12 kills + 1 diagnosed expected-equivalent**
+(the parser's `n == 0` guard — both consumers re-render through the shared
+renderer, which refuses zero one step later; the `Reserve()` precedent).
+Design record **§65**
+(`docs/superpowers/specs/2026-08-04-m3-186-fold-name-agreement.md`), finding
+table in adr-history §3, ka-tutorial parity **16/16**. Task **#186** is
+discharged.
+
+**WHAT LANDED.** `transport.LimitReader.CheckFold(name, dimension, interval)`
+beside `Observations` so both share one window parser/renderer and cannot
+drift. Binance: family weight/orders budgets must be named
+`weight_<window>`/`orders_<window>` rendered from their own interval
+(`10s`/`1m`/`2h`/`1d`); a requests budget is refused only under an EXACTLY
+derivable name (round-trip through the shared parser — window-independent,
+because `Observe` folds by `(family, name)` with neither dimension nor
+interval checked), so `weight_guardrail` and `weight_60s` stay legal local
+names. `Observations` canonicalizes header suffixes through the same renderer
+(`60S` ≡ `1M` → one fold target; checked unit multiplication, because 2^55+1
+seconds wraps to exactly 1s and would mint `weight_1s`). Bybit's `CheckFold`
+is deliberately vacuous with the argument recorded — #185 owns that axis.
+`NewSignedClient` walks `Governor.Snapshot().Limits` and refuses construction
+on the first family-scoped mismatch (`ErrLimitFoldUnaddressable`, naming both
+the declared and the derived name); venue-scoped entries are skipped (keyed
+under the empty family, unreachable by any fold, requests-only since §64d).
+Three fixture families migrated (pure renames): exercise `chaosConfig` JSON,
+exercise `validConfig`, reconcile `spotOnly`. `Limit.Name` and
+`LimitConfig.Name` doc contracts corrected ("ours to choose" was false for
+headered dimensions the moment this landed). §7.6 gains the
+fold-addressability clause.
+
+**THE REVIEW ARC (six rounds, and one rebuttal that survived adjudication).**
+Round 1: the check and the runtime derived names from different inputs — a
+`60S`-spelled header would evade a check that certified `weight_1m` (the
+"recomputed check must share the anchor" memory, caught before any code).
+Round 2: prefix-based collision falsely refuses non-derivable guardrail
+names; the scope-filter mutation was unkillable until the fixture became a
+venue envelope legally SHARING `weight_1m` with a family budget. Rounds 3–4:
+the fixture inventory was falsified twice — a profile takes three shapes
+(typed literals, config builders, serialized documents) and the sweep covered
+one. Round 5: the reviewer's spelling-tuple identity was REBUTTED (it
+reintroduces the observed silent loss to guard an unobserved venue shape
+whose failure direction is conservative anyway — the upward-only fold merges
+to the max) and round 6 upheld the rebuttal; the rejection is recorded in
+§65c with a dual-header test banking the merge.
+
+**WHAT IS NEXT.** Unchanged: the **$20/$55 live-test decision** (Binance
+perp's 50 USDT floor — grow the package or move the leg to Bybit, blocked on
+**#171**, needs the USER), **#179** (spot leg's exposure baseline),
+**#183**/**#184** (filters follow-ons), **#185** (Bybit per-endpoint budgets
+— its CheckFold body now has a named home waiting), **#167** (ka make
+target), or the **§9 acceptance campaign**. Note for any Bybit work: #171's
+testnet validation exercises the repaired read-path seam AND now the
+fold-check boot path.
+
+**Standing, unchanged:** capture **PID 8495**, never rebuild over
+`bin/arblab`, `make ci` runs `-race`, cap `TLC_WORKERS` at 4, docs/i18n
+parity is `bun test`. `MUTATE_TIMEOUT` must exceed the chaos test's 60s bound
+when mutating the exercise package (**180s — WITH the unit**). **§38f (task
+#158) is still the only clock-bound user decision** (≥2 TB off-host, gate
+~2026-09-30).
+
+---
+
+## Status (2026-08-04, session 94 — HISTORICAL): **#173 IS CLOSED — §7.6's CANNOT-COUNT REFUSAL IS TWO ENFORCED LAYERS (THE GOVERNOR ERRORS ON A COST CHARGING A DIMENSION ITS APPLICABLE BUDGETS DO NOT COUNT; A PROFILE IS REJECTED AT CONSTRUCTION UNLESS EVERY FAMILY BUDGETS EVERY CHARGEABLE DIMENSION OR WRITES DOWN WHY NOT, WITH THE VENUE REQUEST ENVELOPE MANDATORY AND NEVER WAIVABLE) — AND THE REVIEW SURFACED A LIVE DEFECT: EVERY BYBIT READ THROUGH THE SIGNED CLIENT FAILED ITS OWN PRECONDITION, BECAUSE THE TRUTHFUL REQUEST-ONLY COST WAS SPELLED AS THE ZERO Cost THE VALIDATOR REFUSES. DOCS ARE v0.9.43; MARKER GREP IS ZERO; SESSIONS 91–93 ARE COMMITTED AND PUSHED (274f944).**
 
 **The slice is done end to end.** `make ci` green on both modules, marker grep
 **0**, **19 targeted mutations / 19 kills** (+1 documented expected-equivalent,

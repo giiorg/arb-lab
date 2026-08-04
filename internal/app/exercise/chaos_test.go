@@ -157,13 +157,13 @@ func chaosConfig(t *testing.T, dir, host string) string {
     "limits": [
       {"name": "ip_requests", "scope": "venue", "dimension": "requests", "interval": "5s",
        "opening_ceiling": 300, "routine_ceiling": 400, "capacity": 500},
-      {"name": "spot_weight", "scope": "family", "product": "spot", "dimension": "weight",
+      {"name": "weight_1m", "scope": "family", "product": "spot", "dimension": "weight",
        "interval": "1m", "opening_ceiling": 4200, "routine_ceiling": 5400, "capacity": 6000},
-      {"name": "spot_orders", "scope": "family", "product": "spot", "dimension": "orders",
+      {"name": "orders_10s", "scope": "family", "product": "spot", "dimension": "orders",
        "interval": "10s", "opening_ceiling": 70, "routine_ceiling": 90, "capacity": 100},
-      {"name": "perp_weight", "scope": "family", "product": "linear_perp", "dimension": "weight",
+      {"name": "weight_1m", "scope": "family", "product": "linear_perp", "dimension": "weight",
        "interval": "1m", "opening_ceiling": 1680, "routine_ceiling": 2160, "capacity": 2400},
-      {"name": "perp_orders", "scope": "family", "product": "linear_perp", "dimension": "orders",
+      {"name": "orders_1m", "scope": "family", "product": "linear_perp", "dimension": "orders",
        "interval": "1m", "opening_ceiling": 840, "routine_ceiling": 1080, "capacity": 1200}
     ],
     "throttle_pause": "2m",

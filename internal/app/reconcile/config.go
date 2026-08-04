@@ -204,7 +204,11 @@ type EndpointConfig struct {
 // repo is an explicit argument, so the operator who knows the venue's published
 // capacity does the arithmetic once, in the open, in the file.
 type LimitConfig struct {
-	// Name is ours to choose; it is what a refusal and a §10 metric label say.
+	// Name is what a refusal and a §10 metric label say. Binance family-scoped
+	// weight and orders names are fixed as weight_<window> and orders_<window>,
+	// where the limit's own interval is spelled 10s/1m/1h/1d style; transport
+	// refuses any mismatch. Requests and Bybit names remain freely chosen until
+	// #185 gives Bybit's per-endpoint budgets a profile-side home.
 	Name string `json:"name"`
 
 	// Scope is "venue" for §7.6's shared IP-ban envelope or "family" for one
