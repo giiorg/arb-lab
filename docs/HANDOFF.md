@@ -1,6 +1,48 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-04, session 99): **#188 IS MID-FLIGHT — THE DESIGN IS FOUR ADVERSARIAL ROUNDS IN AND NOT YET CONVERGED. RECORD §68 (`docs/superpowers/specs/2026-08-04-m3-188-package-reservation.md`) HOLDS THE FULL DESIGN AND THE ROUND-BY-ROUND ARC (§68f). APPENDIX A IS NOT WRITTEN. NOTHING IN `internal/` HAS BEEN TOUCHED.**
+## Status (2026-08-04, session 100): **#188'S DESIGN IS CONVERGED — ROUND 11 RETURNED SHIP AFTER ELEVEN ADVERSARIAL ROUNDS. RECORD §68 HOLDS THE DESIGN, THE FULL ARC (§68f, ROUNDS 1–11), TWELVE RECORDED REJECTIONS (§68d) AND APPENDIX A, THE FILE-BY-FILE IMPLEMENTATION SPEC. NOTHING IN `internal/` HAS BEEN TOUCHED.**
+
+**What sessions 99–100 settled beyond the session-99 block below.** Rounds
+5–10 each NO-SHIP, every finding adjudicated against the shipped code:
+round 5 rekeyed the spend lock off the credential and narrowed the
+guarantee to lock-aware processes (two rebuttals recorded as §68d items
+10/11 — the in-flight charge ladder and persisted governor handoff, both
+pre-existing properties this slice neither narrows nor widens); round 6
+made a malformed endpoint host the third member of round 3's
+boot-detectable post-fsync genus (canonical base-URL parse at
+NewSignedClient; the `price` seam widened to `prepare`, shared by Do and
+ReservePlace); round 7 rekeyed the lock AGAIN — the open `ids.Venue`
+alias to the closed signer-answered `transport.SpendDomain` — added
+`u.Hostname() != ""` (`:443` round-trips with an empty hostname), and
+refused control bytes in credentials at the carrier (item 12 rejecting
+the representative-wire variant); round 8 made the token's lifetime
+structural through the root's two-stage lifecycle; round 9 CORRECTED
+round 8's fold (the predicate is an owned REACHABLE spending capability —
+the `oms.New` error arm releases, §68e fixture 4 flipped); round 10 fired
+item 12's own reopening trigger (the Host header is config-derived) and
+closed it with a `WriteProxy(io.Discard)` dry-run at construction —
+stdlib-only, with the direct-path silent-zeroing mechanism verified
+against the pinned request.go and recorded. Round 11: SHIP, zero material
+findings, triggers 10–12 checked un-fired.
+
+**What the next session does, in order:** (1) dispatch a codex
+implementation session from **Appendix A verbatim** (sections A-1…A-20;
+the evidence plan is §68e), post-write review every changed file
+yourself; (2) collapse checklist BEFORE the mutation campaign, then the
+campaign per §68e/A-19 — six named mutants including the two lifecycle
+ones (defer-Close-inside-newOrderClient; delete the oms.New error-arm
+release) and the recorded expected-equivalent (`holds[i]`→`holds[0]`,
+single venue); (3) docs to v0.9.47 per §68e's inventory (§7.6
+package-reservation clause + spend-exclusivity scoping, §6 step 6 + §4
+Place signature edits, `spend_lock_dir` config schema + example,
+adr-history row, tutorial-parity check); (4) close #188, replace §68's
+WIP banner, update this handoff. The rejections that must not be
+reopened without new evidence: **§68d items 1–12** (10–12 carry explicit
+reopening triggers).
+
+---
+
+## Status (2026-08-04, session 99 — HISTORICAL): **#188 WAS MID-FLIGHT — THE DESIGN WAS FOUR ADVERSARIAL ROUNDS IN AND NOT YET CONVERGED. RECORD §68 (`docs/superpowers/specs/2026-08-04-m3-188-package-reservation.md`) HOLDS THE FULL DESIGN AND THE ROUND-BY-ROUND ARC (§68f). NOTHING IN `internal/` HAS BEEN TOUCHED.**
 
 **What the design is, as it stands after round 4.** A package's rate-limit
 charges are validated and PROVISIONALLY OCCUPIED as one governor operation
