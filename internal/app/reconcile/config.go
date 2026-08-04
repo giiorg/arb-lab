@@ -165,6 +165,14 @@ type VenueConfig struct {
 	ThrottlePause config.Duration `json:"throttle_pause"`
 	BanPause      config.Duration `json:"ban_pause"`
 
+	// Uncounted is §7.6's written escape from the coverage rule: each entry
+	// declares that one family deliberately budgets nothing for one dimension,
+	// and why. The rule itself — every family budgets weight and orders or
+	// writes down the reason it does not, and the venue request envelope is
+	// never waivable — lives in ratelimit.Profile.Validate; this block only
+	// carries the operator's words to it.
+	Uncounted []UncountedConfig `json:"uncounted,omitempty"`
+
 	// ClockOffset and ClockUncertainty calibrate this venue's clock frame against
 	// the engine's — §5.3's anchor is recorded in the VENUE's frame with its
 	// uncertainty band, because the retention cliff is evaluated by the venue on
@@ -219,6 +227,14 @@ type LimitConfig struct {
 	OpeningCeiling uint64 `json:"opening_ceiling"`
 	RoutineCeiling uint64 `json:"routine_ceiling"`
 	Capacity       uint64 `json:"capacity"`
+}
+
+// UncountedConfig is one written §7.6 waiver: this product family deliberately
+// budgets nothing for this dimension, for this reason. See VenueConfig.Uncounted.
+type UncountedConfig struct {
+	Product   ids.ProductCategory `json:"product"`
+	Dimension string              `json:"dimension"`
+	Reason    string              `json:"reason"`
 }
 
 // InstrumentConfig is one instrument and its asset decomposition.
@@ -575,10 +591,23 @@ func (v VenueConfig) profile() (ratelimit.Profile, error) {
 			Capacity:       l.Capacity,
 		})
 	}
+	uncounted := make([]ratelimit.Uncounted, 0, len(v.Uncounted))
+	for i, u := range v.Uncounted {
+		dimension, err := parseDimension(u.Dimension)
+		if err != nil {
+			return ratelimit.Profile{}, fmt.Errorf("uncounted[%d].dimension: %w", i, err)
+		}
+		uncounted = append(uncounted, ratelimit.Uncounted{
+			Family:    u.Product,
+			Dimension: dimension,
+			Reason:    u.Reason,
+		})
+	}
 	p := ratelimit.Profile{
 		Venue:         v.Venue,
 		Families:      families,
 		Limits:        limits,
+		Uncounted:     uncounted,
 		ThrottlePause: v.ThrottlePause.Duration(),
 		BanPause:      v.BanPause.Duration(),
 	}

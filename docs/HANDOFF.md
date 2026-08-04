@@ -1,6 +1,64 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-04, session 93): **#174 IS CLOSED — THE PLACE ACK'S VENUE ORDER ID IS PERSISTED AT DISPATCH (A FOURTH JOURNAL RECORD KIND, ACK-BEFORE-STATE) AND §5.3's GATE 3 RULES A SWEPT ROW OUT AGAINST THE INSTRUMENT'S PERSISTED-ACK SET, SO A BINANCE LOST-ACK ABSENCE WHOSE WINDOW HOLDS ONLY SIBLINGS' FILLS NOW CONCLUDES TO AbsentAfterFinality INSTEAD OF REFUSING FOR EVER. THE RULE-OUT'S PREMISE — PER-SYMBOL orderId NON-REUSE — WAS CONSUMED UNBANKED BY THE FIRST DRAFT AND IS NOW VERIFIED VERBATIM FROM THE VENUE'S OWN PAGES. DOCS ARE v0.9.42; MARKER GREP IS ZERO.**
+## Status (2026-08-04, session 94): **#173 IS CLOSED — §7.6's CANNOT-COUNT REFUSAL IS TWO ENFORCED LAYERS (THE GOVERNOR ERRORS ON A COST CHARGING A DIMENSION ITS APPLICABLE BUDGETS DO NOT COUNT; A PROFILE IS REJECTED AT CONSTRUCTION UNLESS EVERY FAMILY BUDGETS EVERY CHARGEABLE DIMENSION OR WRITES DOWN WHY NOT, WITH THE VENUE REQUEST ENVELOPE MANDATORY AND NEVER WAIVABLE) — AND THE REVIEW SURFACED A LIVE DEFECT: EVERY BYBIT READ THROUGH THE SIGNED CLIENT FAILED ITS OWN PRECONDITION, BECAUSE THE TRUTHFUL REQUEST-ONLY COST WAS SPELLED AS THE ZERO Cost THE VALIDATOR REFUSES. DOCS ARE v0.9.43; MARKER GREP IS ZERO; SESSIONS 91–93 ARE COMMITTED AND PUSHED (274f944).**
+
+**The slice is done end to end.** `make ci` green on both modules, marker grep
+**0**, **19 targeted mutations / 19 kills** (+1 documented expected-equivalent,
+the `Reserve()` precedent). Design record **§64**
+(`docs/superpowers/specs/2026-08-04-m3-173-uncountable-cost-refusal.md`),
+finding table in adr-history §3. Task **#173** is discharged; **#185** (Bybit
+per-endpoint budgets are inexpressible — declared ones cross-charge, undeclared
+ones lose folds) and **#186** (boot-time profile-name/fold-name agreement
+check) are filed with full context.
+
+**WHAT LANDED.** `ratelimit.Profile.Uncounted` (family + dimension + written
+reason, no wildcard — the `//nofloat:allow` shape) plus the coverage rule:
+every family budgets weight and orders with FAMILY-scoped limits or writes the
+waiver; the venue-scoped REQUESTS envelope is mandatory and not waivable
+(family request counters are additive, never the envelope — each can sit
+inside its own capacity while their sum trips the shared gateway ban).
+`Limit.Validate` reserves venue scope for requests (the header fold addresses
+`(family, name)`, so a venue-scoped product budget can never receive the
+venue's own reading). `Governor.decide` refuses — as an ERROR, no waiting
+repairs it — any cost charging a caller-filled dimension its applicable
+windows do not count; a waiver NEVER suppresses this (the waiver is a claim
+about traffic, and the arriving cost is its falsification, fail-closed before
+send). `Cost` gains `RequestOnly()` (unexported mark, constructor-only, zero
+value still refused, contradiction refused); the three Bybit read call sites
+converted, a composed test drives one through `SignedClient.Do` against a real
+governor. Reconcile config gains the `uncounted` passthrough; its fixture's
+limit names are renamed to the fold-derived convention (`weight_1m`,
+`orders_10s`/`orders_1m`) it could never previously receive a fold under.
+
+**THE TWO TRANSFERABLE FINDINGS.** (1) #173's own trigger ("the first
+production ratelimit.Profile") had FIRED two slices earlier when G2's
+reconcile root landed, and nobody re-checked the debt's premise — a filed
+task's trigger clause is re-READ, not re-CHECKED, unless the check (one grep)
+is run at open. (2) Two slices' individually-correct claims contradicted at a
+seam neither suite composed: C2b's "nothing to charge" (`Cost{}`) versus
+C2a's "the zero cost is the field nobody filled in" — and `Do` validates
+before `Acquire`, so the read path was dead on Bybit while every builder and
+governor test passed. The fix is a carrier (`RequestOnly()`), and the
+composed test is the evidence the seam now has.
+
+**WHAT IS NEXT.** Unchanged: the **$20/$55 live-test decision** (Binance
+perp's 50 USDT floor — grow the package or move the leg to Bybit, blocked on
+**#171**, needs the USER), **#179** (spot leg's exposure baseline), **#183**/
+**#184** (filters follow-ons), **#185**/**#186** (this slice's follow-ons —
+#185 interacts with #171), or the **§9 acceptance campaign**. Note for any
+Bybit work: #171's testnet validation now ALSO exercises the repaired
+read-path seam.
+
+**Standing, unchanged:** capture **PID 8495**, never rebuild over
+`bin/arblab`, `make ci` runs `-race`, cap `TLC_WORKERS` at 4, docs/i18n parity
+is `bun test`. `MUTATE_TIMEOUT` must exceed the chaos test's 60s bound when
+mutating the exercise package (**180s — WITH the unit**). **§38f (task #158)
+is still the only clock-bound user decision** (≥2 TB off-host, gate
+~2026-09-30).
+
+---
+
+## Status (2026-08-04, session 93 — HISTORICAL): **#174 IS CLOSED — THE PLACE ACK'S VENUE ORDER ID IS PERSISTED AT DISPATCH (A FOURTH JOURNAL RECORD KIND, ACK-BEFORE-STATE) AND §5.3's GATE 3 RULES A SWEPT ROW OUT AGAINST THE INSTRUMENT'S PERSISTED-ACK SET, SO A BINANCE LOST-ACK ABSENCE WHOSE WINDOW HOLDS ONLY SIBLINGS' FILLS NOW CONCLUDES TO AbsentAfterFinality INSTEAD OF REFUSING FOR EVER. THE RULE-OUT'S PREMISE — PER-SYMBOL orderId NON-REUSE — WAS CONSUMED UNBANKED BY THE FIRST DRAFT AND IS NOW VERIFIED VERBATIM FROM THE VENUE'S OWN PAGES. DOCS ARE v0.9.42; MARKER GREP IS ZERO.**
 
 **The slice is done end to end.** `make ci` green on both modules, marker grep
 **0** (the spec edits landed directly; no marker was ever owed), **19

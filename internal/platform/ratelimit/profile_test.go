@@ -43,6 +43,15 @@ func binanceShaped() ratelimit.Profile {
 				Dimension: ratelimit.DimensionRequests, Interval: 5 * time.Second,
 				OpeningCeiling: 42, RoutineCeiling: 54, Capacity: 60,
 			},
+			{
+				// Spot's own order budget, appended last so the index-addressed
+				// cases above it stay stable. Distinct numbers from perp's, so a
+				// snapshot or refusal attributing one family's budget to the
+				// other cannot produce the same figures.
+				Name: "orders_10s", Scope: ratelimit.ScopeFamily, Family: ids.ProductSpot,
+				Dimension: ratelimit.DimensionOrders, Interval: 10 * time.Second,
+				OpeningCeiling: 14, RoutineCeiling: 18, Capacity: 20,
+			},
 		},
 		ThrottlePause: 30 * time.Second,
 		BanPause:      2 * time.Minute,
@@ -69,7 +78,7 @@ func TestProfileValidate(t *testing.T) {
 			ratelimit.ErrProfileEmpty, ""},
 		{"no families is refused", func(p *ratelimit.Profile) {
 			p.Families = nil
-			p.Limits = p.Limits[3:] // the venue-scoped envelope alone
+			p.Limits = p.Limits[3:4] // the venue-scoped envelope alone
 		}, ratelimit.ErrProfileFamilies, "no API famil"},
 		{"a duplicate family is refused", func(p *ratelimit.Profile) {
 			p.Families = append(p.Families, ids.ProductSpot)
@@ -91,6 +100,83 @@ func TestProfileValidate(t *testing.T) {
 			dup := p.Limits[3]
 			p.Limits = append(p.Limits, dup)
 		}, ratelimit.ErrLimitDuplicate, "ip_5s"},
+
+		// §7.6's coverage rule (task #173). The two uncovered-dimension cases
+		// drop DIFFERENT families' budgets: with both families uncovered, "the
+		// refusal names the uncovered family" and "the refusal names the first
+		// family" are the same answer, and dropping only perp's proves the loop
+		// walked PAST a covered spot.
+		{"an uncounted dimension on the first family is refused", func(p *ratelimit.Profile) {
+			p.Limits = p.Limits[:4] // drop spot's orders budget
+		}, ratelimit.ErrProfileDimensionUncounted, `family "spot": no budget counts DimensionOrders`},
+		{"an uncounted dimension on a later family is refused", func(p *ratelimit.Profile) {
+			p.Limits = append(p.Limits[:2], p.Limits[3:]...) // drop perp's orders budget
+		}, ratelimit.ErrProfileDimensionUncounted, `family "linear_perp": no budget counts DimensionOrders`},
+		{"the refusal names the uncovered dimension, not just the family", func(p *ratelimit.Profile) {
+			p.Limits = p.Limits[1:] // drop spot's weight budget, keep its orders
+		}, ratelimit.ErrProfileDimensionUncounted, "DimensionWeight"},
+		{"a missing venue envelope is refused", func(p *ratelimit.Profile) {
+			p.Limits = append(p.Limits[:3], p.Limits[4:]...)
+		}, ratelimit.ErrProfileEnvelopeMissing, ""},
+		{"family-scoped request limits do not satisfy the envelope", func(p *ratelimit.Profile) {
+			// Both families fully covered, requests counted per family — and
+			// still refused: each counter can be inside its own capacity while
+			// their sum trips the shared gateway ban neither reports on.
+			p.Limits[3] = ratelimit.Limit{
+				Name: "req_5s", Scope: ratelimit.ScopeFamily, Family: ids.ProductSpot,
+				Dimension: ratelimit.DimensionRequests, Interval: 5 * time.Second,
+				OpeningCeiling: 42, RoutineCeiling: 54, Capacity: 60,
+			}
+			p.Limits = append(p.Limits, ratelimit.Limit{
+				Name: "req_5s", Scope: ratelimit.ScopeFamily, Family: ids.ProductLinearPerp,
+				Dimension: ratelimit.DimensionRequests, Interval: 5 * time.Second,
+				OpeningCeiling: 42, RoutineCeiling: 54, Capacity: 60,
+			})
+		}, ratelimit.ErrProfileEnvelopeMissing, ""},
+		{"a venue-scoped weight limit is refused", func(p *ratelimit.Profile) {
+			p.Limits[3].Dimension = ratelimit.DimensionWeight
+		}, ratelimit.ErrLimitScopeDimension, "ip_5s"},
+
+		// The written escape, and its own validation.
+		{"an Uncounted reason satisfies coverage", func(p *ratelimit.Profile) {
+			p.Limits = p.Limits[:4]
+			p.Uncounted = []ratelimit.Uncounted{{
+				Family: ids.ProductSpot, Dimension: ratelimit.DimensionOrders,
+				Reason: "fixture: spot order flow is not under test here",
+			}}
+		}, nil, ""},
+		{"an Uncounted entry for requests is refused", func(p *ratelimit.Profile) {
+			p.Uncounted = []ratelimit.Uncounted{{
+				Family: ids.ProductSpot, Dimension: ratelimit.DimensionRequests,
+				Reason: "the venue documents no request limit",
+			}}
+		}, ratelimit.ErrProfileUncountedInvalid, "not waivable"},
+		{"an Uncounted entry naming an undeclared family is refused", func(p *ratelimit.Profile) {
+			p.Uncounted = []ratelimit.Uncounted{{
+				Family: ids.ProductInversePerp, Dimension: ratelimit.DimensionOrders,
+				Reason: "no such family here",
+			}}
+		}, ratelimit.ErrProfileUncountedInvalid, "undeclared"},
+		{"an Uncounted entry with no reason is refused", func(p *ratelimit.Profile) {
+			p.Limits = p.Limits[:4]
+			p.Uncounted = []ratelimit.Uncounted{{
+				Family: ids.ProductSpot, Dimension: ratelimit.DimensionOrders,
+				Reason: "   ",
+			}}
+		}, ratelimit.ErrProfileUncountedInvalid, "no reason"},
+		{"a duplicate Uncounted entry is refused", func(p *ratelimit.Profile) {
+			p.Limits = p.Limits[:4]
+			p.Uncounted = []ratelimit.Uncounted{
+				{Family: ids.ProductSpot, Dimension: ratelimit.DimensionOrders, Reason: "once"},
+				{Family: ids.ProductSpot, Dimension: ratelimit.DimensionOrders, Reason: "twice"},
+			}
+		}, ratelimit.ErrProfileUncountedInvalid, "twice"},
+		{"an Uncounted entry a declared budget contradicts is refused", func(p *ratelimit.Profile) {
+			p.Uncounted = []ratelimit.Uncounted{{
+				Family: ids.ProductSpot, Dimension: ratelimit.DimensionOrders,
+				Reason: "stale: spot orders became budgeted after this was written",
+			}}
+		}, ratelimit.ErrProfileUncountedContradicted, ""},
 
 		{"a zero throttle pause is refused", func(p *ratelimit.Profile) { p.ThrottlePause = 0 },
 			ratelimit.ErrPauseInvalid, "throttle"},

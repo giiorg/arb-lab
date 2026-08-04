@@ -91,16 +91,23 @@ func validConfig(t *testing.T, journal string) Config {
 			Timeout:    dur(t, "5s"),
 			ReadLimit:  1 << 20,
 			RecvWindow: dur(t, "5s"),
+			// The family limit names follow the FOLD-DERIVED convention
+			// (BinanceLimitReader turns X-Mbx-Used-Weight-1m into "weight_1m",
+			// addressed at the call's family): a profile spelling them any
+			// other way still validates and still counts locally, but every
+			// venue-reported reading is silently dropped at the observe seam —
+			// task #186 is the boot-time check; until it lands the convention
+			// is carried by this fixture being the shape operators copy.
 			Limits: []LimitConfig{
 				{Name: "ip_requests", Scope: "venue", Dimension: "requests", Interval: dur(t, "5s"),
 					OpeningCeiling: 300, RoutineCeiling: 400, Capacity: 500},
-				{Name: "spot_weight", Scope: "family", Product: ids.ProductSpot, Dimension: "weight",
+				{Name: "weight_1m", Scope: "family", Product: ids.ProductSpot, Dimension: "weight",
 					Interval: dur(t, "1m"), OpeningCeiling: 4200, RoutineCeiling: 5400, Capacity: 6000},
-				{Name: "perp_orders", Scope: "family", Product: ids.ProductLinearPerp, Dimension: "orders",
+				{Name: "orders_1m", Scope: "family", Product: ids.ProductLinearPerp, Dimension: "orders",
 					Interval: dur(t, "1m"), OpeningCeiling: 840, RoutineCeiling: 1080, Capacity: 1200},
-				{Name: "perp_weight", Scope: "family", Product: ids.ProductLinearPerp, Dimension: "weight",
+				{Name: "weight_1m", Scope: "family", Product: ids.ProductLinearPerp, Dimension: "weight",
 					Interval: dur(t, "1m"), OpeningCeiling: 1680, RoutineCeiling: 2160, Capacity: 2400},
-				{Name: "spot_orders", Scope: "family", Product: ids.ProductSpot, Dimension: "orders",
+				{Name: "orders_10s", Scope: "family", Product: ids.ProductSpot, Dimension: "orders",
 					Interval: dur(t, "10s"), OpeningCeiling: 70, RoutineCeiling: 90, Capacity: 100},
 			},
 			ThrottlePause:    dur(t, "2m"),
@@ -203,6 +210,21 @@ func TestConfigRefusals(t *testing.T) {
 		{"limit dimension unrecognised", ErrConfigFieldInvalid, func(c *Config) {
 			c.Venue.Limits[1].Dimension = "bytes"
 		}},
+		{"uncounted dimension unrecognised", ErrConfigFieldInvalid, func(c *Config) {
+			c.Venue.Uncounted = []UncountedConfig{
+				{Product: ids.ProductSpot, Dimension: "bytes", Reason: "typo under test"}}
+		}},
+		// The kernel's own §7.6 rules must be REACHABLE from the document — a
+		// passthrough that dropped the block would validate everything here.
+		{"uncounted waiver for requests refused by the kernel", ratelimit.ErrProfileUncountedInvalid,
+			func(c *Config) {
+				c.Venue.Uncounted = []UncountedConfig{
+					{Product: ids.ProductSpot, Dimension: "requests", Reason: "the envelope is not waivable"}}
+			}},
+		{"a family with no order budget and no waiver refused by the kernel",
+			ratelimit.ErrProfileDimensionUncounted, func(c *Config) {
+				c.Venue.Limits = c.Venue.Limits[:4] // drop spot's orders budget
+			}},
 		{"watchdog silence unset", ErrConfigFieldUnset, func(c *Config) { c.WatchdogSilence = config.Duration{} }},
 		{"stop budget unset", ErrConfigFieldUnset, func(c *Config) { c.StopBudget = config.Duration{} }},
 	}
@@ -271,6 +293,34 @@ func TestProfileCarriesBothScopes(t *testing.T) {
 	}
 	if len(p.Families) != 2 {
 		t.Errorf("families = %v, want the two the endpoints declare", p.Families)
+	}
+}
+
+// TestUncountedWaiverPassesThrough: the operator's written waiver crosses the
+// string→enum seam intact and the kernel accepts it in place of the budget it
+// waives — the positive control for the two kernel-reachability refusals in
+// the table above.
+func TestUncountedWaiverPassesThrough(t *testing.T) {
+	t.Parallel()
+
+	cfg := validConfig(t, "/var/lib/arblab/journal.db")
+	cfg.Venue.Limits = cfg.Venue.Limits[:4] // drop spot's orders budget
+	cfg.Venue.Uncounted = []UncountedConfig{{
+		Product: ids.ProductSpot, Dimension: "orders",
+		Reason: "fixture: the spot order budget is deliberately waived here",
+	}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("a config with a written waiver must validate: %v", err)
+	}
+	p, err := cfg.Venue.profile()
+	if err != nil {
+		t.Fatalf("profile: %v", err)
+	}
+	if len(p.Uncounted) != 1 ||
+		p.Uncounted[0].Family != ids.ProductSpot ||
+		p.Uncounted[0].Dimension != ratelimit.DimensionOrders ||
+		p.Uncounted[0].Reason == "" {
+		t.Errorf("Uncounted = %+v, want the document's waiver, translated", p.Uncounted)
 	}
 }
 

@@ -43,6 +43,24 @@ func testProfile(t *testing.T) ratelimit.Profile {
 			OpeningCeiling: 1400,
 			RoutineCeiling: 1800,
 			Capacity:       2400,
+		}, {
+			// The mandatory venue envelope, roomy: this suite's subject is
+			// signing and header folding, not admission policy.
+			Name:           "ip_5s",
+			Scope:          ratelimit.ScopeVenue,
+			Dimension:      ratelimit.DimensionRequests,
+			Interval:       5 * time.Second,
+			OpeningCeiling: 100000,
+			RoutineCeiling: 100000,
+			Capacity:       100000,
+		}},
+		// A written waiver rather than a budget, because it is TRUE here: every
+		// cost this suite presents charges weight (or is request-only), and the
+		// governor's cannot-count refusal would catch the fixture lying.
+		Uncounted: []ratelimit.Uncounted{{
+			Family:    testFamily,
+			Dimension: ratelimit.DimensionOrders,
+			Reason:    "suite presents no order-charging cost; signing is the subject",
 		}},
 		ThrottlePause: 30 * time.Second,
 		BanPause:      2 * time.Minute,
@@ -132,6 +150,44 @@ func TestSignedClientSendsExactlyOnce(t *testing.T) {
 	}
 	if n := hits.Load(); n != 1 {
 		t.Errorf("venue received %d requests, want exactly 1", n)
+	}
+}
+
+// TestSignedClientAdmitsARequestOnlyCost is the seam #173's review found
+// untested — and broken. Bybit's read surfaces charge nothing but the implicit
+// request, and their truthful cost was the zero Cost, which Do's own
+// validation refuses BEFORE Acquire — so every such call failed at the
+// precondition while the codec suite and the governor suite each passed. The
+// claim is the composition: RequestOnly() passes Do's validation, reaches the
+// wire exactly once, and charges the venue envelope alone.
+func TestSignedClientAdmitsARequestOnlyCost(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	gov := testGovernor(t)
+	call := testCall()
+	call.Cost = ratelimit.RequestOnly()
+	call.Limit = ""
+	if _, err := testClient(t, srv, gov).Do(context.Background(), call); err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if n := hits.Load(); n != 1 {
+		t.Errorf("venue received %d requests, want 1", n)
+	}
+	for _, l := range gov.Snapshot().Limits {
+		want := uint64(0)
+		if l.Scope == ratelimit.ScopeVenue {
+			want = 1
+		}
+		if l.Used != want {
+			t.Errorf("limit %q used = %d, want %d — a request-only cost charges the envelope alone",
+				l.Name, l.Used, want)
+		}
 	}
 }
 

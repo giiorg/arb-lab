@@ -192,6 +192,18 @@ func TestCostValidate(t *testing.T) {
 		// field nobody populated, and a bucket that never fills looks exactly
 		// like a system comfortably inside its budget right up to the ban.
 		{"the zero value is refused", ratelimit.Cost{}, ratelimit.ErrCostUnset},
+
+		// The one legitimate way to charge neither field (task #173). Bybit's
+		// read surfaces are metered per request alone, and their truthful cost
+		// is indistinguishable from the zero value without a carrier — so the
+		// carrier is a constructor, and the zero value stays refused.
+		{"a request-only cost is valid", ratelimit.RequestOnly(), nil},
+		{"a request-only cost that still charges weight is refused",
+			func() ratelimit.Cost { c := ratelimit.RequestOnly(); c.Weight = 5; return c }(),
+			ratelimit.ErrCostContradicted},
+		{"a request-only cost that still charges an order slot is refused",
+			func() ratelimit.Cost { c := ratelimit.RequestOnly(); c.Orders = 1; return c }(),
+			ratelimit.ErrCostContradicted},
 	}
 
 	for _, tc := range tests {

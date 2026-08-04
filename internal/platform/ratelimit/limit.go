@@ -81,6 +81,16 @@ func (l Limit) Validate() error {
 	if err := l.Dimension.Validate(); err != nil {
 		return fmt.Errorf("limit %q: %w", l.Name, err)
 	}
+	// Venue scope is §7.6's shared request envelope and nothing else. Weight and
+	// order budgets are headered, and both LimitReaders address a fold at
+	// (family, name) — so a venue-scoped weight or order budget is a fold target
+	// nothing can reach: it validates, counts locally, and silently never
+	// receives the venue's own reading. Requests is the one dimension with no
+	// header to lose.
+	if l.Scope == ScopeVenue && l.Dimension != DimensionRequests {
+		return fmt.Errorf("limit %q is venue-scoped and counts %s: %w",
+			l.Name, l.Dimension, ErrLimitScopeDimension)
+	}
 	if l.Interval <= 0 {
 		return fmt.Errorf("limit %q window %v: %w", l.Name, l.Interval, ErrLimitInterval)
 	}
@@ -198,6 +208,27 @@ type Cost struct {
 	// Orders is 1 for a call that places or amends an order, 0 otherwise. A
 	// batch endpoint charges the number of orders it carries.
 	Orders uint64
+
+	// requestOnly is RequestOnly's mark. It exists because "this call charges
+	// nothing but the implicit request" and "nobody filled the cost in" are the
+	// same zero value, and only one of them is a fact about the venue. Settable
+	// solely through the constructor: the claim needs a carrier a literal
+	// cannot produce by accident.
+	requestOnly bool
+}
+
+// RequestOnly is the cost of a call the venue meters per request alone — no
+// endpoint weight, no order slot. Bybit's read surfaces are the motivating
+// case: /v5/order/realtime and /v5/position/list are metered as requests per
+// second per UID, so there is nothing to charge beyond the one request every
+// Acquire already charges by construction — and nothing to invent, because a
+// fabricated weight would be spent against a budget the venue does not meter.
+//
+// The zero Cost still fails Validate. A call that genuinely charges only the
+// request says so here, in a form the validator can tell apart from the field
+// nobody populated.
+func RequestOnly() Cost {
+	return Cost{requestOnly: true}
 }
 
 // Validate reports whether the cost is populated.
@@ -226,7 +257,20 @@ type Cost struct {
 // get wrong, and the one budget with no header to correct it afterwards is
 // exactly the IP envelope. A check whose subject is the field nobody filled in
 // must read the fields a caller fills in.
+//
+// RequestOnly is the one legitimate way to charge neither field: the venues
+// really do meter some endpoints per request alone, and the constructor is what
+// separates that fact from the unpopulated zero. A request-only cost that ALSO
+// charges weight or orders is refused as a contradiction — one of the two
+// claims is wrong, and this package cannot know which.
 func (c Cost) Validate() error {
+	if c.requestOnly {
+		if c.Weight != 0 || c.Orders != 0 {
+			return fmt.Errorf("request-only beside weight %d and orders %d: %w",
+				c.Weight, c.Orders, ErrCostContradicted)
+		}
+		return nil
+	}
 	if c.Weight == 0 && c.Orders == 0 {
 		return fmt.Errorf("weight 0 and orders 0: %w", ErrCostUnset)
 	}

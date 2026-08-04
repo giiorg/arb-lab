@@ -65,6 +65,13 @@ type Governor struct {
 	// must clear: the venue-scoped ones plus that family's own.
 	applicable map[ids.ProductCategory][]*window
 
+	// counted is, per family, the set of dimensions some applicable window
+	// counts — what decide's cannot-count refusal reads. Precomputed beside
+	// applicable because they must agree: a dimension in this set and absent
+	// from that family's windows (or the reverse) would let a charge pass the
+	// check and then land nowhere.
+	counted map[ids.ProductCategory]map[Dimension]bool
+
 	pausedUntil time.Time
 	pauseKind   PenaltyKind
 	bans        uint64
@@ -86,6 +93,7 @@ func New(c clock.Clock, p Profile) (*Governor, error) {
 		windows:    make(map[limitKey]*window, len(p.Limits)),
 		order:      make([]limitKey, 0, len(p.Limits)),
 		applicable: make(map[ids.ProductCategory][]*window, len(p.Families)),
+		counted:    make(map[ids.ProductCategory]map[Dimension]bool, len(p.Families)),
 	}
 	for _, l := range p.Limits {
 		k := l.key()
@@ -94,13 +102,16 @@ func New(c clock.Clock, p Profile) (*Governor, error) {
 	}
 	for _, f := range p.Families {
 		var ws []*window
+		dims := make(map[Dimension]bool)
 		for _, k := range g.order {
 			w := g.windows[k]
 			if w.limit.Scope == ScopeVenue || w.limit.Family == f {
 				ws = append(ws, w)
+				dims[w.limit.Dimension] = true
 			}
 		}
 		g.applicable[f] = ws
+		g.counted[f] = dims
 	}
 	return g, nil
 }
@@ -146,6 +157,26 @@ func (g *Governor) decide(r Request, charge bool) (Decision, error) {
 	if !ok {
 		return Decision{}, fmt.Errorf("venue %q family %q: %w",
 			g.profile.Venue, r.Family, ErrFamilyUnknown)
+	}
+
+	// §7.6's headline sentence, enforced on the actual cost: a governor MUST
+	// refuse a cost it cannot count. Profile.Validate already made every
+	// caller-charged dimension either budgeted or written down as Uncounted, so
+	// this fires only under such a declaration — and the declaration was a
+	// claim that no such cost arrives, which the cost in hand has just
+	// falsified. The refusal is an error rather than a Decision because it is a
+	// profile-versus-adapter disagreement, like ErrFamilyUnknown: no amount of
+	// waiting changes it. DimensionRequests is exempt for the reason it is
+	// everywhere else in this file: the venue envelope is unconditional at
+	// construction, so its window cannot be absent here.
+	for d := DimensionUnspecified + 1; d <= maxDimension; d++ {
+		if d == DimensionRequests {
+			continue
+		}
+		if r.Cost.units(d) > 0 && !g.counted[r.Family][d] {
+			return Decision{}, fmt.Errorf("venue %q family %q: cost charges %s: %w",
+				g.profile.Venue, r.Family, d, ErrCostUncounted)
+		}
 	}
 
 	now := g.clk.Now()

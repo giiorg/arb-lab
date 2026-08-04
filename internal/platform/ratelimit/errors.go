@@ -66,10 +66,34 @@ var (
 	// and is not.
 	ErrFamilyUnknown = errors.New("ratelimit: no such API family")
 
-	// ErrCostUnset reports a request that charges no weight. Every endpoint on
-	// both venues weighs at least one, so a zero is a field somebody did not
-	// populate, and an uncharged request is a bucket that never fills.
+	// ErrCostUnset reports a cost that charges nothing anywhere — weight and
+	// orders both zero, with no RequestOnly declaration. An earlier wording here
+	// argued "every endpoint weighs at least one", and that premise is FALSE
+	// (Binance's futures order weighs zero — see Cost.Validate); what survives
+	// is the argument that a cost charging no dimension is a bucket that never
+	// fills. A call that truly charges only the implicit request says so via
+	// RequestOnly, which is exactly the distinction this sentinel polices.
 	ErrCostUnset = errors.New("ratelimit: cost unset")
+
+	// ErrCostContradicted reports a RequestOnly cost that also charges weight
+	// or orders. The two claims cannot both be true, and picking either
+	// silently would count the wrong thing.
+	ErrCostContradicted = errors.New("ratelimit: request-only cost still charges")
+
+	// ErrCostUncounted reports a request whose cost charges a dimension no
+	// applicable budget counts — §7.6's "a governor MUST refuse a cost it
+	// cannot count", enforced at decide time. Profile.Validate makes this
+	// unreachable except under a written Uncounted declaration, and then the
+	// arriving cost is that declaration's falsification: the waiver claimed no
+	// such cost existed, so the refusal stands regardless of the waiver.
+	ErrCostUncounted = errors.New("ratelimit: cost charges a dimension no budget counts")
+
+	// ErrLimitScopeDimension reports a venue-scoped limit counting anything but
+	// requests. Venue scope is §7.6's shared envelope; weight and order budgets
+	// are per-family AND headered, and the header fold addresses (family, name),
+	// so a venue-scoped product budget would silently never receive the venue's
+	// own reading.
+	ErrLimitScopeDimension = errors.New("ratelimit: venue-scoped limit counts a headered dimension")
 
 	// ErrProfileEmpty reports a profile with no limits — a governor that admits
 	// everything, which is worse than no governor because it looks like one.
@@ -85,6 +109,40 @@ var (
 	// disagree, and a limit attached to a family no request can name is a
 	// budget that will never be consulted.
 	ErrProfileFamilyUndeclared = errors.New("ratelimit: limit names an undeclared API family")
+
+	// ErrProfileEnvelopeMissing reports a profile with no venue-scoped request
+	// limit. §7.6's IP-ban safety envelope is SHARED per venue, and that word is
+	// the requirement: family-scoped request counters can each be inside their
+	// own capacity while their sum trips the gateway ban neither of them
+	// reports on, so they are additive detail, never the envelope. The
+	// envelope's capacity is a locally chosen safety bound ("bound combined
+	// request rate"), not a venue-published fact — so "the venue documents no
+	// request limit" is a reason to choose a bound, never a reason to have
+	// none. This is also why there is no Uncounted waiver for requests.
+	ErrProfileEnvelopeMissing = errors.New("ratelimit: profile declares no venue request envelope")
+
+	// ErrProfileDimensionUncounted reports a family with no budget for a
+	// dimension a cost can charge, and no written Uncounted declaration. §7.6:
+	// a dimension the profile declares no budget for is silently uncounted, and
+	// a governor that counts nothing admits everything — the worked example is
+	// Binance's futures order, documented at ZERO weight, riding entirely on
+	// the order-count dimension.
+	ErrProfileDimensionUncounted = errors.New("ratelimit: profile counts nothing for a chargeable dimension")
+
+	// ErrProfileUncountedInvalid reports an Uncounted declaration that cannot
+	// mean anything: an undeclared family, an invalid dimension, the requests
+	// dimension (see ErrProfileEnvelopeMissing), an empty reason, or a
+	// duplicate. Refused rather than skipped for the same reason an
+	// unrecognised config tag is: here the safe direction and the silent
+	// direction are not the same one.
+	ErrProfileUncountedInvalid = errors.New("ratelimit: uncounted declaration invalid")
+
+	// ErrProfileUncountedContradicted reports an Uncounted declaration for a
+	// (family, dimension) a declared budget already counts. The two cannot both
+	// be meant: a budget that arrived after the waiver makes the waiver a stale
+	// claim that would quietly survive the budget's later removal, so the
+	// contradiction is refused while somebody is looking at the file.
+	ErrProfileUncountedContradicted = errors.New("ratelimit: uncounted declaration contradicts a declared budget")
 
 	// ErrPauseInvalid reports a pause schedule that cannot hold a venue off: a
 	// non-positive throttle pause, or a ban pause shorter than it. §7.6 puts a

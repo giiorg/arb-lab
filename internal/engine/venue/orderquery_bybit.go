@@ -76,7 +76,10 @@ func (c *BybitOrderCodec) EncodeOrderStatus(ref OrderRef, surface QuerySurface) 
 		// Acquire charges one request by construction, so there is nothing to
 		// add — and nothing to invent, which is the point: a fabricated weight
 		// would be charged against a budget the venue does not meter.
-		Cost:  ratelimit.Cost{},
+		// RequestOnly is that claim with a carrier: the bare zero Cost reads as
+		// the field nobody filled in and Cost.Validate refuses it before
+		// Acquire, which made this call path always-refused until task #173.
+		Cost:  ratelimit.RequestOnly(),
 		Limit: limit,
 	}, nil
 }
@@ -314,8 +317,9 @@ func (c *BybitOrderCodec) EncodeExecutions(instrument ids.VenueInstrument, w Exe
 		Path:   "/v5/execution/list",
 		Params: params,
 		Family: instrument.Product,
-		Cost:   ratelimit.Cost{},
-		Limit:  BybitExecutionListLimit,
+		// Request-only for OrderByClientID's reason, stated there.
+		Cost:  ratelimit.RequestOnly(),
+		Limit: BybitExecutionListLimit,
 	}, nil
 }
 

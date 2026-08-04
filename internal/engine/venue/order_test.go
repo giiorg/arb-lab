@@ -664,12 +664,25 @@ func testClock(t *testing.T, v ids.Venue) clock.Clock {
 // are two clients that must share this one governor.
 func testGovernor(t *testing.T, v ids.Venue) *ratelimit.Governor {
 	t.Helper()
-	limits := []ratelimit.Limit{}
+	// Weight AND orders per family: this suite drives Place, whose costs charge
+	// an order slot (Bybit's at ZERO weight), so a weight-only profile here was
+	// §7.6's worked failure in miniature — and with #173's cannot-count refusal
+	// it would now fail the suite rather than silently count nothing. Ceilings
+	// are roomy: admission policy is governor_test's subject, not this file's.
+	limits := []ratelimit.Limit{{
+		Name: "ip_5s", Scope: ratelimit.ScopeVenue,
+		Dimension: ratelimit.DimensionRequests, Interval: 5 * time.Second,
+		OpeningCeiling: 100000, RoutineCeiling: 100000, Capacity: 100000,
+	}}
 	for _, f := range []ids.ProductCategory{ids.ProductSpot, ids.ProductLinearPerp} {
 		limits = append(limits, ratelimit.Limit{
 			Name: "weight_1m", Scope: ratelimit.ScopeFamily, Family: f,
 			Dimension: ratelimit.DimensionWeight, Interval: time.Minute,
 			OpeningCeiling: 1400, RoutineCeiling: 1800, Capacity: 2400,
+		}, ratelimit.Limit{
+			Name: "orders_10s", Scope: ratelimit.ScopeFamily, Family: f,
+			Dimension: ratelimit.DimensionOrders, Interval: 10 * time.Second,
+			OpeningCeiling: 700, RoutineCeiling: 900, Capacity: 1200,
 		})
 	}
 	g, err := ratelimit.New(testClock(t, v), ratelimit.Profile{

@@ -71,8 +71,12 @@ func (c *BybitOrderCodec) EncodePositions(scope PositionScope) (transport.Call, 
 
 		// Bybit publishes no per-endpoint weight — /v5/position/list is metered
 		// at 50 requests per second per UID — so there is nothing to charge and
-		// nothing to invent. OrderByClientID's argument, unchanged.
-		Cost:  ratelimit.Cost{},
+		// nothing to invent. OrderByClientID's argument, unchanged. RequestOnly
+		// is that fact with a carrier: the bare zero Cost is the field nobody
+		// filled in, and Cost.Validate refuses it before Acquire — which made
+		// this call path always-refused until task #173 gave the claim a form
+		// the validator can tell apart from the accident.
+		Cost:  ratelimit.RequestOnly(),
 		Limit: BybitPositionListLimit,
 	}, nil
 }

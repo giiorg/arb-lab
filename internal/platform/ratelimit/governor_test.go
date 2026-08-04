@@ -381,6 +381,16 @@ func ladderedProfile() ratelimit.Profile {
 				Dimension: ratelimit.DimensionWeight, Interval: time.Minute,
 				OpeningCeiling: 70, RoutineCeiling: 90, Capacity: 100,
 			},
+			{
+				// The mandatory venue envelope, sized so it NEVER refuses in
+				// this file: the fixtures below reason about which of the two
+				// laddered budgets frees last, and a third refusing window
+				// would rejoin exactly the collapse this fixture exists to
+				// avoid. The suite's largest acquire count is well under 100.
+				Name: "ip_5s", Scope: ratelimit.ScopeVenue,
+				Dimension: ratelimit.DimensionRequests, Interval: 5 * time.Second,
+				OpeningCeiling: 100000, RoutineCeiling: 100000, Capacity: 100000,
+			},
 		},
 		ThrottlePause: 30 * time.Second,
 		BanPause:      2 * time.Minute,
@@ -724,6 +734,91 @@ func TestANeverIssuableRequestDominatesEveryOtherRefusal(t *testing.T) {
 	}
 }
 
+// TestGovernorRefusesACostNoBudgetCounts is §7.6's headline sentence — "a
+// governor MUST refuse a cost it cannot count" — driven through the only state
+// Profile.Validate leaves it reachable from: a written Uncounted declaration.
+// The declaration claims no spot cost charges an order slot; the request in
+// hand falsifies the claim, and the refusal stands BECAUSE of the waiver, not
+// despite it — a waiver is a claim about traffic, never a suppression.
+func TestGovernorRefusesACostNoBudgetCounts(t *testing.T) {
+	t.Parallel()
+
+	p := binanceShaped()
+	p.Limits = p.Limits[:4] // drop spot's orders budget
+	p.Uncounted = []ratelimit.Uncounted{{
+		Family: ids.ProductSpot, Dimension: ratelimit.DimensionOrders,
+		Reason: "claim under test: no spot cost charges an order slot",
+	}}
+	tc, err := clock.NewTestClock(start, nil)
+	if err != nil {
+		t.Fatalf("NewTestClock: %v", err)
+	}
+	g, err := ratelimit.New(tc, p)
+	if err != nil {
+		t.Fatalf("New: a profile with a written waiver must construct: %v", err)
+	}
+
+	spotOrder := ratelimit.Request{
+		Family: ids.ProductSpot, Priority: ratelimit.PrioritySafety,
+		Cost: ratelimit.Cost{Weight: 1, Orders: 1},
+	}
+	// Check and Acquire agree: this is a profile-versus-adapter disagreement,
+	// not a budget state, so it is an error rather than a refused Decision and
+	// no amount of waiting changes it.
+	if _, cerr := g.Check(spotOrder); !errors.Is(cerr, ratelimit.ErrCostUncounted) {
+		t.Fatalf("Check = %v, want ErrCostUncounted", cerr)
+	}
+	_, aerr := g.Acquire(spotOrder)
+	if !errors.Is(aerr, ratelimit.ErrCostUncounted) {
+		t.Fatalf("Acquire = %v, want ErrCostUncounted", aerr)
+	}
+	// §7.6: the failure of forgetting is a refusal that NAMES the dimension.
+	if msg := aerr.Error(); !strings.Contains(msg, "spot") || !strings.Contains(msg, "DimensionOrders") {
+		t.Errorf("Acquire = %q, want the message to name the family and the dimension", msg)
+	}
+
+	// The refusal charged nothing, the waiver's scope is exactly one
+	// (family, dimension), and traffic that does not charge the waived
+	// dimension is untouched — three claims, one snapshot and two admissions.
+	mustAcquire(t, g, perpOrder(ratelimit.PrioritySafety))
+	mustAcquire(t, g, spotQuery(ratelimit.PrioritySafety, 10))
+	for _, l := range g.Snapshot().Limits {
+		if l.Family == ids.ProductSpot && l.Dimension == ratelimit.DimensionWeight && l.Used != 10 {
+			t.Errorf("spot weight used = %d, want 10 — the refused order must have charged nothing", l.Used)
+		}
+	}
+}
+
+// TestRequestOnlyChargesTheEnvelopeAlone drives the carrier for "this call is
+// metered per request alone" (Bybit's read surfaces) through the governor: the
+// venue envelope is charged by construction, and no product budget moves.
+func TestRequestOnlyChargesTheEnvelopeAlone(t *testing.T) {
+	t.Parallel()
+
+	g, _ := newGovernor(t)
+	d, err := g.Acquire(ratelimit.Request{
+		Family: ids.ProductSpot, Priority: ratelimit.PriorityRoutine,
+		Cost: ratelimit.RequestOnly(),
+	})
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	if !d.Admitted {
+		t.Fatalf("refused (%s, limit %q), want admitted", d.Reason, d.Limit)
+	}
+	for _, l := range g.Snapshot().Limits {
+		switch {
+		case l.Scope == ratelimit.ScopeVenue:
+			if l.Used != 1 {
+				t.Errorf("envelope used = %d, want 1", l.Used)
+			}
+		case l.Used != 0:
+			t.Errorf("limit %q/%s used = %d, want 0 — a request-only cost charges no product budget",
+				l.Name, l.Family, l.Used)
+		}
+	}
+}
+
 func TestSnapshot(t *testing.T) {
 	t.Parallel()
 
@@ -748,8 +843,8 @@ func TestSnapshot(t *testing.T) {
 	if s.Bans != 1 || s.Throttles != 1 {
 		t.Errorf("Bans=%d Throttles=%d, want 1 and 1", s.Bans, s.Throttles)
 	}
-	if len(s.Limits) != 4 {
-		t.Fatalf("len(Limits) = %d, want 4", len(s.Limits))
+	if len(s.Limits) != 5 {
+		t.Fatalf("len(Limits) = %d, want 5", len(s.Limits))
 	}
 
 	found := false

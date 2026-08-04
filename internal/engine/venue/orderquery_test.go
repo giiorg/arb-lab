@@ -11,6 +11,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/apperror"
 	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
+	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
 )
 
 // This file checks §4's read half, venue-side (slice C2b, record §52).
@@ -945,6 +946,35 @@ func TestNoReadChargesAnOrderSlot(t *testing.T) {
 	for i, call := range calls {
 		if call.Cost.Orders != 0 {
 			t.Errorf("read call %d (%s) charges %d order slots, want 0", i, call.Op, call.Cost.Orders)
+		}
+	}
+}
+
+// TestBybitReadCostsAreRequestOnlyAndValid pins the defect #173's review found
+// LIVE here: Bybit's read surfaces truthfully charge nothing but the implicit
+// request, that truth was spelled as the zero Cost, and SignedClient.Do
+// validates the cost BEFORE Acquire — so every Bybit read failed at the
+// precondition while this file's builder tests all passed. The two assertions
+// are the two halves: the cost must carry the request-only claim (not the
+// unpopulated zero), and it must survive the validation Do actually runs.
+func TestBybitReadCostsAreRequestOnlyAndValid(t *testing.T) {
+	w := venue.ExecutionWindow{Since: venue.Cursor{At: sweepStart}, Until: sweepStart.Add(time.Hour)}
+	positions, err := bybitCodec(t).EncodePositions(perpScope())
+	if err != nil {
+		t.Fatalf("EncodePositions: %v", err)
+	}
+	calls := []transport.Call{
+		mustEncodeOrderStatus(t, bybitCodec(t), perpRef(t, testBybit), venue.SurfaceOrderStatus),
+		mustEncodeOrderStatus(t, bybitCodec(t), perpRef(t, testBybit), venue.SurfaceOrderHistory),
+		mustEncodeExecutions(t, bybitCodec(t), perpInstrument(testBybit), w),
+		positions,
+	}
+	for _, call := range calls {
+		if call.Cost != ratelimit.RequestOnly() {
+			t.Errorf("%s cost = %+v, want RequestOnly() — the zero Cost is the field nobody filled in", call.Op, call.Cost)
+		}
+		if err := call.Cost.Validate(); err != nil {
+			t.Errorf("%s cost fails the validation Do runs before Acquire: %v", call.Op, err)
 		}
 	}
 }
