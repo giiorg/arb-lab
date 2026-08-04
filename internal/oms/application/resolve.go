@@ -56,6 +56,7 @@ type Resolver struct {
 	journal ports.Journal
 	orders  ports.OrderWriteRepository
 	venue   ports.OrderResolver
+	index   ports.VenueOrderIndex
 	clk     clock.Clock
 	policy  ResolutionPolicy
 }
@@ -161,7 +162,14 @@ func (p ResolutionPolicy) Validate() error {
 
 // NewResolver constructs the use case, refusing a missing port or an
 // unusable policy.
-func NewResolver(j ports.Journal, orders ports.OrderWriteRepository, v ports.OrderResolver, clk clock.Clock, policy ResolutionPolicy) (*Resolver, error) {
+//
+// The index is the same in-memory store as orders, handed over as a second
+// capability (the module root's standing pattern for the journal's two
+// halves), and it is refused nil rather than defaulted to an empty lookup —
+// see ErrVenueOrderIndexMissing for why the degraded mode must not be
+// selectable by forgetting a wire.
+func NewResolver(j ports.Journal, orders ports.OrderWriteRepository, v ports.OrderResolver,
+	index ports.VenueOrderIndex, clk clock.Clock, policy ResolutionPolicy) (*Resolver, error) {
 	if j == nil {
 		return nil, ErrJournalMissing
 	}
@@ -171,13 +179,16 @@ func NewResolver(j ports.Journal, orders ports.OrderWriteRepository, v ports.Ord
 	if v == nil {
 		return nil, ErrResolverMissing
 	}
+	if index == nil {
+		return nil, ErrVenueOrderIndexMissing
+	}
 	if clk == nil {
 		return nil, ErrClockMissing
 	}
 	if err := policy.Validate(); err != nil {
 		return nil, fmt.Errorf("oms: resolution policy: %w", err)
 	}
-	return &Resolver{journal: j, orders: orders, venue: v, clk: clk, policy: policy}, nil
+	return &Resolver{journal: j, orders: orders, venue: v, index: index, clk: clk, policy: policy}, nil
 }
 
 // ResolutionOutcome is whether the rule reached a conclusion.
@@ -250,9 +261,13 @@ const (
 	ReasonSweepIncomplete UnprovedReason = "sweep_incomplete"
 
 	// ReasonSweepInconclusive is gate 3 with an execution the sweep can neither
-	// attribute to this order nor rule out — Binance's trade lists carry no
-	// client order id, so a row is attributable only by a venue order id we do
-	// not have for an order the venue says it does not hold.
+	// attribute to this order nor rule out. Binance's trade lists carry no
+	// client order id, so a row answers only by its venue order id — and this
+	// refusal is what remains after the persisted-ack index has spoken: a row
+	// whose id no order of ours on the instrument is recorded under. The
+	// honest causes left are an ack this system lost (possibly this very
+	// order's, which is why the refusal is a refusal and not a rule-out) and
+	// a store that has not heard of a sibling's send.
 	ReasonSweepInconclusive UnprovedReason = "sweep_inconclusive"
 
 	// ReasonExecutionsFound is the sweep REFUTING the absence: an execution
@@ -512,9 +527,17 @@ func (r *Resolver) absent(rec ports.OrderRecord, status ports.VenueOrder, venueN
 
 	// The venue order id is EMPTY here and cannot be otherwise: this path is
 	// reached because the venue answered "no such order", so it supplied no id
-	// for it. That is the arm attribute's second key cannot help — see its doc,
-	// and task #174 for the lever that would.
-	ours, verdict := attribute(sweep.Executions, rec.Order.ClientOrderID, "")
+	// for it. What stands in for it is the STORE's knowledge — the persisted
+	// acks of every order on this instrument, this one included when its own
+	// ack survived. An index error refuses the resolution outright (nothing
+	// written, err != nil's contract) rather than degrading to an empty map,
+	// because an empty map is a real answer that quietly waves off the rows
+	// this order's siblings can explain.
+	known, err := r.index.VenueOrderIDsOn(rec.Order.Instrument)
+	if err != nil {
+		return Resolution{}, fmt.Errorf("resolve order %q: venue order index: %w", rec.Order.ClientOrderID, err)
+	}
+	ours, verdict := attribute(sweep.Executions, rec.Order.ClientOrderID, "", known)
 	switch verdict {
 	case attributionClean:
 		// All four gates. This is the ONLY path in this file to
@@ -605,21 +628,41 @@ const (
 // and both arms are reachable. On Binance it is the ONLY key: neither
 // /fapi/v1/userTrades nor /api/v3/myTrades returns a client order id, so without
 // it every row inside the window is unattributable and the venue's own
-// cumulative could never be rebuilt into the projection. Task #174 (persisting
-// Ack.VenueOrderID) is a different lever on the same fact — it would let the
-// ABSENT path rule out our other orders' rows, which this parameter cannot,
-// because an order the venue denies holding has no id to compare against.
+// cumulative could never be rebuilt into the projection.
+//
+// # And a THIRD now: the store's persisted acks, for the caller with no live id
+//
+// `known` is venue id -> owner for the order's instrument (ports.
+// VenueOrderIndex), and it is what task #174 closed slice D's honest pricing
+// with: the absent path, where the venue denies the order and so supplies no
+// id, can still rule a row out when the id it carries belongs to ANOTHER of
+// our orders — and can still claim one when its own persisted ack matches.
+// The rule-out rests on the banked non-reuse fact (orderId self-increments
+// per symbol, Profiles §8), which is why the map is scoped to the instrument
+// and why the index's one-owner-per-key contract is load-bearing: this
+// function reads the map as a fact, and a map built over a conflicted store
+// would have picked its winner by iteration order. The join path passes nil —
+// not because the arms would be wrong there but because they would be a
+// second authority: the join has the venue's LIVE id and refuses a
+// store-vs-venue mismatch before attribution runs (ErrVenueOrderIDMismatch),
+// so a map entry could only ever agree or be the conflict already refused.
 //
 // # Ours WINS over unknown, and the ordering is the safety property
 //
 // An execution we can attribute is exposure, and it must not be masked by an
 // unrelated row we merely could not classify. So every row is examined before
 // the verdict is taken, rather than returning on the first ambiguous one.
-func attribute(rows []ports.VenueExecution, id ids.ClientOrderID, venueOrderID string) ([]ports.VenueExecution, attributionVerdict) {
+func attribute(rows []ports.VenueExecution, id ids.ClientOrderID, venueOrderID string,
+	known map[string]ids.ClientOrderID) ([]ports.VenueExecution, attributionVerdict) {
 	var ours []ports.VenueExecution
 	unknown := false
 
 	for _, e := range rows {
+		var owner ids.ClientOrderID
+		owned := false
+		if e.VenueOrderID != "" {
+			owner, owned = known[e.VenueOrderID]
+		}
 		switch {
 		case e.ClientOrderID == id:
 			// Reached only when the venue named an order AND it is this one:
@@ -634,13 +677,28 @@ func attribute(rows []ports.VenueExecution, id ids.ClientOrderID, venueOrderID s
 			// because two empty strings comparing equal would attribute every
 			// unidentified row on the instrument to this order.
 			ours = append(ours, e)
+		case owned && owner == id:
+			// The row's id is this order's own PERSISTED ack — the absent path's
+			// only way to claim a row, since the venue that denies the order
+			// supplied no live id to match by. The guard on the ROW's id being
+			// non-empty lives in the lookup above, for the second arm's reason.
+			ours = append(ours, e)
 		case e.ClientOrderID != "":
 			// The venue named a DIFFERENT order. Ruled out — and this is the arm
 			// that makes Bybit's sweep conclusive where Binance's is not.
 		case venueOrderID != "" && e.VenueOrderID != "":
 			// The venue named a different order of ITS own. Ruled out on the same
 			// ground, and reachable only when this caller has an id to compare
-			// against; from the absent path the row falls through to unknown.
+			// against; from the absent path the row falls through to the arm
+			// below, or to unknown.
+		case owned:
+			// The row belongs to another of OUR orders — its id is one a Place
+			// ack handed us and ApplyAck persisted. This is #174's arm: the one
+			// rule-out available to a caller with no live id, and the difference
+			// between a Binance absence that concludes and one that is refused
+			// for ever. It reads the non-reuse premise at its full strength —
+			// an id observed at THAT order's ack still names the same venue
+			// order now — which is what the banked venue fact is for.
 		default:
 			unknown = true
 		}

@@ -97,6 +97,16 @@ func writeExerciseReport(w io.Writer, r appexercise.Report) {
 		fmt.Fprintf(w, "  leg %s: %s venue_id=%q journaled=%t applied=%t",
 			leg.ID, leg.Outcome.State, leg.Outcome.Ack.VenueOrderID,
 			leg.Outcome.Journaled, leg.Outcome.Applied)
+		if leg.Outcome.Ack.VenueOrderID != "" {
+			// Printed only when there was an id to persist: on an id-less leg
+			// "ack_journaled=false" would read as a failure that never had a
+			// write to fail.
+			fmt.Fprintf(w, " ack_journaled=%t ack_applied=%t",
+				leg.Outcome.AckJournaled, leg.Outcome.AckApplied)
+		}
+		if leg.Outcome.AckConflict {
+			fmt.Fprint(w, " ACK CONFLICT — venue id contradicts the store; new trading held")
+		}
 		if leg.Outcome.Cause != nil {
 			fmt.Fprintf(w, " cause=%v", leg.Outcome.Cause)
 		}

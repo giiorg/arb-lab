@@ -1,6 +1,125 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-03, session 90): **#170 IS CLOSED — §7.6's 418/IP-BAN MUST-ALERT IS DELIVERED END TO END: THE ROOT HOLDS THE GOVERNOR IT USED TO DROP, `Report.RateLimit` CARRIES THE SNAPSHOT, BANS > 0 IS ExitOperator, AND THE FINDING IS THAT THE OLD ANSWER WAS NOT SILENT BUT WRONG — A BAN READ AS ExitIncomplete, WHOSE "RETRY MAY LIFT IT" IS THE RESPONSE THAT ESCALATES A BINANCE BAN TOWARD THREE DAYS. DOCS REMAIN v0.9.40; NO SPEC EDIT OWED; MARKER GREP IS ZERO.**
+## Status (2026-08-04, session 93): **#174 IS CLOSED — THE PLACE ACK'S VENUE ORDER ID IS PERSISTED AT DISPATCH (A FOURTH JOURNAL RECORD KIND, ACK-BEFORE-STATE) AND §5.3's GATE 3 RULES A SWEPT ROW OUT AGAINST THE INSTRUMENT'S PERSISTED-ACK SET, SO A BINANCE LOST-ACK ABSENCE WHOSE WINDOW HOLDS ONLY SIBLINGS' FILLS NOW CONCLUDES TO AbsentAfterFinality INSTEAD OF REFUSING FOR EVER. THE RULE-OUT'S PREMISE — PER-SYMBOL orderId NON-REUSE — WAS CONSUMED UNBANKED BY THE FIRST DRAFT AND IS NOW VERIFIED VERBATIM FROM THE VENUE'S OWN PAGES. DOCS ARE v0.9.42; MARKER GREP IS ZERO.**
+
+**The slice is done end to end.** `make ci` green on both modules, marker grep
+**0** (the spec edits landed directly; no marker was ever owed), **19
+mutations / 19 kills**. Design record **§63**
+(`docs/superpowers/specs/2026-08-04-m3-174-persist-venue-order-id.md`),
+finding table in adr-history §3. Task **#174** is discharged.
+
+**WHAT LANDED.** `ports.Journal.AppendAcked` + `JournalVisitor.Acked` + the
+`acked` record kind (tag 4, own table, append-only triggers; `chainLabel`
+stays `/v1` — a new kind changes no existing preimage, and an older build
+refuses at the kind column). `OrderRecord.VenueOrderID` with `ApplyAck` its
+one producer: write-once, same-value no-op (version untouched), contradiction
+refused with `ports.ErrVenueOrderIDConflict` — this order under a different
+id, or the id under another order on the SAME instrument (the scope is the
+banked fact's own). `ports.VenueOrderIndex` (per-instrument venue-id → owner)
+is the Resolver's new read port, same store handed over as a second
+capability. `attribute` gains the map and two arms — own persisted id claims
+the row (`executions_found`), a sibling's rules it out, an unrecorded id still
+refuses (`sweep_inconclusive`, now honestly rare). Dispatch journals the ack
+BEFORE the state record (the crash between the two writes then leaves
+`authorized`+`acked`, which recovery can join; the reverse leaves the
+pre-#174 world) and reports `AckJournaled`/`AckApplied`/`AckConflict`;
+`HoldsNewTrading` is `!Applied || AckConflict`, so the executor's fan-in
+latches on a conflict, and a conflicted journal REFUSES TO REPLAY (verifies,
+does not compose — `OutcomeFailed`, not `EvidenceUnusable`), so no boot ever
+builds an index a conflict poisoned; the module-level composed test drives
+both halves. The Joiner deliberately does NOT read the index: it refuses a
+non-empty store-vs-live id mismatch (`ErrVenueOrderIDMismatch`) and past that
+check attributes by whichever source is non-empty. Ordinary dropped ack
+writes hold NOTHING (degrade = the old refusal, safe and late); they are
+reported per leg (CLI `ack_journaled`/`ack_applied`, printed only when an id
+existed) and fold into `ExitExecution`.
+
+**THE VENUE FACTS, banked 2026-08-04 (Profiles §8):** USDⓈ-M Query Order —
+*"orderId is self-increment for each specific symbol"*; SPOT glossary —
+*"uniquely identifies the order on a symbol"*. Per SYMBOL, hence every
+consumer scopes to the full instrument. The second-model review (Codex)
+blocked the slice on this premise being unbanked and caught two more real
+holes (index-retains-first-owner after a refused conflict; the Joiner as a
+second authority) — all three landed, dispositions in §63.
+
+**WHAT IS NEXT.** Unchanged from sessions 91–92: the **$20/$55 live-test
+decision** (the Binance perp's 50 USDT floor — grow the package or move the
+leg to Bybit, blocked on **#171**, needs the USER), **#179** (spot leg's
+exposure baseline), **#173** (the other §7.6 remnant), **#183**/**#184**
+(filters follow-ons), or the **§9 acceptance campaign** — for which #174 just
+removed a standing operator-hold: a live cycle's recovery can now prove its
+absences on Binance with a sibling's fill in the window.
+
+**Standing, unchanged:** capture **PID 8495**, never rebuild over
+`bin/arblab`, `make ci` runs `-race`, cap `TLC_WORKERS` at 4, docs/i18n
+parity is `bun test`. `MUTATE_TIMEOUT` must exceed the chaos test's 60s bound
+when mutating the exercise package (**180s — WITH the unit**: a unitless
+`180` parses as nanoseconds, `go test` refuses the flag with zero `--- FAIL`
+lines, and mutate.sh prints `NOBUILD!!` with an EMPTY compiler-error block —
+an empty diagnostic under `NOBUILD!!` means the runner never reached the
+compiler; reproduce by hand before re-aiming). **§38f (task #158) is still
+the only clock-bound user decision** (≥2 TB off-host, gate ~2026-09-30).
+
+---
+
+## Status (2026-08-03, sessions 91–92 — HISTORICAL): **#182 IS CLOSED — §2.4's TRADING FILTERS (LOT STEP, MIN QTY, TICK, MIN NOTIONAL) ARE A VERIFIED PROPERTY OF THE ORDER PATH, ENFORCED BY ONE SHARED CHECK AT PLAN AND AT EXECUTE PREFLIGHT, FAIL-CLOSED ON A NIL MAP — AND THE OPERATOR DECISION IT SURFACED IS THAT THE $20 LIVE TEST CANNOT RUN ON THE BINANCE PERP: THE RE-CONFIRMED MIN_NOTIONAL FLOOR IS 50 USDT. DOCS ARE v0.9.41; MARKER GREP IS ZERO.**
+
+**The slice is done end to end.** `make ci` green on both modules, marker grep
+**0** (the slice's own `[SPEC EDIT OWED]` landed and came out the same
+session), **18 mutations / 18 kills**. Design record **§62**, battery **§62h**.
+Task **#182** is discharged; **#183** (fetched-provenance filters + per-package
+freshness for the long-running engine) and **#184** (filter-conform the
+single-order Dispatch path with its first real caller) are filed with full
+context. The Georgian tutorial was regenerated (status line only; parity 16/16).
+
+**WHAT LANDED.** `fixedpoint` gains `Quantity.OnStep`/`Price.OnTick`;
+`oms/domain.TradingFilters` (placed in domain because `singlewriter` leaves it
+nameable by roots — the `InstrumentAssets` precedent); one shared
+`conformsToFilters` in `oms/application` enforced by the Planner per leg
+BEFORE journaling and by the Executor's preflight per package BEFORE any fsync
+(second pass, so a mixed-base package keeps its sharper diagnosis; catches
+replayed `Planned` records conformed under an older revision — §5.3's
+replan-or-discard made structural). Nil map = plans nothing, by name.
+`strategy.LotRules.Tick` is OPTIONAL (pre-tick journaled revisions keep
+decoding; the order-path resolver REFUSES a tick-less row — each consumer's
+own safe direction). `arblab exercise` requires `reference.{path,max_age}` and
+resolves the map pre-boot, refusing missing/tick-less/stale rows naming the
+file; the map reaches the boot via `reconcile.WithInstrumentFilters` (an
+Option, not a Config field — the reconcile fence caught the first placement,
+which is that fence working). §2.4 gains the conformance bullet, §6 steps 5/6
+the verification clauses — tick and min-notional were two UNMARKED spec holes
+(the OWED grep cannot see an absent clause; the reading pass found them).
+Profiles §5 gains the dated 2026-08-03 block: all four ticks (spot 0.01, the
+other three 0.1), lot/notional rows re-confirmed, fapi `?symbol=` IGNORED,
+Binance spot `MARKET_LOT_SIZE` publishes a literal ZERO step, perp
+min-notional spelled `notional`. `configs/reference.btcusdt.json` keeps
+`observed_at` at 2026-07-31 deliberately (the frozen milestone-2 calibration
+must stay answerable; tick provenance lives in the source strings — do NOT
+move it forward).
+
+**THE OPERATOR DECISION (yours, surfaced not absorbed):** the $20 live test's
+perp leg needs ≥50 USDT notional on Binance. Either the package grows to
+~$55, or the perp leg moves to Bybit — blocked on **#171** (Bybit testnet
+credential, needs you). Note also: the committed filter rows are
+MAINNET-observed; a testnet run may meet different filters (failure mode is a
+refused cycle, not exposure) — the mainnet run is the correct target.
+
+**WHAT IS NEXT.** With the quantization blocker gone, the candidates nearest
+the money: the **$20/$55 live-test decision above**, **#174** (persist
+`Ack.VenueOrderID`), **#179** (spot leg's exposure baseline), **#171** (needs
+the USER), **#173** (the other §7.6 remnant). The §9 acceptance campaign
+remains runnable.
+
+**Standing, unchanged:** capture **PID 8495**, never rebuild over `bin/arblab`,
+`make ci` runs `-race`, cap `TLC_WORKERS` at 4, docs/i18n parity is `bun test`.
+`MUTATE_TIMEOUT` must exceed the chaos test's own 60s bound when mutating the
+exercise package (180s+), or a caught mutant reads `TIMEOUT!!`. **§38f (task
+#158) is still the only clock-bound user decision** (≥2 TB off-host, gate
+~2026-09-30).
+
+---
+
+## Status (2026-08-03, session 90 — HISTORICAL): **#170 IS CLOSED — §7.6's 418/IP-BAN MUST-ALERT IS DELIVERED END TO END: THE ROOT HOLDS THE GOVERNOR IT USED TO DROP, `Report.RateLimit` CARRIES THE SNAPSHOT, BANS > 0 IS ExitOperator, AND THE FINDING IS THAT THE OLD ANSWER WAS NOT SILENT BUT WRONG — A BAN READ AS ExitIncomplete, WHOSE "RETRY MAY LIFT IT" IS THE RESPONSE THAT ESCALATES A BINANCE BAN TOWARD THREE DAYS. DOCS REMAIN v0.9.40; NO SPEC EDIT OWED; MARKER GREP IS ZERO.**
 
 **The slice is done end to end.** `make ci` green on both modules, marker grep
 **0**, **13 mutations / 13 kills** (including two aimed at the PRODUCER through

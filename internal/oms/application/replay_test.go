@@ -37,12 +37,13 @@ import (
 // only one group is meaningful at a time — the shape ports.Journal refuses in
 // its API and a scripted fixture is allowed, because the kind chooses.
 type journalEntry struct {
-	seq   uint64
-	kind  string
-	order domain.Order
-	id    ids.ClientOrderID
-	at    clock.ServerTime
-	state domain.OrderState
+	seq          uint64
+	kind         string
+	order        domain.Order
+	id           ids.ClientOrderID
+	at           clock.ServerTime
+	state        domain.OrderState
+	venueOrderID string
 }
 
 // fakeReplay is ports.JournalReplay over a scripted log.
@@ -79,6 +80,8 @@ func (f *fakeReplay) Replay(v ports.JournalVisitor) error {
 			err = v.Authorized(e.seq, e.id, e.at)
 		case "state":
 			err = v.State(e.seq, e.id, e.state)
+		case "acked":
+			err = v.Acked(e.seq, e.id, e.venueOrderID)
 		default:
 			return fmt.Errorf("fake replay: entry %d has kind %q", e.seq, e.kind)
 		}
@@ -505,5 +508,159 @@ func TestDispatchedIsASupersetOfUnresolvedAndHoldsTheTerminals(t *testing.T) {
 	if len(got.Dispatched) == len(got.Unresolved) {
 		t.Errorf("Dispatched and Unresolved are the same size (%d); the fixture cannot show that they answer different questions",
 			len(got.Dispatched))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// acked records (task #174): the venue id survives the crash
+// ---------------------------------------------------------------------------
+
+// TestRebuildRestoresTheVenueOrderId is the ack's half of the central claim:
+// the persisted id is not process memory, so a recovered projection can still
+// rule a sweep row out against it. Two orders (checklist item 1), one acked
+// and one not, so a replayer that stamped every order — or none — fails.
+func TestRebuildRestoresTheVenueOrderId(t *testing.T) {
+	t.Parallel()
+
+	first, second := mintedID(t, 0), mintedID(t, 1)
+	at := replayAnchor(t, 5)
+
+	r, _, orders := newReplayer(t,
+		journalEntry{seq: 1, kind: "planned", order: replayOrder(t, first)},
+		journalEntry{seq: 2, kind: "planned", order: replayOrder(t, second)},
+		journalEntry{seq: 3, kind: "authorized", id: first, at: at},
+		journalEntry{seq: 4, kind: "acked", id: first, venueOrderID: "774411"},
+		journalEntry{seq: 5, kind: "state", id: first, state: domain.StateSubmitted},
+		journalEntry{seq: 6, kind: "authorized", id: second, at: replayAnchor(t, 6)},
+	)
+
+	got, err := r.Rebuild()
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	if got.Records != 6 || got.LastSequence != 6 {
+		t.Errorf("Records/LastSequence = %d/%d, want 6/6", got.Records, got.LastSequence)
+	}
+
+	rec, err := orders.Load(first)
+	if err != nil {
+		t.Fatalf("Load %q: %v", first, err)
+	}
+	if rec.VenueOrderID != "774411" {
+		t.Errorf("replayed venue id = %q, want %q", rec.VenueOrderID, "774411")
+	}
+	other, err := orders.Load(second)
+	if err != nil {
+		t.Fatalf("Load %q: %v", second, err)
+	}
+	if other.VenueOrderID != "" {
+		t.Errorf("second order replayed with venue id %q, want none", other.VenueOrderID)
+	}
+}
+
+// TestADuplicateAckedRecordIsANoOpAndIsCounted mirrors the duplicate-state
+// claim for the fourth kind: §5.3's duplicate deliveries are legitimate, and
+// the restatement neither fails the replay nor moves the version — asserted
+// through the SUBSEQUENT state record, whose version arithmetic would conflict
+// if the no-op had bumped it. The duplicate sits mid-log (checklist item 2).
+func TestADuplicateAckedRecordIsANoOpAndIsCounted(t *testing.T) {
+	t.Parallel()
+
+	id := mintedID(t, 0)
+	at := replayAnchor(t, 5)
+
+	r, _, orders := newReplayer(t,
+		journalEntry{seq: 1, kind: "planned", order: replayOrder(t, id)},
+		journalEntry{seq: 2, kind: "authorized", id: id, at: at},
+		journalEntry{seq: 3, kind: "acked", id: id, venueOrderID: "774411"},
+		journalEntry{seq: 4, kind: "acked", id: id, venueOrderID: "774411"},
+		journalEntry{seq: 5, kind: "state", id: id, state: domain.StateSubmitted},
+	)
+
+	got, err := r.Rebuild()
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	if got.Duplicates != 1 {
+		t.Errorf("Duplicates = %d, want 1", got.Duplicates)
+	}
+	rec, err := orders.Load(id)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if rec.State != domain.StateSubmitted || rec.VenueOrderID != "774411" {
+		t.Errorf("replayed as %s/%q, want %s/%q", rec.State, rec.VenueOrderID,
+			domain.StateSubmitted, "774411")
+	}
+}
+
+// TestReplayRefusesConflictingAckRecords is the crash half of the conflict
+// design: a journal holding two acked records that disagree — about one
+// order's id, or about one id's owner — verifies as a LOG and does not
+// compose as a HISTORY, and the refusal is what keeps a poisoned index from
+// ever being consulted: the boot that would have built it fails first.
+func TestReplayRefusesConflictingAckRecords(t *testing.T) {
+	t.Parallel()
+
+	first, second := mintedID(t, 0), mintedID(t, 1)
+
+	t.Run("one order under two ids", func(t *testing.T) {
+		t.Parallel()
+		r, _, _ := newReplayer(t,
+			journalEntry{seq: 1, kind: "planned", order: replayOrder(t, first)},
+			journalEntry{seq: 2, kind: "authorized", id: first, at: replayAnchor(t, 5)},
+			journalEntry{seq: 3, kind: "acked", id: first, venueOrderID: "774411"},
+			journalEntry{seq: 4, kind: "acked", id: first, venueOrderID: "999999"},
+		)
+		_, err := r.Rebuild()
+		if !errors.Is(err, ports.ErrVenueOrderIDConflict) {
+			t.Fatalf("Rebuild = %v, want ErrVenueOrderIDConflict", err)
+		}
+	})
+
+	t.Run("one id under two orders on the same instrument", func(t *testing.T) {
+		t.Parallel()
+		r, _, _ := newReplayer(t,
+			journalEntry{seq: 1, kind: "planned", order: replayOrder(t, first)},
+			journalEntry{seq: 2, kind: "planned", order: replayOrder(t, second)},
+			journalEntry{seq: 3, kind: "authorized", id: first, at: replayAnchor(t, 5)},
+			journalEntry{seq: 4, kind: "acked", id: first, venueOrderID: "774411"},
+			journalEntry{seq: 5, kind: "authorized", id: second, at: replayAnchor(t, 6)},
+			journalEntry{seq: 6, kind: "acked", id: second, venueOrderID: "774411"},
+		)
+		_, err := r.Rebuild()
+		if !errors.Is(err, ports.ErrVenueOrderIDConflict) {
+			t.Fatalf("Rebuild = %v, want ErrVenueOrderIDConflict", err)
+		}
+	})
+
+	// A broken-log refusal is not the chain sentinel: the log VERIFIED, and
+	// reporting it as tampering would send the operator to the wrong problem.
+	t.Run("the refusal is not a chain-broken report", func(t *testing.T) {
+		t.Parallel()
+		r, _, _ := newReplayer(t,
+			journalEntry{seq: 1, kind: "planned", order: replayOrder(t, first)},
+			journalEntry{seq: 2, kind: "authorized", id: first, at: replayAnchor(t, 5)},
+			journalEntry{seq: 3, kind: "acked", id: first, venueOrderID: "774411"},
+			journalEntry{seq: 4, kind: "acked", id: first, venueOrderID: "999999"},
+		)
+		_, err := r.Rebuild()
+		if application.ChainBroken(err) {
+			t.Fatalf("ChainBroken(%v) = true — a log that verifies and does not compose is the OTHER failure", err)
+		}
+	})
+}
+
+// TestRebuildRefusesAnAckForAnOrderNeverPlanned closes the same door the
+// state-record twin closes: a record about an order the log never created.
+func TestRebuildRefusesAnAckForAnOrderNeverPlanned(t *testing.T) {
+	t.Parallel()
+
+	r, _, _ := newReplayer(t,
+		journalEntry{seq: 1, kind: "planned", order: replayOrder(t, mintedID(t, 0))},
+		journalEntry{seq: 2, kind: "acked", id: mintedID(t, 1), venueOrderID: "774411"},
+	)
+	if _, err := r.Rebuild(); !errors.Is(err, ports.ErrOrderUnknown) {
+		t.Fatalf("Rebuild = %v, want ErrOrderUnknown", err)
 	}
 }

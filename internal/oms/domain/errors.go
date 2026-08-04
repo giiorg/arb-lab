@@ -280,4 +280,24 @@ var (
 	// nobody recorded. The compensating trade is then sized against a delta that
 	// omits it.
 	ErrOrderedQuantityNotPositive = errors.New("oms: ordered quantity is not positive")
+
+	// ErrFilterStepNotPositive and ErrFilterTickNotPositive report a
+	// TradingFilters grid that is zero or negative. A zero grid admits every
+	// value — the unpopulated constraint reading as "no constraint" — and the
+	// zero arrives from real venue data, not only from a forgotten field:
+	// Binance publishes stepSize "0.00000000" on filters that do not apply.
+	ErrFilterStepNotPositive = errors.New("oms: trading filter lot step is not positive")
+	ErrFilterTickNotPositive = errors.New("oms: trading filter price tick is not positive")
+
+	// ErrFilterFloorNegative reports a negative MinQty or MinNotional. Zero is
+	// a legal declared floor; below it there is no reading that is a venue
+	// fact rather than a decode defect.
+	ErrFilterFloorNegative = errors.New("oms: trading filter floor is negative")
+
+	// ErrFilterAssetsDisagree reports TradingFilters members carrying
+	// disagreeing asset tags — two instruments' rows assembled into one value,
+	// or a wrong base/quote split. Caught at Validate so the disagreement is
+	// named here rather than surfacing inside a planner check attributed to
+	// whichever member the check happened to read.
+	ErrFilterAssetsDisagree = errors.New("oms: trading filter members disagree about the instrument's assets")
 )

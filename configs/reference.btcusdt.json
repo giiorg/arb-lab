@@ -56,9 +56,10 @@
       "min_qty": "0.00001",
       "quote": "USDT",
       "min_notional": "5",
+      "tick": "0.01",
       "class": "hand_recorded",
       "observed_at": "2026-07-31T05:09:00Z",
-      "source": "docs/venue-profiles.md — BTCUSDT lot/notional filters (2026-07-31): GET /api/v3/exchangeInfo?symbol=BTCUSDT, LOT_SIZE + NOTIONAL"
+      "source": "docs/venue-profiles.md — BTCUSDT lot/notional filters (2026-07-31) + trading-filters tick block (2026-08-03): GET /api/v3/exchangeInfo?symbol=BTCUSDT, LOT_SIZE + NOTIONAL + PRICE_FILTER tickSize. Lot/notional members observed 2026-07-31 and re-confirmed unchanged 2026-08-03; tick observed 2026-08-03 (single-revision store carries one observed_at, kept at the row's original date so the committed calibration's frozen as-of stays answerable — the tick member is consumed only by the live order path, which reads as-of now)"
     },
     {
       "venue": "binance",
@@ -70,9 +71,10 @@
       "min_qty": "0.001",
       "quote": "USDT",
       "min_notional": "50",
+      "tick": "0.1",
       "class": "hand_recorded",
       "observed_at": "2026-07-31T05:09:00Z",
-      "source": "docs/venue-profiles.md — BTCUSDT lot/notional filters (2026-07-31): GET /fapi/v1/exchangeInfo, LOT_SIZE + MIN_NOTIONAL"
+      "source": "docs/venue-profiles.md — BTCUSDT lot/notional filters (2026-07-31) + trading-filters tick block (2026-08-03): GET /fapi/v1/exchangeInfo, LOT_SIZE + MIN_NOTIONAL + PRICE_FILTER tickSize. Lot/notional members observed 2026-07-31 and re-confirmed unchanged 2026-08-03; tick observed 2026-08-03 (single-revision store carries one observed_at, kept at the row's original date so the committed calibration's frozen as-of stays answerable — the tick member is consumed only by the live order path, which reads as-of now)"
     },
     {
       "venue": "bybit",
@@ -84,9 +86,10 @@
       "min_qty": "0.000001",
       "quote": "USDT",
       "min_notional": "5",
+      "tick": "0.1",
       "class": "hand_recorded",
       "observed_at": "2026-07-31T05:09:00Z",
-      "source": "docs/venue-profiles.md — BTCUSDT lot/notional filters (2026-07-31): GET /v5/market/instruments-info?category=spot&symbol=BTCUSDT, lotSizeFilter (minOrderAmt as min notional)"
+      "source": "docs/venue-profiles.md — BTCUSDT lot/notional filters (2026-07-31) + trading-filters tick block (2026-08-03): GET /v5/market/instruments-info?category=spot&symbol=BTCUSDT, lotSizeFilter (minOrderAmt as min notional) + priceFilter.tickSize. Lot/notional members observed 2026-07-31 and re-confirmed unchanged 2026-08-03; tick observed 2026-08-03 (single-revision store carries one observed_at, kept at the row's original date so the committed calibration's frozen as-of stays answerable — the tick member is consumed only by the live order path, which reads as-of now)"
     },
     {
       "venue": "bybit",
@@ -98,9 +101,10 @@
       "min_qty": "0.001",
       "quote": "USDT",
       "min_notional": "5",
+      "tick": "0.1",
       "class": "hand_recorded",
       "observed_at": "2026-07-31T05:09:00Z",
-      "source": "docs/venue-profiles.md — BTCUSDT lot/notional filters (2026-07-31): GET /v5/market/instruments-info?category=linear&symbol=BTCUSDT, lotSizeFilter (minNotionalValue)"
+      "source": "docs/venue-profiles.md — BTCUSDT lot/notional filters (2026-07-31) + trading-filters tick block (2026-08-03): GET /v5/market/instruments-info?category=linear&symbol=BTCUSDT, lotSizeFilter (minNotionalValue) + priceFilter.tickSize. Lot/notional members observed 2026-07-31 and re-confirmed unchanged 2026-08-03; tick observed 2026-08-03 (single-revision store carries one observed_at, kept at the row's original date so the committed calibration's frozen as-of stays answerable — the tick member is consumed only by the live order path, which reads as-of now)"
     }
   ],
   "hurdle": {

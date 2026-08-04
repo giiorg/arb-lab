@@ -16,6 +16,7 @@ import (
 
 	"github.com/giiorg/arb-lab/internal/engine/venue"
 	"github.com/giiorg/arb-lab/internal/engine/venue/transport"
+	omsdomain "github.com/giiorg/arb-lab/internal/oms/domain"
 	"github.com/giiorg/arb-lab/internal/platform/boot"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/config"
@@ -586,6 +587,40 @@ func spotOnly(t *testing.T, journal string) Config {
 	}
 	cfg.PositionScopes = nil
 	return cfg
+}
+
+// TestWithInstrumentFiltersReachesTheRunner pins the Option half of the §2.4
+// filters thread-through — NewRunner applies options before assembling
+// anything, and a runner built without the option holds the nil map, the
+// deployment that plans nothing. The other half of the chain (r.filters →
+// oms.Deps → the planner's refusal) is proved end to end by the exercise
+// root's off-grid test, which can only refuse through a planner that actually
+// received this map.
+func TestWithInstrumentFiltersReachesTheRunner(t *testing.T) {
+	t.Parallel()
+
+	cfg := validConfig(t, filepath.Join(t.TempDir(), "journal.db"))
+	perp := ids.VenueInstrument{Venue: "binance", Product: ids.ProductLinearPerp,
+		Symbol: "BTCUSDT", Contract: ids.ContractLinear}
+	filters := map[ids.VenueInstrument]omsdomain.TradingFilters{perp: {}}
+
+	r, err := NewRunner(snapshotOf(t, cfg), testWall(t, cfg),
+		observability.NewRegistry(), io.Discard, WithInstrumentFilters(filters))
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+	if _, ok := r.filters[perp]; !ok || len(r.filters) != 1 {
+		t.Fatalf("runner filters = %v, want the supplied one-entry map", r.filters)
+	}
+
+	bare, err := NewRunner(snapshotOf(t, cfg), testWall(t, cfg),
+		observability.NewRegistry(), io.Discard)
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+	if bare.filters != nil {
+		t.Fatalf("optionless runner filters = %v, want nil — plans-nothing is the default", bare.filters)
+	}
 }
 
 func snapshotOf(t *testing.T, cfg Config) config.Snapshot[Config] {

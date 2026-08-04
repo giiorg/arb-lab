@@ -538,6 +538,10 @@ func parseLots(field string, w *lotsWire) (LotRules, error) {
 	if err != nil {
 		return LotRules{}, err
 	}
+	tick, err := parsePrice(field+" tick", w.Tick)
+	if err != nil {
+		return LotRules{}, err
+	}
 	prov, err := parseProvenance(field, w.Provenance)
 	if err != nil {
 		return LotRules{}, err
@@ -545,6 +549,7 @@ func parseLots(field string, w *lotsWire) (LotRules, error) {
 	return LotRules{
 		Instrument: parseInstrument(w.Instrument),
 		Step:       step, MinQty: minQty, MinNotional: minNotional,
+		Tick:       tick,
 		Provenance: prov,
 	}, nil
 }

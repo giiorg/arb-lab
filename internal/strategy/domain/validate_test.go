@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/strategy/domain"
 )
 
@@ -114,4 +115,88 @@ func TestValidateNamesTheField(t *testing.T) {
 	if err := in.Validate(); !errors.Is(err, domain.ErrUnset) {
 		t.Fatalf("want ErrUnset for missing instant, got %v", err)
 	}
+}
+
+// TestLotRulesTick pins the field's deliberate asymmetry: ABSENT is legal —
+// revisions journaled before the field existed must keep decoding, and this
+// context's scoring path never prices with a tick — while a PRESENT tick is
+// held to the same coherence as every other member. The two directions are
+// separate cases because they are separate claims: an implementation that
+// required the tick would break old journals, one that skipped validation
+// when present would let "0" read as "every price conforms".
+func TestLotRulesTick(t *testing.T) {
+	t.Parallel()
+
+	valid := domain.LotRules{
+		Instrument:  perpInst,
+		Step:        mustQty(t, "0.001"),
+		MinQty:      mustQty(t, "0.002"),
+		MinNotional: mustMoney(t, "50"),
+		Provenance:  provenance(t),
+	}
+
+	t.Run("an absent tick validates", func(t *testing.T) {
+		t.Parallel()
+		l := valid
+		if err := l.Validate(); err != nil {
+			t.Fatalf("tick-less rules refused: %v — pre-tick revisions must keep decoding", err)
+		}
+	})
+
+	t.Run("a recorded tick validates", func(t *testing.T) {
+		t.Parallel()
+		l := valid
+		l.Tick = mustPrice(t, "0.1")
+		if err := l.Validate(); err != nil {
+			t.Fatalf("rules with a coherent tick refused: %v", err)
+		}
+	})
+
+	t.Run("a declared zero tick is refused", func(t *testing.T) {
+		t.Parallel()
+		l := valid
+		zero, err := fixedpoint.ParsePrice("BTC", "USDT", "0")
+		if err != nil {
+			t.Fatalf("ParsePrice: %v", err)
+		}
+		l.Tick = zero
+		if err := l.Validate(); !errors.Is(err, domain.ErrUnset) {
+			t.Fatalf("zero tick: want ErrUnset, got %v — it reads as every price conforming", err)
+		}
+	})
+
+	t.Run("a negative tick is refused", func(t *testing.T) {
+		t.Parallel()
+		l := valid
+		l.Tick = mustPrice(t, "-0.1")
+		if err := l.Validate(); !errors.Is(err, domain.ErrUnset) {
+			t.Fatalf("negative tick: want ErrUnset, got %v", err)
+		}
+	})
+
+	t.Run("a tick pricing a different base is refused", func(t *testing.T) {
+		t.Parallel()
+		l := valid
+		tick, err := fixedpoint.ParsePrice("ETH", "USDT", "0.1")
+		if err != nil {
+			t.Fatalf("ParsePrice: %v", err)
+		}
+		l.Tick = tick
+		if err := l.Validate(); !errors.Is(err, domain.ErrKindInvalid) {
+			t.Fatalf("wrong-base tick: want ErrKindInvalid, got %v", err)
+		}
+	})
+
+	t.Run("a tick quoted off the notional's asset is refused", func(t *testing.T) {
+		t.Parallel()
+		l := valid
+		tick, err := fixedpoint.ParsePrice("BTC", "USDC", "0.1")
+		if err != nil {
+			t.Fatalf("ParsePrice: %v", err)
+		}
+		l.Tick = tick
+		if err := l.Validate(); !errors.Is(err, domain.ErrKindInvalid) {
+			t.Fatalf("wrong-quote tick: want ErrKindInvalid, got %v", err)
+		}
+	})
 }

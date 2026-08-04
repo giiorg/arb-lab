@@ -61,6 +61,7 @@ import (
 
 	"github.com/giiorg/arb-lab/internal/engine/venue"
 	"github.com/giiorg/arb-lab/internal/oms/application"
+	"github.com/giiorg/arb-lab/internal/oms/domain"
 	"github.com/giiorg/arb-lab/internal/oms/infrastructure/driven"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
@@ -194,6 +195,22 @@ type Deps struct {
 	// derived from the symbol, and for the construct (§5.1's SymbolSpec) that
 	// will own it.
 	InstrumentAssets map[ids.VenueInstrument]venue.InstrumentAssets
+
+	// InstrumentFilters is each tradable instrument's published trading
+	// filters — the lot grid, the tick grid and the two floors §2.4's
+	// verification half refuses against, resolved by the root from the dated
+	// reference revision.
+	//
+	// The value type is oms/domain's, which is the one vocabulary a root may
+	// name (§3.6 rule 6 polices ports and driven; domain is deliberately out —
+	// §5.1's pattern). A nil map is legal and is a deployment that PLANS
+	// nothing: the planner refuses every leg with ErrFiltersUnknown. That is
+	// InstrumentAssets' refuse-don't-guess rule pointed at the write path,
+	// and it is why the reconcile-only root supplies nothing here and loses
+	// nothing — while a root that forgets the field has built a binary whose
+	// first plan says so, rather than one whose first plan reaches a venue
+	// unchecked.
+	InstrumentFilters map[ids.VenueInstrument]domain.TradingFilters
 
 	// Clock is the time seam §11 requires and §5.3's stable-not-found rule
 	// depends on: the dispatcher stamps the authorization anchor in the venue's
@@ -405,7 +422,7 @@ func New(deps Deps) (*Module, error) {
 		return nil, errors.Join(fmt.Errorf("oms: write repository: %w", err), journal.Close())
 	}
 
-	planner, err := application.NewPlanner(journal, orders)
+	planner, err := application.NewPlanner(journal, orders, deps.InstrumentFilters)
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("oms: planner: %w", err), journal.Close())
 	}
@@ -429,7 +446,7 @@ func New(deps Deps) (*Module, error) {
 		return nil, errors.Join(fmt.Errorf("oms: dispatcher: %w", err), journal.Close())
 	}
 
-	executor, err := application.NewExecutor(dispatcher)
+	executor, err := application.NewExecutor(dispatcher, deps.InstrumentFilters)
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("oms: executor: %w", err), journal.Close())
 	}
@@ -439,7 +456,10 @@ func New(deps Deps) (*Module, error) {
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("oms: order resolver gateway: %w", err), journal.Close())
 	}
-	resolver, err := application.NewResolver(journal, orders, reader, deps.Clock, deps.Resolution)
+	// The same repository, handed over a second time as the read capability
+	// gate 3 rules sweep rows out against — the journal's two-halves pattern,
+	// on the store this time.
+	resolver, err := application.NewResolver(journal, orders, reader, orders, deps.Clock, deps.Resolution)
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("oms: resolver: %w", err), journal.Close())
 	}

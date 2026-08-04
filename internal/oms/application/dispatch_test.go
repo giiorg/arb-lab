@@ -39,14 +39,18 @@ import (
 
 // journalCall is one durable record, in the order it was written.
 //
-// at carries the authorization anchor and is the zero ServerTime on every other
-// record — which is the one place this fake is allowed the optional-field shape
-// ports.Journal refuses in its API, because a test asserting the ORDER of the
-// records needs them in one slice.
+// at carries the authorization anchor and venueOrderID the ack's id; each is
+// zero on every other record — which is the one place this fake is allowed the
+// optional-field shape ports.Journal refuses in its API, because a test
+// asserting the ORDER of the records needs them in one slice. An acked record
+// is the one whose venueOrderID is non-empty and whose state is the zero
+// value; states() skips it so the state-sequence assertions read the list the
+// state records alone would make.
 type journalCall struct {
-	id    ids.ClientOrderID
-	state domain.OrderState
-	at    clock.ServerTime
+	id           ids.ClientOrderID
+	state        domain.OrderState
+	at           clock.ServerTime
+	venueOrderID string
 }
 
 type fakeJournal struct {
@@ -68,6 +72,11 @@ type fakeJournal struct {
 	// applied.
 	failPlannedFrom int
 	failPlannedErr  error
+
+	// failAcked, when set, is returned by every AppendAcked — the hook the
+	// AckJournaled reporting claim needs, since failOn is keyed by state and
+	// an acked record has none.
+	failAcked error
 }
 
 func newFakeJournal() *fakeJournal {
@@ -96,6 +105,19 @@ func (j *fakeJournal) AppendAuthorized(id ids.ClientOrderID, at clock.ServerTime
 	return j.failOn[domain.StateDispatchAuthorized]
 }
 
+// AppendAcked refuses the two empties exactly as the real adapter does — a
+// laxer fake would let a dispatcher journal an id-less ack record, the second
+// spelling of absence the method exists to deny.
+func (j *fakeJournal) AppendAcked(id ids.ClientOrderID, venueOrderID string) error {
+	if id == "" || venueOrderID == "" {
+		return fmt.Errorf("append ack %q for order %q: empty", venueOrderID, id)
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.calls = append(j.calls, journalCall{id: id, venueOrderID: venueOrderID})
+	return j.failAcked
+}
+
 // AppendState refuses StateDispatchAuthorized exactly as the real adapter does.
 //
 // A fake that admitted it would be laxer than the port it stands for, and the
@@ -119,13 +141,40 @@ func (j *fakeJournal) appendCount() int {
 	return len(j.calls)
 }
 
-// states returns what was durably recorded, in order.
+// states returns the STATE records durably recorded, in order — acked records
+// are skipped, so assertions written against the lifecycle sequence keep
+// reading exactly that.
 func (j *fakeJournal) states() []domain.OrderState {
-	out := make([]domain.OrderState, len(j.calls))
-	for i, c := range j.calls {
-		out[i] = c.state
+	var out []domain.OrderState
+	for _, c := range j.calls {
+		if c.venueOrderID != "" {
+			continue
+		}
+		out = append(out, c.state)
 	}
 	return out
+}
+
+// ackedBeforeState reports whether an acked record for id precedes its state
+// record — Dispatch's crash-window ordering claim, read from the one
+// interleaved list.
+func (j *fakeJournal) ackedBeforeState(id ids.ClientOrderID) bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	ackedAt := -1
+	for i, c := range j.calls {
+		if c.id != id {
+			continue
+		}
+		if c.venueOrderID != "" {
+			ackedAt = i
+			continue
+		}
+		if c.state != domain.StateDispatchAuthorized {
+			return ackedAt >= 0 && ackedAt < i
+		}
+	}
+	return false
 }
 
 // plannedIDs returns the ids of the intents recorded, in order.
@@ -227,6 +276,17 @@ type fakeOrders struct {
 	// so that a repeat execution is a NO-OP and not a second application — the
 	// property §7.5's join depends on to be re-runnable.
 	fills map[domain.FillKey]struct{}
+
+	// failApplyAck, when set, is returned by every ApplyAck — including
+	// ports.ErrVenueOrderIDConflict, which is how a test reaches the
+	// AckConflict reporting without constructing the two-order collision the
+	// real adapter needs to refuse.
+	failApplyAck error
+
+	// failVenueIDs, when set, is returned by every VenueOrderIDsOn — the hook
+	// for the claim that an index failure refuses the RESOLUTION rather than
+	// degrading to an empty map.
+	failVenueIDs error
 }
 
 func newFakeOrders() *fakeOrders {
@@ -300,6 +360,72 @@ func (r *fakeOrders) ApplyAuthorized(id ids.ClientOrderID, expected int64, at cl
 	rec.AuthorizedAt = at
 	r.records[id] = rec
 	return rec, nil
+}
+
+// ApplyAck mirrors the adapter's contract: the state guard, the same-value
+// no-op with the version left alone, and the conflict refusals — a fake laxer
+// on any of the three would let this suite pass against a dispatcher the real
+// repository refuses, and the no-op fidelity is what the replay tests' version
+// arithmetic reads.
+func (r *fakeOrders) ApplyAck(id ids.ClientOrderID, expected int64, venueOrderID string) (ports.OrderRecord, error) {
+	if venueOrderID == "" {
+		return ports.OrderRecord{}, fmt.Errorf("fake repository: ack order %q: empty venue order id", id)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.failApplyAck != nil {
+		return ports.OrderRecord{}, r.failApplyAck
+	}
+	rec, ok := r.records[id]
+	if !ok {
+		return ports.OrderRecord{}, fmt.Errorf("ack order %q: %w", id, ports.ErrOrderUnknown)
+	}
+	if rec.Version != expected {
+		return ports.OrderRecord{}, fmt.Errorf("ack order %q: %w", id, ports.ErrVersionConflict)
+	}
+	mayExist, err := rec.State.MayExistAtVenue()
+	if err != nil {
+		return ports.OrderRecord{}, fmt.Errorf("ack order %q at %s: %w", id, rec.State, err)
+	}
+	if !mayExist {
+		return ports.OrderRecord{}, fmt.Errorf("fake repository: ack order %q at %s: no venue side", id, rec.State)
+	}
+	if rec.VenueOrderID == venueOrderID {
+		return rec, nil
+	}
+	if rec.VenueOrderID != "" {
+		return ports.OrderRecord{}, fmt.Errorf("ack order %q holds %q, ack names %q: %w",
+			id, rec.VenueOrderID, venueOrderID, ports.ErrVenueOrderIDConflict)
+	}
+	for otherID, other := range r.records {
+		if otherID != id && other.VenueOrderID == venueOrderID &&
+			other.Order.Instrument == rec.Order.Instrument {
+			return ports.OrderRecord{}, fmt.Errorf("ack order %q: venue id %q already names %q: %w",
+				id, venueOrderID, otherID, ports.ErrVenueOrderIDConflict)
+		}
+	}
+	rec.VenueOrderID = venueOrderID
+	rec.Version++
+	r.records[id] = rec
+	return rec, nil
+}
+
+// VenueOrderIDsOn is ports.VenueOrderIndex, so resolver tests hand the same
+// fake over as both capabilities the way module.go hands the real store.
+func (r *fakeOrders) VenueOrderIDsOn(instrument ids.VenueInstrument) (map[string]ids.ClientOrderID, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.failVenueIDs != nil {
+		return nil, r.failVenueIDs
+	}
+	out := make(map[string]ids.ClientOrderID)
+	for id, rec := range r.records {
+		if rec.VenueOrderID == "" || rec.Order.Instrument != instrument {
+			continue
+		}
+		out[rec.VenueOrderID] = id
+	}
+	return out, nil
 }
 
 // ApplyState refuses the authorization target, as the port requires of every
@@ -395,6 +521,7 @@ var (
 	_ ports.Journal              = (*fakeJournal)(nil)
 	_ ports.OrderPlacer          = (*fakePlacer)(nil)
 	_ ports.OrderWriteRepository = (*fakeOrders)(nil)
+	_ ports.VenueOrderIndex      = (*fakeOrders)(nil)
 )
 
 // mintedID returns a ClientOrderID this system minted, built through the real
@@ -614,8 +741,12 @@ func TestDispatchPlacesAValidOrderExactlyOnce(t *testing.T) {
 	if final.State != domain.StateSubmitted {
 		t.Errorf("repository state = %s, want %s", final.State, domain.StateSubmitted)
 	}
-	if final.Version != 3 {
-		t.Errorf("repository version = %d, want 3 — one bump per applied write", final.Version)
+	if final.Version != 4 {
+		t.Errorf("repository version = %d, want 4 — one bump per applied write: authorized, acked, submitted over the planned base", final.Version)
+	}
+	if final.VenueOrderID != p.ack.VenueOrderID {
+		t.Errorf("repository venue order id = %q, want %q — the ack did not reach the projection",
+			final.VenueOrderID, p.ack.VenueOrderID)
 	}
 }
 
@@ -1368,4 +1499,183 @@ func equalStates(got, want []domain.OrderState) bool {
 		}
 	}
 	return true
+}
+
+// ---------------------------------------------------------------------------
+// the ack's persistence (task #174): journal and projection, ack before state
+// ---------------------------------------------------------------------------
+
+// TestDispatchPersistsTheAcksVenueIdAckFirst is the write path of §5.3 gate
+// 3's rule-out source: a clean place's venue id reaches BOTH stores, and the
+// journal takes it BEFORE the state record — the ordering chosen for the
+// crash between the two writes, where authorized+acked replays into an order
+// recovery can still join and authorized+state replays into the pre-#174
+// world.
+func TestDispatchPersistsTheAcksVenueIdAckFirst(t *testing.T) {
+	t.Parallel()
+
+	d, j, p, r := newDispatcher(t)
+	p.ack = ports.Ack{VenueOrderID: "774411"}
+	o := dispatchableOrder(t)
+	plant(t, r, o)
+
+	out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening)
+	if err != nil {
+		t.Fatalf("Dispatch = %v, want nil", err)
+	}
+	if !out.AckJournaled || !out.AckApplied {
+		t.Errorf("AckJournaled/AckApplied = %v/%v, want true/true", out.AckJournaled, out.AckApplied)
+	}
+	if out.AckConflict {
+		t.Error("AckConflict = true on a clean ack")
+	}
+	if out.HoldsNewTrading() {
+		t.Error("HoldsNewTrading() = true on a clean dispatch")
+	}
+	if !j.ackedBeforeState(o.ClientOrderID) {
+		t.Errorf("journal order is %v — the acked record must precede the state record", j.calls)
+	}
+	rec, err := r.Load(o.ClientOrderID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if rec.VenueOrderID != "774411" {
+		t.Errorf("projection venue id = %q, want %q", rec.VenueOrderID, "774411")
+	}
+}
+
+// TestDispatchWritesNoAckRecordWithoutAnId: a venue that supplied no id gave
+// this dispatch nothing to record, and the absent id has ONE spelling — no
+// acked record at all. An id-less dispatch that wrote one would replay into a
+// field every attribution rule ignores.
+func TestDispatchWritesNoAckRecordWithoutAnId(t *testing.T) {
+	t.Parallel()
+
+	d, j, p, r := newDispatcher(t)
+	p.ack = ports.Ack{}
+	o := dispatchableOrder(t)
+	plant(t, r, o)
+
+	out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening)
+	if err != nil {
+		t.Fatalf("Dispatch = %v, want nil", err)
+	}
+	for _, c := range j.calls {
+		if c.venueOrderID != "" {
+			t.Errorf("journal holds an acked record %+v for an id-less ack", c)
+		}
+	}
+	rec, err := r.Load(o.ClientOrderID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if rec.VenueOrderID != "" {
+		t.Errorf("projection venue id = %q, want empty", rec.VenueOrderID)
+	}
+	// The two report fields are meaningful only when an id existed; on an
+	// id-less ack they are false because nothing was attempted, and the state
+	// pair is what says the dispatch itself was clean.
+	if out.AckJournaled || out.AckApplied || out.AckConflict {
+		t.Errorf("Ack reporting = %v/%v/%v on an id-less ack, want all false",
+			out.AckJournaled, out.AckApplied, out.AckConflict)
+	}
+	if !out.Journaled || !out.Applied {
+		t.Errorf("Journaled/Applied = %v/%v, want true/true", out.Journaled, out.Applied)
+	}
+}
+
+// TestDispatchReportsADroppedAckWriteWithoutFailing mirrors the unjournaled-
+// result claim one record over: neither ack write failing aborts the dispatch
+// or holds trading — the degraded mode is the pre-#174 refusal-to-conclude,
+// which is safe — and each failure is reported in its own field.
+func TestDispatchReportsADroppedAckWriteWithoutFailing(t *testing.T) {
+	t.Parallel()
+
+	t.Run("journal ack write fails", func(t *testing.T) {
+		t.Parallel()
+		d, j, p, r := newDispatcher(t)
+		p.ack = ports.Ack{VenueOrderID: "774411"}
+		j.failAcked = errors.New("disk sulking")
+		o := dispatchableOrder(t)
+		plant(t, r, o)
+
+		out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening)
+		if err != nil {
+			t.Fatalf("Dispatch = %v, want nil", err)
+		}
+		if out.AckJournaled {
+			t.Error("AckJournaled = true, the append failed")
+		}
+		if !out.AckApplied || !out.Journaled || !out.Applied {
+			t.Errorf("AckApplied/Journaled/Applied = %v/%v/%v, want true/true/true — the other writes proceed",
+				out.AckApplied, out.Journaled, out.Applied)
+		}
+		if out.HoldsNewTrading() {
+			t.Error("HoldsNewTrading() = true — a dropped ack record degrades attribution, it does not hold trading")
+		}
+	})
+
+	t.Run("projection ack write fails plainly", func(t *testing.T) {
+		t.Parallel()
+		d, _, p, r := newDispatcher(t)
+		p.ack = ports.Ack{VenueOrderID: "774411"}
+		r.failApplyAck = errors.New("store sulking")
+		o := dispatchableOrder(t)
+		plant(t, r, o)
+
+		out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening)
+		if err != nil {
+			t.Fatalf("Dispatch = %v, want nil", err)
+		}
+		if out.AckApplied || out.AckConflict {
+			t.Errorf("AckApplied/AckConflict = %v/%v, want false/false on a plain failure",
+				out.AckApplied, out.AckConflict)
+		}
+		// The state apply proceeds at the PRE-ack version — the fallback the
+		// repository's mutate-only-once-nothing-can-fail discipline licenses —
+		// so the dispatch's own reporting stays clean.
+		if !out.AckJournaled || !out.Journaled || !out.Applied {
+			t.Errorf("AckJournaled/Journaled/Applied = %v/%v/%v, want true/true/true",
+				out.AckJournaled, out.Journaled, out.Applied)
+		}
+		if out.HoldsNewTrading() {
+			t.Error("HoldsNewTrading() = true on a plain ack-apply failure")
+		}
+	})
+}
+
+// TestDispatchHoldsTradingOnAnAckConflict is the live half of the conflict
+// design: ErrVenueOrderIDConflict from ApplyAck means the venue and the store
+// disagree about an identity every gate-3 rule-out rests on, so the outcome
+// latches through HoldsNewTrading exactly as a stale projection does. (The
+// crash half — a journal holding both sides refuses to replay — is
+// TestReplayRefusesConflictingAckRecords and the module composition test.)
+func TestDispatchHoldsTradingOnAnAckConflict(t *testing.T) {
+	t.Parallel()
+
+	d, _, p, r := newDispatcher(t)
+	p.ack = ports.Ack{VenueOrderID: "774411"}
+	r.failApplyAck = fmt.Errorf("ack order: %w", ports.ErrVenueOrderIDConflict)
+	o := dispatchableOrder(t)
+	plant(t, r, o)
+
+	out, err := d.Dispatch(o.ClientOrderID, 1, ports.UrgencyOpening)
+	if err != nil {
+		t.Fatalf("Dispatch = %v, want nil — the send happened, err must not discard it", err)
+	}
+	if !out.AckConflict {
+		t.Error("AckConflict = false, want true")
+	}
+	if out.AckApplied {
+		t.Error("AckApplied = true on a refused ack")
+	}
+	if !out.HoldsNewTrading() {
+		t.Error("HoldsNewTrading() = false — a conflicted identity must hold new trading")
+	}
+	// The state write still lands: the order IS at the venue whatever the
+	// identity dispute, and losing the state reading would compound the
+	// problem with a stale projection.
+	if !out.Applied {
+		t.Error("Applied = false, want true")
+	}
 }

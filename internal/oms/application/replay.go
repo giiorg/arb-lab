@@ -94,8 +94,9 @@ type Recovery struct {
 	// Orders is how many distinct orders the journal created.
 	Orders int
 
-	// Duplicates is how many state records restated a state the order was
-	// already in.
+	// Duplicates is how many records restated a fact the projection already
+	// held — a state record naming the state the order was in, or an acked
+	// record naming the venue id it already carried.
 	//
 	// §5.3's duplicate deliveries make those legitimate — journalcodec.go says
 	// so in as many words, which is why a replay must not treat one as a corrupt
@@ -227,6 +228,35 @@ func (b *rebuild) Authorized(seq uint64, id ids.ClientOrderID, at clock.ServerTi
 	}
 	if _, err := b.orders.ApplyAuthorized(id, rec.Version, at); err != nil {
 		return fmt.Errorf("journal record %d: replay authorization of order %q: %w", seq, id, err)
+	}
+	return nil
+}
+
+// Acked applies one venue-identifier record.
+//
+// The repository's own semantics do the two jobs this method would otherwise
+// hold rules for: re-recording the id the order already holds is ApplyAck's
+// no-op (counted below as a duplicate, on State's rationale — a journal that
+// is mostly restatements means something upstream re-delivered), and an id
+// that CONTRADICTS the store — this order under a different id, or the id
+// naming another order on the instrument — is ApplyAck's refusal, which fails
+// the replay. That failure is the crash-path half of the conflict design
+// (ports.ErrVenueOrderIDConflict): a journal holding both sides of a
+// contradiction verifies as a log and does not compose as a history, and a
+// boot that cannot compose its history does not trade.
+func (b *rebuild) Acked(seq uint64, id ids.ClientOrderID, venueOrderID string) error {
+	b.seen(seq)
+
+	rec, err := b.orders.Load(id)
+	if err != nil {
+		return fmt.Errorf("journal record %d: replay ack of order %q: %w", seq, id, err)
+	}
+	if rec.VenueOrderID == venueOrderID {
+		b.duplicates++
+		return nil
+	}
+	if _, err := b.orders.ApplyAck(id, rec.Version, venueOrderID); err != nil {
+		return fmt.Errorf("journal record %d: replay ack of order %q: %w", seq, id, err)
 	}
 	return nil
 }

@@ -83,6 +83,30 @@ func (p Price) Cmp(o Price) (int, error) {
 	return cmpMantissa(p.p, o.p), nil
 }
 
+// OnTick reports whether p sits on tick's price grid — is an exact whole
+// multiple of it. Quantity.OnStep's twin for the price axis: the same
+// predicate-not-rounding contract, stated there.
+//
+// Both tags must agree, Cmp's rule: a tick for one instrument says nothing
+// about a price on another pair. tick must be strictly positive — see
+// ErrStepNotPositive.
+func (p Price) OnTick(tick Price) (bool, error) {
+	if err := p.Validate(); err != nil {
+		return false, fmt.Errorf("price on tick: %w", err)
+	}
+	if err := tick.Validate(); err != nil {
+		return false, fmt.Errorf("price on tick: %w", err)
+	}
+	if p.base != tick.base || p.quote != tick.quote {
+		return false, fmt.Errorf("price on tick: %s/%s vs %s/%s: %w",
+			p.quote, p.base, tick.quote, tick.base, ErrAssetMismatch)
+	}
+	if tick.p <= 0 {
+		return false, fmt.Errorf("price on tick %s: %w", tick, ErrStepNotPositive)
+	}
+	return p.p%tick.p == 0, nil
+}
+
 // Notional returns the value of qty at px: an amount of the price's quote
 // asset. It is the operation that turns a size into money.
 //

@@ -75,6 +75,26 @@ var (
 	// component reports healthy.
 	ErrAuthorizationNeedsAnchor = errors.New("oms: an order may not reach the dispatch boundary without a venue-frame authorization instant")
 
+	// ErrVenueOrderIDConflict reports an ApplyAck whose id contradicts the
+	// store — this order already holds a different venue id, or another order
+	// on the same instrument already holds this one.
+	//
+	// # Either way the venue and this store disagree about an identity, and
+	// # that is held, not absorbed
+	//
+	// Under the banked venue fact (orderId self-increments per symbol, never
+	// reused) neither contradiction has an innocent reading: one of the two
+	// acks, or the store, is wrong, and every attribution premise the
+	// resolver's rule-out rests on is wrong with it. So the refusal must
+	// SURVIVE to wherever a conclusion could be drawn, and it does, on both
+	// paths: live, Dispatch reports it as Outcome.AckConflict, which
+	// HoldsNewTrading folds in and the executor's fan-in latches on; after a
+	// crash, the journal holds both acked records and the replay's ApplyAck
+	// refuses the second, which fails the boot — a log that verifies and does
+	// not compose. A resolver therefore never reads an index this sentinel
+	// fired about, which is the property the whole arm's safety rests on.
+	ErrVenueOrderIDConflict = errors.New("oms: venue order id contradicts what the store holds for this instrument")
+
 	// ErrJournalChainBroken reports a replay whose hash chain does not verify: a
 	// record whose recomputed digest is not the one stored, a prev_hash that does
 	// not name its predecessor, or a sequence with a hole in it.

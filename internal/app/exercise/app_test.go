@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -25,6 +26,11 @@ import (
 // validConfig mirrors reconcile's own fixture — the embedded half is §5.2's
 // block unchanged, and the trade block is the two-leg cash-and-carry §9's
 // cycle drives. Every refusal test below mutates ONE field of it.
+//
+// The trade's 0.5 BTC at 50100/49900 conforms to the reference fixture's
+// REAL BTCUSDT filters non-trivially: on both lot grids (1e-5 spot, 1e-3
+// perp), on both tick grids (0.01 spot, 0.1 perp), above both notional
+// floors (5 and 50 USDT).
 func validConfig(t *testing.T) Config {
 	t.Helper()
 	return Config{
@@ -39,7 +45,64 @@ func validConfig(t *testing.T) Config {
 					Side: "sell", Quantity: "0.5", LimitPrice: "49900"},
 			},
 		},
+		Reference: ReferenceConfig{
+			Path:   writeReference(t, time.Now().UTC().Add(-time.Hour)),
+			MaxAge: dur(t, "24h"),
+		},
 	}
+}
+
+// writeReference commits a reference revision to the test's own directory:
+// the four real BTCUSDT filter rows (profiles §5, 2026-08-03 probes) with
+// observed_at supplied by the caller, so freshness is a RELATIVE fact the
+// stale-row test can vary rather than a wall-clock bomb that starts failing
+// max_age after the values were typed.
+func writeReference(t *testing.T, observedAt time.Time) string {
+	t.Helper()
+	return writeReferenceTicks(t, observedAt, "0.01", "0.1")
+}
+
+// writeReferenceTicks is writeReference with each leg's tick in the caller's
+// hands; "" OMITS the key — the pre-tick row shape the tick-less refusal test
+// needs, which is not the same row as a declared "0" (the domain refuses that
+// one at load).
+func writeReferenceTicks(t *testing.T, observedAt time.Time, spotTick, perpTick string) string {
+	t.Helper()
+	observed := observedAt.Format(time.RFC3339)
+	lot := func(product, contract, step, minQty, minNotional, tick string) string {
+		tickField := ""
+		if tick != "" {
+			tickField = fmt.Sprintf("\"tick\": %q,", tick)
+		}
+		return fmt.Sprintf(`{
+			"venue": "binance", "product": %q, "contract": %q, "symbol": "BTCUSDT",
+			"base": "BTC", "step": %q, "min_qty": %q,
+			"quote": "USDT", "min_notional": %q, %s
+			"class": "hand_recorded", "observed_at": %q,
+			"source": "test fixture mirroring docs/venue-profiles.md trading filters (2026-08-03)"
+		}`, product, contract, step, minQty, minNotional, tickField, observed)
+	}
+	doc := fmt.Sprintf(`{
+		"fees": [
+			{"venue": "binance", "product": "spot", "contract": "", "maker": "0.001", "taker": "0.001",
+			 "tier": "VIP0-modeled", "class": "hand_recorded", "observed_at": %q, "source": "test fixture"},
+			{"venue": "binance", "product": "linear_perp", "contract": "linear", "maker": "0.0002", "taker": "0.0005",
+			 "tier": "VIP0-modeled", "class": "hand_recorded", "observed_at": %q, "source": "test fixture"}
+		],
+		"lots": [%s, %s],
+		"hurdle": {"annual_rate": "0.0369", "access_cost": "0", "liquidity_haircut": "0",
+			"counterparty_haircut": "0", "as_of": %q, "class": "hand_recorded",
+			"observed_at": %q, "source": "test fixture"}
+	}`, observed, observed,
+		lot("spot", "", "0.00001", "0.00001", "5", spotTick),
+		lot("linear_perp", "linear", "0.001", "0.001", "50", perpTick),
+		observed, observed)
+
+	path := filepath.Join(t.TempDir(), "reference.json")
+	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+		t.Fatalf("write reference fixture: %v", err)
+	}
+	return path
 }
 
 func reconcileConfig(t *testing.T) reconcile.Config {
@@ -253,9 +316,9 @@ func cleanBoot() reconcile.Report {
 	}
 }
 
-// submittedLeg is a clean leg. Its Ack is left zero deliberately: naming
-// ports.Ack here would need the one import singlewriter bars this package
-// from, and the gate is right — the exit class reads no ack field.
+// submittedLeg is a clean leg whose venue supplied no id — the ack fields are
+// zero because there was nothing to persist, which the exit class must read
+// as clean rather than as two dropped writes.
 func submittedLeg(id ids.ClientOrderID) application.LegResult {
 	return application.LegResult{
 		ID: id,
@@ -263,6 +326,19 @@ func submittedLeg(id ids.ClientOrderID) application.LegResult {
 			State: domain.StateSubmitted, Journaled: true, Applied: true,
 		},
 	}
+}
+
+// ackedLeg is a clean leg whose venue supplied an id and whose ack writes both
+// landed. The id is set by field ASSIGNMENT rather than a composite literal,
+// because naming ports.Ack would need the one import singlewriter bars this
+// package from — the gate is still right, and reading and writing a field of
+// an imported struct's field needs no import at all.
+func ackedLeg(id ids.ClientOrderID) application.LegResult {
+	leg := submittedLeg(id)
+	leg.Outcome.Ack.VenueOrderID = "774411"
+	leg.Outcome.AckJournaled = true
+	leg.Outcome.AckApplied = true
+	return leg
 }
 
 func TestExitClassPrecedence(t *testing.T) {
@@ -335,6 +411,43 @@ func TestExitClassPrecedence(t *testing.T) {
 				Legs: []application.LegResult{submittedLeg(legA),
 					{ID: legB, Outcome: application.Outcome{State: domain.StateSubmitted,
 						Journaled: true, Applied: false}},
+				},
+			}},
+			ExitExecution,
+		},
+		{
+			// The positive control for the ack predicate: both writes landed,
+			// so a run that persisted its ids cleanly still exits 0. Without
+			// this case the two below would pass against a predicate that
+			// fails every leg whose venue said anything at all.
+			"a clean acked package is clean",
+			Report{Boot: cleanBoot(), Executed: true, Execution: application.Execution{
+				Legs: []application.LegResult{ackedLeg(legA), ackedLeg(legB)},
+			}},
+			ExitClean,
+		},
+		{
+			"a dropped ack journal write is an execution incident",
+			Report{Boot: cleanBoot(), Executed: true, Execution: application.Execution{
+				Legs: []application.LegResult{ackedLeg(legA),
+					func() application.LegResult {
+						leg := ackedLeg(legB)
+						leg.Outcome.AckJournaled = false
+						return leg
+					}(),
+				},
+			}},
+			ExitExecution,
+		},
+		{
+			"a dropped ack apply is an execution incident",
+			Report{Boot: cleanBoot(), Executed: true, Execution: application.Execution{
+				Legs: []application.LegResult{ackedLeg(legA),
+					func() application.LegResult {
+						leg := ackedLeg(legB)
+						leg.Outcome.AckApplied = false
+						return leg
+					}(),
 				},
 			}},
 			ExitExecution,

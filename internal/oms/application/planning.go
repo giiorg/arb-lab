@@ -44,8 +44,13 @@ type LegIntent struct {
 	// Side is the direction.
 	Side domain.Side
 
-	// Quantity is the ordered size, strictly positive — §6 step 4 has already
-	// quantized it to the lot-size intersection.
+	// Quantity is the ordered size, strictly positive. §6 step 4's sizing is
+	// responsible for having quantized it to the lot-size intersection — and
+	// Plan VERIFIES that claim against the instrument's TradingFilters rather
+	// than trusting it, because the failure mode of an unverified claim here
+	// is not an error message: each leg is judged by its own venue against
+	// its own grid, so an off-grid package is one leg filled and one leg
+	// refused, which is naked exposure.
 	Quantity fixedpoint.Quantity
 
 	// LimitPrice is the marketable limit §6 step 6 requires. It is not optional
@@ -160,6 +165,7 @@ type TradePlan struct {
 type Planner struct {
 	journal ports.Journal
 	orders  ports.OrderWriteRepository
+	filters map[ids.VenueInstrument]domain.TradingFilters
 }
 
 // NewPlanner constructs the use case, refusing a missing port.
@@ -168,14 +174,33 @@ type Planner struct {
 // discover a nil journal is the one recording an intent that is about to be
 // submitted, and finding the write-ahead journal absent there means §6 step 5's
 // guarantee silently did not hold for an order already being planned.
-func NewPlanner(j ports.Journal, orders ports.OrderWriteRepository) (*Planner, error) {
+//
+// # filters is a map rather than a port, and nil is legal — and plans nothing
+//
+// The filters are venue reference facts resolved by the composition root from
+// the dated reference revision (§2.4's provenance rule), so what the use case
+// needs is the resolved values, not a live lookup it would re-run per leg. A
+// nil or empty map is a deployment that plans nothing: every leg is refused
+// with ErrFiltersUnknown naming its instrument. That is the direction that is
+// right when somebody forgets — the reconcile-only root wires no filters and
+// never plans, and a future root that forgets the map gets a named refusal on
+// its first plan rather than an unverified order on its way to a venue.
+//
+// Each ENTRY is validated here rather than at first use, because the call
+// that would discover a zero step is the one refusing a real order — and the
+// message there would name the order, not the wiring that broke.
+func NewPlanner(j ports.Journal, orders ports.OrderWriteRepository,
+	filters map[ids.VenueInstrument]domain.TradingFilters) (*Planner, error) {
 	if j == nil {
 		return nil, ErrJournalMissing
 	}
 	if orders == nil {
 		return nil, ErrOrdersMissing
 	}
-	return &Planner{journal: j, orders: orders}, nil
+	if err := validateFilters(filters); err != nil {
+		return nil, err
+	}
+	return &Planner{journal: j, orders: orders, filters: filters}, nil
 }
 
 // Plan mints, journals and applies every leg of a trade.
@@ -257,6 +282,9 @@ func (p *Planner) mint(plan TradePlan) ([]domain.Order, error) {
 			ReduceOnly:    leg.ReduceOnly,
 		}
 		if err := o.Validate(); err != nil {
+			return nil, fmt.Errorf("plan trade %s leg %d: %w", plan.Trade, i, err)
+		}
+		if err := conformsToFilters(p.filters, leg.Instrument, leg.Quantity, leg.LimitPrice); err != nil {
 			return nil, fmt.Errorf("plan trade %s leg %d: %w", plan.Trade, i, err)
 		}
 

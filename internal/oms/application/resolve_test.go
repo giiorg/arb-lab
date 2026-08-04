@@ -155,7 +155,7 @@ func newResolver(t *testing.T, now time.Time, policy application.ResolutionPolic
 	if err != nil {
 		t.Fatalf("NewTestClock: %v", err)
 	}
-	res, err := application.NewResolver(j, r, v, clk, policy)
+	res, err := application.NewResolver(j, r, v, r, clk, policy)
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -233,25 +233,28 @@ func TestNewResolverRefusesAMissingPortOrAnUnusablePolicy(t *testing.T) {
 
 	// One omission at a time and a DIFFERENT sentinel per case, so a constructor
 	// that answered one blanket refusal to everything does not score five.
-	if _, err := application.NewResolver(nil, newFakeOrders(), &fakeResolver{}, clk, testPolicy()); !errors.Is(err, application.ErrJournalMissing) {
+	if _, err := application.NewResolver(nil, newFakeOrders(), &fakeResolver{}, newFakeOrders(), clk, testPolicy()); !errors.Is(err, application.ErrJournalMissing) {
 		t.Errorf("NewResolver(nil journal) = %v, want ErrJournalMissing", err)
 	}
-	if _, err := application.NewResolver(newFakeJournal(), nil, &fakeResolver{}, clk, testPolicy()); !errors.Is(err, application.ErrOrdersMissing) {
+	if _, err := application.NewResolver(newFakeJournal(), nil, &fakeResolver{}, newFakeOrders(), clk, testPolicy()); !errors.Is(err, application.ErrOrdersMissing) {
 		t.Errorf("NewResolver(nil orders) = %v, want ErrOrdersMissing", err)
 	}
-	if _, err := application.NewResolver(newFakeJournal(), newFakeOrders(), nil, clk, testPolicy()); !errors.Is(err, application.ErrResolverMissing) {
+	if _, err := application.NewResolver(newFakeJournal(), newFakeOrders(), nil, newFakeOrders(), clk, testPolicy()); !errors.Is(err, application.ErrResolverMissing) {
 		t.Errorf("NewResolver(nil venue) = %v, want ErrResolverMissing", err)
 	}
-	if _, err := application.NewResolver(newFakeJournal(), newFakeOrders(), &fakeResolver{}, nil, testPolicy()); !errors.Is(err, application.ErrClockMissing) {
+	if _, err := application.NewResolver(newFakeJournal(), newFakeOrders(), &fakeResolver{}, nil, clk, testPolicy()); !errors.Is(err, application.ErrVenueOrderIndexMissing) {
+		t.Errorf("NewResolver(nil index) = %v, want ErrVenueOrderIndexMissing", err)
+	}
+	if _, err := application.NewResolver(newFakeJournal(), newFakeOrders(), &fakeResolver{}, newFakeOrders(), nil, testPolicy()); !errors.Is(err, application.ErrClockMissing) {
 		t.Errorf("NewResolver(nil clock) = %v, want ErrClockMissing", err)
 	}
-	if _, err := application.NewResolver(newFakeJournal(), newFakeOrders(), &fakeResolver{}, clk, application.ResolutionPolicy{}); !errors.Is(err, application.ErrResolutionPolicyUnset) {
+	if _, err := application.NewResolver(newFakeJournal(), newFakeOrders(), &fakeResolver{}, newFakeOrders(), clk, application.ResolutionPolicy{}); !errors.Is(err, application.ErrResolutionPolicyUnset) {
 		t.Errorf("NewResolver(zero policy) = %v, want ErrResolutionPolicyUnset", err)
 	}
 
 	// The positive control. Without it a constructor that refused everything
 	// would score five out of five above.
-	if _, err := application.NewResolver(newFakeJournal(), newFakeOrders(), &fakeResolver{}, clk, testPolicy()); err != nil {
+	if _, err := application.NewResolver(newFakeJournal(), newFakeOrders(), &fakeResolver{}, newFakeOrders(), clk, testPolicy()); err != nil {
 		t.Errorf("NewResolver with every dependency = %v, want nil", err)
 	}
 }
@@ -974,5 +977,158 @@ func TestResolveAppliesTheStateEvenWhenTheJournalFailed(t *testing.T) {
 	}
 	if rec := r.records[o.ClientOrderID]; rec.State != domain.StateAbsentAfterFinality {
 		t.Errorf("record is at %s, want %s", rec.State, domain.StateAbsentAfterFinality)
+	}
+}
+
+// venueRow builds one execution the way Binance reports it: NO client order id,
+// the venue's own orderId only. It is the row shape the persisted-ack index
+// exists for.
+func venueRow(venueOrderID, executionID string) ports.VenueExecution {
+	return ports.VenueExecution{ExecutionID: ids.ExecutionID(executionID), VenueOrderID: venueOrderID}
+}
+
+// plantAcked plants a sibling order on an instrument with a persisted venue id
+// — a Filled terminal, which is the realistic sibling: the orders that leave
+// rows in a sweep window are exactly the ones that executed.
+func plantAcked(t *testing.T, r *fakeOrders, leg int, instrument ids.VenueInstrument, venueOrderID string) ids.ClientOrderID {
+	t.Helper()
+	id := mintedID(t, leg)
+	o := dispatchableOrder(t)
+	o.ClientOrderID = id
+	o.Instrument = instrument
+	r.records[id] = ports.OrderRecord{
+		Order: o, State: domain.StateFilled, Version: 3, VenueOrderID: venueOrderID,
+	}
+	return id
+}
+
+// TestResolveRulesOutRowsByThePersistedAckIndex is task #174's headline: on
+// Binance a swept row names no client order id, so before the index existed
+// ANY row in the window was ReasonSweepInconclusive — a permanent refusal.
+// With the siblings' acks persisted, a row is ruled out when its venue id
+// belongs to another of OUR orders on the instrument, claimed when it is this
+// order's own persisted id, and still refused when nobody is recorded under
+// it.
+func TestResolveRulesOutRowsByThePersistedAckIndex(t *testing.T) {
+	t.Parallel()
+
+	anchorAt := testNow
+	at, err := clock.NewServerTime(anchorAt, testUncertainty)
+	if err != nil {
+		t.Fatalf("NewServerTime: %v", err)
+	}
+	horizon := horizonOf(at, testPolicy())
+
+	cases := map[string]struct {
+		ownVenueID string // persisted on THIS order's record when non-empty
+		siblingOn  ids.VenueInstrument
+		rows       []ports.VenueExecution
+		wantReason application.UnprovedReason
+		wantState  domain.OrderState
+		wantOurs   int
+	}{
+		// The behaviour change: every row in the window belongs to an
+		// identified sibling, so a Binance absence CONCLUDES.
+		"every row owned by a sibling proves the absence": {
+			siblingOn: perp(),
+			rows:      []ports.VenueExecution{venueRow("201", "e-1"), venueRow("202", "e-2")},
+			wantState: domain.StateAbsentAfterFinality,
+		},
+		"a row nobody is recorded under still refuses": {
+			siblingOn:  perp(),
+			rows:       []ports.VenueExecution{venueRow("201", "e-1"), venueRow("999", "e-2")},
+			wantReason: application.ReasonSweepInconclusive,
+		},
+		// The banked venue fact is per SYMBOL, so a sibling's number on the
+		// OTHER instrument is a different namespace and rules out nothing —
+		// the fixture that separates instrument-keyed from globally-keyed,
+		// in the direction that would otherwise prove a false absence.
+		"a sibling's number on another instrument rules out nothing": {
+			siblingOn:  spot(),
+			rows:       []ports.VenueExecution{venueRow("201", "e-1")},
+			wantReason: application.ReasonSweepInconclusive,
+		},
+		// This order's OWN persisted ack claims the row — exposure, surfaced,
+		// with the unknown row FIRST so the ours-wins-over-unknown ordering
+		// covers the new arm too.
+		"a row matching this orders own persisted id is exposure": {
+			ownVenueID: "200",
+			siblingOn:  perp(),
+			rows:       []ports.VenueExecution{venueRow("999", "e-1"), venueRow("200", "e-2")},
+			wantReason: application.ReasonExecutionsFound,
+			wantOurs:   1,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			res, j, r, v := newResolver(t, engineTimeFor(horizon), testPolicy())
+			o := dispatchableOrder(t)
+			resolvableAt(t, r, o, domain.StateDispatchAuthorized, anchorAt)
+			if tc.ownVenueID != "" {
+				rec := r.records[o.ClientOrderID]
+				rec.VenueOrderID = tc.ownVenueID
+				r.records[o.ClientOrderID] = rec
+			}
+			// The siblings hold 201 and 202; the placement instrument is the
+			// case's own.
+			plantAcked(t, r, 2, tc.siblingOn, "201")
+			plantAcked(t, r, 3, tc.siblingOn, "202")
+
+			v.status = absentVenue(publishedReach())
+			v.sweeps = []ports.ExecutionSweep{provenSweep(horizon, tc.rows...)}
+
+			got, err := res.Resolve(o.ClientOrderID)
+			if err != nil {
+				t.Fatalf("Resolve = %v, want nil", err)
+			}
+			if tc.wantState != "" {
+				if got.Outcome != application.OutcomeResolved || got.State != tc.wantState {
+					t.Fatalf("Resolve = %s/%s/%s, want resolved/%s", got.Outcome, got.State, got.Reason, tc.wantState)
+				}
+				return
+			}
+			if got.Outcome != application.OutcomeUnproved || got.Reason != tc.wantReason {
+				t.Fatalf("Resolve = %s/%s, want unproved/%s", got.Outcome, got.Reason, tc.wantReason)
+			}
+			if len(got.Executions) != tc.wantOurs {
+				t.Errorf("carried %d executions, want %d", len(got.Executions), tc.wantOurs)
+			}
+			if len(j.calls) != 0 {
+				t.Errorf("journaled %v, want nothing", j.states())
+			}
+		})
+	}
+}
+
+// TestResolveRefusesWhenTheIndexCannotAnswer: an index error is a refusal of
+// the whole resolution (err != nil, nothing written), never a degrade to an
+// empty map — an empty map is a real answer that quietly waves off every row a
+// sibling could explain, and the degraded mode must not be selectable by a
+// store hiccup.
+func TestResolveRefusesWhenTheIndexCannotAnswer(t *testing.T) {
+	t.Parallel()
+
+	anchorAt := testNow
+	at, err := clock.NewServerTime(anchorAt, testUncertainty)
+	if err != nil {
+		t.Fatalf("NewServerTime: %v", err)
+	}
+	horizon := horizonOf(at, testPolicy())
+
+	res, j, r, v := newResolver(t, engineTimeFor(horizon), testPolicy())
+	o := dispatchableOrder(t)
+	resolvableAt(t, r, o, domain.StateDispatchAuthorized, anchorAt)
+	r.failVenueIDs = errors.New("store sulking")
+	v.status = absentVenue(publishedReach())
+	v.sweeps = []ports.ExecutionSweep{provenSweep(horizon)}
+
+	if _, err := res.Resolve(o.ClientOrderID); err == nil {
+		t.Fatal("Resolve = nil, want the index failure passed through")
+	}
+	if len(j.calls) != 0 {
+		t.Errorf("journaled %v, want nothing — err != nil means nothing was written", j.states())
 	}
 }

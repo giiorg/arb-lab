@@ -204,6 +204,7 @@ type lotsWire struct {
 	Step        *qtyWire        `json:"step"`
 	MinQty      *qtyWire        `json:"min_qty"`
 	MinNotional *moneyWire      `json:"min_notional"`
+	Tick        *priceWire      `json:"tick,omitempty"`
 	Provenance  *provenanceWire `json:"provenance"`
 }
 

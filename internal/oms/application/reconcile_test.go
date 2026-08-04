@@ -81,7 +81,7 @@ func newReconcileFixture(t *testing.T, now time.Time, entries ...journalEntry) *
 	if err != nil {
 		t.Fatalf("NewJoiner: %v", err)
 	}
-	resolver, err := application.NewResolver(journal, orders, resolveVenue, clk, testPolicy())
+	resolver, err := application.NewResolver(journal, orders, resolveVenue, orders, clk, testPolicy())
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}

@@ -83,6 +83,35 @@ var (
 	// fresh attempt — which is what ClientOrderRef.Attempt is for.
 	ErrLegAlreadyPlanned = errors.New("oms: a leg's client order id is already known to the write repository")
 
+	// ErrFiltersUnknown reports a plan for an instrument the planner holds no
+	// trading filters for.
+	//
+	// This is the fail-closed reading of an ABSENT entry, and it is what makes
+	// forgetting safe end to end: a root that wires no filters map at all
+	// plans nothing, with an error naming the instrument, rather than planning
+	// everything unchecked. The permissive reading — absent means
+	// unconstrained — is exactly the defect this slice closes, reintroduced
+	// one lookup higher.
+	ErrFiltersUnknown = errors.New("oms: no trading filters for this leg's instrument")
+
+	// ErrQuantityOffLotStep, ErrPriceOffTick, ErrBelowMinQty and
+	// ErrBelowMinNotional are §2.4's verification half: the four ways a leg
+	// can conform to this system's own rules and still be an order its venue
+	// refuses.
+	//
+	// They are checked per leg BEFORE anything is journaled, and the harm they
+	// prevent is not the rejection — it is the rejection's asymmetry. Each leg
+	// of a package is judged by its own venue against its own grid (the two
+	// spot steps differ from the two perp steps by two orders of magnitude,
+	// profiles §5), so an off-grid package is one leg filled and one leg
+	// refused: naked exposure, reached through two individually-plausible
+	// numbers. A package refused HERE, whole, before the journal, is the §2.4
+	// sizing failure surfacing where it is still free.
+	ErrQuantityOffLotStep = errors.New("oms: leg quantity is not on the venue's lot grid")
+	ErrPriceOffTick       = errors.New("oms: leg limit price is not on the venue's tick grid")
+	ErrBelowMinQty        = errors.New("oms: leg quantity is below the venue's minimum")
+	ErrBelowMinNotional   = errors.New("oms: leg notional at the limit price is below the venue's minimum")
+
 	// ErrOrderNotOMSMinted reports a dispatch of an order whose ClientOrderID
 	// this system did not mint.
 	//
@@ -206,6 +235,22 @@ var (
 	// the write half so that §5.3's "never resubmitted" is unexpressible rather
 	// than merely forbidden.
 	ErrResolverMissing = errors.New("oms: resolver has no venue order resolver")
+
+	// ErrVenueOrderIndexMissing reports a Resolver constructed without the
+	// per-instrument venue-id index gate 3's rule-out reads. It is required
+	// rather than defaulted to an always-empty lookup, because the two are
+	// indistinguishable at every call site and only one of them is a
+	// configuration: an empty index quietly reverts every Binance absence to
+	// the pre-#174 permanent refusal, which is safe, silent, and exactly the
+	// degraded mode a forgotten wire should not be able to select.
+	ErrVenueOrderIndexMissing = errors.New("oms: resolver has no venue order index")
+
+	// ErrVenueOrderIDMismatch reports a join that found the venue's live
+	// answer and the store's persisted ack disagreeing about one order's
+	// venue id. Two authorities over one identity, with no rule for which
+	// wins — and the loser decides which sweep rows become this order's
+	// fills — so the join refuses the order rather than picking.
+	ErrVenueOrderIDMismatch = errors.New("oms: venue reports a different venue order id than the store persisted")
 
 	// ErrResolutionPolicyUnset reports a resolution policy with a non-positive
 	// duration in it.

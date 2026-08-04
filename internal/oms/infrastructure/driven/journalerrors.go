@@ -112,4 +112,14 @@ var (
 	// way: §7.5 joins journal records to venue truth BY client id, so the
 	// record is silently absent from the join rather than reported.
 	ErrJournalClientIDUnset = errors.New("oms journal: state record has no client order id")
+
+	// ErrJournalVenueOrderIDUnset reports an AppendAcked with no id to record.
+	//
+	// Refused because the absent venue id already has a spelling — no acked
+	// record at all — and an empty-string record would be a second one. The
+	// consumer makes the stake concrete: gate 3's attribution guards every
+	// venue-id comparison on non-emptiness, so an empty id journaled here
+	// would replay into a projection field every rule ignores, a record that
+	// cost an fsync to say nothing.
+	ErrJournalVenueOrderIDUnset = errors.New("oms journal: ack record has no venue order id")
 )

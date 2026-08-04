@@ -295,6 +295,7 @@ func wireLots(l LotRules) *lotsWire {
 		Step:        wireQty(l.Step),
 		MinQty:      wireQty(l.MinQty),
 		MinNotional: wireMoney(l.MinNotional),
+		Tick:        wirePrice(l.Tick),
 		Provenance:  wireProvenance(l.Provenance),
 	}
 }

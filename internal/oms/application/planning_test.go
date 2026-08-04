@@ -7,6 +7,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/oms/application"
 	"github.com/giiorg/arb-lab/internal/oms/application/ports"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
+	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
 
@@ -80,11 +81,47 @@ func threeLegPlan(t *testing.T) application.TradePlan {
 	return plan
 }
 
+// testFilters is the two fixture instruments' trading filters, chosen so the
+// plan fixtures above conform NON-trivially.
+//
+// The grids are deliberately not powers of ten (spot step 0.025, perp step
+// 0.05; spot tick 25, perp tick 20): at a power-of-ten grid, "whole multiple
+// of the step" and "has few enough decimal places" are the same predicate, so
+// a digit-counting implementation would pass every fixture. And the two
+// instruments' filters DIFFER in every member, so a planner that read one
+// leg's filters for the other is distinguishable from a correct one.
+func testFilters(t *testing.T) map[ids.VenueInstrument]domain.TradingFilters {
+	t.Helper()
+	return map[ids.VenueInstrument]domain.TradingFilters{
+		spot(): {
+			Step:        qty(t, "0.025"),
+			MinQty:      qty(t, "0.05"),
+			Tick:        price(t, "25"),
+			MinNotional: usdt(t, "5000"),
+		},
+		perp(): {
+			Step:        qty(t, "0.05"),
+			MinQty:      qty(t, "0.1"),
+			Tick:        price(t, "20"),
+			MinNotional: usdt(t, "10000"),
+		},
+	}
+}
+
+func usdt(t *testing.T, v string) fixedpoint.Money {
+	t.Helper()
+	m, err := fixedpoint.ParseMoney("USDT", v)
+	if err != nil {
+		t.Fatalf("ParseMoney(%q): %v", v, err)
+	}
+	return m
+}
+
 func newPlanner(t *testing.T) (*application.Planner, *fakeJournal, *fakeOrders) {
 	t.Helper()
 	j := newFakeJournal()
 	r := newFakeOrders()
-	p, err := application.NewPlanner(j, r)
+	p, err := application.NewPlanner(j, r, testFilters(t))
 	if err != nil {
 		t.Fatalf("NewPlanner: %v", err)
 	}
@@ -116,16 +153,27 @@ func wantIDs(t *testing.T, plan application.TradePlan) []ids.ClientOrderID {
 func TestNewPlannerRefusesAMissingPort(t *testing.T) {
 	t.Parallel()
 
-	if _, err := application.NewPlanner(nil, newFakeOrders()); !errors.Is(err, application.ErrJournalMissing) {
+	if _, err := application.NewPlanner(nil, newFakeOrders(), testFilters(t)); !errors.Is(err, application.ErrJournalMissing) {
 		t.Errorf("NewPlanner(nil, orders) = %v, want ErrJournalMissing", err)
 	}
-	if _, err := application.NewPlanner(newFakeJournal(), nil); !errors.Is(err, application.ErrOrdersMissing) {
+	if _, err := application.NewPlanner(newFakeJournal(), nil, testFilters(t)); !errors.Is(err, application.ErrOrdersMissing) {
 		t.Errorf("NewPlanner(journal, nil) = %v, want ErrOrdersMissing", err)
 	}
+	// An invalid filters ENTRY is refused at construction, where the message
+	// can name the wiring — not at the first real order it would misjudge.
+	broken := testFilters(t)
+	broken[spot()] = domain.TradingFilters{}
+	if _, err := application.NewPlanner(newFakeJournal(), newFakeOrders(), broken); err == nil {
+		t.Error("NewPlanner with a zero-value filters entry = nil, want a refusal")
+	}
 	// The positive control: without it a constructor refusing everything scores
-	// two out of two above.
-	if _, err := application.NewPlanner(newFakeJournal(), newFakeOrders()); err != nil {
+	// three out of three above. A NIL map is deliberately legal — it is the
+	// deployment that plans nothing, asserted by TestPlanWithNoFiltersRefusesEveryLeg.
+	if _, err := application.NewPlanner(newFakeJournal(), newFakeOrders(), testFilters(t)); err != nil {
 		t.Errorf("NewPlanner with both ports = %v, want nil", err)
+	}
+	if _, err := application.NewPlanner(newFakeJournal(), newFakeOrders(), nil); err != nil {
+		t.Errorf("NewPlanner with a nil filters map = %v, want nil — fail-closed at Plan, not construction", err)
 	}
 }
 
@@ -438,7 +486,7 @@ func TestPlanRefusesWhenTheRepositoryCannotAnswer(t *testing.T) {
 	j := newFakeJournal()
 	r := newFakeOrders()
 	r.failLoad = unavailable
-	p, err := application.NewPlanner(j, r)
+	p, err := application.NewPlanner(j, r, testFilters(t))
 	if err != nil {
 		t.Fatalf("NewPlanner: %v", err)
 	}
@@ -472,7 +520,7 @@ func TestPlanReportsAFailedApplyAndLeavesThePartialPlanDiscardable(t *testing.T)
 	r := newFakeOrders()
 	r.failApplyPlannedFrom = 2
 	r.failApplyPlannedErr = unavailable
-	p, err := application.NewPlanner(j, r)
+	p, err := application.NewPlanner(j, r, testFilters(t))
 	if err != nil {
 		t.Fatalf("NewPlanner: %v", err)
 	}
@@ -544,7 +592,7 @@ func TestPlannedOrdersAreDispatchable(t *testing.T) {
 	r := newFakeOrders()
 	placer := &fakePlacer{}
 
-	planner, err := application.NewPlanner(j, r)
+	planner, err := application.NewPlanner(j, r, testFilters(t))
 	if err != nil {
 		t.Fatalf("NewPlanner: %v", err)
 	}

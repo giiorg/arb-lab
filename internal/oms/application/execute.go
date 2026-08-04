@@ -48,6 +48,7 @@ type Executor struct {
 	orders  ports.OrderWriteRepository
 	clk     clock.Clock
 	auth    *DispatchAuthority
+	filters map[ids.VenueInstrument]domain.TradingFilters
 }
 
 // NewExecutor constructs the use case FROM the process's dispatcher, and the
@@ -64,9 +65,22 @@ type Executor struct {
 // signature. An executor built from a dispatcher IS on that dispatcher's
 // authority, journal, placer, repository and clock; a second authority in one
 // process is no longer expressible from outside this package.
-func NewExecutor(d *Dispatcher) (*Executor, error) {
+//
+// # filters is the Planner's map, taken again on purpose
+//
+// The preflight RE-verifies every leg against §2.4's trading filters even
+// though Plan refused nonconforming legs before journaling them — because the
+// repository the refs point into is also rebuilt by §7.5's replay, and a
+// replayed StatePlanned record was conformed by whatever revision (or
+// pre-filters build) planned it, not by this process's. filters.go states the
+// argument in full. NewPlanner's nil-map contract holds here identically: a
+// nil map executes nothing, refusing each package on its first leg.
+func NewExecutor(d *Dispatcher, filters map[ids.VenueInstrument]domain.TradingFilters) (*Executor, error) {
 	if d == nil {
 		return nil, ErrDispatcherMissing
+	}
+	if err := validateFilters(filters); err != nil {
+		return nil, err
 	}
 	// d's own constructor refused every nil, so these copies are known good.
 	return &Executor{
@@ -75,6 +89,7 @@ func NewExecutor(d *Dispatcher) (*Executor, error) {
 		orders:  d.orders,
 		clk:     d.clk,
 		auth:    d.auth,
+		filters: filters,
 	}, nil
 }
 
@@ -321,6 +336,7 @@ func actFor(u ports.Urgency) boot.Act {
 // a read.
 func (e *Executor) preflight(refs []DispatchRef) error {
 	seen := make(map[ids.ClientOrderID]struct{}, len(refs))
+	recs := make([]ports.OrderRecord, 0, len(refs))
 	var trade ids.TradeID
 	attempt := -1
 	var first *ports.OrderRecord
@@ -366,6 +382,7 @@ func (e *Executor) preflight(refs []DispatchRef) error {
 			return fmt.Errorf("execute package leg %d: %q is %s/%s: %w",
 				i, ref.ID, rec.Order.Type, rec.Order.TimeInForce, ErrNotMarketableIOCLimit)
 		}
+		recs = append(recs, rec)
 
 		if first == nil {
 			r := rec
@@ -380,6 +397,21 @@ func (e *Executor) preflight(refs []DispatchRef) error {
 			return fmt.Errorf("execute package leg %d: %q quantity %s, leg 0 quantity %s: %w",
 				i, ref.ID, rec.Order.Quantity, first.Order.Quantity,
 				joinNonNil(ErrPackageQuantityMismatch, err))
+		}
+	}
+
+	// §2.4's verification half, AGAIN — against THIS process's filters, not
+	// whichever revision planned the records. filters.go states why a
+	// replayed leg makes the re-check load-bearing, and here it is
+	// package-atomic: refused now, no sibling has been fsynced or sent. A
+	// SECOND pass, after the package-shape checks above, so a mixed-base
+	// package keeps its sharper diagnosis (ErrPackageQuantityMismatch) rather
+	// than surfacing as a filters/asset disagreement on whichever leg the
+	// first pass reached.
+	for i, rec := range recs {
+		if err := conformsToFilters(e.filters, rec.Order.Instrument,
+			rec.Order.Quantity, rec.Order.LimitPrice); err != nil {
+			return fmt.Errorf("execute package leg %d: %q: %w", i, rec.Order.ClientOrderID, err)
 		}
 	}
 	return nil

@@ -111,9 +111,40 @@ type Outcome struct {
 	State domain.OrderState
 
 	// Ack is what the venue returned, zero on any failed Place. The dispatcher
-	// does not read it; see ports.Ack for why parsing it is downstream of the
-	// transition rather than part of it.
+	// does not BRANCH state on its contents — see ports.Ack for why parsing it
+	// is downstream of the transition — but it does PERSIST a non-empty
+	// VenueOrderID, journal and projection both, because on Binance that
+	// number is the only join key a later sweep has (§5.3 gate 3).
 	Ack ports.Ack
+
+	// AckJournaled and AckApplied report where the ack's venue id reached,
+	// on Journaled and Applied's own semantics one record over. Both are
+	// meaningful only when Ack.VenueOrderID is non-empty — a venue that
+	// supplied no id gave this dispatch nothing to record, and the field that
+	// says so is two lines up in the same struct.
+	//
+	// Neither failure holds trading, and the direction is worth stating: a
+	// lost ack record degrades the ABSENT path's attribution back to what it
+	// was before the id existed — a sweep that refuses to conclude — which is
+	// safe and late, the resolver's designed failure direction. Both are
+	// alerting matters for Journaled's reason: the store that dropped this
+	// write threatens the next order's.
+	AckJournaled bool
+	AckApplied   bool
+
+	// AckConflict reports that the projection REFUSED the ack's venue id as
+	// contradicting what the store holds (ports.ErrVenueOrderIDConflict) —
+	// this order already recorded under a different id, or the id already
+	// naming another order on the instrument.
+	//
+	// It is a separate field from AckApplied because it is a different KIND
+	// of false: an ordinary failed apply loses a reading, this one gains a
+	// finding — the venue and the store disagree about an identity every
+	// attribution premise rests on. HoldsNewTrading folds it in, so the
+	// executor's fan-in latches on it exactly as it does on a stale
+	// projection; the crash-path twin of that latch is the journal itself,
+	// whose two conflicting acked records refuse to replay.
+	AckConflict bool
 
 	// Cause is why State is not StateSubmitted — the Place failure, joined with
 	// ErrEffectUnhandled if the classification came from the fallback. It is nil
@@ -199,7 +230,19 @@ type Outcome struct {
 // latch. A caller dispatching outside the package path holds the same duty
 // this predicate states — which is one reason the package path is the one
 // §6 step 6 sends through.
-func (o Outcome) HoldsNewTrading() bool { return !o.Applied }
+//
+// # AckConflict is the second disjunct, and it is a hold for a different
+// # reason than staleness
+//
+// A stale projection lags toward the permissive reading; a conflicted ack
+// means the store's identity premise — one venue id, one owner, per
+// instrument — was contradicted by the venue itself, and every rule-out §5.3
+// gate 3 would perform against this store is suspect with it. An ordinary
+// failed ack write (AckApplied false, AckConflict false) is deliberately NOT
+// here: it degrades attribution to refusal, which is the safe direction, and
+// holding trading on it would hold the system on the store having hiccuped
+// while the journal — the store that matters — took the record.
+func (o Outcome) HoldsNewTrading() bool { return !o.Applied || o.AckConflict }
 
 // Dispatch submits one planned order to its venue, exactly once.
 //
@@ -356,25 +399,58 @@ func (d *Dispatcher) Dispatch(id ids.ClientOrderID, expected int64, urgency port
 
 	state, unhandled := classifyPlace(placeErr)
 
+	// The ack's venue id is journaled BEFORE the state record, and the
+	// ordering is chosen for the crash between the two writes: authorized +
+	// acked replays into an order at the crash boundary WITH the one join key
+	// a Binance sweep can use, while authorized + state leaves recovery
+	// exactly where it stood before this record kind existed. The state is
+	// the recoverable half — it is what the resolving query re-derives — and
+	// the ack is the half that, lost, stays lost (§4: the sweep is useless
+	// alone in the lost-ack scenario). An empty id appends nothing: the
+	// journal's spelling of "the venue supplied none" is the record's
+	// absence.
+	ackJournaled := false
+	if ack.VenueOrderID != "" {
+		ackJournaled = d.journal.AppendAcked(id, ack.VenueOrderID) == nil
+	}
+
 	journalErr := d.journal.AppendState(id, state)
 
 	// Skipped outright when the authorization never applied, rather than
 	// attempted against a guessed version. The record is still at StatePlanned,
 	// so every target this classification can produce is a forbidden edge from
 	// it — the attempt could only fail, and it would fail with a transition
-	// error that describes the projection's gap rather than its cause.
-	applied := false
+	// error that describes the projection's gap rather than its cause. That
+	// skip covers the ack apply too, and for more than the version arithmetic:
+	// ApplyAck refuses a Planned order by state, so the attempt against the
+	// broken projection could only add a second error describing the same gap.
+	applied, ackApplied, ackConflict := false, false, false
 	if applyErr == nil {
-		_, resultErr := d.orders.ApplyState(id, authorized.Version, state)
+		version := authorized.Version
+		if ack.VenueOrderID != "" {
+			acked, ackErr := d.orders.ApplyAck(id, version, ack.VenueOrderID)
+			if ackErr == nil {
+				ackApplied = true
+				version = acked.Version
+			}
+			ackConflict = errors.Is(ackErr, ports.ErrVenueOrderIDConflict)
+		}
+		// A failed ack apply falls back to the pre-ack version deliberately:
+		// the repository mutates only once nothing further can fail, so a
+		// refusal left the version where the authorization put it.
+		_, resultErr := d.orders.ApplyState(id, version, state)
 		applied = resultErr == nil
 	}
 
 	return Outcome{
-		State:     state,
-		Ack:       ack,
-		Cause:     errors.Join(placeErr, unhandled),
-		Journaled: journalErr == nil,
-		Applied:   applied,
+		State:        state,
+		Ack:          ack,
+		Cause:        errors.Join(placeErr, unhandled),
+		Journaled:    journalErr == nil,
+		Applied:      applied,
+		AckJournaled: ackJournaled,
+		AckApplied:   ackApplied,
+		AckConflict:  ackConflict,
 	}, nil
 }
 

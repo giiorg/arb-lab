@@ -729,3 +729,68 @@ func signed(t *testing.T, v string) fixedpoint.Quantity {
 	}
 	return q
 }
+
+// ---------------------------------------------------------------------------
+// the persisted ack meets the live id (task #174)
+// ---------------------------------------------------------------------------
+
+// TestJoinRefusesAStoreVenueIdTheLiveQueryContradicts: two authorities can now
+// name one order's venue id — the ack the dispatch persisted and the answer
+// the join's own query returns — and the loser of a disagreement decides which
+// sweep rows become this order's fills. A non-empty mismatch refuses the JOIN,
+// before any row is attributed.
+func TestJoinRefusesAStoreVenueIdTheLiveQueryContradicts(t *testing.T) {
+	t.Parallel()
+
+	j, orders, v, _ := newJoiner(t)
+	o := joinOrder(t, 1, perp(), domain.SideSell, "0.5")
+	plantJoinable(t, orders, o, domain.StateFilled)
+	rec := orders.records[o.ClientOrderID]
+	rec.VenueOrderID = "774411"
+	orders.records[o.ClientOrderID] = rec
+
+	v.status[o.ClientOrderID] = present("999999", "0.5", t)
+
+	_, err := j.Join([]ids.ClientOrderID{o.ClientOrderID})
+	if !errors.Is(err, application.ErrVenueOrderIDMismatch) {
+		t.Fatalf("Join = %v, want ErrVenueOrderIDMismatch", err)
+	}
+	// Nothing was attributed for the disputed order: a fill applied under
+	// either id would be a fill applied on a coin flip's authority.
+	if len(v.windows) != 0 {
+		t.Errorf("the join swept %v before settling whose id this is", v.windows)
+	}
+}
+
+// TestJoinAttributesByThePersistedIdWhenTheSurfaceReturnsNone: past the
+// mismatch check the two sources agree or one is silent, so the join
+// attributes by whichever is non-empty — the persisted ack when a surface
+// answered without an id. The row is Binance-shaped (no client id), so the
+// venue id is the only key that can claim it.
+func TestJoinAttributesByThePersistedIdWhenTheSurfaceReturnsNone(t *testing.T) {
+	t.Parallel()
+
+	j, orders, v, _ := newJoiner(t)
+	o := joinOrder(t, 1, perp(), domain.SideSell, "0.5")
+	plantJoinable(t, orders, o, domain.StateFilled)
+	rec := orders.records[o.ClientOrderID]
+	rec.VenueOrderID = "774411"
+	orders.records[o.ClientOrderID] = rec
+
+	v.status[o.ClientOrderID] = present("", "0.5", t)
+	v.sweeps[perp()] = ports.ExecutionSweep{
+		Executions:    []ports.VenueExecution{execution(t, "e-1", "", "774411", "0.5")},
+		ProvenThrough: joinNow.Add(time.Hour),
+	}
+
+	report, err := j.Join([]ids.ClientOrderID{o.ClientOrderID})
+	if err != nil {
+		t.Fatalf("Join = %v, want nil", err)
+	}
+	if report.Fills != 1 {
+		t.Errorf("Fills = %d, want 1 — the persisted id was the only key that could claim the row", report.Fills)
+	}
+	if len(report.Unattributed) != 0 {
+		t.Errorf("Unattributed = %v, want none", report.Unattributed)
+	}
+}

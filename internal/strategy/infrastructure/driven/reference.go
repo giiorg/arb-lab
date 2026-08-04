@@ -103,6 +103,14 @@ type LotRow struct {
 	Quote       string `json:"quote"`
 	MinNotional string `json:"min_notional"`
 
+	// Tick is the venue's price increment in Quote per Base, optional for the
+	// domain type's stated reason: rows recorded before the field existed
+	// stay decodable, and the one consumer that needs a tick refuses a row
+	// without one. Unlike MinNotional there is no declared-zero reading — a
+	// venue with no tick does not exist, so "" is the only spelling of
+	// absence and "0" is refused by the domain validator.
+	Tick string `json:"tick,omitempty"`
+
 	Class      string `json:"class"`
 	ObservedAt string `json:"observed_at"`
 	Source     string `json:"source"`
@@ -253,6 +261,13 @@ func (r LotRow) toDomain(rev config.Revision) (domain.LotRules, error) {
 	if err != nil {
 		return domain.LotRules{}, fmt.Errorf("min_notional: %w: %w", ErrRowInvalid, err)
 	}
+	var tick fixedpoint.Price
+	if r.Tick != "" {
+		tick, err = fixedpoint.ParsePrice(fixedpoint.Asset(r.Base), fixedpoint.Asset(r.Quote), r.Tick)
+		if err != nil {
+			return domain.LotRules{}, fmt.Errorf("tick: %w: %w", ErrRowInvalid, err)
+		}
+	}
 	class, err := parseClass(r.Class)
 	if err != nil {
 		return domain.LotRules{}, err
@@ -271,6 +286,7 @@ func (r LotRow) toDomain(rev config.Revision) (domain.LotRules, error) {
 		Step:        step,
 		MinQty:      minQty,
 		MinNotional: minNotional,
+		Tick:        tick,
 		Provenance:  domain.Provenance{Class: class, ObservedAt: observed, Rev: rev},
 	}
 	if err := lots.Validate(); err != nil {

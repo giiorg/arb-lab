@@ -42,6 +42,7 @@ type recordingVisitor struct {
 	planned    []domain.Order
 	authorized []anchorCall
 	states     []stateCall
+	acked      []ackCall
 	seqs       []uint64
 
 	// failAt, when positive, makes the visit of that sequence fail. It is how
@@ -58,6 +59,11 @@ type anchorCall struct {
 type stateCall struct {
 	id    ids.ClientOrderID
 	state domain.OrderState
+}
+
+type ackCall struct {
+	id           ids.ClientOrderID
+	venueOrderID string
 }
 
 func (v *recordingVisitor) note(seq uint64) error {
@@ -89,6 +95,14 @@ func (v *recordingVisitor) State(seq uint64, id ids.ClientOrderID, s domain.Orde
 		return err
 	}
 	v.states = append(v.states, stateCall{id: id, state: s})
+	return nil
+}
+
+func (v *recordingVisitor) Acked(seq uint64, id ids.ClientOrderID, venueOrderID string) error {
+	if err := v.note(seq); err != nil {
+		return err
+	}
+	v.acked = append(v.acked, ackCall{id: id, venueOrderID: venueOrderID})
 	return nil
 }
 
@@ -157,6 +171,71 @@ func TestReplayRoundTripsEveryKindInOrder(t *testing.T) {
 
 	if got := v.states[0]; got.id != o.ClientOrderID || got.state != domain.StateSubmitted {
 		t.Errorf("state record replayed as %+v, want %q/%s", got, o.ClientOrderID, domain.StateSubmitted)
+	}
+}
+
+// TestReplayRoundTripsAnAckedRecord is the fourth kind's round trip, beside
+// the three-kind positive control rather than folded into it — the tamper
+// tests below key on that helper's sequence numbers, and shifting them to
+// admit a fourth record would re-aim every one of them.
+func TestReplayRoundTripsAnAckedRecord(t *testing.T) {
+	t.Parallel()
+	j, _ := openTestJournal(t)
+	o, _ := writeThreeKinds(t, j)
+	if err := j.AppendAcked(o.ClientOrderID, "774411"); err != nil {
+		t.Fatalf("AppendAcked: %v", err)
+	}
+
+	var v recordingVisitor
+	if err := j.Replay(&v); err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	if want := []uint64{1, 2, 3, 4}; fmt.Sprint(v.seqs) != fmt.Sprint(want) {
+		t.Errorf("visited sequences %v, want %v", v.seqs, want)
+	}
+	if len(v.acked) != 1 {
+		t.Fatalf("visited %d acked records, want 1", len(v.acked))
+	}
+	if got := v.acked[0]; got.id != o.ClientOrderID || got.venueOrderID != "774411" {
+		t.Errorf("acked record replayed as %+v, want %q/%q", got, o.ClientOrderID, "774411")
+	}
+}
+
+// TestAckedTamperBreaksTheChain is what makes encodeAcked's hashing real: an
+// edited venue id must fail verification, which requires the column to be in
+// the preimage rather than merely in the table. Without this test a
+// journal_acked row would be the one detail the chain does not actually
+// cover, and an attacker's cheapest edit is exactly the id a swept row is
+// ruled out against.
+func TestAckedTamperBreaksTheChain(t *testing.T) {
+	t.Parallel()
+	j, path := openTestJournal(t)
+	o, _ := writeThreeKinds(t, j)
+	if err := j.AppendAcked(o.ClientOrderID, "774411"); err != nil {
+		t.Fatalf("AppendAcked: %v", err)
+	}
+
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatalf("tamper open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec(`DROP TRIGGER journal_acked_no_update`); err != nil {
+		t.Fatalf("tamper: drop trigger: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE journal_acked SET venue_order_id = '999999' WHERE seq = 4`); err != nil {
+		t.Fatalf("tamper: update: %v", err)
+	}
+
+	var v recordingVisitor
+	err = j.Replay(&v)
+	if !errors.Is(err, ports.ErrJournalChainBroken) {
+		t.Fatalf("Replay over a tampered acked record = %v, want ErrJournalChainBroken", err)
+	}
+	// The tamper is at seq 4, so the intact prefix was still delivered — the
+	// caller's rebuilt state is a prefix of the log, not a subset.
+	if want := []uint64{1, 2, 3}; fmt.Sprint(v.seqs) != fmt.Sprint(want) {
+		t.Errorf("visited sequences %v, want %v — the verified prefix only", v.seqs, want)
 	}
 }
 

@@ -123,6 +123,33 @@ func perpInstrument() ids.VenueInstrument {
 	}
 }
 
+func mustQty(t *testing.T, v string) fixedpoint.Quantity {
+	t.Helper()
+	q, err := fixedpoint.ParseQuantity("BTC", v)
+	if err != nil {
+		t.Fatalf("ParseQuantity(%q): %v", v, err)
+	}
+	return q
+}
+
+func mustPx(t *testing.T, v string) fixedpoint.Price {
+	t.Helper()
+	p, err := fixedpoint.ParsePrice("BTC", "USDT", v)
+	if err != nil {
+		t.Fatalf("ParsePrice(%q): %v", v, err)
+	}
+	return p
+}
+
+func mustUSDT(t *testing.T, v string) fixedpoint.Money {
+	t.Helper()
+	m, err := fixedpoint.ParseMoney("USDT", v)
+	if err != nil {
+		t.Fatalf("ParseMoney(%q): %v", v, err)
+	}
+	return m
+}
+
 // journalPath returns a fresh path under the test's own directory. Fresh per
 // test rather than shared, so a test that dispatches cannot be read as passing
 // because of records another one wrote.
@@ -154,6 +181,24 @@ func fullDeps(t *testing.T) oms.Deps {
 		InstrumentAssets: map[ids.VenueInstrument]venue.InstrumentAssets{
 			spotInstrument(): {Base: "BTC", Quote: "USDT"},
 			perpInstrument(): {Base: "BTC", Quote: "USDT"},
+		},
+		InstrumentFilters: map[ids.VenueInstrument]domain.TradingFilters{
+			// Grids deliberately off the powers of ten, and distinct per
+			// instrument — planning_test.go's testFilters states the collapse
+			// argument. The cashAndCarry fixture (0.5 BTC at 50000/50100)
+			// conforms non-trivially to both.
+			spotInstrument(): {
+				Step:        mustQty(t, "0.025"),
+				MinQty:      mustQty(t, "0.05"),
+				Tick:        mustPx(t, "25"),
+				MinNotional: mustUSDT(t, "5000"),
+			},
+			perpInstrument(): {
+				Step:        mustQty(t, "0.05"),
+				MinQty:      mustQty(t, "0.1"),
+				Tick:        mustPx(t, "20"),
+				MinNotional: mustUSDT(t, "10000"),
+			},
 		},
 		Clock: clk,
 		Resolution: application.ResolutionPolicy{
@@ -416,9 +461,11 @@ func TestPlanThenDispatchWritesOneJournalAndOneProjection(t *testing.T) {
 	}
 
 	// ONE journal, holding both halves of the history in order: two planned
-	// intents from §6 step 5, then this leg's authorization and result from §6
-	// step 6. The sequence is what says the two use cases share a journal — a
-	// module with two would leave two records here, not four.
+	// intents from §6 step 5, then this leg's authorization, ack and result
+	// from §6 step 6. The sequence is what says the two use cases share a
+	// journal — a module with two would leave two records here, not five —
+	// and the acked record sits BEFORE the state record, which is Dispatch's
+	// crash-window ordering asserted against the real store.
 	records := readJournal(t, deps.JournalPath)
 	want := []journalRow{
 		{kind: "planned", clientID: string(planned[0].Order.ClientOrderID)},
@@ -427,6 +474,7 @@ func TestPlanThenDispatchWritesOneJournalAndOneProjection(t *testing.T) {
 		// StateDispatchAuthorized: the anchor §5.3 measures from travels with it,
 		// and AppendState refuses that target outright.
 		{kind: "authorized", clientID: string(perp.Order.ClientOrderID)},
+		{kind: "acked", clientID: string(perp.Order.ClientOrderID)},
 		{kind: "state", clientID: string(perp.Order.ClientOrderID), state: string(domain.StateSubmitted)},
 	}
 	if len(records) != len(want) {
@@ -509,9 +557,10 @@ func TestASecondModuleRebuildsWhatTheFirstOneDid(t *testing.T) {
 		t.Fatalf("Rebuild: %v", err)
 	}
 
-	// Two planned intents, the authorization, and the result of the send.
-	if got.Records != 4 || got.LastSequence != 4 {
-		t.Errorf("Records/LastSequence = %d/%d, want 4/4", got.Records, got.LastSequence)
+	// Two planned intents, the authorization, the ack, and the result of the
+	// send.
+	if got.Records != 5 || got.LastSequence != 5 {
+		t.Errorf("Records/LastSequence = %d/%d, want 5/5", got.Records, got.LastSequence)
 	}
 	if got.Orders != 2 {
 		t.Errorf("Orders = %d, want 2", got.Orders)
@@ -648,4 +697,74 @@ func readJournal(t *testing.T, path string) []journalRow {
 		t.Fatalf("iterate journal rows: %v", err)
 	}
 	return out
+}
+
+// TestAnAckConflictLatchesLiveAndRefusesTheNextBoot is the conflict design's
+// COMPOSITION, against the real journal and the real repository — the two
+// halves each layer test asserts alone, proved to meet: a venue handing two
+// orders on one instrument the same orderId (the banked non-reuse fact
+// failing, or an adapter mis-threading acks) must first latch the live
+// process and then refuse the boot that would otherwise build a poisoned
+// rule-out index from the journal it left behind. Neither half alone closes
+// the false-absence path: the latch dies with the process, and the replay
+// refusal never runs while it lives.
+func TestAnAckConflictLatchesLiveAndRefusesTheNextBoot(t *testing.T) {
+	t.Parallel()
+
+	deps := fullDeps(t)
+	m := newModule(t, deps)
+
+	first, err := m.Plan.Plan(cashAndCarry(t))
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	rePlan := cashAndCarry(t)
+	rePlan.Attempt = 1
+	second, err := m.Plan.Plan(rePlan)
+	if err != nil {
+		t.Fatalf("Plan attempt 1: %v", err)
+	}
+
+	// Both perp legs — the SAME instrument — and the counting placer answers
+	// every Place with the same venue id, which is exactly the venue
+	// misbehaviour the conflict design exists for.
+	clean, err := m.Dispatch.Dispatch(first[1].Order.ClientOrderID, first[1].Version, ports.UrgencyOpening)
+	if err != nil {
+		t.Fatalf("first Dispatch = %v, want nil", err)
+	}
+	if !clean.AckApplied || clean.AckConflict {
+		t.Fatalf("first dispatch AckApplied/AckConflict = %v/%v, want true/false",
+			clean.AckApplied, clean.AckConflict)
+	}
+
+	conflicted, err := m.Dispatch.Dispatch(second[1].Order.ClientOrderID, second[1].Version, ports.UrgencyOpening)
+	if err != nil {
+		t.Fatalf("second Dispatch = %v, want nil — the send happened", err)
+	}
+	if !conflicted.AckConflict {
+		t.Fatal("second dispatch AckConflict = false, want true")
+	}
+	if !conflicted.HoldsNewTrading() {
+		t.Fatal("second dispatch HoldsNewTrading() = false — the live half of the design")
+	}
+	// The journal took BOTH acked records — it is a recorder, and its refusal
+	// to compose them is deliberately the replay's.
+	if !conflicted.AckJournaled {
+		t.Fatal("second dispatch AckJournaled = false, want true")
+	}
+
+	// The crash half: a fresh process over this journal must refuse to boot,
+	// because composing the log means picking one of two owners for the id —
+	// and a boot that picked would hand the resolver the poisoned index.
+	next := deps
+	next.VenueOrders = &countingPlacer{ack: venue.OrderAck{VenueOrderID: venueOrderID}}
+	reborn, err := oms.New(next)
+	if err != nil {
+		t.Fatalf("New over the existing journal: %v", err)
+	}
+	defer func() { _ = reborn.Close() }()
+
+	if _, err := reborn.Recover.Rebuild(); !errors.Is(err, ports.ErrVenueOrderIDConflict) {
+		t.Fatalf("Rebuild over a conflicted journal = %v, want ErrVenueOrderIDConflict", err)
+	}
 }

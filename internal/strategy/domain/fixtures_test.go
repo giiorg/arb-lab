@@ -211,9 +211,14 @@ func entryInput(t *testing.T) domain.DecisionInput {
 		},
 		SpotFees: domain.LegFees{Instrument: spotInst, Maker: mustRate(t, "0.001"), Taker: mustRate(t, "0.001"), Tier: "VIP0", Provenance: provenance(t)},
 		PerpFees: domain.LegFees{Instrument: perpInst, Maker: mustRate(t, "0.0002"), Taker: mustRate(t, "0.00055"), Tier: "VIP0", Provenance: provenance(t)},
+		// SpotLots carries a tick and PerpLots does not, deliberately: the two
+		// fixtures split the field's two legal states (recorded / unrecorded),
+		// so every round-trip covers BOTH the tick wire member and the
+		// omitempty absence that pre-tick journaled decisions decode through.
 		SpotLots: domain.LotRules{
 			Instrument: spotInst, Step: mustQty(t, "0.00001"),
 			MinQty: mustQty(t, "0.00001"), MinNotional: mustMoney(t, "5"),
+			Tick:       mustPrice(t, "0.01"),
 			Provenance: provenance(t),
 		},
 		PerpLots: domain.LotRules{

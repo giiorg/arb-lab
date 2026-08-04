@@ -58,4 +58,13 @@ var (
 	// lands on the DispatchAuthorized crash boundary the formal model was built
 	// around, so this package never panics on data.
 	ErrDivideByZero = errors.New("fixedpoint: divide by zero")
+
+	// ErrStepNotPositive reports a grid-conformance check against a step or
+	// tick that is zero or negative. A zero step would report EVERY value
+	// on-grid — the unpopulated constraint reading as "no constraint", which is
+	// the flattering direction — and Binance publishes a literal zero where a
+	// filter does not apply (MARKET_LOT_SIZE stepSize "0.00000000", observed
+	// 2026-08-03), so the zero arrives from real data, not only from a
+	// forgotten field.
+	ErrStepNotPositive = errors.New("fixedpoint: step is not positive")
 )

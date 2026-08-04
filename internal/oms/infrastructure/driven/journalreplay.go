@@ -56,11 +56,13 @@ SELECT j.seq, j.kind, j.client_id, j.prev_hash, j.hash,
        p.venue, p.product, p.symbol, p.contract, p.side, p.order_type, p.time_in_force,
        p.qty_asset, p.qty_mantissa, p.price_base, p.price_quote, p.price_mantissa, p.reduce_only,
        s.state,
-       a.instant_unix_nano, a.uncertainty_nano
+       a.instant_unix_nano, a.uncertainty_nano,
+       k.venue_order_id
 FROM journal j
 LEFT JOIN journal_planned    p ON p.seq = j.seq
 LEFT JOIN journal_state      s ON s.seq = j.seq
 LEFT JOIN journal_authorized a ON a.seq = j.seq
+LEFT JOIN journal_acked      k ON k.seq = j.seq
 ORDER BY j.seq`
 
 // replayRow is one journal row with every detail table's columns attached.
@@ -82,6 +84,8 @@ type replayRow struct {
 	state sql.NullString
 
 	instantUnixNano, uncertaintyNano sql.NullInt64
+
+	venueOrderID sql.NullString
 }
 
 // Replay is ports.JournalReplay: walk the log in sequence order, verifying the
@@ -124,6 +128,7 @@ func (j *SQLiteJournal) Replay(v ports.JournalVisitor) error {
 			&r.qtyAsset, &r.qtyMantissa, &r.priceBase, &r.priceQuote, &r.priceMantissa, &r.reduceOnly,
 			&r.state,
 			&r.instantUnixNano, &r.uncertaintyNano,
+			&r.venueOrderID,
 		); err != nil {
 			return fmt.Errorf("oms journal: replay: scan: %w", err)
 		}
@@ -217,6 +222,12 @@ func replayPreimage(r replayRow) ([]byte, error) {
 			return nil, err
 		}
 		return encodeAuthorized(ids.ClientOrderID(r.clientID), at), nil
+
+	case kindAcked:
+		if !r.venueOrderID.Valid {
+			return nil, detailMissing(r, "journal_acked")
+		}
+		return encodeAcked(ids.ClientOrderID(r.clientID), r.venueOrderID.String), nil
 	}
 
 	// A kind column holding something no encoder knows. It is refused rather
@@ -339,6 +350,9 @@ func visit(v ports.JournalVisitor, r replayRow) error {
 			return err
 		}
 		return v.Authorized(uint64(r.seq), ids.ClientOrderID(r.clientID), at)
+
+	case kindAcked:
+		return v.Acked(uint64(r.seq), ids.ClientOrderID(r.clientID), r.venueOrderID.String)
 	}
 	return fmt.Errorf("oms journal: replay: record %d has kind %q: %w",
 		r.seq, r.kind, ErrJournalKindUnknown)

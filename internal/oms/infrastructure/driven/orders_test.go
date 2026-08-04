@@ -945,3 +945,187 @@ func TestOrdersInReportsTheLiveCumulative(t *testing.T) {
 		t.Fatalf("cumulative = %s, want %s (ordered was 10)", got[0].Cumulative, want)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ApplyAck and the venue-id index (§5.3 gate 3's rule-out source)
+// ---------------------------------------------------------------------------
+
+// ackedOrder plans a second order on a chosen instrument and advances it to
+// the crash boundary, where a venue ack is a state of the world SM §1 admits.
+func ackedOrder(t *testing.T, repo *driven.MemoryOrderWriteRepository, leg int,
+	instrument ids.VenueInstrument) (domain.Order, int64) {
+	t.Helper()
+	o := plannedOrder(t)
+	o.ClientOrderID = mintedID(t, leg)
+	o.Instrument = instrument
+	if _, err := repo.ApplyPlanned(o); err != nil {
+		t.Fatalf("ApplyPlanned leg %d: %v", leg, err)
+	}
+	return o, advance(t, repo, o, domain.StateDispatchAuthorized)
+}
+
+func TestApplyAckRecordsTheVenueIdOnceAndRefusesASecondOpinion(t *testing.T) {
+	t.Parallel()
+
+	repo, o := created(t)
+	version := advance(t, repo, o, domain.StateDispatchAuthorized)
+
+	rec, err := repo.ApplyAck(o.ClientOrderID, version, "774411")
+	if err != nil {
+		t.Fatalf("ApplyAck: %v", err)
+	}
+	if rec.VenueOrderID != "774411" {
+		t.Errorf("VenueOrderID = %q, want %q", rec.VenueOrderID, "774411")
+	}
+	if rec.Version != version+1 {
+		t.Errorf("Version = %d, want %d — the ack changed the record", rec.Version, version+1)
+	}
+
+	// Restating the id is a no-op with the version LEFT ALONE — §7.5's replay
+	// may meet the same acked record twice, and a bump here would invalidate
+	// every other reader's expectation to record that nothing happened.
+	again, err := repo.ApplyAck(o.ClientOrderID, rec.Version, "774411")
+	if err != nil {
+		t.Fatalf("ApplyAck of the same id: %v", err)
+	}
+	if again.Version != rec.Version {
+		t.Errorf("no-op re-ack moved the version %d -> %d", rec.Version, again.Version)
+	}
+
+	// A DIFFERENT id is the venue and the store disagreeing about an
+	// identity, and nothing may pick a winner.
+	if _, err := repo.ApplyAck(o.ClientOrderID, rec.Version, "999999"); !errors.Is(err, ports.ErrVenueOrderIDConflict) {
+		t.Errorf("ApplyAck with a different id = %v, want ErrVenueOrderIDConflict", err)
+	}
+	final, err := repo.Load(o.ClientOrderID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if final.VenueOrderID != "774411" || final.Version != rec.Version {
+		t.Errorf("refused re-ack moved the record to %q/v%d, want %q/v%d untouched",
+			final.VenueOrderID, final.Version, "774411", rec.Version)
+	}
+}
+
+func TestApplyAckRefusesWhatThePortRequires(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an empty venue order id", func(t *testing.T) {
+		t.Parallel()
+		repo, o := created(t)
+		version := advance(t, repo, o, domain.StateDispatchAuthorized)
+		if _, err := repo.ApplyAck(o.ClientOrderID, version, ""); !errors.Is(err, driven.ErrRepositoryVenueOrderIDUnset) {
+			t.Errorf("ApplyAck(\"\") = %v, want ErrRepositoryVenueOrderIDUnset", err)
+		}
+	})
+
+	t.Run("a Planned order, which has no venue side to have acked it", func(t *testing.T) {
+		t.Parallel()
+		repo, o := created(t)
+		if _, err := repo.ApplyAck(o.ClientOrderID, 1, "774411"); !errors.Is(err, driven.ErrRepositoryOrderNotAtVenue) {
+			t.Errorf("ApplyAck on a Planned order = %v, want ErrRepositoryOrderNotAtVenue", err)
+		}
+	})
+
+	t.Run("a stale version", func(t *testing.T) {
+		t.Parallel()
+		repo, o := created(t)
+		version := advance(t, repo, o, domain.StateDispatchAuthorized)
+		if _, err := repo.ApplyAck(o.ClientOrderID, version+7, "774411"); !errors.Is(err, ports.ErrVersionConflict) {
+			t.Errorf("ApplyAck at a stale version = %v, want ErrVersionConflict", err)
+		}
+	})
+
+	t.Run("an order the repository never created", func(t *testing.T) {
+		t.Parallel()
+		repo := newTestRepository(t)
+		if _, err := repo.ApplyAck(mintedID(t, 9), 1, "774411"); !errors.Is(err, ports.ErrOrderUnknown) {
+			t.Errorf("ApplyAck on an unknown order = %v, want ErrOrderUnknown", err)
+		}
+	})
+}
+
+// TestApplyAckScopesUniquenessToTheInstrument is the banked venue fact's scope
+// made a fixture: orderId is per SYMBOL, so the same number on the SAME
+// instrument is a contradiction and on a different instrument is Tuesday. A
+// suite with only the refusing half cannot tell "unique per instrument" from
+// "unique globally" — and the global reading is the one that would let a
+// same-numbered spot order block the perp ack it has no relation to.
+func TestApplyAckScopesUniquenessToTheInstrument(t *testing.T) {
+	t.Parallel()
+
+	repo, a := created(t)
+	aVersion := advance(t, repo, a, domain.StateDispatchAuthorized)
+	if _, err := repo.ApplyAck(a.ClientOrderID, aVersion, "774411"); err != nil {
+		t.Fatalf("ApplyAck a: %v", err)
+	}
+
+	// A second order on the SAME instrument claiming the same id: refused.
+	b, bVersion := ackedOrder(t, repo, 2, perp())
+	if _, err := repo.ApplyAck(b.ClientOrderID, bVersion, "774411"); !errors.Is(err, ports.ErrVenueOrderIDConflict) {
+		t.Errorf("ApplyAck of a's id on b (same instrument) = %v, want ErrVenueOrderIDConflict", err)
+	}
+
+	// The same NUMBER on the other leg's instrument: a different namespace,
+	// accepted.
+	c, cVersion := ackedOrder(t, repo, 3, spot())
+	if _, err := repo.ApplyAck(c.ClientOrderID, cVersion, "774411"); err != nil {
+		t.Errorf("ApplyAck of the same number on spot = %v, want nil — orderId is per symbol", err)
+	}
+}
+
+func TestVenueOrderIDsOnAnswersPerInstrument(t *testing.T) {
+	t.Parallel()
+
+	repo, a := created(t)
+	aVersion := advance(t, repo, a, domain.StateDispatchAuthorized)
+	if _, err := repo.ApplyAck(a.ClientOrderID, aVersion, "101"); err != nil {
+		t.Fatalf("ApplyAck a: %v", err)
+	}
+	b, bVersion := ackedOrder(t, repo, 2, perp())
+	if _, err := repo.ApplyAck(b.ClientOrderID, bVersion, "102"); err != nil {
+		t.Fatalf("ApplyAck b: %v", err)
+	}
+	// c holds the same NUMBER as a, one instrument over — the entry that
+	// separates instrument-keyed from globally-keyed.
+	c, cVersion := ackedOrder(t, repo, 3, spot())
+	if _, err := repo.ApplyAck(c.ClientOrderID, cVersion, "101"); err != nil {
+		t.Fatalf("ApplyAck c: %v", err)
+	}
+	// d has no persisted id and must contribute nothing.
+	if _, err := repo.ApplyPlanned(func() domain.Order {
+		o := plannedOrder(t)
+		o.ClientOrderID = mintedID(t, 4)
+		return o
+	}()); err != nil {
+		t.Fatalf("ApplyPlanned d: %v", err)
+	}
+
+	got, err := repo.VenueOrderIDsOn(perp())
+	if err != nil {
+		t.Fatalf("VenueOrderIDsOn(perp): %v", err)
+	}
+	if len(got) != 2 || got["101"] != a.ClientOrderID || got["102"] != b.ClientOrderID {
+		t.Errorf("VenueOrderIDsOn(perp) = %v, want {101:%s, 102:%s}", got, a.ClientOrderID, b.ClientOrderID)
+	}
+
+	spotIDs, err := repo.VenueOrderIDsOn(spot())
+	if err != nil {
+		t.Fatalf("VenueOrderIDsOn(spot): %v", err)
+	}
+	if len(spotIDs) != 1 || spotIDs["101"] != c.ClientOrderID {
+		t.Errorf("VenueOrderIDsOn(spot) = %v, want {101:%s}", spotIDs, c.ClientOrderID)
+	}
+
+	// An instrument nothing traded returns an EMPTY map — a real answer, not
+	// an error: no row can be ruled out by ownership, none can be claimed.
+	other := perp()
+	other.Symbol = "ETHUSDT"
+	empty, err := repo.VenueOrderIDsOn(other)
+	if err != nil {
+		t.Fatalf("VenueOrderIDsOn(other): %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("VenueOrderIDsOn(other) = %v, want empty", empty)
+	}
+}

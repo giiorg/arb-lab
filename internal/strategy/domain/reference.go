@@ -134,6 +134,21 @@ type LotRules struct {
 	// venue has none.
 	MinNotional fixedpoint.Money
 
+	// Tick is the venue's price increment (Binance PRICE_FILTER tickSize;
+	// Bybit priceFilter.tickSize), carried beside the lot members because the
+	// venue publishes them as one filter set and the order path verifies them
+	// as one (§2.4's verification half; oms/domain.TradingFilters).
+	//
+	// It is OPTIONAL here — the zero value means "not recorded" — where Step
+	// is not, and the asymmetry is each consumer's own safe direction, not an
+	// oversight: this context's scoring path quantizes QUANTITY and never
+	// consumes a tick, while revisions journaled before the field existed
+	// must keep decoding. The consumer that does need it — the order path's
+	// filters resolver — REFUSES a row whose tick is absent, so the optional
+	// zero here cannot reach a venue as an unchecked price; it can only
+	// refuse a plan while naming this row.
+	Tick fixedpoint.Price
+
 	// Provenance is the row's origin.
 	Provenance Provenance
 }
@@ -160,6 +175,25 @@ func (l LotRules) Validate() error {
 	}
 	if err := l.MinNotional.Validate(); err != nil {
 		return fmt.Errorf("min notional: %w", err)
+	}
+	// A PRESENT tick must be coherent; only absence is admitted. A declared
+	// zero tick is refused for Step's reason — it reads as "every price
+	// conforms", the flattering direction.
+	if l.Tick != (fixedpoint.Price{}) {
+		if err := l.Tick.Validate(); err != nil {
+			return fmt.Errorf("tick: %w", err)
+		}
+		if l.Tick.Mantissa() <= 0 {
+			return fmt.Errorf("tick %s: %w", l.Tick, ErrUnset)
+		}
+		if l.Tick.Base() != l.Step.Asset() {
+			return fmt.Errorf("tick prices %s, step counts %s: %w",
+				l.Tick.Base(), l.Step.Asset(), ErrKindInvalid)
+		}
+		if l.Tick.Quote() != l.MinNotional.Asset() {
+			return fmt.Errorf("tick quoted in %s, min notional in %s: %w",
+				l.Tick.Quote(), l.MinNotional.Asset(), ErrKindInvalid)
+		}
 	}
 	if err := l.Provenance.Validate(); err != nil {
 		return fmt.Errorf("provenance: %w", err)

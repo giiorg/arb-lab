@@ -141,6 +141,16 @@ func (r Report) ExitClass() ExitClass {
 			!leg.Outcome.Journaled || !leg.Outcome.Applied {
 			return ExitExecution
 		}
+		// The ack pair joins the clean-run predicate on Journaled's own terms:
+		// meaningful only when the venue supplied an id, and a dropped write is
+		// a run that needs eyes even though nothing held. AckConflict needs no
+		// clause of its own — it forces AckApplied false, and the latch it
+		// also raises reaches this classifier through HoldsNewTrading's
+		// reporting, not through the exit code.
+		if leg.Outcome.Ack.VenueOrderID != "" &&
+			(!leg.Outcome.AckJournaled || !leg.Outcome.AckApplied) {
+			return ExitExecution
+		}
 	}
 	return ExitClean
 }
@@ -152,11 +162,21 @@ func (r Report) ExitClass() ExitClass {
 func Run(ctx context.Context, snap config.Snapshot[Config], wall *clock.Wall,
 	reg *observability.Registry, stderr io.Writer) (Report, error) {
 
+	// The §2.4 trading filters, resolved BEFORE the boot exists so a bad
+	// reference file — unreadable, missing an instrument, tick-less, stale —
+	// refuses the RUN with the file named, before any venue call or fsync.
+	// An error here is Run's own contract: the boot could not be PERFORMED.
+	filters, err := snap.Value.tradingFilters(wall)
+	if err != nil {
+		return Report{}, err
+	}
+
 	// The boot is the reconcile root's, over the embedded §5.2 block. The
 	// snapshot is re-wrapped rather than re-read: same bytes, same revision,
 	// one bootstrap read.
 	boot := config.Snapshot[reconcile.Config]{Value: snap.Value.OMS, Rev: snap.Rev}
-	r, err := reconcile.NewRunner(boot, wall, reg, stderr)
+	r, err := reconcile.NewRunner(boot, wall, reg, stderr,
+		reconcile.WithInstrumentFilters(filters))
 	if err != nil {
 		return Report{}, err
 	}

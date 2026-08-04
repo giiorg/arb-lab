@@ -81,6 +81,10 @@ type JournalVisitor interface {
 	// once, with §5.3's anchor.
 	Authorized(seq uint64, id ids.ClientOrderID, at clock.ServerTime) error
 
+	// Acked is one AppendAcked record: the venue's own identifier for the
+	// order, as the Place ack carried it.
+	Acked(seq uint64, id ids.ClientOrderID, venueOrderID string) error
+
 	// State is one AppendState record: an order reaching a lifecycle state.
 	State(seq uint64, id ids.ClientOrderID, s domain.OrderState) error
 }

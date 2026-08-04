@@ -193,6 +193,11 @@ CREATE TABLE IF NOT EXISTS journal_authorized (
 	uncertainty_nano  INTEGER NOT NULL
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS journal_acked (
+	seq            INTEGER PRIMARY KEY REFERENCES journal(seq),
+	venue_order_id TEXT NOT NULL
+) STRICT;
+
 CREATE TRIGGER IF NOT EXISTS journal_no_update BEFORE UPDATE ON journal
 	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS journal_no_delete BEFORE DELETE ON journal
@@ -208,6 +213,10 @@ CREATE TRIGGER IF NOT EXISTS journal_state_no_delete BEFORE DELETE ON journal_st
 CREATE TRIGGER IF NOT EXISTS journal_authorized_no_update BEFORE UPDATE ON journal_authorized
 	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS journal_authorized_no_delete BEFORE DELETE ON journal_authorized
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_acked_no_update BEFORE UPDATE ON journal_acked
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_acked_no_delete BEFORE DELETE ON journal_acked
 	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
 `
 
@@ -400,6 +409,35 @@ func (j *SQLiteJournal) AppendAuthorized(id ids.ClientOrderID, at clock.ServerTi
 			_, err := tx.Exec(
 				`INSERT INTO journal_authorized (seq, instant_unix_nano, uncertainty_nano) VALUES (?,?,?)`,
 				seq, instant.UnixNano(), int64(at.Uncertainty()))
+			return err
+		})
+}
+
+// AppendAcked durably records the venue's identifier for an order.
+//
+// Both refusals are the port's, restated as this adapter's checks: an empty
+// client id is a record about nothing, and an empty venue id is the absent
+// id acquiring a second spelling — the journal's spelling of "the venue
+// supplied none" is that no acked record exists.
+//
+// It does NOT check the id against other orders' — that is the projection's
+// refusal (ApplyAck, ErrVenueOrderIDConflict), and this recorder holding a
+// copy of it would be a second home for the rule, exactly what ports.Journal
+// refuses about SM §1's edge set. The consequence is deliberate and is the
+// crash-path half of the conflict design: a journal CAN hold two acked
+// records claiming one id, and §7.5's replay is where that log is found to
+// verify and not compose.
+func (j *SQLiteJournal) AppendAcked(id ids.ClientOrderID, venueOrderID string) error {
+	if id == "" {
+		return fmt.Errorf("oms journal: append ack: %w", ErrJournalClientIDUnset)
+	}
+	if venueOrderID == "" {
+		return fmt.Errorf("oms journal: append ack for order %q: %w", id, ErrJournalVenueOrderIDUnset)
+	}
+	return j.appendRecord(kindAcked, string(id), encodeAcked(id, venueOrderID),
+		func(tx *sql.Tx, seq int64) error {
+			_, err := tx.Exec(`INSERT INTO journal_acked (seq, venue_order_id) VALUES (?,?)`,
+				seq, venueOrderID)
 			return err
 		})
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/giiorg/arb-lab/internal/platform/config"
+	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 	"github.com/giiorg/arb-lab/internal/strategy/infrastructure/driven"
 )
@@ -24,8 +25,8 @@ const docJSON = `{
     {"venue":"bybit","product":"linear_perp","contract":"linear","maker":"0.0002","taker":"0.00055","tier":"non-VIP","class":"hand_recorded","observed_at":"2026-07-31T00:00:00Z","source":"venue-profiles.md test row"}
   ],
   "lots": [
-    {"venue":"binance","product":"spot","contract":"","symbol":"BTCUSDT","base":"BTC","step":"0.00001","min_qty":"0.00001","quote":"USDT","min_notional":"5","class":"hand_recorded","observed_at":"2026-07-31T00:00:00Z","source":"exchangeInfo test row"},
-    {"venue":"binance","product":"linear_perp","contract":"linear","symbol":"BTCUSDT","base":"BTC","step":"0.001","min_qty":"0.001","quote":"USDT","min_notional":"100","class":"hand_recorded","observed_at":"2026-07-31T00:00:00Z","source":"exchangeInfo test row"},
+    {"venue":"binance","product":"spot","contract":"","symbol":"BTCUSDT","base":"BTC","step":"0.00001","min_qty":"0.00001","quote":"USDT","min_notional":"5","tick":"0.01","class":"hand_recorded","observed_at":"2026-07-31T00:00:00Z","source":"exchangeInfo test row"},
+    {"venue":"binance","product":"linear_perp","contract":"linear","symbol":"BTCUSDT","base":"BTC","step":"0.001","min_qty":"0.001","quote":"USDT","min_notional":"100","tick":"0.1","class":"hand_recorded","observed_at":"2026-07-31T00:00:00Z","source":"exchangeInfo test row"},
     {"venue":"bybit","product":"spot","contract":"","symbol":"BTCUSDT","base":"BTC","step":"0.000001","min_qty":"0.000048","quote":"USDT","min_notional":"1","class":"hand_recorded","observed_at":"2026-07-31T00:00:00Z","source":"instruments-info test row"},
     {"venue":"bybit","product":"linear_perp","contract":"linear","symbol":"BTCUSDT","base":"BTC","step":"0.001","min_qty":"0.001","quote":"USDT","min_notional":"0","class":"hand_recorded","observed_at":"2026-07-31T00:00:00Z","source":"instruments-info test row"}
   ],
@@ -106,6 +107,15 @@ func TestLotAndHurdleFacesAnswer(t *testing.T) {
 	if lots.Step.Decimal() != "0.001" {
 		t.Fatalf("perp step %s", lots.Step.Decimal())
 	}
+	// The tick rides the row through to the domain value — and the two
+	// Binance rows carry DIFFERENT ticks (0.01 / 0.1), so a store serving one
+	// row's tick for the other is distinguishable from a correct one.
+	if lots.Tick.Decimal() != "0.1" {
+		t.Fatalf("perp tick %s, want 0.1", lots.Tick.Decimal())
+	}
+	if lots.Tick.Base() != "BTC" || lots.Tick.Quote() != "USDT" {
+		t.Fatalf("perp tick assets %s/%s, want BTC/USDT — the row's base and quote", lots.Tick.Base(), lots.Tick.Quote())
+	}
 
 	// Step/min-qty ORIENTATION, pinned on the row whose two quantities
 	// differ — the Binance perp row's are both 0.001, where a swap changes
@@ -120,6 +130,12 @@ func TestLotAndHurdleFacesAnswer(t *testing.T) {
 	}
 	if bl.MinNotional.Decimal() != "1" {
 		t.Fatalf("bybit spot min notional %s", bl.MinNotional.Decimal())
+	}
+	// The two Bybit rows carry NO tick key, and that must pass through as
+	// the domain's "unrecorded" zero — not refuse the row, and not invent a
+	// value. Pre-tick revisions decode through exactly this path.
+	if bl.Tick != (fixedpoint.Price{}) {
+		t.Fatalf("bybit spot tick %v, want the unrecorded zero — the fixture row has no tick key", bl.Tick)
 	}
 
 	h, err := ref.Hurdle(asOfOK)
@@ -212,6 +228,16 @@ func TestDocumentRefusals(t *testing.T) {
 			mutate: func(s string) string { return strings.Replace(s, `"maker":"0.001"`, `"maker":"0.1%"`, 1) },
 			want:   driven.ErrRowInvalid,
 		},
+		"unparseable tick": {
+			mutate: func(s string) string { return strings.Replace(s, `"tick":"0.01"`, `"tick":"0.01%"`, 1) },
+			want:   driven.ErrRowInvalid,
+		},
+		// A DECLARED zero tick is not the absent field: absence means
+		// "unrecorded" and decodes, a zero means "every price conforms" and
+		// the domain validator refuses it at load, before any consumer.
+		"declared zero tick": {
+			mutate: func(s string) string { return strings.Replace(s, `"tick":"0.01"`, `"tick":"0"`, 1) },
+		},
 		"missing source": {
 			mutate: func(s string) string {
 				return strings.Replace(s, `"source":"benchmark test row"`, `"source":""`, 1)
@@ -292,11 +318,22 @@ func TestCommittedMilestone2RevisionLoads(t *testing.T) {
 		if sf.Provenance.Class != "hand_recorded" {
 			t.Fatalf("%s spot fee class %q — a committed row may never claim fetched", venue, sf.Provenance.Class)
 		}
-		if _, err := ref.LotRules(spot, asOf); err != nil {
+		// Every committed lot row must now carry a tick: the exercise binary
+		// refuses a tick-less row at startup, so a committed document that
+		// dropped one would fail the $20 run at its door.
+		sl, err := ref.LotRules(spot, asOf)
+		if err != nil {
 			t.Fatalf("%s spot lots: %v", venue, err)
 		}
-		if _, err := ref.LotRules(perp, asOf); err != nil {
+		if sl.Tick == (fixedpoint.Price{}) {
+			t.Fatalf("%s spot lot row carries no tick", venue)
+		}
+		pl, err := ref.LotRules(perp, asOf)
+		if err != nil {
 			t.Fatalf("%s perp lots: %v", venue, err)
+		}
+		if pl.Tick == (fixedpoint.Price{}) {
+			t.Fatalf("%s perp lot row carries no tick", venue)
 		}
 	}
 	if _, err := ref.Hurdle(asOf); err != nil {

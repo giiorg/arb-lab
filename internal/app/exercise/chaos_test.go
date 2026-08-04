@@ -197,12 +197,51 @@ func chaosConfig(t *testing.T, dir, host string) string {
       {"product": "linear_perp", "contract": "linear", "symbol": "BTCUSDT", "side": "sell",
        "quantity": "0.5", "limit_price": "49900"}
     ]
-  }
-}`, filepath.Join(dir, "journal.db"), host, host)
+  },
+  "reference": {"path": %q, "max_age": "24h"}
+}`, filepath.Join(dir, "journal.db"), host, host, chaosReference(t, dir))
 
 	path := filepath.Join(dir, "exercise.json")
 	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
+	}
+	return path
+}
+
+// chaosReference writes the reference revision the run resolves its §2.4
+// trading filters from: the real BTCUSDT rows (profiles §5, 2026-08-03
+// probes), observed one hour ago so freshness is a relative fact rather than
+// a wall-clock bomb. The 0.5 @ 50100/49900 trade above conforms to these
+// filters non-trivially — see validConfig's note.
+func chaosReference(t *testing.T, dir string) string {
+	t.Helper()
+	observed := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+	doc := fmt.Sprintf(`{
+  "fees": [
+    {"venue": "binance", "product": "spot", "contract": "", "maker": "0.001", "taker": "0.001",
+     "tier": "VIP0-modeled", "class": "hand_recorded", "observed_at": %[1]q, "source": "test fixture"},
+    {"venue": "binance", "product": "linear_perp", "contract": "linear", "maker": "0.0002", "taker": "0.0005",
+     "tier": "VIP0-modeled", "class": "hand_recorded", "observed_at": %[1]q, "source": "test fixture"}
+  ],
+  "lots": [
+    {"venue": "binance", "product": "spot", "contract": "", "symbol": "BTCUSDT",
+     "base": "BTC", "step": "0.00001", "min_qty": "0.00001",
+     "quote": "USDT", "min_notional": "5", "tick": "0.01",
+     "class": "hand_recorded", "observed_at": %[1]q,
+     "source": "test fixture mirroring docs/venue-profiles.md trading filters (2026-08-03)"},
+    {"venue": "binance", "product": "linear_perp", "contract": "linear", "symbol": "BTCUSDT",
+     "base": "BTC", "step": "0.001", "min_qty": "0.001",
+     "quote": "USDT", "min_notional": "50", "tick": "0.1",
+     "class": "hand_recorded", "observed_at": %[1]q,
+     "source": "test fixture mirroring docs/venue-profiles.md trading filters (2026-08-03)"}
+  ],
+  "hurdle": {"annual_rate": "0.0369", "access_cost": "0", "liquidity_haircut": "0",
+    "counterparty_haircut": "0", "as_of": %[1]q, "class": "hand_recorded",
+    "observed_at": %[1]q, "source": "test fixture"}
+}`, observed)
+	path := filepath.Join(dir, "reference.json")
+	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+		t.Fatalf("write reference fixture: %v", err)
 	}
 	return path
 }

@@ -92,6 +92,29 @@ type OrderRecord struct {
 	// replayer is the construct that must re-derive it (slice F).
 	AuthorizedAt clock.ServerTime
 
+	// VenueOrderID is the venue's own identifier for this order, exactly as
+	// the single Place's ack carried it (Ack.VenueOrderID). Empty until an ack
+	// with an id was applied, and empty for ever on the order whose ack was
+	// lost — which is not a degenerate case but the one §6.7 exists for.
+	//
+	// # Its emptiness is meaningful the way AuthorizedAt's unset is
+	//
+	// An empty value refuses rather than misleads: no attribution rule may
+	// compare against it (attribute guards every venue-id arm on non-empty),
+	// so the order it belongs to simply contributes nothing to the rule-out
+	// set. The asymmetry with AuthorizedAt is what earns the plain string: an
+	// anchor nobody recorded reads as "authorized at the epoch" unless the
+	// type refuses, while an id nobody recorded reads as nothing at all.
+	//
+	// What a NON-empty value licenses rests on a banked venue fact rather than
+	// on this struct: Binance's orderId is "self-increment for each specific
+	// symbol" (Profiles §8, dated source), so an id observed at ack time still
+	// names the same venue order when a later sweep meets it — non-reuse
+	// across time, which is strictly more than the at-query-time uniqueness
+	// the live paths need. Both claims are per SYMBOL, which is why every
+	// consumer of this field scopes to the full instrument.
+	VenueOrderID string
+
 	// Version is §5.1's OCC version, starting at 1 and incremented by every
 	// write that CHANGES the record.
 	//
@@ -225,6 +248,28 @@ type OrderWriteRepository interface {
 	// every boundary, so accepting it here would durably record an authorization
 	// whose order can never be resolved.
 	ApplyAuthorized(id ids.ClientOrderID, expected int64, at clock.ServerTime) (OrderRecord, error)
+
+	// ApplyAck records the venue's identifier for an order the venue has
+	// acknowledged — OrderRecord.VenueOrderID's one producer.
+	//
+	// An implementation MUST refuse: an empty venueOrderID (the absent id has
+	// one spelling, an empty field, and this method is not it); an order whose
+	// state answers false to MayExistAtVenue (a Planned order has no venue
+	// side to have acked it, so the call describes a history §5.3 says cannot
+	// have happened); and — with ErrVenueOrderIDConflict — an id that
+	// CONTRADICTS the store: this order already holding a different id, or
+	// another order on the same instrument already holding this one. Both
+	// contradictions poison the same downstream fact, the per-instrument
+	// venue-id index the resolver rules sweep rows out against, and a store
+	// that admitted either would hand that index two owners for one key — at
+	// which point a Go map build picks a winner by iteration order, which is
+	// this repo's recorded coin-flip-in-the-code shape with a terminal state
+	// on the losing side.
+	//
+	// Re-recording the id the order already holds is a NO-OP — (record, nil),
+	// version unchanged, per Version's "every write that CHANGES the record" —
+	// because §7.5's replay may legitimately meet the same acked record twice.
+	ApplyAck(id ids.ClientOrderID, expected int64, venueOrderID string) (OrderRecord, error)
 
 	// ApplyState moves the order to a new lifecycle state, refusing the write
 	// unless expected matches the record's current Version.

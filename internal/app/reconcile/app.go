@@ -39,9 +39,11 @@ import (
 
 	"github.com/giiorg/arb-lab/internal/oms"
 	"github.com/giiorg/arb-lab/internal/oms/application"
+	omsdomain "github.com/giiorg/arb-lab/internal/oms/domain"
 	"github.com/giiorg/arb-lab/internal/platform/boot"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/config"
+	"github.com/giiorg/arb-lab/internal/platform/ids"
 	"github.com/giiorg/arb-lab/internal/platform/observability"
 	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
 )
@@ -223,17 +225,40 @@ func Run(ctx context.Context, snap config.Snapshot[Config], wall *clock.Wall,
 	return r.BootReport(), nil
 }
 
+// Option adjusts a Runner at construction. The zero set is the reconcile
+// binary's own boot, complete as it stands; options exist for the composing
+// caller that runs this same sequence and then does MORE with the module.
+type Option func(*Runner)
+
+// WithInstrumentFilters supplies the §2.4 trading filters the assembled
+// module's planner and executor verify against — oms.Deps.InstrumentFilters,
+// threaded through this boot because the module is constructed inside it.
+//
+// It is an OPTION, not a Config field, and the placement is this root's
+// import fence: the filters are resolved from the strategy context's dated
+// reference revision, and §7.5's boot must not depend on strategy — a
+// reconcile-only process plans nothing, so the fail-closed nil map is exactly
+// right for it. The caller that plans (the exercise root) owns the reference
+// document, the freshness bound and the resolution, and hands this boot only
+// the finished vocabulary oms/domain already speaks.
+func WithInstrumentFilters(filters map[ids.VenueInstrument]omsdomain.TradingFilters) Option {
+	return func(r *Runner) { r.filters = filters }
+}
+
 // NewRunner assembles §7.5's boot for a caller that needs to hold it open —
 // the exercise root runs this same sequence and then acts on its verdict, so
 // the phases, the checklist and the module have to be reachable as one value
 // rather than sealed inside Run. Run remains the whole story for a caller that
 // only reconciles.
 func NewRunner(snap config.Snapshot[Config], wall *clock.Wall,
-	reg *observability.Registry, stderr io.Writer) (*Runner, error) {
+	reg *observability.Registry, stderr io.Writer, opts ...Option) (*Runner, error) {
 
 	r := &Runner{
 		cfg: snap.Value, clk: wall, reg: reg, stderr: stderr,
 		rev: snap.Rev.HashString(), storageCheck: checkJournalStorage,
+	}
+	for _, opt := range opts {
+		opt(r)
 	}
 	checklist, err := boot.NewChecklist(declaredGates()...)
 	if err != nil {
@@ -283,6 +308,13 @@ type Runner struct {
 
 	checklist *boot.Checklist
 	module    *oms.Module
+
+	// filters is what WithInstrumentFilters supplied — oms.Deps'
+	// InstrumentFilters, resolved by the caller that plans. Nil for the
+	// reconcile binary, and nil is a meaning, not a gap: the assembled
+	// module's planner refuses every leg, which is what a boot that was
+	// handed no venue grids must do about orders.
+	filters map[ids.VenueInstrument]omsdomain.TradingFilters
 
 	// governor is the venue's §7.6 budget, held here because the root is the
 	// alert deliverer ratelimit's Snapshot doc names: the transports spend
@@ -427,15 +459,16 @@ func (r *Runner) startOMS(context.Context) (boot.StopFunc, error) {
 	}
 	r.governor = governor
 	module, err := oms.New(oms.Deps{
-		JournalPath:      r.cfg.JournalPath,
-		VenueOrders:      client,
-		VenueOrderReads:  client,
-		VenuePositions:   client,
-		PositionScopes:   r.cfg.scopes(),
-		InstrumentAssets: r.cfg.assets(),
-		Clock:            r.clk,
-		Account:          r.cfg.Account,
-		Resolution:       r.cfg.policy(),
+		JournalPath:       r.cfg.JournalPath,
+		VenueOrders:       client,
+		VenueOrderReads:   client,
+		VenuePositions:    client,
+		PositionScopes:    r.cfg.scopes(),
+		InstrumentAssets:  r.cfg.assets(),
+		InstrumentFilters: r.filters,
+		Clock:             r.clk,
+		Account:           r.cfg.Account,
+		Resolution:        r.cfg.policy(),
 	})
 	if err != nil {
 		r.halted = true

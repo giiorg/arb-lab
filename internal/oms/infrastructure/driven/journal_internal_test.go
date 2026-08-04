@@ -230,6 +230,18 @@ func oraclePreimage(t *testing.T, db *sql.DB, r replayed) []byte {
 		b = append(b, oracleI64(instant)...)
 		b = append(b, oracleI64(uncertainty)...)
 		return b
+
+	case "acked":
+		var venueOrderID string
+		if err := db.QueryRow(`SELECT venue_order_id FROM journal_acked WHERE seq = ?`, r.seq).
+			Scan(&venueOrderID); err != nil {
+			t.Fatalf("oracle acked detail at seq %d: %v", r.seq, err)
+		}
+		var b []byte
+		b = append(b, 4) // kind tag, spelled as a literal
+		b = append(b, oracleStr(r.clientID)...)
+		b = append(b, oracleStr(venueOrderID)...)
+		return b
 	}
 
 	t.Fatalf("oracle: record at seq %d has unknown kind %q", r.seq, r.kind)
@@ -433,18 +445,20 @@ func TestOpenRefusesAnEmptyPath(t *testing.T) {
 func TestChainVerifiesAtEveryLength(t *testing.T) {
 	t.Parallel()
 
-	for _, n := range []int{1, 2, 3, 7} {
+	for _, n := range []int{1, 2, 3, 9} {
 		t.Run(fmt.Sprintf("length_%d", n), func(t *testing.T) {
 			t.Parallel()
 			j, path := openTestJournal(t)
 
-			// All THREE kinds interleave — collapse dimension 2, re-run now
-			// that there are three. A chain of one kind makes the kind tag a
-			// constant, and a chain of two makes the THIRD tag's presence in
-			// the preimage unobservable, which is the same defect one member
-			// along: the fixture would not contain the thing under test.
+			// All FOUR kinds interleave — collapse dimension 2, re-run for the
+			// second time now that a fourth exists. A chain of one kind makes
+			// the kind tag a constant, and a chain that never reaches a kind
+			// makes THAT tag's presence in the preimage unobservable, which is
+			// the same defect one member along: the fixture would not contain
+			// the thing under test. The longest length is 9 so the cycle
+			// completes twice.
 			for i := range n {
-				switch i % 3 {
+				switch i % 4 {
 				case 0:
 					if err := j.AppendPlanned(testOrder(t, fmt.Sprintf("c-%d", i), "binance", "BTCUSDT")); err != nil {
 						t.Fatalf("AppendPlanned %d: %v", i, err)
@@ -455,7 +469,12 @@ func TestChainVerifiesAtEveryLength(t *testing.T) {
 						t.Fatalf("AppendAuthorized %d: %v", i, err)
 					}
 				case 2:
-					if err := j.AppendState(ids.ClientOrderID(fmt.Sprintf("c-%d", i-2)),
+					if err := j.AppendAcked(ids.ClientOrderID(fmt.Sprintf("c-%d", i-2)),
+						fmt.Sprintf("77%d", i)); err != nil {
+						t.Fatalf("AppendAcked %d: %v", i, err)
+					}
+				case 3:
+					if err := j.AppendState(ids.ClientOrderID(fmt.Sprintf("c-%d", i-3)),
 						domain.StateSubmitted); err != nil {
 						t.Fatalf("AppendState %d: %v", i, err)
 					}
@@ -659,6 +678,29 @@ func TestPlannedAndStateRecordsCannotCollide(t *testing.T) {
 	}
 }
 
+// TestAckedAndStateRecordsCannotCollide is the pair the fourth kind makes the
+// tag load-bearing for a second time: both encodings are a client id followed
+// by one length-prefixed string, so a venue id spelling a state name is
+// byte-identical after the tag. The fixture takes that worst case rather than
+// a realistic id — a numeric orderId differs from every state name and would
+// pass with the tags deleted.
+func TestAckedAndStateRecordsCannotCollide(t *testing.T) {
+	t.Parallel()
+
+	state := encodeState("c-1", domain.StateSubmitted)
+	acked := encodeAcked("c-1", string(domain.StateSubmitted))
+	if bytes.Equal(state, acked) {
+		t.Error("a state record and an acked record with identical fields share a preimage")
+	}
+	if state[0] == acked[0] {
+		t.Errorf("both kinds carry tag %d — the tag is not discriminating", state[0])
+	}
+	if !bytes.Equal(state[1:], acked[1:]) {
+		t.Error("fixture is broken: the two payloads must be identical past the tag, " +
+			"or the test is not about the tag")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // append-only, enforced by the database
 // ---------------------------------------------------------------------------
@@ -675,6 +717,9 @@ func TestJournalIsAppendOnly(t *testing.T) {
 	}
 	if err := j.AppendAuthorized("c-1", testAnchor(t, 1)); err != nil {
 		t.Fatalf("AppendAuthorized: %v", err)
+	}
+	if err := j.AppendAcked("c-1", "774411"); err != nil {
+		t.Fatalf("AppendAcked: %v", err)
 	}
 
 	db, err := sql.Open("sqlite", "file:"+path)
@@ -695,6 +740,8 @@ func TestJournalIsAppendOnly(t *testing.T) {
 		{"delete a state detail", `DELETE FROM journal_state WHERE seq = 2`},
 		{"update an authorized detail", `UPDATE journal_authorized SET instant_unix_nano = 0 WHERE seq = 3`},
 		{"delete an authorized detail", `DELETE FROM journal_authorized WHERE seq = 3`},
+		{"update an acked detail", `UPDATE journal_acked SET venue_order_id = 'x' WHERE seq = 4`},
+		{"delete an acked detail", `DELETE FROM journal_acked WHERE seq = 4`},
 	}
 	for _, m := range mutations {
 		t.Run(m.name, func(t *testing.T) {
@@ -710,8 +757,8 @@ func TestJournalIsAppendOnly(t *testing.T) {
 	if err := db.QueryRow(`SELECT count(*) FROM journal`).Scan(&n); err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	if n != 3 {
-		t.Errorf("journal holds %d records, want 3 — reads must still work", n)
+	if n != 4 {
+		t.Errorf("journal holds %d records, want 4 — reads must still work", n)
 	}
 }
 
@@ -826,6 +873,50 @@ func TestAppendStateRefusals(t *testing.T) {
 			}
 			if !errors.Is(err, tc.want) {
 				t.Errorf("AppendState = %v, want %v", err, tc.want)
+			}
+			if r := oracleReplay(t, path); len(r) != 0 {
+				t.Errorf("a refused append left %d records behind", len(r))
+			}
+		})
+	}
+}
+
+func TestAppendAckedRefusals(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name         string
+		id           ids.ClientOrderID
+		venueOrderID string
+		want         error
+	}{
+		{"positive control", "c-1", "774411", nil},
+		{"no client order id", "", "774411", ErrJournalClientIDUnset},
+
+		// The empty venue id is the refusal this method exists to state: the
+		// absent id's one spelling is the record's absence, and a journaled
+		// empty string would be a second one — replayed into a field every
+		// attribution rule ignores.
+		{"no venue order id", "c-1", "", ErrJournalVenueOrderIDUnset},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			j, path := openTestJournal(t)
+
+			err := j.AppendAcked(tc.id, tc.venueOrderID)
+			if tc.want == nil {
+				if err != nil {
+					t.Fatalf("AppendAcked: %v", err)
+				}
+				if r := oracleReplay(t, path); len(r) != 1 {
+					t.Errorf("accepted append wrote %d records, want 1", len(r))
+				}
+				return
+			}
+			if !errors.Is(err, tc.want) {
+				t.Errorf("AppendAcked = %v, want %v", err, tc.want)
 			}
 			if r := oracleReplay(t, path); len(r) != 0 {
 				t.Errorf("a refused append left %d records behind", len(r))

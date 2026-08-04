@@ -60,7 +60,7 @@ func newExecutor(t *testing.T) (*application.Executor, *fakeJournal, *fakePlacer
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	e, err := application.NewExecutor(d)
+	e, err := application.NewExecutor(d, testFilters(t))
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestNewExecutorRefusesAMissingDispatcher(t *testing.T) {
 	// One refusal where five used to be: the executor is built FROM the
 	// dispatcher, whose own constructor already refused every nil port, so the
 	// only missing collaborator this constructor can meet is the dispatcher.
-	if _, err := application.NewExecutor(nil); !errors.Is(err, application.ErrDispatcherMissing) {
+	if _, err := application.NewExecutor(nil, testFilters(t)); !errors.Is(err, application.ErrDispatcherMissing) {
 		t.Errorf("NewExecutor(nil) = %v, want ErrDispatcherMissing", err)
 	}
 
@@ -126,7 +126,7 @@ func TestNewExecutorRefusesAMissingDispatcher(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	if _, err := application.NewExecutor(d); err != nil {
+	if _, err := application.NewExecutor(d, testFilters(t)); err != nil {
 		t.Errorf("NewExecutor(dispatcher) = %v, want nil", err)
 	}
 }
@@ -179,9 +179,10 @@ func TestExecuteDispatchesEveryLegExactlyOnce(t *testing.T) {
 			t.Errorf("Place %d entered with %d journal appends completed, want >= 1", i, before)
 		}
 	}
-	// Both legs' full record pairs are in the journal.
-	if len(j.calls) != 4 {
-		t.Errorf("journal holds %d records, want 4 (authorized+state per leg): %v", len(j.calls), j.states())
+	// Both legs' full record triples are in the journal — the ack sits between
+	// each leg's authorization and its result.
+	if len(j.calls) != 6 {
+		t.Errorf("journal holds %d records, want 6 (authorized+acked+state per leg): %v", len(j.calls), j.states())
 	}
 }
 
@@ -205,7 +206,7 @@ func TestExecuteRunsLegsInParallel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	e, err := application.NewExecutor(gated)
+	e, err := application.NewExecutor(gated, testFilters(t))
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
@@ -690,7 +691,7 @@ func TestTheAuthorityIsSharedAcrossDispatchPaths(t *testing.T) {
 		t.Fatalf("Dispatch = %v", err)
 	}
 
-	e, err := application.NewExecutor(d)
+	e, err := application.NewExecutor(d, testFilters(t))
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
@@ -719,7 +720,7 @@ func TestTheAuthorityIsSharedAcrossDispatchPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	split, err := application.NewExecutor(other)
+	split, err := application.NewExecutor(other, testFilters(t))
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}

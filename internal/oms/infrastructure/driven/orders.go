@@ -23,6 +23,10 @@ var _ ports.OrderWriteRepository = (*MemoryOrderWriteRepository)(nil)
 // repository would go on compiling if OrdersIn were deleted.
 var _ ports.HedgeGroupOrders = (*MemoryOrderWriteRepository)(nil)
 
+// And for the read port §5.3's gate 3 rules sweep rows out against — a third
+// line, on the same argument as the second.
+var _ ports.VenueOrderIndex = (*MemoryOrderWriteRepository)(nil)
+
 // This adapter's own refusals, both about §5.1's account component.
 var (
 	// ErrRepositoryAccountUnset reports a store constructed with no account.
@@ -36,6 +40,22 @@ var (
 	// Determined with a zero residual, so the wrong account would return the one
 	// answer that unblocks a compensating trade sized from nothing.
 	ErrRepositoryAccountMismatch = errors.New("oms write repository: hedge group names a different account")
+
+	// ErrRepositoryVenueOrderIDUnset reports an ApplyAck with no id to record.
+	// The absent id's one spelling is an empty OrderRecord.VenueOrderID, which
+	// is what a record has until this method runs — so an empty argument could
+	// only ever be a caller that forgot to check its ack, recorded as a write
+	// that changed nothing and bumped the version anyway.
+	ErrRepositoryVenueOrderIDUnset = errors.New("oms write repository: ack carries no venue order id")
+
+	// ErrRepositoryOrderNotAtVenue reports an ApplyAck for an order whose
+	// state says no venue side exists to have acked it — StatePlanned, the
+	// one state MayExistAtVenue answers false for. Application declares its
+	// own sentinel for the same predicate on the join path
+	// (ErrOrderNotAtVenue); they are not shared because no caller branches
+	// across the two, and an adapter error a use case imported would be the
+	// coupling ports/errors.go exists to prevent — in the other direction.
+	ErrRepositoryOrderNotAtVenue = errors.New("oms write repository: order state admits no venue ack")
 )
 
 // firstVersion is the version an order's record is created at.
@@ -133,6 +153,13 @@ type record struct {
 	// could only come from a second authorization — which is the thing the whole
 	// dispatch path exists to prevent.
 	authorizedAt clock.ServerTime
+
+	// venueOrderID is the venue's identifier from the Place ack, empty until
+	// ApplyAck records one. Write-once like the anchor, but the once is
+	// ENFORCED here rather than inherited from SM §1's edge set: no state
+	// machine forbids a second ack, so ApplyAck's own conflict check is the
+	// only thing standing between this field and two authorities.
+	venueOrderID string
 }
 
 // NewMemoryOrderWriteRepository returns an empty repository for one venue
@@ -263,6 +290,96 @@ func (r *MemoryOrderWriteRepository) ApplyAuthorized(id ids.ClientOrderID, expec
 	}
 	rec.authorizedAt = at
 	return r.snapshot(rec)
+}
+
+// ApplyAck records the venue's identifier for an order, refusing what the
+// port requires refused.
+//
+// # The two contradiction checks are ONE rule with two witnesses, and the
+// # error direction of each is the same
+//
+// The rule is the port's: one venue id, one owner, per instrument. A record
+// already holding a different id and a different record already holding this
+// id are the two ways a store can come to violate it, and both are refused
+// with the same sentinel because a caller's recovery is identical — nothing,
+// this is not recoverable by retry; it is the banked non-reuse premise
+// failing, or an adapter mis-threading acks, and either way the index built
+// over this store must never be consulted again until an operator has looked.
+//
+// The cross-order scan is O(records) under the lock, and that is accepted
+// rather than indexed away: this method runs once per dispatched order, the
+// map it would maintain is a second copy of a fact the records already state,
+// and the copy is the one that drifts.
+func (r *MemoryOrderWriteRepository) ApplyAck(id ids.ClientOrderID, expected int64, venueOrderID string) (ports.OrderRecord, error) {
+	if venueOrderID == "" {
+		return ports.OrderRecord{}, fmt.Errorf("ack order %q: %w", id, ErrRepositoryVenueOrderIDUnset)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	rec, ok := r.records[id]
+	if !ok {
+		return ports.OrderRecord{}, fmt.Errorf("ack order %q: %w", id, ports.ErrOrderUnknown)
+	}
+	if rec.version != expected {
+		return ports.OrderRecord{}, fmt.Errorf("ack order %q: record is at version %d, write expected %d: %w",
+			id, rec.version, expected, ports.ErrVersionConflict)
+	}
+
+	// A Planned order has no venue side to have acked it, so the call
+	// describes a history §5.3 says cannot have happened — the same predicate
+	// the join and the replay report use, called rather than restated.
+	mayExist, err := rec.state.MayExistAtVenue()
+	if err != nil {
+		return ports.OrderRecord{}, fmt.Errorf("ack order %q at %s: %w", id, rec.state, err)
+	}
+	if !mayExist {
+		return ports.OrderRecord{}, fmt.Errorf("ack order %q at %s: %w", id, rec.state, ErrRepositoryOrderNotAtVenue)
+	}
+
+	if rec.venueOrderID == venueOrderID {
+		// §7.5's replay may meet the same acked record twice; restating a fact
+		// is not a change, so the version holds still.
+		return r.snapshot(rec)
+	}
+	if rec.venueOrderID != "" {
+		return ports.OrderRecord{}, fmt.Errorf("ack order %q: record holds venue id %q, ack names %q: %w",
+			id, rec.venueOrderID, venueOrderID, ports.ErrVenueOrderIDConflict)
+	}
+	for otherID, other := range r.records {
+		if otherID != id && other.venueOrderID == venueOrderID &&
+			other.order.Instrument == rec.order.Instrument {
+			return ports.OrderRecord{}, fmt.Errorf("ack order %q: venue id %q already names order %q on %s: %w",
+				id, venueOrderID, otherID, rec.order.Instrument, ports.ErrVenueOrderIDConflict)
+		}
+	}
+
+	rec.venueOrderID = venueOrderID
+	rec.version++
+	return r.snapshot(rec)
+}
+
+// VenueOrderIDsOn is ports.VenueOrderIndex: venue id -> owner for one
+// instrument.
+//
+// The one-owner-per-key contract is inherited from ApplyAck rather than
+// re-checked here — this loop cannot meet two records sharing an id on one
+// instrument because the only writer of the field refused to create them, and
+// a second detector would be a branch no test could reach through this type's
+// public surface.
+func (r *MemoryOrderWriteRepository) VenueOrderIDsOn(instrument ids.VenueInstrument) (map[string]ids.ClientOrderID, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	out := make(map[string]ids.ClientOrderID)
+	for id, rec := range r.records {
+		if rec.venueOrderID == "" || rec.order.Instrument != instrument {
+			continue
+		}
+		out[rec.venueOrderID] = id
+	}
+	return out, nil
 }
 
 // ApplyState moves the order along SM §1, under OCC.
@@ -408,6 +525,7 @@ func (r *MemoryOrderWriteRepository) snapshot(rec *record) (ports.OrderRecord, e
 		Cumulative:   cumulative,
 		Fills:        fills,
 		AuthorizedAt: rec.authorizedAt,
+		VenueOrderID: rec.venueOrderID,
 		Version:      rec.version,
 	}, nil
 }

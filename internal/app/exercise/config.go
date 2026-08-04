@@ -6,6 +6,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/app/reconcile"
 	"github.com/giiorg/arb-lab/internal/oms/application"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
+	"github.com/giiorg/arb-lab/internal/platform/config"
 	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
@@ -36,6 +37,25 @@ type Config struct {
 	// Trade is the package this run plans and executes: §9's synchronized
 	// spot↔perp cycle, stated as data.
 	Trade TradeConfig `json:"trade"`
+
+	// Reference names the committed reference revision the run resolves its
+	// instruments' §2.4 trading filters from, and how old a row may be. It is
+	// REQUIRED here and absent from reconcile.Config, deliberately: the
+	// requirement belongs to the binary that plans, and §7.5's boot root is
+	// fenced off from the strategy context the document belongs to — see
+	// tradingFilters for the whole argument.
+	Reference ReferenceConfig `json:"reference"`
+}
+
+// ReferenceConfig locates the reference revision and bounds its age.
+type ReferenceConfig struct {
+	// Path is the committed document (configs/reference.btcusdt.json in this
+	// repo's deployments).
+	Path string `json:"path"`
+
+	// MaxAge bounds now − observed_at per resolved row. See
+	// ErrFilterRowStale for what a stale row silently re-opens.
+	MaxAge config.Duration `json:"max_age"`
 }
 
 // TradeConfig is one planned package.
@@ -83,6 +103,12 @@ type LegConfig struct {
 func (c Config) Validate() error {
 	if err := c.OMS.Validate(); err != nil {
 		return err
+	}
+	if c.Reference.Path == "" {
+		return fmt.Errorf("reference.path: %w", ErrReferenceFieldUnset)
+	}
+	if c.Reference.MaxAge.Duration() <= 0 {
+		return fmt.Errorf("reference.max_age: %w", ErrReferenceFieldUnset)
 	}
 	if c.Trade.ID == "" {
 		return fmt.Errorf("trade.id: %w", ErrTradeFieldUnset)

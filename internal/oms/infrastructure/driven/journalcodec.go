@@ -95,6 +95,7 @@ const (
 	kindTagPlanned    uint8 = 1
 	kindTagState      uint8 = 2
 	kindTagAuthorized uint8 = 3
+	kindTagAcked      uint8 = 4
 )
 
 // Kind names, as they appear in the kind column.
@@ -107,6 +108,7 @@ const (
 	kindPlanned    = "planned"
 	kindState      = "state"
 	kindAuthorized = "authorized"
+	kindAcked      = "acked"
 )
 
 // genesisHash is the prev_hash of sequence 1.
@@ -175,6 +177,27 @@ func encodeAuthorized(id ids.ClientOrderID, at clock.ServerTime) []byte {
 	b = appendString(b, string(id))
 	b = appendInt64(b, at.Instant().UnixNano())
 	b = appendInt64(b, int64(at.Uncertainty()))
+	return b
+}
+
+// encodeAcked is the canonical preimage of an AppendAcked record.
+//
+// Structurally it is encodeState with a different tag — a client id followed
+// by one length-prefixed string — which is exactly the collision the kind tag
+// exists for: without it, an acked record whose venue id happened to spell a
+// state name would hash identically to a state record of the same order. The
+// tag was load-bearing before this kind existed (the authorized/state pair);
+// this kind makes it load-bearing twice.
+//
+// Adding a kind changes no existing preimage, so chainLabel keeps its /v1:
+// every record an older build wrote verifies unchanged, and an older build
+// reading a journal WITH acked records refuses at the kind column
+// (ErrJournalKindUnknown), which is the documented downgrade direction.
+func encodeAcked(id ids.ClientOrderID, venueOrderID string) []byte {
+	b := make([]byte, 0, 64)
+	b = append(b, kindTagAcked)
+	b = appendString(b, string(id))
+	b = appendString(b, venueOrderID)
 	return b
 }
 

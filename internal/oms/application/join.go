@@ -538,6 +538,20 @@ func (j *Joiner) joinOne(rec ports.OrderRecord, report *Join) (ports.OrderRecord
 		return rec, fmt.Errorf("join order %q on %s: %w", id, rec.Order.Instrument.Venue, err)
 	}
 
+	// Two authorities can now name this order's venue id — the live query's
+	// answer and the ack the dispatch persisted — and they are compared BEFORE
+	// any row is attributed, because the loser of a disagreement decides which
+	// sweep rows become this order's fills. A non-empty mismatch is refused
+	// outright: under the banked non-reuse fact there is no innocent reading,
+	// and picking either id would apply executions on a coin flip's authority.
+	// Either side being empty is not a mismatch — a lost ack left the store
+	// silent, and a surface that returns no id left the query silent; silence
+	// agrees with everything.
+	if rec.VenueOrderID != "" && status.VenueOrderID != "" && rec.VenueOrderID != status.VenueOrderID {
+		return rec, fmt.Errorf("join order %q: store holds venue id %q, venue reports %q: %w",
+			id, rec.VenueOrderID, status.VenueOrderID, ErrVenueOrderIDMismatch)
+	}
+
 	sweep, err := j.venue.SweepExecutions(rec.Order, rec.AuthorizedAt.Earliest(), until.Earliest())
 	if err != nil {
 		return rec, fmt.Errorf("join order %q: %w", id, err)
@@ -547,7 +561,18 @@ func (j *Joiner) joinOne(rec ports.OrderRecord, report *Join) (ports.OrderRecord
 		return rec, nil
 	}
 
-	ours, _ := attribute(sweep.Executions, id, status.VenueOrderID)
+	// Past the mismatch check the two sources agree or one is silent, so
+	// "this order's venue id" has exactly one non-empty answer and either
+	// field may carry it — the live id ordinarily, the persisted ack when a
+	// surface answered without one. The index is deliberately NOT consulted —
+	// nil, not an oversight: an entry for this order could only restate the
+	// id resolved here, and entries for OTHER orders only re-derive the
+	// rule-out the different-id arm already makes. See attribute's doc.
+	venueID := status.VenueOrderID
+	if venueID == "" {
+		venueID = rec.VenueOrderID
+	}
+	ours, _ := attribute(sweep.Executions, id, venueID, nil)
 	for _, e := range ours {
 		fill := domain.Fill{
 			ExecutionID: string(e.ExecutionID),

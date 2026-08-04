@@ -146,6 +146,29 @@ func (q Quantity) Sign() (int, error) {
 	return signMantissa(q.q), nil
 }
 
+// OnStep reports whether q sits on step's lot grid — is an exact whole
+// multiple of it.
+//
+// It is a predicate rather than a rounding operation, and the split is §2.4's:
+// DERIVING an on-grid size belongs to the sizing step, which rounds down and
+// owns the residual tolerance, while the order path VERIFIES and refuses. A
+// verification has no rounding decision to make, so there is no RoundingMode
+// parameter to invite one.
+//
+// step must be strictly positive — see ErrStepNotPositive for why a zero is
+// refused rather than read as "no constraint". A negative q is judged by the
+// same arithmetic (|q| on the grid), which is what a lot filter means for a
+// short.
+func (q Quantity) OnStep(step Quantity) (bool, error) {
+	if _, err := binaryQuantityAsset("on step", q, step); err != nil {
+		return false, err
+	}
+	if step.q <= 0 {
+		return false, fmt.Errorf("quantity on step %s: %w", step, ErrStepNotPositive)
+	}
+	return q.q%step.q == 0, nil
+}
+
 // Mul scales a size by a dimensionless ratio — taking a fraction of a position,
 // or applying a contract multiplier. The rounding mode is the caller's, and for
 // sizing it is normally RoundTowardZero: never size beyond what is backed.

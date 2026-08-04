@@ -88,6 +88,26 @@ type Journal interface {
 	// the misuse is not discouraged; it is a method that does not exist.
 	AppendAuthorized(id ids.ClientOrderID, at clock.ServerTime) error
 
+	// AppendAcked durably records the venue's own identifier for an order —
+	// the id the single Place's ack carried, which on Binance is the ONLY join
+	// key between a swept execution and one of our orders (Ack.VenueOrderID).
+	//
+	// # A venue that supplied no id gets NO record, and that is the method's
+	// # whole shape
+	//
+	// The absent id has exactly one spelling: the record does not exist. An
+	// optional column on the state record would give absence a second spelling —
+	// an empty string whose zero value is legal and says nothing — which is the
+	// same argument that split AppendAuthorized out, one field over. So both
+	// arguments are refused empty: an id-less record could only ever mean "the
+	// venue said nothing", and the journal already says that by silence.
+	//
+	// What the record buys is stated at the consumer: §5.3's gate 3 rules a
+	// swept row OUT when its venue order id belongs to another of OUR orders,
+	// and the persisted ack is where "our orders' venue ids" comes from for an
+	// order whose own ack was lost — which is the one scenario §6.7 runs for.
+	AppendAcked(id ids.ClientOrderID, venueOrderID string) error
+
 	// AppendState durably records an order reaching a lifecycle state.
 	//
 	// It takes the target state only, not the pair. The journal is append-only
