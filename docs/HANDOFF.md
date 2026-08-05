@@ -1,5 +1,170 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
+## Status (2026-08-05, session 104): **#179 MID-SLICE, SECOND SAFE POINT — ITEMS 1–4 OF SESSION 103'S EIGHT ARE IMPLEMENTED AND `make ci` IS GREEN UNCACHED ON BOTH MODULES: THE ENGINE BALANCE CODECS + CLIENT READ, THE BASELINE DOCUMENT PACKAGE WITH ITS VERIFYING LOADER (TESTED AGAINST A REAL JOURNAL), THE SIX-STEP RECORD PROTOCOL + `arblab baseline record`, AND THE CONFIG/ROOT/RENDERER THREADING. THE RECORD PROTOCOL IS IMPLEMENTED BUT NOT YET TESTED — ITS FIXTURE DESIGN IS WRITTEN OUT BELOW SO NOTHING RE-DERIVES. THE SIX SKIPS AND THE ONE `[SPEC EDIT OWED]` MARKER (join.go:~502) STILL STAND BY DESIGN.**
+
+**Read record §70 first; then this block's "NOT YET DONE" is the whole work
+list.** What landed this session, by §70 section:
+
+**(1) Engine codecs + client (§70d/§70f).** `SpotBalanceCodec` embedded in
+`OrderCodec` (both venues or no venue); `balances_binance.go` — weight **20**
+asserted in-test, `omitZeroBalances` deliberately UNSET (params length 0 is
+asserted), `BinanceSpotTotal` exported (free+locked, the ONE shared meaning),
+empty-balances body REFUSED (with omitZeroBalances false every asset comes
+back, so a rowless body is wrong-shaped and §5.3 forbids reading it as a flat
+wallet); `balances_bybit.go` — `accountType=UNIFIED`, `coin` never passed
+(asserted at the WIRE in a client test, not only at encode), `BybitSpotTotal`
+exported (both-readings: pinned only at locked==0), borrow arms
+`borrowAmount`/`spotBorrow` each unpinning on its OWN fixture, and an
+**empty-string borrow field is "no evidence", not a refusal** — the unpin is
+evidence-bound (a STATED nonzero inflates walletBalance); a non-empty
+unparseable figure is a decode error; #171 measures reality (decision recorded
+in `bybitCoinBorrowed`'s comment). `OrderClient.SpotBalances(ctx, urgency)`
+routes via the SPOT transport (two-host test: fapi sees nothing), stamps
+`ObservedAt` from the new `transport.SignedClient.ServerNow()` (same clock the
+request was signed with — one authority). Roster row
+`/v5/account/wallet-balance` → `wallet_balance` landed; the transport fixtures
+are ROSTER-DRIVEN (they iterate `Endpoints()`), so the §66 complete-roster
+ripple auto-propagated and no hand-built Bybit profile exists outside them —
+the hand-enumerated path→name test table got its row explicitly.
+
+**(2) The document package (§70b) — `internal/oms/infrastructure/baseline`**
+(under oms BY POSITION so it may hold the journal adapter; roots may import
+it, singlewriter still bites on ports/driven). `Document` stores INPUTS:
+per-asset verbatim words OR an explicit `absent` marker (the venue's silence
+stated out loud — absent coin = zero), per-order rows {id, side, base,
+cumulative, fees by asset}. `Write` is O_EXCL with partial-write cleanup;
+`Encode` is exported (the digest the operator pins is of the exact bytes) and
+pinned by a BYTE GOLDEN — the encoding is deployment contract, a marshalling
+drift would refuse every pinned document in the field. `Load(pin, journal,
+bindings)` runs the ladder in dependency order: digest → shape → chain mark
+(`HashAt`; seq-0 vacuous BY THE SEQ; `driven.ErrJournalMarkBeyondHead` passes
+through NAMED — truncation is a different operator conversation than
+`ErrChainMarkMismatch`) → credential fingerprint → venue/account →
+rows-vs-prefix (a `prefixOrders` visitor rides the chain-verifying `Replay`;
+mark 0 collects nothing, so order rows on an empty-journal document refuse) →
+RECOMPUTE (B via the shared per-venue derivation selected by
+`baseline.Dialect` — ids.Venue is an open key, the dialect is the
+discriminator; a stored Bybit row with locked != 0 is
+`ErrStoredRowUnpinnable`, which is what makes the walletBalance/locked
+VALUE-swap loud; ours by §70c's formula; baseline = B − ours last).
+`baseline_test.go` runs against a REAL SQLiteJournal: §70h items 3 (B and ours
+both nonzero: B=1.0, ours=0.5−0.2−0.0005−0.0001=0.2994, baseline=0.7006, plus
+an absent-ETH row giving baseline −1), 1–2 (fee shapes incl. the BNB-shape
+cross-pair fee), 7 (three chain-mark cases), 16 (round-trip + word-edit moves
+the answer by exactly the edit + byte golden), 19 (fingerprint the ONLY
+discriminator), 20 (bytes replaced at path → digest; row past the mark →
+prefix — journaled AFTER the mark, so "in the journal" ≠ "in the prefix").
+
+**(3) The record protocol (§70b) — `oms.RecordSpotBaseline` in
+`internal/oms/record.go`,** a Module method (Module gained unexported
+`orders/reader/balances/venue/account/roster/baselines` fields; the venue
+derivation moved above the spot-leg block in New). Steps: replay (Dispatched
+IS the MayExistAtVenue set — Planned-only excluded by the same predicate the
+join uses); join (Unattributed → its own sentinel, THE non-negotiable;
+Incomplete → its own); every absence through §5.3 (`OutcomeUnproved` refuses;
+`Journaled && !Applied` refuses as stale); terminal check AFTER resolution
+(spot only — a live perp is fine, mid-carry re-record); balance read #1
+through the protocol's OWN Routine adapter; `SettleWait(SpotSettle)`; re-read
+BOTH surfaces (per-order: present-at-join must still be present with an
+unchanged Executed, absent-at-join must still be absent — either flip is
+`ErrRecordCumulativeMoved`; balances: verbatim-words equality per coverage
+asset, else `ErrRecordBalanceMoved`); chain mark = `journal.Head()` taken at
+document build (resolution may have appended state records); write O_EXCL;
+**verify-back through the real loader** — the Baselines the operator sees are
+the loader's recomputation, not the protocol's arithmetic. Absorbed deltas
+against the prior: `RecordBaselineDeps.PriorPin` is loaded BEST-EFFORT
+(failure → `RecordedBaseline.PriorError`, printed) because re-recording is the
+REMEDY for a prior that no longer verifies — the BOOT stays strict
+(`oms.New` errors on an unloadable `Deps.SpotBaselineDocument`).
+`app/reconcile.RecordBaseline` wires the same config at
+`RecoveryReadPriority: Routine`; `cmd/arblab/baseline.go` is
+`arblab baseline record -config -out` (prints path, sha256, baselines,
+absorbed, and the "pin it" next step; exit 1 on any gauntlet refusal).
+
+**(4) Config/root/renderer (§70g).** `Config.SpotBaseline *BaselinePinConfig`
+({path, sha256} — hex-validated 32 bytes) OPTIONAL; `Config.SpotSettle`
+required-iff-spot AND REFUSED on a spotless deployment (a bound nothing waits
+is a claim nobody checks); `oms.Deps.SpotBaselineDocument` (pin + fingerprint
++ dialect) mutually exclusive with the `SpotBaselines` data seam
+(`ErrSpotBaselineDoubleSourced`), loaded inside `New` against the journal it
+just opened; `venueWiring.fingerprint` exposed; the boot threads
+`SpotBalances: wiring.client` always, the settle pair when configured, and
+the pin when present. Renderer: `spot unexplained` lines sit BESIDE the
+derivative deltas (same finding, one leg over), `spot unconcluded` after
+`unasserted`. The two `validConfig` fixtures (reconcile, exercise) gained
+`SpotSettle: 2s`. The stale `UnassertedNoPositionSurface` comment in
+Validate's spot arm was rewritten.
+
+**NOT YET DONE (the next session's list, in order):**
+
+**(a) `internal/oms/record_test.go` — the protocol has NO tests; the design
+is settled, transcribe it:** fakes at the VENUE level (the driven adapters
+are real): a per-id scriptable `driven.VenueOrderReader` — `statuses
+map[string][]venue.OrderStatus` walked per call (last repeats), ONE shared
+`venue.ExecutionPage` per symbol (both spot orders share BTCUSDT; `attribute`
+filters by id, which is the realistic answer), `Watermark` past `until` for a
+complete sweep, urgency log — and a `driven.SpotBalanceReader` fake with
+`reports []venue.SpotBalanceReport` walked per call + urgency log
+(`ObservedAt` via `clock.NewServerTime`; the ENGINE normally stamps it, the
+fake must). Journal pre-populated via `driven.OpenSQLiteJournal` BEFORE
+`oms.New` (planned/authorized/acked/state rows — module_test.go's
+`TestASecondModuleRebuilds` shape), reuse `fullDeps` with overrides and
+`RecoveryReadPriority: Routine`. Ten cases: HAPPY (a Planned-only order
+beside a terminal filled one RECORDS — §70h.12; the recording wait called
+exactly once with SpotSettle; every urgency on BOTH surfaces is Routine —
+§70h.13's seam evidence; ours=0.5−0.0005 fee=0.4995, B=1.0 (words
+free/locked), baseline=0.5005 via the returned loader recomputation; document
+rows exactly [the filled order]); StateSubmitted spot order →
+`ErrRecordSpotOrderOpen`; short watermark → `ErrRecordSweepIncomplete`;
+venue Executed ≠ swept rows → `ErrRecordUnattributed`; unpinned BTC row →
+`ErrRecordBalanceUnpinned`; statuses [0.5 then 0.6] →
+`ErrRecordCumulativeMoved`; balance reports differing across the wait →
+`ErrRecordBalanceMoved` (§70h.18 = these two are SEPARATE fixtures); absent +
+recently-authorized → `ErrRecordAbsenceUnproved`; nil SettleWait →
+`ErrRecordSettleUnwired`; prior via `Deps.SpotBaselines` {BTC 0.3} →
+Absorbed {0.3 → 0.5005, delta 0.2005}. Useful shapes: `venueReach()` from
+driven/orderresolver_test.go; `venue.OrderPresent`, `venue.OrderStateFilled`.
+Also add the driven-adapter zero-priority construction refusal if no fixture
+reaches it.
+
+**(b) Config refusal tests + renderer goldens:** spot_settle
+required-when-spot AND refused-when-spotless; pin hex-shape refusals; the
+`TestConfigRefusals` table rows; renderer goldens for SpotUnexplained order
+against existing sections and SpotUnconcluded lines (§70h.11/21) incl. the
+combined latching-plus-unpinned boot output.
+
+**(c) Item 5 — UNSKIP the six `awaits #179` fixtures** (grep it: reconcile
+app_test 1, exercise app/filters 2, chaos 3). They exercise ROOTS, so the
+path is: build the fixture journal, `baseline.Write` a document against it,
+sha256 the bytes, put {path, digest} in the fixture config — NOT the Deps
+data seam.
+
+**(d) Item 6 — §70h checklist audit 1–24** (many landed at the two safe
+points: 1–3, 7, 16, 19, 20 in baseline_test; 5–6 partly in engine
+balances_test + join_test — AUDIT, don't assume; 22's encode assertion is in
+balances_test; 4, 8–15, 17–18, 21, 23–24 are spread over join_test/
+reconcile_test from session 103 plus (a)/(b) above — verify each by name)
+**then the ≥15-mutant campaign** (battery list at §70h's tail; remember
+MUTATE_TIMEOUT spelled `180s`, and the §70h.16 Binance free/locked swap is
+BEHAVIOR-EQUIVALENT (sum commutes) — the Bybit value-swap is the loud one,
+already a fixture).
+
+**(e) Item 7 — spec edits → v0.9.49:** §7.5 spot paragraph rewrite discharges
+the ONE `[SPEC EDIT OWED]` at join.go:~502; §5.2 gains `spot_baseline`
+{path,sha256} optional + `spot_settle` required-when-spot (+ the CLI:
+`arblab baseline record`); profiles already carry the dated block;
+adr-history dated block; §70's WIP banner → closure record.
+
+**(f) Item 8 — the final fresh `code_diff` review** (round-4 design review
+stays optional). Then commit as the slice close.
+
+**Standing user decisions, unchanged:** the $20/$55 live-test decision; #171;
+§38f. Capture **PID 8495**, never rebuild over `bin/arblab`, `make ci` runs
+`-race` AND the ka staleness gate (needs node), cap `TLC_WORKERS` at 4,
+docs/i18n parity is `bun test`.
+
+---
+
 ## Status (2026-08-05, session 103): **#179 IS MID-SLICE AT A COMMITTED SAFE POINT — THE DESIGN (RECORD §70) IS THROUGH THREE ADVERSARIAL ROUNDS WITH ALL FOURTEEN MAJORS FOLDED IN, THE APPLICATION CORE IS IMPLEMENTED AND `make ci` IS GREEN, SIX FIXTURES ARE LOUDLY SKIPPED AWAITING THE BASELINE LOADING PATH, AND ONE `[SPEC EDIT OWED]` MARKER STANDS BY DESIGN.**
 
 **Read record §70 (`docs/superpowers/specs/2026-08-05-m3-179-spot-baseline.md`)

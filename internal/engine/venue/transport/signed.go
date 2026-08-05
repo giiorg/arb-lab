@@ -449,6 +449,18 @@ func (c *SignedClient) UsesGovernor(g *ratelimit.Governor) bool {
 	return c.cfg.Governor == g
 }
 
+// ServerNow reports the venue-calibrated server clock this client signs with.
+//
+// Exposed for the one consumer that needs a venue instant OUTSIDE a
+// signature: the spot balance read stamps its report's ObservedAt (task #179,
+// record §70d). Reading it here keeps "the venue clock instant of the read"
+// the same authority the request was signed against, rather than a second
+// clock a codec would have to invent from a response field whose semantics
+// differ per venue.
+func (c *SignedClient) ServerNow() clock.ServerTime {
+	return c.cfg.Clock.ServerNow(c.cfg.Signer.Venue())
+}
+
 // observe folds the venue's rate-limit headers into the governor and reports
 // whether the mapped endpoint received its usable observation.
 //
@@ -762,6 +774,7 @@ const (
 	BybitOrderHistoryLimit  = "order_history"
 	BybitExecutionListLimit = "execution_list"
 	BybitPositionListLimit  = "position_list"
+	BybitWalletBalanceLimit = "wallet_balance"
 )
 
 type bybitEndpointRow struct {
@@ -779,6 +792,10 @@ var bybitEndpointRegistry = [...]bybitEndpointRow{
 	{Path: "/v5/order/history", EndpointBudget: EndpointBudget{Name: BybitOrderHistoryLimit, Dimension: ratelimit.DimensionRequests}},
 	{Path: "/v5/execution/list", EndpointBudget: EndpointBudget{Name: BybitExecutionListLimit, Dimension: ratelimit.DimensionRequests}},
 	{Path: "/v5/position/list", EndpointBudget: EndpointBudget{Name: BybitPositionListLimit, Dimension: ratelimit.DimensionRequests}},
+	// The account surface (task #179): §7.5's spot baseline assertion reads
+	// the wallet at boot, and `arblab baseline record` reads it twice more.
+	// Venue-published 50/s per UID (Profiles §4's dated 2026-08-05 block).
+	{Path: "/v5/account/wallet-balance", EndpointBudget: EndpointBudget{Name: BybitWalletBalanceLimit, Dimension: ratelimit.DimensionRequests}},
 }
 
 var bybitEndpoints = func() map[string]string {

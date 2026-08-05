@@ -1,6 +1,8 @@
 package reconcile
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -76,12 +78,59 @@ type Config struct {
 	// venue publishes.
 	Resolution ResolutionConfig `json:"resolution"`
 
+	// SpotBaseline pins the recorded spot exposure baseline document — the
+	// path AND its sha256, because the digest is what enforces the two-act
+	// rule: `arblab baseline record` writes a NEW document (O_EXCL), and only
+	// this config edit makes it govern anything (task #179, record §70b).
+	//
+	// OPTIONAL, and the optionality is load-bearing (§70g): a required field
+	// is circular on a virgin deployment — the record command runs off this
+	// same validated config. Absence is not a config error; it is the
+	// INVARIANT's own named refusal: every spot instrument reports
+	// UnassertedBaselineUnrecorded, which holds the posture. When the field
+	// IS present, the document must load, chain-verify and bind, or the boot
+	// errors — a pinned document that will not load is a wiring defect, not a
+	// gate refusal.
+	SpotBaseline *BaselinePinConfig `json:"spot_baseline,omitempty"`
+
+	// SpotSettle is §5.2's `spot_settle`: the settle bound both the record
+	// protocol and the boot's spot second look wait — one rule, two callers
+	// (record §70c). Required whenever a spot instrument is configured; a
+	// positive duration (seconds, for the IOC-only MVP). It is an OPERATOR
+	// statement of how stale the venue's own read side may be about its own
+	// matching engine — the same kind of claim as resolution.max_landing,
+	// not the same claim.
+	SpotSettle config.Duration `json:"spot_settle,omitempty"`
+
 	// WatchdogSilence is §7.4's host-silence threshold and StopBudget is what each
 	// phase's closer is allotted. boot.Sequence refuses a total teardown at or
 	// above the threshold, because an ordinary restart that outlasts it presents
 	// to the watchdog exactly as a dead host.
 	WatchdogSilence config.Duration `json:"watchdog_silence"`
 	StopBudget      config.Duration `json:"stop_budget"`
+}
+
+// BaselinePinConfig is the spot baseline document's pin: where it is and what
+// its bytes digest to. Both halves required — a path-only pin would re-open
+// the edit-in-place hole the digest exists to close.
+type BaselinePinConfig struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+}
+
+func (p BaselinePinConfig) validate() error {
+	if p.Path == "" {
+		return fmt.Errorf("spot_baseline.path: %w", ErrConfigFieldUnset)
+	}
+	if p.SHA256 == "" {
+		return fmt.Errorf("spot_baseline.sha256: %w", ErrConfigFieldUnset)
+	}
+	raw, err := hex.DecodeString(p.SHA256)
+	if err != nil || len(raw) != sha256.Size {
+		return fmt.Errorf("spot_baseline.sha256 %q is not a 32-byte hex digest: %w",
+			p.SHA256, ErrConfigFieldInvalid)
+	}
+	return nil
 }
 
 // Dialect names a venue's REST family, and it selects FOUR collaborators at once.
@@ -380,12 +429,16 @@ func (c Config) Validate() error {
 		}
 		covered[scopeKey{s.Venue, s.Product}] = struct{}{}
 	}
+	hasSpot := false
 	for i, in := range c.Instruments {
 		if !in.Product.IsPerp() {
 			// No venue publishes a position surface for spot, so no scope could
-			// ever cover it. That leg is reported on every boot instead
-			// (application.UnassertedNoPositionSurface) and task #179 is the
-			// baseline that would let it be asserted.
+			// ever cover it. The spot leg is asserted against a recorded
+			// BASELINE instead (task #179, record §70), or reported
+			// UnassertedBaselineUnrecorded — a coverage check that lives at
+			// assert time, in the report, because the baseline is deliberately
+			// optional here (see Config.SpotBaseline).
+			hasSpot = true
 			continue
 		}
 		if _, ok := covered[scopeKey{in.Venue, in.Product}]; !ok {
@@ -396,6 +449,26 @@ func (c Config) Validate() error {
 
 	if err := c.Resolution.validate(c.Venue); err != nil {
 		return err
+	}
+	if c.SpotBaseline != nil {
+		if err := c.SpotBaseline.validate(); err != nil {
+			return err
+		}
+	}
+	// The settle bound is required exactly when a spot instrument exists: the
+	// record protocol and the boot's second look both wait it, and a spot
+	// deployment without one would meet its first spot delta with an unwired
+	// bracket — a failure at the moment that needs the bracket most. A
+	// derivatives-only deployment carrying the field is refused too: a bound
+	// nothing waits is a claim nobody checks.
+	if hasSpot && c.SpotSettle.Duration() <= 0 {
+		return fmt.Errorf("spot_settle: %w", ErrConfigFieldUnset)
+	}
+	if !hasSpot && c.SpotSettle.Duration() != 0 {
+		return fmt.Errorf("spot_settle configured with no spot instrument: %w", ErrConfigFieldInvalid)
+	}
+	if !hasSpot && c.SpotBaseline != nil {
+		return fmt.Errorf("spot_baseline configured with no spot instrument: %w", ErrConfigFieldInvalid)
 	}
 	if c.WatchdogSilence.Duration() <= 0 {
 		return fmt.Errorf("watchdog_silence: %w", ErrConfigFieldUnset)

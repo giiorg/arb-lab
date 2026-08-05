@@ -131,11 +131,23 @@ func writeReconcileDiagnosis(w io.Writer, r appreconcile.Report) {
 		fmt.Fprintf(w, "  unexplained %s: venue %s, ours %s, delta %s\n",
 			d.Instrument, d.Observed.Decimal(), d.Expected.Decimal(), d.Unexplained.Decimal())
 	}
+	for _, d := range rec.Assertion.SpotUnexplained {
+		// Beside the derivative deltas rather than after the sections below:
+		// the two are the SAME finding — §7.5's unexplained delta — on the
+		// leg with no position surface, and an operator triaging a latch
+		// reads them together (task #179, record §70c).
+		fmt.Fprintf(w, "  spot unexplained %s %s: balance-minus-baseline %s, ours %s, delta %s\n",
+			d.Venue, d.Asset, d.Observed.Decimal(), d.Expected.Decimal(), d.Unexplained.Decimal())
+	}
 	for _, s := range rec.Assertion.Foreign {
 		fmt.Fprintf(w, "  foreign symbol %s\n", s)
 	}
 	for _, u := range rec.Assertion.Unasserted {
 		fmt.Fprintf(w, "  unasserted %s: %s\n", u.Instrument, u.Reason)
+	}
+	for _, u := range rec.Assertion.SpotUnconcluded {
+		fmt.Fprintf(w, "  spot unconcluded %s %s: %s (re-reportable; a further attempt may pin it)\n",
+			u.Venue, u.Asset, u.Reason)
 	}
 	if rec.Cause != nil {
 		fmt.Fprintf(w, "cause:    %v\n", rec.Cause)

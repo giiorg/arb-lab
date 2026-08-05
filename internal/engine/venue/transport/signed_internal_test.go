@@ -1036,6 +1036,7 @@ func TestLimitReadersDeriveEndpointNames(t *testing.T) {
 		{"/v5/order/history", "order_history"},
 		{"/v5/execution/list", "execution_list"},
 		{"/v5/position/list", "position_list"},
+		{"/v5/account/wallet-balance", "wallet_balance"},
 		{"/v5/order/unknown", ""},
 	}
 	for _, tc := range cases {

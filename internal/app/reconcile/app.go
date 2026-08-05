@@ -43,6 +43,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/oms"
 	"github.com/giiorg/arb-lab/internal/oms/application"
 	omsdomain "github.com/giiorg/arb-lab/internal/oms/domain"
+	"github.com/giiorg/arb-lab/internal/oms/infrastructure/baseline"
 	"github.com/giiorg/arb-lab/internal/platform/boot"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/config"
@@ -476,7 +477,7 @@ func (r *Runner) startOMS(context.Context) (boot.StopFunc, error) {
 	}
 	r.governor = wiring.governor
 	r.spend = wiring.spend
-	module, err := oms.New(oms.Deps{
+	deps := oms.Deps{
 		JournalPath:       r.cfg.JournalPath,
 		VenueOrders:       wiring.client,
 		VenueOrderReads:   wiring.client,
@@ -492,7 +493,29 @@ func (r *Runner) startOMS(context.Context) (boot.StopFunc, error) {
 		// §7.6's ladder. The record command's wiring is the Routine caller
 		// the constructor pin exists to distinguish (record §70f).
 		RecoveryReadPriority: ratelimit.PrioritySafety,
-	})
+
+		// The spot leg (task #179): the balance surface rides the same venue
+		// client; the settle bracket is wired exactly when the config
+		// carries the bound (required-when-spot, so a spot deployment always
+		// has it); the baseline document pin is optional, and its absence is
+		// the invariant's own named refusal rather than a wiring error.
+		SpotBalances: wiring.client,
+	}
+	if settle := r.cfg.SpotSettle.Duration(); settle > 0 {
+		deps.SettleWait = time.Sleep
+		deps.SpotSettle = settle
+	}
+	if r.cfg.SpotBaseline != nil {
+		deps.SpotBaselineDocument = &oms.SpotBaselineDocument{
+			Pin: baseline.Pin{
+				Path:   r.cfg.SpotBaseline.Path,
+				SHA256: r.cfg.SpotBaseline.SHA256,
+			},
+			Fingerprint: wiring.fingerprint,
+			Dialect:     baseline.Dialect(r.cfg.Venue.Dialect),
+		}
+	}
+	module, err := oms.New(deps)
 	if err != nil {
 		r.halted = true
 		r.reconciliation.Cause = errors.Join(err, r.spend.Close())

@@ -130,6 +130,10 @@ func validConfig(t *testing.T, journal string) Config {
 				{Venue: "binance", Product: ids.ProductSpot, Reach: dur(t, "72h")},
 			},
 		},
+		// Required-when-spot (record §70g): the fixture declares a spot
+		// instrument, so the settle bound must be here or the fixture fails
+		// its own positive control.
+		SpotSettle:      dur(t, "2s"),
 		WatchdogSilence: dur(t, "30s"),
 		StopBudget:      dur(t, "2s"),
 	}

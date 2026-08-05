@@ -261,6 +261,22 @@ var (
 	// the zero value or out of roster — an asset outside the assertion with no
 	// account of why (task #179).
 	ErrSpotUnpinnedReasonInvalid = errors.New("venue: spot balance row names no valid unpinned reason")
+
+	// ErrSpotBalancesUnreadable reports a wallet enumeration whose answer
+	// cannot be attributed row by row — a rowless Binance account body, a
+	// missing or foreign accountType echo, a duplicate asset, a row with no
+	// asset name. The positions surface's ErrPositionsUnreadable one surface
+	// over, and separate from it because the two answers feed different
+	// halves of §7.5's assertion (task #179, record §70d).
+	ErrSpotBalancesUnreadable = errors.New("venue: spot balance answer is unreadable")
+
+	// ErrSpotBalanceWordSet reports verbatim balance words that are not
+	// exactly the venue's documented field set — one missing, one stated
+	// twice, or one nothing consumes. The strictness is the baseline
+	// document's: a stored word nothing reads is a claim nobody checks
+	// (record §70b), and the live codec building its own words cannot miss,
+	// so a miss is a codec defect rather than a venue surprise.
+	ErrSpotBalanceWordSet = errors.New("venue: spot balance words do not match the venue's field set")
 )
 
 // There is deliberately no sentinel here for "funding asked of a spot

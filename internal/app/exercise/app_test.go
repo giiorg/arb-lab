@@ -155,6 +155,8 @@ func reconcileConfig(t *testing.T) reconcile.Config {
 				{Venue: "binance", Product: ids.ProductSpot, Reach: dur(t, "72h")},
 			},
 		},
+		// Required-when-spot (record §70g): the fixture trades a spot leg.
+		SpotSettle:      dur(t, "2s"),
 		WatchdogSilence: dur(t, "30s"),
 		StopBudget:      dur(t, "2s"),
 	}

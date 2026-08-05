@@ -63,6 +63,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/engine/venue"
 	"github.com/giiorg/arb-lab/internal/oms/application"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
+	"github.com/giiorg/arb-lab/internal/oms/infrastructure/baseline"
 	"github.com/giiorg/arb-lab/internal/oms/infrastructure/driven"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
@@ -211,12 +212,25 @@ type Deps struct {
 	SpotBalances driven.SpotBalanceReader
 
 	// SpotBaselines is the recorded not-ours portion of the venue's spot
-	// balance, per base asset — the conclusion of the root's verification of
-	// the pinned baseline document (chain mark, credential fingerprint, config
-	// digest, per-order row recomputation), handed here as data. The module
-	// re-validates shape (validateSpotLeg); it cannot re-verify provenance and
-	// does not pretend to.
+	// balance, per base asset, handed here as already-verified DATA — the
+	// fixture seam, for tests that pin a baseline without a document. The
+	// module re-validates shape (validateSpotLeg); it cannot re-verify
+	// provenance and does not pretend to. Mutually exclusive with
+	// SpotBaselineDocument.
 	SpotBaselines []application.SpotBaseline
+
+	// SpotBaselineDocument is §5.2's `spot_baseline` pin plus the bindings
+	// only the root knows: the transport credential's fingerprint and the
+	// venue dialect. When set, New runs the verifying loader over the pinned
+	// document — digest, chain mark against the journal it just opened,
+	// fingerprint, venue/account, rows-vs-prefix, recomputation — and a
+	// document that will not load FAILS construction: a pinned document that
+	// cannot govern is a wiring defect, not a gate refusal (record §70g).
+	//
+	// The load happens HERE rather than in the root because the chain mark is
+	// verified against the journal, and §3.6 rule 6 keeps the journal adapter
+	// out of every root's reach.
+	SpotBaselineDocument *SpotBaselineDocument
 
 	// RecoveryReadPriority is the §7.6 shed class the order-read surface
 	// (Resolve and the executions sweep) carries — a ROOT's statement since
@@ -423,6 +437,20 @@ type Module struct {
 	// that singlewriter cannot see, because the root needs no import to use a
 	// value it was given.
 	journal *driven.SQLiteJournal
+
+	// The record protocol's capabilities (task #179, record §70b): the
+	// projection the document rows come from, the order-read adapter the
+	// settle re-read rides, the balance client its Routine adapter is built
+	// over, and the deployment identity the document binds. Unexported for
+	// journal's reason — RecordSpotBaseline is the one consumer, and a root
+	// drives the protocol rather than the parts.
+	orders    *driven.MemoryOrderWriteRepository
+	reader    *driven.OrderResolver
+	balances  driven.SpotBalanceReader
+	venue     ids.Venue
+	account   string
+	roster    []application.SpotInstrument
+	baselines []application.SpotBaseline
 }
 
 // New assembles the context, refusing an incomplete one.
@@ -551,7 +579,36 @@ func New(deps Deps) (*Module, error) {
 	// to find exposure on instruments nothing here knows about, so deriving it
 	// would cap it at what we know; the spot roster exists to make every
 	// instrument we DO know answered for, which is exactly a derivation.
-	spot := application.SpotLeg{Baselines: deps.SpotBaselines}
+	// The venue is the instrument table's — NewVenuePositions above has
+	// already refused a table naming two, so the first key's venue is a
+	// well-defined function of validated input, not a map-order sample.
+	var moduleVenue ids.Venue
+	for instrument := range deps.InstrumentAssets {
+		moduleVenue = instrument.Venue
+		break
+	}
+	baselines := deps.SpotBaselines
+	if deps.SpotBaselineDocument != nil {
+		if len(deps.SpotBaselines) > 0 {
+			// Two authorities for one slot: the data seam is for fixtures, the
+			// pin is for deployments, and a caller supplying both has two
+			// answers to "which history is this baseline about".
+			return nil, errors.Join(ErrSpotBaselineDoubleSourced, journal.Close())
+		}
+		loaded, err := baseline.Load(deps.SpotBaselineDocument.Pin, journal, baseline.Bindings{
+			Venue:       moduleVenue,
+			Account:     deps.Account,
+			Fingerprint: deps.SpotBaselineDocument.Fingerprint,
+			Dialect:     deps.SpotBaselineDocument.Dialect,
+		})
+		if err != nil {
+			// A pinned document that will not load is a wiring defect, not a
+			// gate refusal (record §70g): the boot ERRORS rather than holding.
+			return nil, errors.Join(fmt.Errorf("oms: spot baseline document: %w", err), journal.Close())
+		}
+		baselines = loaded
+	}
+	spot := application.SpotLeg{Baselines: baselines}
 	for instrument, assets := range deps.InstrumentAssets {
 		if instrument.Product != ids.ProductSpot {
 			continue
@@ -568,15 +625,7 @@ func New(deps Deps) (*Module, error) {
 		// does not happen. The record command constructs its OWN adapter at
 		// Routine — the two rungs are the reason the priority is a constructor
 		// argument at all.
-		// The venue is the instrument table's — NewVenuePositions above has
-		// already refused a table naming two, so the first key's venue is a
-		// well-defined function of validated input, not a map-order sample.
-		var v ids.Venue
-		for instrument := range deps.InstrumentAssets {
-			v = instrument.Venue
-			break
-		}
-		balances, err := driven.NewSpotBalances(deps.SpotBalances, v, ratelimit.PrioritySafety)
+		balances, err := driven.NewSpotBalances(deps.SpotBalances, moduleVenue, ratelimit.PrioritySafety)
 		if err != nil {
 			return nil, errors.Join(fmt.Errorf("oms: spot balances gateway: %w", err), journal.Close())
 		}
@@ -607,6 +656,13 @@ func New(deps Deps) (*Module, error) {
 		Join:      joiner,
 		Reconcile: reconciler,
 		journal:   journal,
+		orders:    orders,
+		reader:    reader,
+		balances:  deps.SpotBalances,
+		venue:     moduleVenue,
+		account:   deps.Account,
+		roster:    spot.Roster,
+		baselines: baselines,
 	}, nil
 }
 

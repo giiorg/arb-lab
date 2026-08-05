@@ -155,6 +155,12 @@ type venueWiring struct {
 	client   *venue.OrderClient
 	governor *ratelimit.Governor
 	spend    *transport.SpendLock
+
+	// fingerprint is the spending credential's digest — the binding the spot
+	// baseline document carries and the loader compares (task #179, record
+	// §70b): the account LABEL is mutable configuration, and this is what
+	// refuses a credential swapped underneath it.
+	fingerprint string
 }
 
 func newOrderClient(cfg Config, clk clock.Clock) (venueWiring, error) {
@@ -205,5 +211,6 @@ func newOrderClient(cfg Config, clk clock.Clock) (venueWiring, error) {
 	if err != nil {
 		return venueWiring{}, errors.Join(err, spend.Close())
 	}
-	return venueWiring{client: client, governor: governor, spend: spend}, nil
+	return venueWiring{client: client, governor: governor, spend: spend,
+		fingerprint: cred.Fingerprint()}, nil
 }

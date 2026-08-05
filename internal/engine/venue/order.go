@@ -242,6 +242,14 @@ type OrderCodec interface {
 	// positions cannot be read is not a venue this system may hold a derivative
 	// leg on.
 	PositionCodec
+
+	// SpotBalanceCodec is the spot balance surface (task #179), embedded on
+	// the same argument's spot half: §7.5's spot assertion compares the
+	// wallet against a recorded baseline before trading resumes, and
+	// cash-and-carry's spot leg is the strategy rather than an option, so a
+	// venue whose spot balances cannot be read is not a venue this system may
+	// hold a spot leg on.
+	SpotBalanceCodec
 }
 
 // OrderClient is §4's OrderGateway.Place for one venue.
