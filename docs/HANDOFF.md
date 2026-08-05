@@ -1,6 +1,91 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-05, session 104): **#179 MID-SLICE, SECOND SAFE POINT — ITEMS 1–4 OF SESSION 103'S EIGHT ARE IMPLEMENTED AND `make ci` IS GREEN UNCACHED ON BOTH MODULES: THE ENGINE BALANCE CODECS + CLIENT READ, THE BASELINE DOCUMENT PACKAGE WITH ITS VERIFYING LOADER (TESTED AGAINST A REAL JOURNAL), THE SIX-STEP RECORD PROTOCOL + `arblab baseline record`, AND THE CONFIG/ROOT/RENDERER THREADING. THE RECORD PROTOCOL IS IMPLEMENTED BUT NOT YET TESTED — ITS FIXTURE DESIGN IS WRITTEN OUT BELOW SO NOTHING RE-DERIVES. THE SIX SKIPS AND THE ONE `[SPEC EDIT OWED]` MARKER (join.go:~502) STILL STAND BY DESIGN.**
+## Status (2026-08-05, session 105): **#179 MID-SLICE, THIRD SAFE POINT — ITEMS (a) THROUGH (d) OF SESSION 104'S LIST ARE DONE: THE TEN-CASE `record_test.go` TRANSCRIBED AND GREEN, THE CONFIG ROWS + RENDERER GOLDENS LANDED, ALL SIX `awaits #179` FIXTURES UNSKIPPED, THE §70h ITEM 1–24 AUDIT COMPLETE (IT FOUND AND FILLED TWO REAL GAPS), AND THE MUTATION CAMPAIGN RUN — 20 MUTANTS, ZERO SURVIVED (results table at §70h's tail). `make ci` GREEN UNCACHED. WHAT REMAINS IS ITEMS (e) SPEC EDITS → v0.9.49 (DISCHARGING THE ONE `[SPEC EDIT OWED]` AT join.go:~502) AND (f) THE FINAL FRESH `code_diff` REVIEW, THEN THE SLICE CLOSES.**
+
+**What session 105 did, in order.**
+
+**(a) `internal/oms/record_test.go`** — the ten-case design transcribed
+verbatim: the happy path (Planned-only beside terminal filled RECORDS —
+§70h.12; the wait exactly once with SpotSettle; order reads a known exact
+count of 3, every urgency Routine on BOTH surfaces — §70h.13; baseline 0.5005
+via the returned loader recomputation; document rows exactly the filled order,
+words verbatim, ChainSeq exactly 7; SHA256 re-derived from the on-disk bytes),
+the four gauntlet refusals each on its own fixture (§70h.8), the two
+settle-window refusals as SEPARATE fixtures (§70h.18 — the balance-moved one
+moves the SPLIT while keeping the total, pinning verbatim-words equality), the
+unproved absence (recent anchor → horizon gate), the unwired bracket (both
+halves), and the absorbed-delta print {0.3 → 0.5005, delta 0.2005}. Plus
+`TestBootBalanceReadRidesSafety` (the boot rung beside the record rung — one
+fake, two call sites, two logged priorities) and
+`driven/balances_test.go` (constructor refusals incl. the zero priority,
+which no composed fixture could reach).
+
+**(b) Config + renderer.** Seven `TestConfigRefusals` rows (settle
+required-when-spot / refused-when-spotless, pin shape ×4, pin-on-spotless with
+a WELL-FORMED pin so the row cannot pass on the shallower shape check) + the
+two acceptance positive controls; `TestReconcileReportGoldenSpotSections`
+pins the complete report with every assertion section at once — spot
+unexplained BESIDE the derivative delta (§70h.11), both unpinned reasons'
+lines, and the combined latching-plus-unpinned output with verdict
+ExitOperator (§70h.21/14).
+
+**(c) The six unskips.** The recipe everywhere: a seq-0 baseline document
+(`pinnedCleanBaseline` in reconcile's and exercise's tests, `chaosBaseline` in
+chaos_test) whose stored words the fake venue's `GET /api/v3/account` answer
+repeats, pinned by {path, sha256} in the FIXTURE CONFIG (never the Deps data
+seam), fingerprint computed through `transport.NewCredential(...).Fingerprint()`
+— the production derivation, not a literal. The reconcile clean boot now
+serves exactly ONE wallet read and asserts the count; chaos config gained
+`spot_settle` (it would no longer validate without it) and both chaos runs
+boot through the pin (seq-0 verifies vacuously against both journals).
+`TestBootWithoutABaselineHoldsAtUnrecorded` is the virgin path stated
+app-level (§70h.15): no pin → ExitOperator, GateNetDeltaAsserted at
+NeedsOperator naming UnassertedBaselineUnrecorded, zero venue calls.
+
+**(d) The audit found the safe-point summaries had OVERSTATED coverage** —
+"§70h 5–6 partly in join_test" was false: `Joiner.assertSpot` and the
+Reconciler's second look had NO tests at all (every joiner fixture passed
+`SpotLeg{}`). Two new files close it: `join_spot_test.go` (the cell
+arithmetic with baseline≠0 AND ours≠0, all three fee shapes incl. a perp
+order whose BTC fee must NOT count, both delta signs, absence-as-zero against
+a two-row report, the shared-base cell with one read and ONE delta,
+unpinned-is-unconcluded-not-a-pass, the duplicate-row refusal, and the
+validateSpotLeg table incl. §70h.24's quote-overlap deny with its
+same-roster-no-baseline positive control) and `reconcile_spot_test.go` (the
+second look: stable delta → NeedsOperator latched with the wait recorded;
+delta that MOVES mid-bracket → Incomplete, no latch — the fixtures mutate the
+venue INSIDE the injected Wait; delta fully explained → Passed; unwired
+bracket meeting a delta → Failed naming ErrSecondLookUnwired; unpinned alone →
+Incomplete with the bracket never running, and unpinned-beside-stable-delta →
+still latches — §70h.14/23). Then the campaign: **20 mutants, zero
+SURVIVED**, results table + the four re-aimed NOBUILDs recorded at §70h's
+tail in the design record.
+
+**NOT YET DONE (the next session's list, in order):**
+
+**(e) Item 7 — spec edits → v0.9.49:** §7.5's spot paragraph rewrite
+discharges the ONE `[SPEC EDIT OWED]` marker at
+`internal/oms/application/join.go` (~line 502, on `UnassertedBaselineUnrecorded`
+— grep `SPEC EDIT OWED`); §5.2 gains `spot_baseline` {path, sha256} optional +
+`spot_settle` required-when-spot + the CLI (`arblab baseline record -config
+-out`); venue-profiles already carries the dated 2026-08-05 balance-surfaces
+block (verify, don't re-add); adr-history dated block; §70's WIP banner →
+closure record. Docs to v0.9.48 → v0.9.49. Remember the reading pass beside
+the OWED grep: the audit's own finding this session was a summary claiming
+coverage that did not exist.
+
+**(f) Item 8 — the final fresh `code_diff` review** over the whole #179 diff
+(three safe points: 6c3f719's predecessor..HEAD). Round-4 design review stays
+optional. Then commit as the slice close and #179 is done.
+
+**Standing user decisions, unchanged:** the $20/$55 live-test decision; #171;
+§38f. Capture **PID 8495**, never rebuild over `bin/arblab`, `make ci` runs
+`-race` AND the ka staleness gate (needs node), cap `TLC_WORKERS` at 4,
+docs/i18n parity is `bun test`.
+
+---
+
+## Status (2026-08-05, session 104 — HISTORICAL): **#179 MID-SLICE, SECOND SAFE POINT — ITEMS 1–4 OF SESSION 103'S EIGHT ARE IMPLEMENTED AND `make ci` IS GREEN UNCACHED ON BOTH MODULES: THE ENGINE BALANCE CODECS + CLIENT READ, THE BASELINE DOCUMENT PACKAGE WITH ITS VERIFYING LOADER (TESTED AGAINST A REAL JOURNAL), THE SIX-STEP RECORD PROTOCOL + `arblab baseline record`, AND THE CONFIG/ROOT/RENDERER THREADING. THE RECORD PROTOCOL IS IMPLEMENTED BUT NOT YET TESTED — ITS FIXTURE DESIGN IS WRITTEN OUT BELOW SO NOTHING RE-DERIVES. THE SIX SKIPS AND THE ONE `[SPEC EDIT OWED]` MARKER (join.go:~502) STILL STAND BY DESIGN.**
 
 **Read record §70 first; then this block's "NOT YET DONE" is the whole work
 list.** What landed this session, by §70 section:

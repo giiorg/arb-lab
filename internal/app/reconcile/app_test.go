@@ -2,6 +2,8 @@ package reconcile
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -16,7 +18,9 @@ import (
 
 	"github.com/giiorg/arb-lab/internal/engine/venue"
 	"github.com/giiorg/arb-lab/internal/engine/venue/transport"
+	"github.com/giiorg/arb-lab/internal/oms/application"
 	omsdomain "github.com/giiorg/arb-lab/internal/oms/domain"
+	"github.com/giiorg/arb-lab/internal/oms/infrastructure/baseline"
 	"github.com/giiorg/arb-lab/internal/platform/boot"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/config"
@@ -71,6 +75,10 @@ func dur(t *testing.T, s string) config.Duration {
 const (
 	testKeyVar    = "ARBLAB_TEST_API_KEY"
 	testSecretVar = "ARBLAB_TEST_API_SECRET"
+
+	// testPinDigest is a well-formed 64-hex-char digest for the baseline pin
+	// cases — a shape fixture, deliberately not the digest of anything.
+	testPinDigest = "6c62272e07bb014262b821756295c58d6c62272e07bb014262b821756295c58d"
 )
 
 // validConfig is the fixture every refusal test mutates one field of.
@@ -236,6 +244,39 @@ func TestConfigRefusals(t *testing.T) {
 			}},
 		{"watchdog silence unset", ErrConfigFieldUnset, func(c *Config) { c.WatchdogSilence = config.Duration{} }},
 		{"stop budget unset", ErrConfigFieldUnset, func(c *Config) { c.StopBudget = config.Duration{} }},
+		// The spot pair rules (record §70g): the settle bound is required
+		// exactly when a spot instrument exists, and refused when none does —
+		// a bound nothing waits is a claim nobody checks. The fixture declares
+		// a spot leg, so each spotless case drops it.
+		{"spot_settle unset with a spot instrument", ErrConfigFieldUnset, func(c *Config) {
+			c.SpotSettle = config.Duration{}
+		}},
+		{"spot_settle on a spotless deployment", ErrConfigFieldInvalid, func(c *Config) {
+			c.Instruments = c.Instruments[1:] // the perp leg alone; the settle bound stays behind
+		}},
+		// The pin here is WELL-FORMED on purpose: the shape checks run first
+		// and answer the same sentinel, so a malformed pin would let this row
+		// pass while never reaching the spotless rule it is named after — the
+		// two-claims-one-checker trap, again.
+		{"spot_baseline on a spotless deployment", ErrConfigFieldInvalid, func(c *Config) {
+			c.Instruments = c.Instruments[1:]
+			c.SpotSettle = config.Duration{}
+			c.SpotBaseline = &BaselinePinConfig{Path: "/var/lib/arblab/baseline.json", SHA256: testPinDigest}
+		}},
+		{"spot_baseline path unset", ErrConfigFieldUnset, func(c *Config) {
+			c.SpotBaseline = &BaselinePinConfig{SHA256: testPinDigest}
+		}},
+		{"spot_baseline sha256 unset", ErrConfigFieldUnset, func(c *Config) {
+			c.SpotBaseline = &BaselinePinConfig{Path: "/var/lib/arblab/baseline.json"}
+		}},
+		{"spot_baseline sha256 not hex", ErrConfigFieldInvalid, func(c *Config) {
+			c.SpotBaseline = &BaselinePinConfig{Path: "/var/lib/arblab/baseline.json",
+				SHA256: strings.Repeat("zx", 32)}
+		}},
+		{"spot_baseline sha256 wrong length", ErrConfigFieldInvalid, func(c *Config) {
+			c.SpotBaseline = &BaselinePinConfig{Path: "/var/lib/arblab/baseline.json",
+				SHA256: testPinDigest[:32]}
+		}},
 	}
 	for _, c := range cases {
 		cfg := validConfig(t, "/var/lib/arblab/journal.db")
@@ -244,6 +285,29 @@ func TestConfigRefusals(t *testing.T) {
 		if !errors.Is(err, c.want) {
 			t.Errorf("%s: Validate() = %v, want %v", c.name, err, c.want)
 		}
+	}
+}
+
+// TestConfigAcceptsTheSpotPairsPositiveControls: the two acceptance shapes the
+// spot refusal rows above lean on, stated rather than implied. A well-formed
+// pin on a spot deployment validates — so the pin-shape rows fail on the pin,
+// not on some other objection — and a spotless deployment carrying NEITHER
+// spot field validates — so the refused-when-spotless rows fail on the
+// leftover field, not on the spotless shape itself.
+func TestConfigAcceptsTheSpotPairsPositiveControls(t *testing.T) {
+	t.Parallel()
+
+	withPin := validConfig(t, "/var/lib/arblab/journal.db")
+	withPin.SpotBaseline = &BaselinePinConfig{Path: "/var/lib/arblab/baseline.json", SHA256: testPinDigest}
+	if err := withPin.Validate(); err != nil {
+		t.Errorf("a spot deployment with a well-formed pin must validate: %v", err)
+	}
+
+	spotless := validConfig(t, "/var/lib/arblab/journal.db")
+	spotless.Instruments = spotless.Instruments[1:]
+	spotless.SpotSettle = config.Duration{}
+	if err := spotless.Validate(); err != nil {
+		t.Errorf("a spotless deployment with neither spot field must validate: %v", err)
 	}
 }
 
@@ -674,9 +738,54 @@ func TestExitClassIsNotThePosture(t *testing.T) {
 // The sequence, end to end
 // ---------------------------------------------------------------------------
 
-// spotOnly is the one deployment shape whose reconcile makes NO network call: no
-// scope is required for spot, so Assert enumerates nothing, and an empty journal
-// has no dispatched order to join.
+// binanceAccountBody is the fake venue's GET /api/v3/account answer: the BTC
+// row the pinned baseline's words repeat, plus a USDT row — with
+// omitZeroBalances unset the venue answers with every asset, and the extra row
+// is what makes "the coverage set filtered" and "the whole answer consumed"
+// different claims.
+const binanceAccountBody = `{"balances":[` +
+	`{"asset":"BTC","free":"1.00000000","locked":"0.00000000"},` +
+	`{"asset":"USDT","free":"1000.00000000","locked":"0.00000000"}]}`
+
+// pinnedCleanBaseline writes a seq-0 spot baseline document and returns its
+// config pin (task #179, record §70g). Seq 0 is the virgin-deployment record:
+// every journal extends the empty one and `ours` was zero, so the recomputed
+// baseline is exactly the stored balance — 1 BTC, the same words the fake
+// venue answers live — and the boot's spot assertion concludes with a zero
+// delta. The credential fingerprint binding is computed by the SAME derivation
+// the root uses, not restated as a literal, because the claim is that the two
+// meet.
+func pinnedCleanBaseline(t *testing.T, account, apiKey, apiSecret string) *BaselinePinConfig {
+	t.Helper()
+	cred, err := transport.NewCredential(apiKey, apiSecret)
+	if err != nil {
+		t.Fatalf("NewCredential: %v", err)
+	}
+	doc := baseline.Document{
+		Kind: baseline.Kind, Version: baseline.Version,
+		Venue: "binance", Account: account,
+		CredentialSHA256: cred.Fingerprint(),
+		ObservedAt:       "2026-08-03T11:00:00Z",
+		Balances: []baseline.BalanceRow{{Asset: "BTC", Words: []baseline.Word{
+			{Name: "free", Value: "1.00000000"}, {Name: "locked", Value: "0.00000000"},
+		}}},
+	}
+	body, err := baseline.Encode(doc)
+	if err != nil {
+		t.Fatalf("baseline.Encode: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "spot-baseline.json")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatalf("write baseline document: %v", err)
+	}
+	digest := sha256.Sum256(body)
+	return &BaselinePinConfig{Path: path, SHA256: hex.EncodeToString(digest[:])}
+}
+
+// spotOnly is the deployment shape whose reconcile makes no network call UNTIL
+// a baseline is pinned: no scope is required for spot, so Assert enumerates
+// nothing, and an empty journal has no dispatched order to join. The clean
+// boot test pins one and serves the single wallet read that buys.
 func spotOnly(t *testing.T, journal string) Config {
 	t.Helper()
 	cfg := validConfig(t, journal)
@@ -752,15 +861,34 @@ func testWall(t *testing.T, cfg Config) *clock.Wall {
 }
 
 // TestBootRunsEveryPhaseAndReportsClean is the positive control for the whole
-// sequence: an empty journal on this host's filesystem, no venue call, and the
-// four gates this binary produces all reported.
+// sequence: an empty journal on this host's filesystem, a pinned seq-0
+// baseline, exactly ONE venue call — the spot assertion's wallet read — and
+// the four gates this binary produces all reported. Until #179 this fixture
+// could not exist: with no baseline the spot leg correctly held
+// GateNetDeltaAsserted at UnassertedBaselineUnrecorded, so "clean" was not a
+// reachable verdict for a spot deployment.
 func TestBootRunsEveryPhaseAndReportsClean(t *testing.T) {
-	t.Skip("awaits #179's baseline document path (record §70): the spot leg now correctly holds GateNetDeltaAsserted at UnassertedBaselineUnrecorded until a baseline is pinned; unskip when this fixture can load one")
 	t.Setenv(testKeyVar, "key")
 	t.Setenv(testSecretVar, "secret")
 
+	var accountReads atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v3/account" {
+			accountReads.Add(1)
+			w.Header().Set("X-Mbx-Used-Weight-1m", "20")
+			fmt.Fprint(w, binanceAccountBody)
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"code":-1000,"msg":"unexpected path in clean-boot fake"}`)
+	}))
+	defer srv.Close()
+
 	dir := t.TempDir()
 	cfg := spotOnly(t, filepath.Join(dir, "journal.db"))
+	cfg.Venue.Endpoints[0].Scheme = "http"
+	cfg.Venue.Endpoints[0].Host = strings.TrimPrefix(srv.URL, "http://")
+	cfg.SpotBaseline = pinnedCleanBaseline(t, cfg.Account, "key", "secret")
 	r := newRunnerFor(t, cfg, func(string) error { return nil })
 
 	rep, err := r.run(t)
@@ -800,7 +928,50 @@ func TestBootRunsEveryPhaseAndReportsClean(t *testing.T) {
 			rep.RateLimit.Venue, cfg.Venue.Venue)
 	}
 	if rep.RateLimit.Bans != 0 {
-		t.Errorf("RateLimit.Bans = %d on a boot that made no venue call", rep.RateLimit.Bans)
+		t.Errorf("RateLimit.Bans = %d on a clean boot", rep.RateLimit.Bans)
+	}
+	// Exactly one wallet read: the spot assertion consumed the pinned baseline
+	// against a live balance rather than passing vacuously, and no second look
+	// ran — a zero delta needs none. An exact count, so a retry loop or a
+	// skipped read cannot hide.
+	if got := accountReads.Load(); got != 1 {
+		t.Errorf("the venue saw %d account reads, want exactly 1", got)
+	}
+}
+
+// TestBootWithoutABaselineHoldsAtUnrecorded is §70g's virgin path (§70h item
+// 15): the same spot deployment with NO spot_baseline — no placeholder file
+// anywhere — boots to a HOLDING gate that names UnassertedBaselineUnrecorded,
+// with no venue call at all, because there is no baseline to compare the
+// wallet against. This is the state the first `arblab baseline record` runs
+// from, so it must be an operator conversation, never a wiring error.
+func TestBootWithoutABaselineHoldsAtUnrecorded(t *testing.T) {
+	t.Setenv(testKeyVar, "key")
+	t.Setenv(testSecretVar, "secret")
+
+	cfg := spotOnly(t, filepath.Join(t.TempDir(), "journal.db"))
+	r := newRunnerFor(t, cfg, func(string) error { return nil })
+
+	rep, err := r.run(t)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := rep.ExitClass(); got != ExitOperator {
+		t.Errorf("ExitClass() = %s, want ExitOperator — an uncompared wallet needs a human, not a retry", got)
+	}
+	if o, _ := r.checklist.Outcome(boot.GateNetDeltaAsserted); o != boot.OutcomeNeedsOperator {
+		t.Errorf("GateNetDeltaAsserted = %s, want OutcomeNeedsOperator", o)
+	}
+	want := []application.UnassertedInstrument{{
+		Instrument: ids.VenueInstrument{Venue: "binance", Product: ids.ProductSpot, Symbol: "BTCUSDT"},
+		Reason:     application.UnassertedBaselineUnrecorded,
+	}}
+	got := rep.Reconciliation.Assertion.Unasserted
+	if len(got) != 1 || got[0] != want[0] {
+		t.Errorf("Unasserted = %+v, want %+v", got, want)
+	}
+	if rep.RateLimit.Bans != 0 {
+		t.Errorf("Bans = %d on a boot that made no venue call", rep.RateLimit.Bans)
 	}
 }
 

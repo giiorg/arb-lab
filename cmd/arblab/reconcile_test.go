@@ -10,6 +10,7 @@ import (
 	appreconcile "github.com/giiorg/arb-lab/internal/app/reconcile"
 	"github.com/giiorg/arb-lab/internal/oms/application"
 	"github.com/giiorg/arb-lab/internal/platform/boot"
+	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
 )
@@ -247,6 +248,85 @@ func TestReconcileReportGoldenNoMiss(t *testing.T) {
 		"  unproved ord-2: no_anchor\n" +
 		"  stale projection for ord-1\n" +
 		"cause:    venue join stopped early\n"
+	if got := buf.String(); got != want {
+		t.Errorf("report drifted from the golden output:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func goldenQty(t *testing.T, asset, v string) fixedpoint.Quantity {
+	t.Helper()
+	q, err := fixedpoint.ParseQuantity(fixedpoint.Asset(asset), v)
+	if err != nil {
+		t.Fatalf("ParseQuantity(%s, %q): %v", asset, v, err)
+	}
+	return q
+}
+
+// TestReconcileReportGoldenSpotSections pins the COMPLETE output of a report
+// carrying every assertion section at once (task #179, record §70h items 11
+// and 21). Two claims live in the ORDER, and only a golden can hold an order:
+//
+//   - The spot unexplained line sits BESIDE the derivative delta — same
+//     finding, one leg over — before the foreign/unasserted/unconcluded tail,
+//     and no substring battery can see the render loops swapped.
+//   - The latch and the unconcluded line appear in ONE report with the
+//     verdict ExitOperator: an unpinned row is re-reportable work, and it
+//     must not mask a latched delta (NeedsOperator > Incomplete).
+//
+// The fixture is a RENDERING fixture: it populates every section at once so
+// their order is observable, not a claim that one join can produce this exact
+// combination — section membership is the joiner's tests' subject.
+func TestReconcileReportGoldenSpotSections(t *testing.T) {
+	var buf bytes.Buffer
+	writeReconcileReport(&buf, appreconcile.Report{
+		Posture:  boot.PostureReconcileOnly,
+		Latched:  []boot.Gate{boot.GateNetDeltaAsserted},
+		Blocking: []boot.Gate{boot.GateAccountPosture},
+		Reconciliation: application.Reconciliation{
+			Recovery: application.Recovery{Records: 9, Dispatched: []ids.ClientOrderID{"ord-1", "ord-2"}},
+			Join:     application.Join{Orders: 2, Fills: 2},
+			Assertion: application.Assertion{
+				Unexplained: []application.InstrumentDelta{{
+					Instrument: ids.VenueInstrument{Venue: "binance", Product: ids.ProductLinearPerp,
+						Symbol: "BTCUSDT", Contract: ids.ContractLinear},
+					Expected:    goldenQty(t, "BTC", "-0.4"),
+					Observed:    goldenQty(t, "BTC", "-0.5"),
+					Unexplained: goldenQty(t, "BTC", "-0.1"),
+				}},
+				SpotUnexplained: []application.AssetDelta{{
+					Venue:       "binance",
+					Asset:       "BTC",
+					Expected:    goldenQty(t, "BTC", "0.4995"),
+					Observed:    goldenQty(t, "BTC", "0.7"),
+					Unexplained: goldenQty(t, "BTC", "0.2005"),
+				}},
+				Foreign: []string{"ETHBTC"},
+				Unasserted: []application.UnassertedInstrument{{
+					Instrument: ids.VenueInstrument{Venue: "binance", Product: ids.ProductSpot, Symbol: "ETHUSDT"},
+					Reason:     application.UnassertedBaselineUnrecorded,
+				}},
+				// Both declared reasons, one line each (§70h item 21): the
+				// renderer enumerates fields by hand, so a reason whose line
+				// nobody pinned could vanish silently.
+				SpotUnconcluded: []application.UnconcludedBalance{
+					{Venue: "binance", Asset: "ETH", Reason: application.UnpinnedBorrowOutstanding},
+					{Venue: "binance", Asset: "SOL", Reason: application.UnpinnedLockedSplitUnverified},
+				},
+			},
+		},
+	})
+	want := "posture:  PostureReconcileOnly (this binary reports 4 of §7.5's 8 gates; the rest have no producer yet)\n" +
+		"verdict:  ExitOperator\n" +
+		"latched:  [GateNetDeltaAsserted]  <- operator clearance required; a retry will not lift these\n" +
+		"blocking: [GateAccountPosture]\n" +
+		"replayed: 9 records, 2 dispatched orders\n" +
+		"joined:   2 orders, 2 fills admitted, 0 duplicates\n" +
+		"  unexplained binance:linear_perp:BTCUSDT:linear: venue -0.5, ours -0.4, delta -0.1\n" +
+		"  spot unexplained binance BTC: balance-minus-baseline 0.7, ours 0.4995, delta 0.2005\n" +
+		"  foreign symbol ETHBTC\n" +
+		"  unasserted binance:spot:ETHUSDT: UnassertedBaselineUnrecorded\n" +
+		"  spot unconcluded binance ETH: UnpinnedBorrowOutstanding (re-reportable; a further attempt may pin it)\n" +
+		"  spot unconcluded binance SOL: UnpinnedLockedSplitUnverified (re-reportable; a further attempt may pin it)\n"
 	if got := buf.String(); got != want {
 		t.Errorf("report drifted from the golden output:\ngot:\n%s\nwant:\n%s", got, want)
 	}

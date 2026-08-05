@@ -1,6 +1,8 @@
 package exercise_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +19,8 @@ import (
 
 	appexercise "github.com/giiorg/arb-lab/internal/app/exercise"
 	appreconcile "github.com/giiorg/arb-lab/internal/app/reconcile"
+	"github.com/giiorg/arb-lab/internal/engine/venue/transport"
+	"github.com/giiorg/arb-lab/internal/oms/infrastructure/baseline"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/config"
 	"github.com/giiorg/arb-lab/internal/platform/observability"
@@ -112,6 +116,15 @@ func (v *chaosVenue) handler(t *testing.T) http.Handler {
 		case r.Method == http.MethodGet && r.URL.Path == "/fapi/v3/positionRisk":
 			fmt.Fprint(w, `[]`)
 
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/account":
+			// Both runs' boots assert the spot leg against the pinned seq-0
+			// baseline; the wallet answers the same words the document stores,
+			// so the assertion concludes with a zero delta. Never blocks: a
+			// recovery read must not wait on the Place gate.
+			fmt.Fprint(w, `{"balances":[`+
+				`{"asset":"BTC","free":"1.00000000","locked":"0.00000000"},`+
+				`{"asset":"USDT","free":"1000.00000000","locked":"0.00000000"}]}`)
+
 		default:
 			v.mu.Lock()
 			v.unexpected = append(v.unexpected, r.Method+" "+r.URL.Path)
@@ -138,6 +151,7 @@ func (v *chaosVenue) placeCounts() map[string]int {
 // differ, and every assertion keys on ClientOrderID).
 func chaosConfig(t *testing.T, dir, host string) string {
 	t.Helper()
+	baselinePath, baselineDigest := chaosBaseline(t, dir)
 	doc := fmt.Sprintf(`{
  "oms": {
   "journal_path": %q,
@@ -187,6 +201,8 @@ func chaosConfig(t *testing.T, dir, host string) string {
       {"venue": "binance", "product": "spot", "reach": "72h"}
     ]
   },
+  "spot_baseline": {"path": %q, "sha256": %q},
+  "spot_settle": "2s",
   "watchdog_silence": "30s",
   "stop_budget": "2s"
  },
@@ -200,13 +216,47 @@ func chaosConfig(t *testing.T, dir, host string) string {
     ]
   },
   "reference": {"path": %q, "max_age": "24h"}
-}`, filepath.Join(dir, "journal.db"), dir, host, host, chaosReference(t, dir))
+}`, filepath.Join(dir, "journal.db"), dir, host, host,
+		baselinePath, baselineDigest, chaosReference(t, dir))
 
 	path := filepath.Join(dir, "exercise.json")
 	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	return path
+}
+
+// chaosBaseline writes the seq-0 spot baseline document both runs' boots load:
+// account "chaos-sub", the chaos credential's fingerprint, and the same BTC
+// words the fake's /api/v3/account answer carries — so run 1's boot passes the
+// spot assertion, and run 2's reconcile over the survivor journal recomputes a
+// zero delta (the killed orders never filled). Seq 0 verifies vacuously
+// against BOTH journals, because every journal extends the empty one.
+func chaosBaseline(t *testing.T, dir string) (string, string) {
+	t.Helper()
+	cred, err := transport.NewCredential("chaos-key", "chaos-secret")
+	if err != nil {
+		t.Fatalf("NewCredential: %v", err)
+	}
+	doc := baseline.Document{
+		Kind: baseline.Kind, Version: baseline.Version,
+		Venue: "binance", Account: "chaos-sub",
+		CredentialSHA256: cred.Fingerprint(),
+		ObservedAt:       "2026-08-03T11:00:00Z",
+		Balances: []baseline.BalanceRow{{Asset: "BTC", Words: []baseline.Word{
+			{Name: "free", Value: "1.00000000"}, {Name: "locked", Value: "0.00000000"},
+		}}},
+	}
+	body, err := baseline.Encode(doc)
+	if err != nil {
+		t.Fatalf("baseline.Encode: %v", err)
+	}
+	path := filepath.Join(dir, "spot-baseline.json")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatalf("write baseline document: %v", err)
+	}
+	digest := sha256.Sum256(body)
+	return path, hex.EncodeToString(digest[:])
 }
 
 // chaosReference writes the reference revision the run resolves its §2.4
@@ -271,7 +321,6 @@ func moduleRoot(t *testing.T) string {
 }
 
 func TestProcessKillMidIOC(t *testing.T) {
-	t.Skip("awaits #179's baseline document path (record §70): the spot leg now correctly holds GateNetDeltaAsserted at UnassertedBaselineUnrecorded until a baseline is pinned; unskip when this fixture can load one")
 	if runtime.GOOS == "windows" {
 		t.Skip("SIGKILL semantics; the deployment targets are darwin/linux")
 	}
@@ -403,7 +452,6 @@ func TestProcessKillMidIOC(t *testing.T) {
 // it, a harness whose exercise binary dies on every boot would still pass the
 // kill test's early waits by timing out somewhere that reads as "venue slow".
 func TestExerciseCycleCleanRun(t *testing.T) {
-	t.Skip("awaits #179's baseline document path (record §70): the spot leg now correctly holds GateNetDeltaAsserted at UnassertedBaselineUnrecorded until a baseline is pinned; unskip when this fixture can load one")
 	if runtime.GOOS == "windows" {
 		t.Skip("the deployment targets are darwin/linux")
 	}
@@ -448,7 +496,6 @@ func TestExerciseCycleCleanRun(t *testing.T) {
 // deliberately not 2's "retry may lift" (§59d: a re-run with the same trade id
 // is exactly the §5.3 reuse the planner refuses).
 func TestExerciseExitCodeOnARejectedLeg(t *testing.T) {
-	t.Skip("awaits #179's baseline document path (record §70): the spot leg now correctly holds GateNetDeltaAsserted at UnassertedBaselineUnrecorded until a baseline is pinned; unskip when this fixture can load one")
 	if runtime.GOOS == "windows" {
 		t.Skip("the deployment targets are darwin/linux")
 	}

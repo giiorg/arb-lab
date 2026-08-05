@@ -660,3 +660,41 @@ arm swap (walletBalance+locked vs walletBalance when pinning), absence-skip
 record-gauntlet arm drops (one per refusal), HoldsPosture flip on the new
 member, roster row dimension/window mutations, Total=free (locked dropped) on
 Binance.
+
+### Campaign results (2026-08-05, session 105) — 20 runs, zero SURVIVED
+
+Run after the item 1–24 audit filled the application-layer gaps the safe-point
+summaries had overstated (assertSpot and the second look had NO tests until
+`join_spot_test.go` / `reconcile_spot_test.go` landed — "5–6 partly in
+join_test" was a claim the audit falsified).
+
+| # | Mutant | Verdict |
+|---|---|---|
+| 1 | record: unattributed arm dropped (`>0`→`>99`) | caught |
+| 2 | record: incomplete-sweep arm dropped | caught |
+| 3 | record: open-order arm dropped (`!terminal`→`terminal && false`) | caught (first sed NOBUILD: orphaned `terminal` — re-aimed) |
+| 4 | record: cumulative-moved arm dropped (`!= 0`→`== 99`) | caught (re-aimed after NOBUILD, same cause) |
+| 5 | record: balance-moved arm dropped | caught |
+| 6 | record: unpinned-balance arm dropped | caught (re-aimed after NOBUILD, same cause) |
+| 7 | assertSpot: fee term dropped | caught (re-aimed after NOBUILD: orphaned `feeTotal`) |
+| 8 | assertSpot: fee scope widened to derivative orders | caught — needed the perp-with-BTC-fee leg added to the main fixture first |
+| 9 | assertSpot: fee scope narrowed to the order's own base | caught |
+| 10 | assertSpot: baseline subtraction dropped | caught (12 tests) |
+| 11 | assertSpot: Unexplained sign flipped | caught (7 tests) |
+| 12 | assertSpot: absent asset skipped instead of compared as zero | caught |
+| 13 | HoldsPosture: UnassertedBaselineUnrecorded exempted | caught (3 tests) |
+| 14 | second look: `spotDeltasEqual` answers stable for every pair | caught |
+| 15 | second look: the holding gate never brackets (`Holds()`→false) | caught (6 tests) |
+| 16 | loader: chain-mark comparison dropped | caught (2 tests) |
+| 17 | journal: seq-beyond-head answers a zero hash, not the named sentinel | caught (3 tests) |
+| 18 | Binance Total = free (locked dropped) | caught (2 tests) |
+| 19 | Binance account read charged at the misread 10 | caught |
+| 20 | Bybit pinning arm swapped (`locked != 0` pins) | caught (6 tests) |
+| 21 | wallet_balance roster row on the wrong dimension | caught (35 tests) |
+
+Four NOBUILD!! verdicts total, every one "declared and not used" — a bad sed
+orphaning the condition's only reader, none a compiler-enforced claim; each
+re-aimed with a variable-preserving mutation and killed. The Binance
+free/locked VALUE swap stays un-run by design: the sum commutes, so it is
+behavior-equivalent (§70h.16 names the Bybit value-swap as the loud one, and
+it is a standing fixture in baseline_test).

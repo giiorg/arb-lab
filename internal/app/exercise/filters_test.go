@@ -175,7 +175,6 @@ func TestTradingFiltersFreshnessBound(t *testing.T) {
 // reconcile's boot → oms.Deps → the planner: a break anywhere in that chain
 // surfaces here as ErrFiltersUnknown or as a plan that goes through.
 func TestRunRefusesAnOffGridTradeBeforeAnythingIsSent(t *testing.T) {
-	t.Skip("awaits #179's baseline document path (record §70): the spot leg now correctly holds GateNetDeltaAsserted at UnassertedBaselineUnrecorded until a baseline is pinned; unskip when this fixture can load one")
 	t.Setenv("ARBLAB_TEST_API_KEY", "k")
 	t.Setenv("ARBLAB_TEST_API_SECRET", "s")
 
@@ -184,6 +183,11 @@ func TestRunRefusesAnOffGridTradeBeforeAnythingIsSent(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/fapi/v3/positionRisk":
 			fmt.Fprint(w, `[]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/account":
+			// The boot's spot assertion, satisfied by the pinned baseline —
+			// the refusal under test must come from the PLANNER, not from a
+			// boot that never got that far.
+			fmt.Fprint(w, binanceAccountBody)
 		case r.Method == http.MethodPost:
 			places++
 			w.WriteHeader(http.StatusBadRequest)
@@ -197,6 +201,7 @@ func TestRunRefusesAnOffGridTradeBeforeAnythingIsSent(t *testing.T) {
 
 	cfg := validConfig(t)
 	cfg.OMS.JournalPath = filepath.Join(t.TempDir(), "journal.db")
+	cfg.OMS.SpotBaseline = pinnedCleanBaseline(t, cfg.OMS.Account, "k", "s")
 	host := strings.TrimPrefix(srv.URL, "http://")
 	for i := range cfg.OMS.Venue.Endpoints {
 		cfg.OMS.Venue.Endpoints[i].Scheme = "http"

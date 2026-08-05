@@ -1,6 +1,8 @@
 package exercise
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -13,8 +15,10 @@ import (
 	"time"
 
 	"github.com/giiorg/arb-lab/internal/app/reconcile"
+	"github.com/giiorg/arb-lab/internal/engine/venue/transport"
 	"github.com/giiorg/arb-lab/internal/oms/application"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
+	"github.com/giiorg/arb-lab/internal/oms/infrastructure/baseline"
 	"github.com/giiorg/arb-lab/internal/platform/boot"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/config"
@@ -22,6 +26,42 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/observability"
 	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
 )
+
+// binanceAccountBody and pinnedCleanBaseline are the reconcile root's clean
+// spot fixtures, restated for this package's boots: a seq-0 baseline document
+// whose stored words the fake venue's GET /api/v3/account answer repeats, so
+// the boot's spot assertion concludes with a zero delta and the run proceeds
+// to its execute half (task #179, record §70g).
+const binanceAccountBody = `{"balances":[` +
+	`{"asset":"BTC","free":"1.00000000","locked":"0.00000000"},` +
+	`{"asset":"USDT","free":"1000.00000000","locked":"0.00000000"}]}`
+
+func pinnedCleanBaseline(t *testing.T, account, apiKey, apiSecret string) *reconcile.BaselinePinConfig {
+	t.Helper()
+	cred, err := transport.NewCredential(apiKey, apiSecret)
+	if err != nil {
+		t.Fatalf("NewCredential: %v", err)
+	}
+	doc := baseline.Document{
+		Kind: baseline.Kind, Version: baseline.Version,
+		Venue: "binance", Account: account,
+		CredentialSHA256: cred.Fingerprint(),
+		ObservedAt:       "2026-08-03T11:00:00Z",
+		Balances: []baseline.BalanceRow{{Asset: "BTC", Words: []baseline.Word{
+			{Name: "free", Value: "1.00000000"}, {Name: "locked", Value: "0.00000000"},
+		}}},
+	}
+	body, err := baseline.Encode(doc)
+	if err != nil {
+		t.Fatalf("baseline.Encode: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "spot-baseline.json")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatalf("write baseline document: %v", err)
+	}
+	digest := sha256.Sum256(body)
+	return &reconcile.BaselinePinConfig{Path: path, SHA256: hex.EncodeToString(digest[:])}
+}
 
 // validConfig mirrors reconcile's own fixture — the embedded half is §5.2's
 // block unchanged, and the trade block is the two-leg cash-and-carry §9's
@@ -482,7 +522,6 @@ func TestExitClassPrecedence(t *testing.T) {
 // the pause and exactly one leg fails, by the venue's refusal rather than by a
 // race with the governor.
 func TestABanDuringDispatchIsSurfaced(t *testing.T) {
-	t.Skip("awaits #179's baseline document path (record §70): the spot leg now correctly holds GateNetDeltaAsserted at UnassertedBaselineUnrecorded until a baseline is pinned; unskip when this fixture can load one")
 	t.Setenv("ARBLAB_TEST_API_KEY", "k")
 	t.Setenv("ARBLAB_TEST_API_SECRET", "s")
 
@@ -506,6 +545,11 @@ func TestABanDuringDispatchIsSurfaced(t *testing.T) {
 			fmt.Fprint(w, `{"code":-1003,"msg":"Way too much request weight used; IP banned."}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/fapi/v3/positionRisk":
 			fmt.Fprint(w, `[]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/account":
+			// The boot's spot assertion reads the wallet the pinned baseline
+			// explains in full — a zero delta, so the boot stays clean and the
+			// ban arrives where this test wants it: in the dispatch.
+			fmt.Fprint(w, binanceAccountBody)
 		default:
 			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprint(w, `{"code":-1000,"msg":"unexpected path in ban fake"}`)
@@ -515,6 +559,7 @@ func TestABanDuringDispatchIsSurfaced(t *testing.T) {
 
 	cfg := validConfig(t)
 	cfg.OMS.JournalPath = filepath.Join(t.TempDir(), "journal.db")
+	cfg.OMS.SpotBaseline = pinnedCleanBaseline(t, cfg.OMS.Account, "k", "s")
 	host := strings.TrimPrefix(srv.URL, "http://")
 	for i := range cfg.OMS.Venue.Endpoints {
 		cfg.OMS.Venue.Endpoints[i].Scheme = "http"
