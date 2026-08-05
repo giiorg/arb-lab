@@ -284,6 +284,9 @@ func btcReport(t *testing.T, free, locked string, total string) venue.SpotBalanc
 				{Name: "locked", Value: locked},
 			},
 		}},
+		// The Binance kind, matching the words: every asset comes back, so
+		// this report's silences conclude nothing (§70i).
+		Absence: venue.SpotAbsenceInconclusive,
 	}
 }
 
@@ -571,11 +574,44 @@ func TestRecordSpotBaselineRefusesAnUnpinnedBalance(t *testing.T) {
 	h.balances.reports = []venue.SpotBalanceReport{{
 		ObservedAt: serverAt(t, time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)),
 		Unpinned:   []venue.SpotUnpinnedRow{{Asset: "BTC", Reason: venue.SpotUnpinnedBorrow}},
+		Absence:    venue.SpotAbsenceInconclusive,
 	}}
 	m := newModule(t, h.deps)
 
 	if _, err := m.RecordSpotBaseline(h.path, h.rdeps); !errors.Is(err, oms.ErrRecordBalanceUnpinned) {
 		t.Fatalf("RecordSpotBaseline = %v, want ErrRecordBalanceUnpinned", err)
+	}
+	if len(h.wait.waits) != 0 {
+		t.Errorf("settle waits = %v, want none — the first read refused before the bracket", h.wait.waits)
+	}
+}
+
+// TestRecordSpotBaselineRefusesAnInconclusiveAbsence is §70i: the coverage
+// asset is missing from a report whose enumeration kind concludes nothing
+// from silence (Binance's — every asset comes back, so a missing one is an
+// anomaly). A baseline is an attestation, and attesting the absence as a zero
+// would store missing evidence as fact — refused on the first read, before
+// the bracket spends its wait.
+func TestRecordSpotBaselineRefusesAnInconclusiveAbsence(t *testing.T) {
+	t.Parallel()
+
+	h := happyHarness(t)
+	h.balances.reports = []venue.SpotBalanceReport{{
+		ObservedAt: serverAt(t, time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)),
+		Rows: []venue.SpotBalanceRow{{
+			Asset: "ETH",
+			Total: mustAssetQty(t, "ETH", "1"),
+			Words: []venue.SpotBalanceWord{
+				{Name: "free", Value: "1.00000000"},
+				{Name: "locked", Value: "0.00000000"},
+			},
+		}},
+		Absence: venue.SpotAbsenceInconclusive,
+	}}
+	m := newModule(t, h.deps)
+
+	if _, err := m.RecordSpotBaseline(h.path, h.rdeps); !errors.Is(err, oms.ErrRecordBalanceAbsent) {
+		t.Fatalf("RecordSpotBaseline = %v, want ErrRecordBalanceAbsent", err)
 	}
 	if len(h.wait.waits) != 0 {
 		t.Errorf("settle waits = %v, want none — the first read refused before the bracket", h.wait.waits)

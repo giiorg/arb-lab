@@ -499,10 +499,6 @@ const (
 	// UnassertedBaselineUnrecorded is a SPOT instrument whose base asset has no
 	// recorded baseline at its venue, so the balance comparison cannot run.
 	//
-	// [SPEC EDIT OWED] §7.5's spot paragraph still states the must-not-hold
-	// exemption and "until a baseline is defined"; record §70g owns the
-	// rewrite, which lands before slice #179 closes.
-	//
 	// It replaced UnassertedNoPositionSurface in task #179 (record §70), and
 	// the posture answer flipped with it. The old member was §7.5's permanent,
 	// venue-imposed gap — no venue publishes a position surface for spot, so no
@@ -1073,13 +1069,36 @@ func (j *Joiner) assertSpot(expected map[ids.VenueInstrument]fixedpoint.Quantity
 			continue
 		}
 
-		// An asset absent from the rows is a ZERO balance — a real answer,
-		// available only because the enumeration is unscoped (ports.SpotBalances).
+		// What an asset absent from the rows means is the REPORT's answer, not
+		// a universal zero (§70i): under AbsenceIsZero the silence is the
+		// venue's own word for a zero balance; under AbsenceInconclusive the
+		// venue's documented shape contains every asset, so a missing one is
+		// an anomaly the assertion must not conclude a quantity from — the
+		// asset is reported unconcluded, boot.OutcomeIncomplete's cell, the
+		// same non-latching non-pass an unpinned row earns.
 		total := fixedpoint.ZeroQuantity(key.Asset)
+		found := false
 		for _, row := range venueReport.Rows {
 			if row.Asset == key.Asset {
 				total = row.Total
+				found = true
 				break
+			}
+		}
+		if !found {
+			switch venueReport.Absence {
+			case ports.AbsenceIsZero:
+				// total stays zero.
+			case ports.AbsenceInconclusive:
+				report.SpotUnconcluded = append(report.SpotUnconcluded, UnconcludedBalance{
+					Venue:  key.Venue,
+					Asset:  string(key.Asset),
+					Reason: ports.UnpinnedAbsenceInconclusive,
+				})
+				continue
+			case ports.AbsenceSemanticsUnspecified:
+				return fmt.Errorf("assert spot %s on %s: %w",
+					key.Asset, key.Venue, ports.ErrAbsenceSemanticsInvalid)
 			}
 		}
 
@@ -1137,6 +1156,13 @@ func (j *Joiner) spotBalances(venue ids.Venue, cache map[ids.Venue]ports.Balance
 	}
 	report, err := j.spot.Balances.Balances(ports.SpotBalanceScope{Venue: venue})
 	if err != nil {
+		return ports.BalanceReport{}, fmt.Errorf("assert spot balances on %s: %w", venue, err)
+	}
+	if err := report.Absence.Validate(); err != nil {
+		// Checked here, once per read, whether or not any asset is absent: a
+		// report that never stated its silences' meaning is a wiring defect,
+		// and it must be loud on the boot where nothing happens to be absent,
+		// not first on the boot where something is.
 		return ports.BalanceReport{}, fmt.Errorf("assert spot balances on %s: %w", venue, err)
 	}
 	seen := make(map[fixedpoint.Asset]struct{}, len(report.Rows))

@@ -262,6 +262,13 @@ var (
 	// account of why (task #179).
 	ErrSpotUnpinnedReasonInvalid = errors.New("venue: spot balance row names no valid unpinned reason")
 
+	// ErrSpotAbsenceSemanticsInvalid reports a SpotBalanceReport that never
+	// stated what its silences mean — the zero value or out of roster. The
+	// codec stamps the venue's enumeration kind; a report without one would
+	// leave every consumer to inherit a reading of absence, which is the
+	// policy-with-no-carrier failure (§70i).
+	ErrSpotAbsenceSemanticsInvalid = errors.New("venue: spot balance report states no absence semantics")
+
 	// ErrSpotBalancesUnreadable reports a wallet enumeration whose answer
 	// cannot be attributed row by row — a rowless Binance account body, a
 	// missing or foreign accountType echo, a duplicate asset, a row with no

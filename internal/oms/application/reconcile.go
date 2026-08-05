@@ -306,6 +306,19 @@ func (r *Reconciler) Reconcile(c *boot.Checklist) (Reconciliation, error) {
 			// and a delta computed over it proves nothing either way.
 			return out, c.Report(boot.GateNetDeltaAsserted, boot.OutcomeIncomplete)
 		}
+		if newAbsence(joined.Absent, second.Absent) {
+			// An order the venue held at the first look and does not hold now
+			// changed evidence INSIDE the settle window — §5.3's resolution
+			// decides what that absence licenses, and this bracket does not
+			// run it, so the re-assert would read a projection the ordering
+			// (join → resolve → assert) says is not concluded. NEWLY absent
+			// only: an order absent at BOTH looks was resolved through §5.3
+			// before the first assert ever ran and re-reports absent on every
+			// boot for as long as the venue has purged it — treating that as
+			// motion would leave any deployment holding one AbsentAfterFinality
+			// order unable to latch a real spot delta, for ever (§70i).
+			return out, c.Report(boot.GateNetDeltaAsserted, boot.OutcomeIncomplete)
+		}
 		reasserted, err := r.join.Assert(rec.Dispatched)
 		if err != nil {
 			out.Cause = err
@@ -355,6 +368,26 @@ func spotDeltaOnly(a Assertion) bool {
 		}
 	}
 	return true
+}
+
+// newAbsence reports whether the second look's join found an order absent that
+// the first look's did not — evidence that changed inside the settle window,
+// which only §5.3's resolution may interpret. Absences present in BOTH looks
+// are not motion: they were resolved before the first assert ran (§70i).
+func newAbsence(first, second []ids.ClientOrderID) bool {
+	if len(second) == 0 {
+		return false
+	}
+	seen := make(map[ids.ClientOrderID]struct{}, len(first))
+	for _, id := range first {
+		seen[id] = struct{}{}
+	}
+	for _, id := range second {
+		if _, held := seen[id]; !held {
+			return true
+		}
+	}
+	return false
 }
 
 // spotDeltasEqual reports whether two looks saw the SAME spot deltas — same

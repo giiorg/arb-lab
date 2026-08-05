@@ -114,9 +114,19 @@ const (
 	// The §4.1 posture check refuses borrow separately; this port reports
 	// about its OWN evidence rather than assuming a sibling gate ran.
 	UnpinnedBorrowOutstanding
+
+	// UnpinnedAbsenceInconclusive is an asset ABSENT from a report whose
+	// enumeration kind concludes nothing from silence (AbsenceInconclusive).
+	// Minted by the CONSUMER, never the adapter: an adapter cannot report a
+	// row it does not have, and which absences matter is the caller's roster.
+	// It is the §70i correction of a hazard named for one input — the
+	// empty-body refusal's argument (a silence the venue's shape rules out is
+	// wrong-shaped, not zero) covers each asset's silence too, and reading
+	// zero there was the permissive default.
+	UnpinnedAbsenceInconclusive
 )
 
-const maxUnpinnedReason = UnpinnedBorrowOutstanding
+const maxUnpinnedReason = UnpinnedAbsenceInconclusive
 
 // Validate reports whether r names a reason, excluding the sentinel.
 func (r UnpinnedReason) Validate() error {
@@ -135,8 +145,62 @@ func (r UnpinnedReason) String() string {
 		return "UnpinnedLockedSplitUnverified"
 	case UnpinnedBorrowOutstanding:
 		return "UnpinnedBorrowOutstanding"
+	case UnpinnedAbsenceInconclusive:
+		return "UnpinnedAbsenceInconclusive"
 	}
 	return fmt.Sprintf("UnpinnedReason(%d)", uint8(r))
+}
+
+// AbsenceSemantics is what an asset's ABSENCE from a report concludes, stated
+// by the adapter because the venue's enumeration kind is what decides it — the
+// discriminating fact must have a carrier, and before it had one every
+// consumer read absence as zero for both kinds (§70i).
+//
+// Bybit's coin-less call returns non-zero assets by the venue's own sentence,
+// so its silence IS a zero. Binance's account read returns every asset with
+// `omitZeroBalances` unset, so its silence is an anomaly the venue's shape
+// rules out — concluding zero from it manufactures a holding from missing
+// evidence, in the direction that can both record a wrong baseline and pass
+// a boot on it if the anomaly persists.
+type AbsenceSemantics uint8
+
+const (
+	// AbsenceSemanticsUnspecified is the zero value: a report that never
+	// stated what its silences mean. Refused by every consumer — a wiring
+	// that forgot to choose must not inherit either reading.
+	AbsenceSemanticsUnspecified AbsenceSemantics = iota
+
+	// AbsenceIsZero: an absent asset is a zero balance, on the venue's own
+	// word (Bybit's non-zero enumeration).
+	AbsenceIsZero
+
+	// AbsenceInconclusive: an absent asset concludes NOTHING — the venue's
+	// documented shape includes every asset, so a missing one is an anomaly,
+	// not a quantity (Binance with omitZeroBalances unset).
+	AbsenceInconclusive
+)
+
+const maxAbsenceSemantics = AbsenceInconclusive
+
+// Validate reports whether s names a semantics, excluding the sentinel.
+func (s AbsenceSemantics) Validate() error {
+	if s == AbsenceSemanticsUnspecified || s > maxAbsenceSemantics {
+		return fmt.Errorf("absence semantics %d: %w", uint8(s), ErrAbsenceSemanticsInvalid)
+	}
+	return nil
+}
+
+// String implements fmt.Stringer.
+func (s AbsenceSemantics) String() string {
+	switch s {
+	case AbsenceSemanticsUnspecified:
+		return "AbsenceSemanticsUnspecified"
+	case AbsenceIsZero:
+		return "AbsenceIsZero"
+	case AbsenceInconclusive:
+		return "AbsenceInconclusive"
+	}
+	return fmt.Sprintf("AbsenceSemantics(%d)", uint8(s))
 }
 
 // UnpinnedBalance is one asset whose total this read could not pin.
@@ -156,10 +220,14 @@ type BalanceReport struct {
 	// invalidated by events, never by time; record §70b).
 	ObservedAt clock.ServerTime
 
-	// Rows are the assets the venue reported with a pinnable total. An asset
-	// ABSENT from Rows and Unpinned both is a zero balance — a real answer,
-	// available only because the enumeration is unscoped (see SpotBalances).
+	// Rows are the assets the venue reported with a pinnable total. What an
+	// asset ABSENT from Rows and Unpinned both means is Absence's answer, not
+	// a universal zero (§70i).
 	Rows []AssetBalance
+
+	// Absence states what this report's silences conclude. Required: the
+	// zero value is refused by every consumer.
+	Absence AbsenceSemantics
 
 	// Unpinned are the assets whose total this read could NOT pin, each with
 	// the reason. The assertion neither concludes nor latches on one — it

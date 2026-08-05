@@ -49,6 +49,19 @@ var (
 	// history than the mark names.
 	ErrOrderOutsidePrefix = errors.New("baseline: order row is outside the chain-marked journal prefix")
 
+	// ErrOrderRowSideDisagrees reports a stored order row whose side
+	// contradicts the journal prefix's planned record for the same id. The
+	// side is the one row field the journal can recompute, and a flip inverts
+	// the row's whole contribution to `ours` — the silent sign error — so it
+	// is recomputed rather than trusted (§70i).
+	ErrOrderRowSideDisagrees = errors.New("baseline: order row side contradicts the journal prefix")
+
+	// ErrStoredAbsenceUninterpretable reports an absent balance row stored
+	// under a dialect whose enumeration returns every asset — a silence that
+	// dialect's venue could not have answered with, so no zero may be
+	// re-derived from it (§70i).
+	ErrStoredAbsenceUninterpretable = errors.New("baseline: stored absent row under a dialect whose silence concludes nothing")
+
 	// ErrStoredRowUnpinnable reports a stored balance row whose words the
 	// per-venue derivation cannot pin. The record command never writes one, so
 	// the document was made some other way.

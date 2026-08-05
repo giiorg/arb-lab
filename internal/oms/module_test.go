@@ -136,9 +136,14 @@ func perpInstrument() ids.VenueInstrument {
 
 func mustQty(t *testing.T, v string) fixedpoint.Quantity {
 	t.Helper()
-	q, err := fixedpoint.ParseQuantity("BTC", v)
+	return mustAssetQty(t, "BTC", v)
+}
+
+func mustAssetQty(t *testing.T, asset, v string) fixedpoint.Quantity {
+	t.Helper()
+	q, err := fixedpoint.ParseQuantity(fixedpoint.Asset(asset), v)
 	if err != nil {
-		t.Fatalf("ParseQuantity(%q): %v", v, err)
+		t.Fatalf("ParseQuantity(%s, %q): %v", asset, v, err)
 	}
 	return q
 }

@@ -146,7 +146,9 @@ func (c *BybitOrderCodec) DecodeSpotBalances(resp transport.Response) (SpotBalan
 			account.AccountType, bybitUnifiedAccountType, ErrSpotBalancesUnreadable)
 	}
 
-	var report SpotBalanceReport
+	// The coin-less UNIFIED call "returns non-zero asset info" — the venue's
+	// own sentence — so this report's silences ARE zeros (§70i).
+	report := SpotBalanceReport{Absence: SpotAbsenceZero}
 	seen := make(map[string]struct{}, len(account.Coin))
 	for i, row := range account.Coin {
 		if row.Coin == "" {

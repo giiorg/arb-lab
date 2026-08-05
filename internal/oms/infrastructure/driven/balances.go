@@ -83,10 +83,15 @@ func (b *SpotBalances) Balances(scope ports.SpotBalanceScope) (ports.BalanceRepo
 		return ports.BalanceReport{}, err
 	}
 
+	absence, err := absenceSemanticsOf(report.Absence)
+	if err != nil {
+		return ports.BalanceReport{}, fmt.Errorf("spot balances on %s: %w", scope.Venue, err)
+	}
 	out := ports.BalanceReport{
 		ObservedAt: report.ObservedAt,
 		Rows:       make([]ports.AssetBalance, 0, len(report.Rows)),
 		Unpinned:   make([]ports.UnpinnedBalance, 0, len(report.Unpinned)),
+		Absence:    absence,
 	}
 	for _, row := range report.Rows {
 		words := make([]ports.VerbatimField, 0, len(row.Words))
@@ -128,6 +133,25 @@ func unpinnedReasonOf(r venue.SpotUnpinnedReason) (ports.UnpinnedReason, error) 
 		return ports.UnpinnedReasonUnspecified, r.Validate()
 	}
 	return ports.UnpinnedReasonUnspecified, r.Validate()
+}
+
+// absenceSemanticsOf translates the engine's absence statement into the
+// port's, on unpinnedReasonOf's argument: two enums because the layers may not
+// import each other, a switch so exhaustiveswitch makes a member added on
+// either side loud here.
+func absenceSemanticsOf(s venue.SpotAbsenceSemantics) (ports.AbsenceSemantics, error) {
+	switch s {
+	case venue.SpotAbsenceZero:
+		return ports.AbsenceIsZero, nil
+	case venue.SpotAbsenceInconclusive:
+		return ports.AbsenceInconclusive, nil
+	case venue.SpotAbsenceUnspecified:
+		// Named rather than left to the trailing return (§3.6 rule 10): the
+		// zero value is a report that never stated its silences' meaning,
+		// distinct from a value out of roster.
+		return ports.AbsenceSemanticsUnspecified, s.Validate()
+	}
+	return ports.AbsenceSemanticsUnspecified, s.Validate()
 }
 
 // The adapter's own refusals.

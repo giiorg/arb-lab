@@ -1,6 +1,19 @@
 # M3 task #179 — the spot leg's exposure baseline (§7.5's invariant covers one leg of two)
 
-**Date:** 2026-08-05 (session 103) · **Status:** DESIGN — WIP
+**Date:** 2026-08-05 (sessions 103–106) · **Status:** CLOSED (2026-08-05, docs
+v0.9.49) — three adversarial design rounds (fourteen majors, two minors, all
+folded in place below), implementation across three safe points, the §70h
+item 1–24 audit run at close (it falsified the safe-point summaries' own
+coverage claim and `join_spot_test.go`/`reconcile_spot_test.go` filled the
+gap), twenty-mutant campaign zero SURVIVED (results at §70h's tail), then
+the final fresh code_diff review — four majors, all validated and folded
+(§70i) with an eight-mutant addendum, campaign total 28 zero SURVIVED.
+§70g's spec edits landed as v0.9.49 and the one `[SPEC EDIT OWED]` marker
+(`join.go`, the §7.5 exemption rewrite) is discharged; §70i added rule 3's
+documented exception for this package's own position. Deferred with
+arguments, not dropped: continuous re-assertion in the long-running engine
+(§70c), quote-asset baselines (§70b), FundingLedger (§56j), #184's Dispatch
+conformance, baseline lifecycle tooling beyond record (§70g).
 **Reads:** core §7.5 (the spot paragraph, edited v0.9.37/v0.9.39), §5.1's hedge
 group, §4.1/§4.2, record §56g/§56j (slice F2), record §69 (#183's document
 precedent), Profiles §2/§3/§4/§6.
@@ -176,9 +189,13 @@ own formula, `baseline = B − ours` last — and it cross-checks every stored
 order id against the replayed journal prefix at the chain mark: a row naming
 an order the prefix does not hold is refused, so the rows are bound to the
 same history the mark names. What remains attested rather than recomputable is
-only each row's `venue cumulative` (fills are not journaled); a late fill
-admitted after record now shows up as a DIAGNOSABLE per-order disagreement
-between the stored row and the live join, not an opaque asset-level delta.
+each row's `venue cumulative` and its FEES (fills are not journaled) and its
+base attribution (the loader deliberately holds no roster); the row's SIDE is
+recomputed against the prefix's planned record since §70i — an earlier
+wording here claimed only the cumulative was attested, which the final
+code_diff review falsified. A late fill admitted after record still shows up
+as a DIAGNOSABLE per-order disagreement between the stored row and the live
+join, not an opaque asset-level delta.
 
 Top-level bindings, each its own refusal: venue; account label (against the
 deployment config); **the spending credential's fingerprint** (round-2 finding
@@ -405,7 +422,12 @@ cost, so an understated weight admits past the venue's budget; the call-cost
 gets its own fixture and a 20→10 mutation), on the SPOT family's weight
 budget (family-scoped, existing profile shape). `omitZeroBalances`
 default **false** and the adapter leaves it unset — every asset comes back, so
-absence carries no conclusion and none is needed. Verbatim: `free` = "Amount
+absence carries no conclusion and none is needed. **§70i made that sentence a
+CARRIER instead of prose**: the first build read every absence as zero for
+both venues, so the codec now stamps `SpotAbsenceInconclusive`, a missing
+asset is reported unconcluded by the assertion, refused by the record
+command, and a stored absent row refuses under the Binance loader dialect.
+Verbatim: `free` = "Amount
 not currently committed to an open order", `locked` = "Amount currently
 committed to an open order". **Total = free + locked** — both fields are
 documented as partitions of holdings, so the sum is the venue's word, not an
@@ -698,3 +720,84 @@ re-aimed with a variable-preserving mutation and killed. The Binance
 free/locked VALUE swap stays un-run by design: the sum commutes, so it is
 behavior-equivalent (§70h.16 names the Bybit value-swap as the loud one, and
 it is a standing fixture in baseline_test).
+
+## §70i — the final code_diff review round (session 106): four majors, all folded
+
+The pre-close second-model review of the whole slice diff (2deb8ae..HEAD plus
+the v0.9.49 spec edits) returned NO-SHIP with four majors. Every one was
+validated against the code before acceptance; the review's one wrong
+sub-claim — "the spec claims every structural rule is checked in CI" — was
+rejected in place (§3.6 has ten rules and six gates, and rule 3 is un-gated
+by design).
+
+**1. Binance absence read as zero — a checker consuming a value marked "not a
+conclusion".** §70d's own sentence ("absence carries no conclusion and none
+is needed") was prose while `ports.BalanceReport` declared absent-means-zero
+universally, and join, record and loader all concluded zero from silence on
+both venues. The empty-body refusal's argument (a silence the documented
+shape rules out is wrong-shaped, not zero) covers each ASSET's silence too —
+a hazard named for one input. FOLD: the enumeration kind is a CARRIER stamped
+by the codec (`SpotAbsenceSemantics` / `ports.AbsenceSemantics`, zero value
+refused at the client, the ACL, the join and the record command); under
+`AbsenceIsZero` (Bybit) silence stays the venue's zero, under
+`AbsenceInconclusive` (Binance) a missing baselined asset is
+`SpotUnconcluded` at assert (non-latching non-pass), `ErrRecordBalanceAbsent`
+at record (before the bracket), and `ErrStoredAbsenceUninterpretable` at
+load. The mislabelled absence-as-zero fixture (a "binance" venue label over
+zero-concluding silence) is relabelled to the conclusive kind with the
+inconclusive twin added.
+
+**2. The second look re-asserted over a mid-bracket disappearance.** The
+bracket checked only `Incomplete`/`Unattributed` before re-asserting, so an
+order the venue held at look 1 and not at look 2 (a Bybit realtime clear, a
+retention cliff) bypassed §5.3 and could latch a delta computed over an
+unresolved absence — violating the normative replay → join → resolve →
+assert ordering inside the one construct built to avoid false latches. FOLD:
+`newAbsence(first, second)` downgrades to `OutcomeIncomplete` — NEWLY absent
+only, because an order absent at BOTH looks was resolved before the first
+assert and re-reports absent on every boot; treating it as motion would
+leave any deployment holding one `AbsentAfterFinality` order unable to latch
+a real delta for ever. Both directions carry their own fixture and their own
+killed mutant.
+
+**3. The loader trusted stored side/base/fees while §70b claimed only the
+cumulative was attested.** The prefix visitor collected bare ids; a
+chain-valid re-pinned document could flip a side and move the recomputed
+baseline by twice the cumulative. FOLD: the visitor collects side per id and
+the loader refuses a contradicting row (`ErrOrderRowSideDisagrees`); §70b's
+sentence is corrected in place (attested = cumulative, fees, base
+attribution — fees are unjournaled, base needs the roster the loader
+deliberately does not hold). The review's bijection demand (require every
+prefix order in the rows) is REJECTED with the argument: an omitted row's
+fills stay in the live ledger, so the very invariant the document feeds
+latches on the omission at the next assert, and a completeness rule would
+re-implement the record protocol's own MayExistAtVenue/terminality judgment
+inside the loader. The side check also caught a real fixture inconsistency:
+`baseline_test`'s sell row had been journaled as a BUY, and the old loader
+computed from the document's word with the journal silently disagreeing.
+
+**4. `oms/infrastructure/baseline` violated §3.6 rule 3 unmarked.** The
+position was chosen deliberately in §70b ("under oms BY POSITION") but the
+permitted-children rule was never edited — a deviation absorbed, not marked,
+found by exactly the reading pass the slice-close ritual prescribes. FOLD:
+rule 3 gains the documented exception with the load-bearing argument (under
+`driven/`, every root constructing the §5.2 pin would acquire the whole
+write-adapter surface, the shape rule 6 exists to make undeclarable), scoped
+to ONE named package. The review's second sub-claim (the loader's local
+`Journal` interface violates rule 2) is rejected: rule 2 governs a context's
+inner layers depending on adapters; a consumer-declared narrow interface
+inside infrastructure, satisfied by the driven journal at the one wiring
+site inside `oms.New`, is the deep-module shape this repo prefers.
+
+### §70i mutation addendum — 8 runs, zero SURVIVED (campaign total 28)
+
+| # | Mutant | Verdict |
+|---|---|---|
+| 22 | Binance codec stamps the conclusive kind | caught |
+| 23 | Bybit codec stamps the inconclusive kind | caught |
+| 24 | join: inconclusive absence falls through to the zero arithmetic | caught |
+| 25 | record: inconclusive absence attested as zero (refusal arm dropped) | caught |
+| 26 | second look: mid-bracket disappearance ignored | caught |
+| 27 | second look: ANY absence downgrades, resolved kind included | caught (the both-looks control is the killer) |
+| 28 | loader: stored side trusted (check dropped) | caught (3 tests) |
+| 29 | loader: Binance stored absence re-derives as zero | caught |

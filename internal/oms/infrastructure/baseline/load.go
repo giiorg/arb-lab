@@ -170,15 +170,27 @@ func Load(pin Pin, journal Journal, bind Bindings) ([]application.SpotBaseline, 
 			doc.Account, bind.Account, ErrAccountMismatch)
 	}
 
-	// 6. Rows against the chain-marked prefix.
-	prefix := prefixOrders{mark: doc.ChainSeq, ids: make(map[string]struct{})}
+	// 6. Rows against the chain-marked prefix — membership AND side. The side
+	// is recomputable from the prefix (the Planned record carries it), so per
+	// the stored-form rule it is recomputed rather than trusted: a side flip
+	// inverts the row's whole contribution to `ours`, twice the cumulative,
+	// which is the classic silent sign error. Base and fees remain
+	// attestations — base needs the roster this loader deliberately does not
+	// hold, and fees are not journaled (§70i corrects §70b's overclaim that
+	// only the cumulative was attested).
+	prefix := prefixOrders{mark: doc.ChainSeq, sides: make(map[string]domain.Side)}
 	if err := journal.Replay(&prefix); err != nil {
 		return nil, fmt.Errorf("baseline prefix replay: %w", err)
 	}
 	for _, row := range doc.Orders {
-		if _, held := prefix.ids[row.ClientOrderID]; !held {
+		side, held := prefix.sides[row.ClientOrderID]
+		if !held {
 			return nil, fmt.Errorf("order row %q is not in the journal prefix at seq %d: %w",
 				row.ClientOrderID, doc.ChainSeq, ErrOrderOutsidePrefix)
+		}
+		if domain.Side(row.Side) != side {
+			return nil, fmt.Errorf("order row %q states side %q, the journal prefix says %q: %w",
+				row.ClientOrderID, row.Side, side, ErrOrderRowSideDisagrees)
 		}
 	}
 
@@ -248,10 +260,21 @@ func Load(pin Pin, journal Journal, bind Bindings) ([]application.SpotBaseline, 
 func storedTotal(d Dialect, row BalanceRow) (fixedpoint.Quantity, error) {
 	tag := fixedpoint.Asset(row.Asset)
 	if row.Absent {
-		// The enumeration's silence, stored out loud: an absent coin is a zero
-		// balance (the Bybit rule; on Binance every asset comes back, so an
-		// absent row there records the same conclusion from a narrower cause).
-		return fixedpoint.ZeroQuantity(tag), nil
+		switch d {
+		case DialectBybit:
+			// The enumeration's silence, stored out loud: Bybit's coin-less
+			// call returns non-zero assets by the venue's own sentence, so a
+			// stored absence is the venue's zero.
+			return fixedpoint.ZeroQuantity(tag), nil
+		case DialectBinance:
+			// Binance returns every asset with omitZeroBalances unset, so its
+			// silence concludes nothing — the record command refuses to write
+			// an absent row under this dialect, and a stored one is hand-made
+			// or from a build that read absence permissively (§70i).
+			return fixedpoint.Quantity{}, fmt.Errorf("balance row %s is stored absent under a dialect whose silence concludes nothing: %w",
+				row.Asset, ErrStoredAbsenceUninterpretable)
+		}
+		return fixedpoint.Quantity{}, fmt.Errorf("balance row %s: %w", row.Asset, ErrDialectUnknown)
 	}
 	words := make([]venue.SpotBalanceWord, 0, len(row.Words))
 	for _, w := range row.Words {
@@ -301,12 +324,14 @@ func signedCumulative(side domain.Side, cumulative fixedpoint.Quantity) (fixedpo
 // empty-journal document refuse.
 type prefixOrders struct {
 	mark uint64
-	ids  map[string]struct{}
+	// sides maps each prefix id to its planned side — membership and the one
+	// row field the journal can recompute, collected in one walk (§70i).
+	sides map[string]domain.Side
 }
 
 func (p *prefixOrders) Planned(seq uint64, o domain.Order) error {
 	if seq <= p.mark {
-		p.ids[string(o.ClientOrderID)] = struct{}{}
+		p.sides[string(o.ClientOrderID)] = o.Side
 	}
 	return nil
 }

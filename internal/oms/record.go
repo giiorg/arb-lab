@@ -470,6 +470,9 @@ func (m *Module) recordBalanceEvidence(adapter *driven.SpotBalances, coverage []
 	if err != nil {
 		return recordEvidenceView{}, fmt.Errorf("record baseline balance read: %w", err)
 	}
+	if err := report.Absence.Validate(); err != nil {
+		return recordEvidenceView{}, fmt.Errorf("record baseline balance read: %w", err)
+	}
 	view := recordEvidenceView{
 		evidence:   make(map[fixedpoint.Asset]recordEvidence, len(coverage)),
 		observedAt: report.ObservedAt,
@@ -497,6 +500,16 @@ func (m *Module) recordBalanceEvidence(adapter *driven.SpotBalances, coverage []
 			break
 		}
 		if !found {
+			if report.Absence != ports.AbsenceIsZero {
+				// Only a report whose silence is the venue's own zero may have
+				// that silence stored as evidence. Under AbsenceInconclusive
+				// the documented shape contains every asset, so a missing
+				// coverage asset is an anomaly — and a baseline is an
+				// attestation, so attesting a quantity the venue never stated
+				// would store missing evidence as fact (§70i).
+				return recordEvidenceView{}, fmt.Errorf("balance of %s is absent from a read whose silence concludes nothing: %w",
+					asset, ErrRecordBalanceAbsent)
+			}
 			view.evidence[asset] = recordEvidence{absent: true}
 		}
 	}
@@ -531,6 +544,7 @@ var (
 	ErrRecordAbsenceUnproved   = errors.New("oms: record baseline refused — an absent order §5.3 has not concluded about")
 	ErrRecordProjectionStale   = errors.New("oms: record baseline refused — a resolved state did not reach the projection")
 	ErrRecordBalanceUnpinned   = errors.New("oms: record baseline refused — a coverage asset's balance could not be pinned this read")
+	ErrRecordBalanceAbsent     = errors.New("oms: record baseline refused — a coverage asset is absent from a read whose silence concludes nothing")
 	ErrRecordCumulativeMoved   = errors.New("oms: record baseline refused — an order surface moved across the settle window")
 	ErrRecordBalanceMoved      = errors.New("oms: record baseline refused — the balance moved across the settle window")
 )

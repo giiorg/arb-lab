@@ -1,6 +1,60 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-05, session 105): **#179 MID-SLICE, THIRD SAFE POINT — ITEMS (a) THROUGH (d) OF SESSION 104'S LIST ARE DONE: THE TEN-CASE `record_test.go` TRANSCRIBED AND GREEN, THE CONFIG ROWS + RENDERER GOLDENS LANDED, ALL SIX `awaits #179` FIXTURES UNSKIPPED, THE §70h ITEM 1–24 AUDIT COMPLETE (IT FOUND AND FILLED TWO REAL GAPS), AND THE MUTATION CAMPAIGN RUN — 20 MUTANTS, ZERO SURVIVED (results table at §70h's tail). `make ci` GREEN UNCACHED. WHAT REMAINS IS ITEMS (e) SPEC EDITS → v0.9.49 (DISCHARGING THE ONE `[SPEC EDIT OWED]` AT join.go:~502) AND (f) THE FINAL FRESH `code_diff` REVIEW, THEN THE SLICE CLOSES.**
+## Status (2026-08-05, session 106): **#179 IS CLOSED — DOCS AT v0.9.49, THE ONE `[SPEC EDIT OWED]` MARKER DISCHARGED, AND THE FINAL `code_diff` REVIEW RAN TWO ROUNDS: NO-SHIP WITH FOUR MAJORS (ALL VALIDATED AND FOLDED, RECORD §70i, EIGHT-MUTANT ADDENDUM — CAMPAIGN TOTAL 28 ZERO SURVIVED), THEN SHIP. `make ci` GREEN UNCACHED ON BOTH MODULES. THE SPOT LEG'S EXPOSURE BASELINE IS DONE END TO END.**
+
+**(e) The spec edits, v0.9.48 → v0.9.49.** §7.5's spot paragraph is rewritten
+into two: the baseline construct DEFINED (`baseline := B − ours` per
+`(venue, account, base asset)`, operator-run `arblab baseline record`, two-act
+`{path, sha256}` pin, inputs-not-conclusions document chain-marked to the
+journal, invalidated by events never time, stable-across-a-second-look
+latching), and the must-not-hold exemption RETIRED with its expired premise
+stated in place — `UnassertedBaselineUnrecorded` HOLDS the posture, coverage
+is roster-driven, and `spot_baseline`'s optionality is load-bearing. §5.2's
+OMS block gains both fields (settle required-when-spot and refused-when-
+spotless; the pin refused-when-spotless too — a reading-pass catch, the code
+asserted it and the first spec draft missed it). adr-history gains the #179
+block with an eleven-row findings table; venue-profiles gains the v0.9.49
+set-version entry over its already-landed balance-surfaces block; the design
+record's WIP banner is a closure record. `grep -rn "SPEC EDIT OWED"
+internal/ tools/` returns zero.
+
+**(f) The final review, and it earned its keep: four majors, every one
+real.** (1) **Binance absence read as zero** — §70d's own sentence said a
+Binance absence "carries no conclusion" while the port declared
+absent-means-zero universally; now the enumeration kind is a CARRIER
+(`SpotAbsenceSemantics`/`ports.AbsenceSemantics`, stamped by each codec,
+zero value refused at the client, the ACL, the join and the record command):
+Bybit silence stays the venue's zero, a Binance absence is `SpotUnconcluded`
+at assert, `ErrRecordBalanceAbsent` at record (both bracket reads share the
+guarded path), `ErrStoredAbsenceUninterpretable` at load. (2) **The second
+look re-asserted over a mid-bracket disappearance** — `newAbsence` now
+downgrades to `OutcomeIncomplete` for NEWLY absent orders only; the
+both-looks control (a resolved `AbsentAfterFinality` order beside a stable
+delta that must still latch) pins the other direction, and the paired
+mutants (check dropped / widened to any absence) are each killed by their
+own fixture. (3) **The loader trusted stored side/base/fees against §70b's
+claim that only the cumulative was attested** — the prefix visitor now
+collects sides and a contradicting row refuses (`ErrOrderRowSideDisagrees`);
+folding it instantly caught baseline_test's sell row journaled as a BUY.
+§70b corrected in place; the bijection demand rejected with the recorded
+argument. (4) **`oms/infrastructure/baseline` violated §3.6 rule 3
+unmarked** — the position was deliberate in §70b but the permitted-children
+rule was never edited; rule 3 now carries the documented exception with the
+rule-6 interaction argument, scoped to ONE named package. Round 2 verified
+all four folds end-to-end: **SHIP**.
+
+**Open work, none of it #179's:** the standing operator decisions ($20/$55
+live test + #171's Bybit testnet credential + §38f's off-host archive
+target); #177 (FM-9's consumer in SM §7's generation ladder); #180 (browser-
+confirm positionRisk weights); #184 (Dispatch filter conformance, awaits its
+first real caller); #152/#153/#159 (capture/gate housekeeping). Capture
+**PID 8495**, never rebuild over `bin/arblab`, `make ci` runs `-race` AND
+the ka staleness gate (needs node), cap `TLC_WORKERS` at 4, docs/i18n parity
+is `bun test`.
+
+---
+
+## Status (2026-08-05, session 105 — HISTORICAL): **#179 MID-SLICE, THIRD SAFE POINT — ITEMS (a) THROUGH (d) OF SESSION 104'S LIST ARE DONE: THE TEN-CASE `record_test.go` TRANSCRIBED AND GREEN, THE CONFIG ROWS + RENDERER GOLDENS LANDED, ALL SIX `awaits #179` FIXTURES UNSKIPPED, THE §70h ITEM 1–24 AUDIT COMPLETE (IT FOUND AND FILLED TWO REAL GAPS), AND THE MUTATION CAMPAIGN RUN — 20 MUTANTS, ZERO SURVIVED (results table at §70h's tail). `make ci` GREEN UNCACHED. WHAT REMAINS IS ITEMS (e) SPEC EDITS → v0.9.49 (DISCHARGING THE ONE `[SPEC EDIT OWED]` AT join.go:~502) AND (f) THE FINAL FRESH `code_diff` REVIEW, THEN THE SLICE CLOSES.**
 
 **What session 105 did, in order.**
 

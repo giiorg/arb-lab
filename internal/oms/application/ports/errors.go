@@ -176,4 +176,11 @@ var (
 	// account of why, which is the state the type exists to make unwritable
 	// (UnassertedReason's argument, one port over).
 	ErrUnpinnedReasonInvalid = errors.New("oms: unpinned balance names no valid reason")
+
+	// ErrAbsenceSemanticsInvalid reports a BalanceReport that never stated
+	// what its silences mean — the zero value or out of roster. Every
+	// consumer refuses it: a report whose absences could be read either way
+	// is a policy with no carrier, and inheriting a reading is the mistake
+	// the field exists to make unwritable (§70i).
+	ErrAbsenceSemanticsInvalid = errors.New("oms: balance report states no absence semantics")
 )

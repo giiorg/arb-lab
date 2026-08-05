@@ -219,6 +219,12 @@ func TestBinanceDecodeSpotBalances(t *testing.T) {
 		btc.Words[1] != (venue.SpotBalanceWord{Name: "locked", Value: "0.25000000"}) {
 		t.Errorf("BTC words = %v, want free/locked verbatim", btc.Words)
 	}
+	// With omitZeroBalances unset every asset comes back, so this report's
+	// silences conclude NOTHING — the value here is a claim, not a default,
+	// and the Bybit codec must stamp the opposite one (§70i).
+	if report.Absence != venue.SpotAbsenceInconclusive {
+		t.Errorf("Absence = %s, want SpotAbsenceInconclusive", report.Absence)
+	}
 }
 
 func TestBinanceDecodeSpotBalancesRefusals(t *testing.T) {
@@ -281,6 +287,12 @@ func TestBybitDecodeSpotBalances(t *testing.T) {
 	}
 	if report.Unpinned[0].Asset != "ETH" || report.Unpinned[0].Reason != venue.SpotUnpinnedLockedSplit {
 		t.Errorf("unpinned = %+v, want ETH under SpotUnpinnedLockedSplit", report.Unpinned[0])
+	}
+	// The coin-less call "returns non-zero asset info" — the venue's own
+	// sentence — so this report's silences ARE zeros, the opposite stamp from
+	// the Binance codec's (§70i).
+	if report.Absence != venue.SpotAbsenceZero {
+		t.Errorf("Absence = %s, want SpotAbsenceZero", report.Absence)
 	}
 }
 

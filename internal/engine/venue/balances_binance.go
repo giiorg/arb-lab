@@ -108,7 +108,11 @@ func (c *BinanceOrderCodec) DecodeSpotBalances(resp transport.Response) (SpotBal
 			ErrSpotBalancesUnreadable)
 	}
 
-	var report SpotBalanceReport
+	// With omitZeroBalances left unset every asset comes back, zeros included
+	// (Profiles §4's dated block) — so this report's silences conclude
+	// NOTHING: an asset missing from a shape documented to contain every
+	// asset is an anomaly, not a quantity (§70i).
+	report := SpotBalanceReport{Absence: SpotAbsenceInconclusive}
 	seen := make(map[string]struct{}, len(wire.Balances))
 	for i, row := range wire.Balances {
 		if row.Asset == "" {

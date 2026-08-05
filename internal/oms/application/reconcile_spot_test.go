@@ -32,6 +32,7 @@ type spotReconcileFixture struct {
 	reconciler *application.Reconciler
 	joinVenue  *fakeJoinVenue
 	balances   *fakeSpotBalances
+	resolver   *fakeResolver
 
 	waits  []time.Duration
 	onWait func()
@@ -40,7 +41,7 @@ type spotReconcileFixture struct {
 func newSpotReconcileFixture(t *testing.T, leg application.SpotLeg, wired bool, entries ...journalEntry) *spotReconcileFixture {
 	t.Helper()
 
-	f := &spotReconcileFixture{joinVenue: newFakeJoinVenue()}
+	f := &spotReconcileFixture{joinVenue: newFakeJoinVenue(), resolver: &fakeResolver{}}
 	orders := newFakeOrders()
 	replay := &fakeReplay{entries: entries}
 	journal := newFakeJournal()
@@ -59,7 +60,7 @@ func newSpotReconcileFixture(t *testing.T, leg application.SpotLeg, wired bool, 
 	if err != nil {
 		t.Fatalf("NewJoiner: %v", err)
 	}
-	resolver, err := application.NewResolver(journal, orders, &fakeResolver{}, orders, clk, testPolicy())
+	resolver, err := application.NewResolver(journal, orders, f.resolver, orders, clk, testPolicy())
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -127,6 +128,100 @@ func TestReconcileASpotDeltaStableAcrossTheSecondLookLatches(t *testing.T) {
 	}
 	if len(f.waits) != 1 || f.waits[0] != 2*time.Second {
 		t.Errorf("waits = %v, want exactly [2s] — one bracket, the configured bound", f.waits)
+	}
+	if len(got.Assertion.SpotUnexplained) != 1 {
+		t.Fatalf("SpotUnexplained = %+v, want the stable BTC delta", got.Assertion.SpotUnexplained)
+	}
+	spotDeltaEquals(t, got.Assertion.SpotUnexplained[0], "BTC", "0.5", "0.7", "0.2")
+}
+
+// TestReconcileAnOrderNewlyAbsentInTheSecondLookIsIncomplete is §70i: an order
+// the venue held at the first look and does not hold inside the bracket
+// changed evidence the ordering (join → resolve → assert) says only §5.3 may
+// interpret — and the bracket does not run the Resolver, so the re-assert
+// would read a projection that is not concluded. The outcome is Incomplete:
+// the next boot re-derives everything, resolution included.
+func TestReconcileAnOrderNewlyAbsentInTheSecondLookIsIncomplete(t *testing.T) {
+	t.Parallel()
+
+	f, buy := spotDeltaBoot(t, true)
+	f.onWait = func() {
+		f.joinVenue.status[buy.ClientOrderID] = ports.VenueOrder{Presence: ports.VenueHasNoOrder}
+	}
+	c := bootChecklist(t)
+	if _, err := f.reconciler.Reconcile(c); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if o := outcomeOf(t, c, boot.GateNetDeltaAsserted); o != boot.OutcomeIncomplete {
+		t.Errorf("GateNetDeltaAsserted = %s, want OutcomeIncomplete — the evidence moved mid-bracket", o)
+	}
+	if latched(t, c, boot.GateNetDeltaAsserted) {
+		t.Error("a mid-bracket disappearance latched — that is a delta computed over an unresolved absence")
+	}
+	if len(f.waits) != 1 {
+		t.Errorf("waits = %v, want exactly one bracket", f.waits)
+	}
+}
+
+// TestReconcileAnAbsenceInBothLooksStillLatchesAStableDelta is the §70i
+// control: an order absent at BOTH looks was resolved through §5.3 before the
+// first assert ever ran, and it re-reports absent on every boot for as long
+// as the venue has purged it — so it is NOT motion, and treating it as motion
+// would leave any deployment holding one AbsentAfterFinality order unable to
+// latch a real spot delta, for ever. The stable delta must still latch over
+// it.
+func TestReconcileAnAbsenceInBothLooksStillLatchesAStableDelta(t *testing.T) {
+	t.Parallel()
+
+	// The delta source: a filled spot buy of 0.5 against wallet 1.0 and
+	// baseline 0.3 (spotDeltaBoot's arithmetic, restated because this fixture
+	// needs a SECOND order in the journal).
+	buy := joinOrder(t, 1, spot(), domain.SideBuy, "0.5")
+	// The stably-absent order: journaled to SubmissionUnknown an hour ago, so
+	// its landing horizon has long passed and §5.3 can conclude the absence.
+	gone := joinOrder(t, 2, spot(), domain.SideSell, "0.1")
+	anchor := joinNow.Add(-time.Hour)
+	at, err := clock.NewServerTime(anchor, testUncertainty)
+	if err != nil {
+		t.Fatalf("NewServerTime: %v", err)
+	}
+
+	balances := newFakeSpotBalances()
+	balances.reports["binance"] = balanceReport(t, balanceRow(t, "BTC", "1"))
+	leg := application.SpotLeg{
+		Balances:  balances,
+		Roster:    spotRoster(),
+		Baselines: []application.SpotBaseline{btcBaseline(t, "0.3")},
+	}
+	entries := append(
+		replayScript(t, 1, buy, anchor, domain.StateFilled),
+		replayScript(t, 4, gone, anchor, domain.StateSubmissionUnknown)...)
+	f := newSpotReconcileFixture(t, leg, true, entries...)
+	f.balances = balances
+	f.joinVenue.status[buy.ClientOrderID] = present("V-1", "0.5", t)
+	f.joinVenue.sweeps[spot()] = ports.ExecutionSweep{
+		Executions: []ports.VenueExecution{execution(t, "E-1", buy.ClientOrderID, "V-1", "0.5")},
+	}
+	// `gone` is in the status map of neither look: the venue reports it
+	// absent both times. The Resolver concludes the absence at the first pass
+	// (stable not-found: absent from the resolving surface, a proven sweep
+	// past the horizon, inside the published reach).
+	f.resolver.status = absentVenue(publishedReach())
+	f.resolver.sweeps = []ports.ExecutionSweep{provenSweep(horizonOf(at, testPolicy()))}
+
+	c := bootChecklist(t)
+	got, err := f.reconciler.Reconcile(c)
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if o := outcomeOf(t, c, boot.GateNetDeltaAsserted); o != boot.OutcomeNeedsOperator {
+		t.Errorf("GateNetDeltaAsserted = %s, want OutcomeNeedsOperator — a both-looks absence is not motion", o)
+	}
+	if !latched(t, c, boot.GateNetDeltaAsserted) {
+		t.Error("the stable delta did not latch — the resolved absence masked it")
+	}
+	if len(f.waits) != 1 {
+		t.Errorf("waits = %v, want exactly one bracket", f.waits)
 	}
 	if len(got.Assertion.SpotUnexplained) != 1 {
 		t.Fatalf("SpotUnexplained = %+v, want the stable BTC delta", got.Assertion.SpotUnexplained)

@@ -50,7 +50,7 @@ func openJournal(t *testing.T) *driven.SQLiteJournal {
 	return j
 }
 
-func spotOrder(t *testing.T, id, symbol, base, quote string) domain.Order {
+func spotOrder(t *testing.T, id, symbol, base, quote string, side domain.Side) domain.Order {
 	t.Helper()
 	qty, err := fixedpoint.ParseQuantity(fixedpoint.Asset(base), "1")
 	if err != nil {
@@ -63,7 +63,7 @@ func spotOrder(t *testing.T, id, symbol, base, quote string) domain.Order {
 	return domain.Order{
 		ClientOrderID: ids.ClientOrderID(id),
 		Instrument:    ids.VenueInstrument{Venue: "binance", Product: ids.ProductSpot, Symbol: symbol},
-		Side:          domain.SideBuy,
+		Side:          side,
 		Type:          domain.OrderTypeLimit,
 		TimeInForce:   domain.TimeInForceIOC,
 		Quantity:      qty,
@@ -114,9 +114,13 @@ func bindings() baseline.Bindings {
 func mainDocument(t *testing.T, j *driven.SQLiteJournal) baseline.Document {
 	t.Helper()
 	for _, o := range []domain.Order{
-		spotOrder(t, "ord-btc-buy", "BTCUSDT", "BTC", "USDT"),
-		spotOrder(t, "ord-btc-sell", "BTCUSDT", "BTC", "USDT"),
-		spotOrder(t, "ord-eth-buy", "ETHUSDT", "ETH", "USDT"),
+		spotOrder(t, "ord-btc-buy", "BTCUSDT", "BTC", "USDT", domain.SideBuy),
+		// Journaled as the SELL the document row states: the loader recomputes
+		// the side from the prefix since §70i, so a fixture whose journal and
+		// document disagreed — as this one silently did before the check
+		// existed — refuses instead of computing from the document's word.
+		spotOrder(t, "ord-btc-sell", "BTCUSDT", "BTC", "USDT", domain.SideSell),
+		spotOrder(t, "ord-eth-buy", "ETHUSDT", "ETH", "USDT", domain.SideBuy),
 	} {
 		if err := j.AppendPlanned(o); err != nil {
 			t.Fatalf("AppendPlanned(%s): %v", o.ClientOrderID, err)
@@ -137,8 +141,14 @@ func mainDocument(t *testing.T, j *driven.SQLiteJournal) baseline.Document {
 				{Name: "free", Value: "0.75000000"},
 				{Name: "locked", Value: "0.25000000"},
 			}},
-			// The venue's silence stated out loud: B(ETH) is zero.
-			{Asset: "ETH", Absent: true},
+			// B(ETH) is zero AS THE VENUE STATES IT: Binance returns every
+			// asset with omitZeroBalances unset, so its zero is a row with
+			// zero words, never an absence (§70i — the absent marker is the
+			// Bybit dialect's, whose enumeration omits zero coins).
+			{Asset: "ETH", Words: []baseline.Word{
+				{Name: "free", Value: "0.00000000"},
+				{Name: "locked", Value: "0.00000000"},
+			}},
 		},
 		Orders: []baseline.OrderRow{
 			// A buy with a fee in the BASE asset (item 1's first half)...
@@ -238,7 +248,7 @@ func TestLoadRefusesARowOutsideTheChainMarkedPrefix(t *testing.T) {
 	// Journal a FOURTH order after the mark was taken, and claim it in the
 	// document. It is in the journal — only the prefix comparison can refuse
 	// it, so "in the journal" and "in the prefix" must be different sets.
-	if err := j.AppendPlanned(spotOrder(t, "ord-late", "BTCUSDT", "BTC", "USDT")); err != nil {
+	if err := j.AppendPlanned(spotOrder(t, "ord-late", "BTCUSDT", "BTC", "USDT", domain.SideBuy)); err != nil {
 		t.Fatalf("AppendPlanned: %v", err)
 	}
 	doc.Orders = append(doc.Orders, baseline.OrderRow{
@@ -369,6 +379,97 @@ func TestLoadRefusesAStoredRowTheDerivationCannotPin(t *testing.T) {
 		Fingerprint: testFingerprint, Dialect: baseline.DialectBybit}
 	if _, err := baseline.Load(pinned(t, doc), j, bind); !errors.Is(err, baseline.ErrStoredRowUnpinnable) {
 		t.Errorf("Load(unpinnable words) = %v, want ErrStoredRowUnpinnable", err)
+	}
+}
+
+func TestLoadAbsentRowIsTheBybitDialectsWord(t *testing.T) {
+	t.Parallel()
+
+	// Bybit's coin-less enumeration returns non-zero assets by the venue's
+	// own sentence, so a stored absence re-derives as zero THERE — beside a
+	// counted order, so the zero feeds a real subtraction rather than a
+	// degenerate 0−0 (§70i).
+	j := openJournal(t)
+	order := domain.Order{
+		ClientOrderID: ids.ClientOrderID("ord-by-buy"),
+		Instrument:    ids.VenueInstrument{Venue: "bybit", Product: ids.ProductSpot, Symbol: "BTCUSDT"},
+		Side:          domain.SideBuy,
+		Type:          domain.OrderTypeLimit,
+		TimeInForce:   domain.TimeInForceIOC,
+	}
+	var err error
+	if order.Quantity, err = fixedpoint.ParseQuantity("BTC", "1"); err != nil {
+		t.Fatalf("ParseQuantity: %v", err)
+	}
+	if order.LimitPrice, err = fixedpoint.ParsePrice("BTC", "USDT", "100"); err != nil {
+		t.Fatalf("ParsePrice: %v", err)
+	}
+	if err := j.AppendPlanned(order); err != nil {
+		t.Fatalf("AppendPlanned: %v", err)
+	}
+	seq, hash := mark(t, j)
+	doc := baseline.Document{
+		Kind: baseline.Kind, Version: baseline.Version,
+		Venue: "bybit", Account: testAccount, CredentialSHA256: testFingerprint,
+		ObservedAt: "2026-08-05T12:00:00Z",
+		ChainSeq:   seq, ChainHash: hash,
+		Balances: []baseline.BalanceRow{{Asset: "BTC", Absent: true}},
+		Orders: []baseline.OrderRow{{ClientOrderID: "ord-by-buy", Side: "buy",
+			Base: "BTC", Cumulative: "0.5"}},
+	}
+	bind := baseline.Bindings{Venue: "bybit", Account: testAccount,
+		Fingerprint: testFingerprint, Dialect: baseline.DialectBybit}
+	got, err := baseline.Load(pinned(t, doc), j, bind)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	// baseline = B − ours = 0 − 0.5 = −0.5.
+	want, err := fixedpoint.ParseQuantity("BTC", "-0.5")
+	if err != nil {
+		t.Fatalf("ParseQuantity: %v", err)
+	}
+	if cmp, err := loadQuantity(t, got, "BTC").Cmp(want); err != nil || cmp != 0 {
+		t.Errorf("baseline(BTC) = %v, want -0.5 (cmp %d, err %v)", loadQuantity(t, got, "BTC"), cmp, err)
+	}
+}
+
+func TestLoadRefusesAnAbsentRowUnderTheBinanceDialect(t *testing.T) {
+	t.Parallel()
+
+	// Binance returns every asset with omitZeroBalances unset, so a stored
+	// absence is a silence that venue could not have answered with — the
+	// record command never writes one, and re-deriving zero from it would
+	// mint a quantity from missing evidence (§70i). The positive control is
+	// TestLoadRecomputesEverythingFromStoredInputs, whose ETH zero is stated
+	// in words.
+	j := openJournal(t)
+	doc := mainDocument(t, j)
+	doc.Balances[1] = baseline.BalanceRow{Asset: "ETH", Absent: true}
+	if _, err := baseline.Load(pinned(t, doc), j, bindings()); !errors.Is(err, baseline.ErrStoredAbsenceUninterpretable) {
+		t.Errorf("Load(absent under binance) = %v, want ErrStoredAbsenceUninterpretable", err)
+	}
+}
+
+func TestLoadRefusesARowWhoseSideContradictsThePrefix(t *testing.T) {
+	t.Parallel()
+
+	// The side is the one row field the journal prefix can recompute, and a
+	// flip inverts the row's whole contribution to `ours` — checked in both
+	// directions, because the two flips move the baseline opposite ways and
+	// either would read as a clean load without the check (§70i).
+	for name, flip := range map[string]func(*baseline.Document){
+		"buy claimed as sell": func(d *baseline.Document) { d.Orders[0].Side = "sell" },
+		"sell claimed as buy": func(d *baseline.Document) { d.Orders[1].Side = "buy" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			j := openJournal(t)
+			doc := mainDocument(t, j)
+			flip(&doc)
+			if _, err := baseline.Load(pinned(t, doc), j, bindings()); !errors.Is(err, baseline.ErrOrderRowSideDisagrees) {
+				t.Errorf("Load(flipped side) = %v, want ErrOrderRowSideDisagrees", err)
+			}
+		})
 	}
 }
 

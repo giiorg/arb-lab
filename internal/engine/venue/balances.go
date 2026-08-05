@@ -88,6 +88,51 @@ func (r SpotUnpinnedReason) String() string {
 	return fmt.Sprintf("SpotUnpinnedReason(%d)", uint8(r))
 }
 
+// SpotAbsenceSemantics is what an asset's ABSENCE from the report concludes.
+// The CODEC states it, because the venue's enumeration kind is what decides:
+// Bybit's coin-less call returns non-zero assets by the venue's own sentence,
+// so its silence is a zero; Binance's account read returns every asset with
+// omitZeroBalances unset, so its silence is an anomaly the documented shape
+// rules out, and concluding zero from it would manufacture a holding from
+// missing evidence (§70i — the empty-body refusal's argument, per asset).
+type SpotAbsenceSemantics uint8
+
+const (
+	// SpotAbsenceUnspecified is the zero value: a report that never stated
+	// what its silences mean. Refused downstream.
+	SpotAbsenceUnspecified SpotAbsenceSemantics = iota
+
+	// SpotAbsenceZero: an absent asset is a zero balance, on the venue's own
+	// word (Bybit).
+	SpotAbsenceZero
+
+	// SpotAbsenceInconclusive: an absent asset concludes nothing (Binance).
+	SpotAbsenceInconclusive
+)
+
+const maxSpotAbsenceSemantics = SpotAbsenceInconclusive
+
+// Validate reports whether s names a semantics, excluding the sentinel.
+func (s SpotAbsenceSemantics) Validate() error {
+	if s == SpotAbsenceUnspecified || s > maxSpotAbsenceSemantics {
+		return fmt.Errorf("spot absence semantics %d: %w", uint8(s), ErrSpotAbsenceSemanticsInvalid)
+	}
+	return nil
+}
+
+// String implements fmt.Stringer.
+func (s SpotAbsenceSemantics) String() string {
+	switch s {
+	case SpotAbsenceUnspecified:
+		return "SpotAbsenceUnspecified"
+	case SpotAbsenceZero:
+		return "SpotAbsenceZero"
+	case SpotAbsenceInconclusive:
+		return "SpotAbsenceInconclusive"
+	}
+	return fmt.Sprintf("SpotAbsenceSemantics(%d)", uint8(s))
+}
+
 // SpotUnpinnedRow is one asset whose total this read could not pin.
 type SpotUnpinnedRow struct {
 	// Asset is the coin, in the venue's own spelling.
@@ -102,13 +147,17 @@ type SpotBalanceReport struct {
 	// ObservedAt is the venue clock instant of the read.
 	ObservedAt clock.ServerTime
 
-	// Rows are the assets with a pinnable total. Absence from Rows AND
-	// Unpinned is a zero balance (see the package comment above).
+	// Rows are the assets with a pinnable total. What absence from Rows AND
+	// Unpinned means is Absence's answer, per venue (§70i).
 	Rows []SpotBalanceRow
 
 	// Unpinned are the assets whose total could not be pinned, each with the
 	// reason.
 	Unpinned []SpotUnpinnedRow
+
+	// Absence states what this report's silences conclude. The codec stamps
+	// it; the client refuses a report without one.
+	Absence SpotAbsenceSemantics
 }
 
 // SpotBalanceCodec is one venue's translation of the spot balance surface.
@@ -182,6 +231,12 @@ func (c *OrderClient) SpotBalances(ctx context.Context, urgency ratelimit.Priori
 
 	report, err := c.codec.DecodeSpotBalances(resp)
 	if err != nil {
+		return SpotBalanceReport{}, apperror.Precondition(op, "decode", err)
+	}
+	if err := report.Absence.Validate(); err != nil {
+		// A report that never stated what its silences mean cannot be reasoned
+		// from: every consumer downstream branches on this field for an asset
+		// the venue did not mention.
 		return SpotBalanceReport{}, apperror.Precondition(op, "decode", err)
 	}
 	for _, row := range report.Rows {

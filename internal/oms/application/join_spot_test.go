@@ -111,7 +111,10 @@ func balanceReport(t *testing.T, rows ...ports.AssetBalance) ports.BalanceReport
 	if err != nil {
 		t.Fatalf("NewServerTime: %v", err)
 	}
-	return ports.BalanceReport{ObservedAt: at, Rows: rows}
+	// AbsenceIsZero by default: most fixtures state every asset they mean,
+	// and the conclusive kind is the one whose silences are also answers.
+	// Tests about the INCONCLUSIVE kind set the field themselves (§70i).
+	return ports.BalanceReport{ObservedAt: at, Rows: rows, Absence: ports.AbsenceIsZero}
 }
 
 // newSpotJoiner mirrors newJoiner with a wired spot leg. No position scope:
@@ -296,11 +299,12 @@ func TestAssertSpotLatchesBothDeltaSigns(t *testing.T) {
 	}
 }
 
-// TestAssertSpotAnAbsentAssetIsAZeroBalance is §70h item 6: the baselined
-// asset is missing from a report that holds TWO other rows, and the absence
-// must reach the subtraction as a zero balance — observed = 0 − baseline —
-// never as a skipped cell. The port's enumeration is unscoped, so absence is
-// the venue's own statement.
+// TestAssertSpotAnAbsentAssetIsAZeroBalance is §70h item 6 under the
+// CONCLUSIVE enumeration kind (AbsenceIsZero — Bybit's, whose coin-less call
+// omits zero coins by the venue's own sentence): the baselined asset is
+// missing from a report that holds TWO other rows, and the absence must reach
+// the subtraction as a zero balance — observed = 0 − baseline — never as a
+// skipped cell. The inconclusive kind is the test below (§70i).
 func TestAssertSpotAnAbsentAssetIsAZeroBalance(t *testing.T) {
 	t.Parallel()
 
@@ -323,6 +327,64 @@ func TestAssertSpotAnAbsentAssetIsAZeroBalance(t *testing.T) {
 	spotDeltaEquals(t, got.SpotUnexplained[0], "BTC", "0", "-0.3", "-0.3")
 	if !got.Holds() {
 		t.Error("Holds() = false — a wallet short of its own baseline is exposure with the sign flipped")
+	}
+}
+
+// TestAssertSpotAnInconclusiveAbsenceConcludesNothing is §70i: the same
+// missing asset under the INCONCLUSIVE kind (Binance's, whose account read
+// returns every asset with omitZeroBalances unset, so a missing one is an
+// anomaly the documented shape rules out). The assertion must neither read
+// zero — a quantity minted from missing evidence — nor latch: the asset is
+// reported unconcluded, the same non-latching non-pass an unpinned row earns.
+func TestAssertSpotAnInconclusiveAbsenceConcludesNothing(t *testing.T) {
+	t.Parallel()
+
+	balances := newFakeSpotBalances()
+	report := balanceReport(t, balanceRow(t, "ETH", "1"), balanceRow(t, "USDT", "5"))
+	report.Absence = ports.AbsenceInconclusive
+	balances.reports["binance"] = report
+	j, _ := newSpotJoiner(t, application.SpotLeg{
+		Balances:  balances,
+		Roster:    spotRoster(),
+		Baselines: []application.SpotBaseline{btcBaseline(t, "0.3")},
+	})
+
+	got, err := j.Assert(nil)
+	if err != nil {
+		t.Fatalf("Assert: %v", err)
+	}
+	if len(got.SpotUnexplained) != 0 {
+		t.Errorf("SpotUnexplained = %+v, want none — an inconclusive absence is not a delta", got.SpotUnexplained)
+	}
+	want := application.UnconcludedBalance{Venue: "binance", Asset: "BTC",
+		Reason: ports.UnpinnedAbsenceInconclusive}
+	if len(got.SpotUnconcluded) != 1 || got.SpotUnconcluded[0] != want {
+		t.Errorf("SpotUnconcluded = %+v, want [%+v]", got.SpotUnconcluded, want)
+	}
+	if got.Holds() {
+		t.Error("Holds() = true — refusing to conclude must not latch an operator incident")
+	}
+}
+
+// TestAssertSpotRefusesAReportWithNoAbsenceSemantics: the zero value is a
+// report that never stated what its silences mean, and it is refused on the
+// boot where nothing happens to be absent — not first on the boot where
+// something is (§70i).
+func TestAssertSpotRefusesAReportWithNoAbsenceSemantics(t *testing.T) {
+	t.Parallel()
+
+	balances := newFakeSpotBalances()
+	report := balanceReport(t, balanceRow(t, "BTC", "0.3"))
+	report.Absence = ports.AbsenceSemanticsUnspecified
+	balances.reports["binance"] = report
+	j, _ := newSpotJoiner(t, application.SpotLeg{
+		Balances:  balances,
+		Roster:    spotRoster(),
+		Baselines: []application.SpotBaseline{btcBaseline(t, "0.3")},
+	})
+
+	if _, err := j.Assert(nil); !errors.Is(err, ports.ErrAbsenceSemanticsInvalid) {
+		t.Errorf("Assert = %v, want ErrAbsenceSemanticsInvalid", err)
 	}
 }
 
