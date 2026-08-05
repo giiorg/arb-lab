@@ -77,7 +77,7 @@ func newReconcileFixture(t *testing.T, now time.Time, entries ...journalEntry) *
 	if err != nil {
 		t.Fatalf("NewReplayer: %v", err)
 	}
-	joiner, err := application.NewJoiner(joinVenue, positions, orders, clk, joinAccount, perpScopeFor())
+	joiner, err := application.NewJoiner(joinVenue, positions, orders, clk, joinAccount, application.SpotLeg{}, perpScopeFor())
 	if err != nil {
 		t.Fatalf("NewJoiner: %v", err)
 	}
@@ -85,7 +85,7 @@ func newReconcileFixture(t *testing.T, now time.Time, entries ...journalEntry) *
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
-	r, err := application.NewReconciler(replayer, joiner, resolver)
+	r, err := application.NewReconciler(replayer, joiner, resolver, application.SecondLook{})
 	if err != nil {
 		t.Fatalf("NewReconciler: %v", err)
 	}
@@ -733,10 +733,10 @@ func TestReconcilerRefusesAMissingPhase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewReplayer: %v", err)
 	}
-	if _, err := application.NewReconciler(nil, nil, nil); !errors.Is(err, application.ErrReplayerMissing) {
+	if _, err := application.NewReconciler(nil, nil, nil, application.SecondLook{}); !errors.Is(err, application.ErrReplayerMissing) {
 		t.Errorf("NewReconciler(nil,...) = %v, want ErrReplayerMissing", err)
 	}
-	if _, err := application.NewReconciler(replayer, nil, nil); !errors.Is(err, application.ErrJoinerMissing) {
+	if _, err := application.NewReconciler(replayer, nil, nil, application.SecondLook{}); !errors.Is(err, application.ErrJoinerMissing) {
 		t.Errorf("NewReconciler(replayer, nil, nil) = %v, want ErrJoinerMissing", err)
 	}
 }

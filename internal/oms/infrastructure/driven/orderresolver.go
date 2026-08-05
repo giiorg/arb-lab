@@ -21,8 +21,9 @@ import (
 // able to place an order, and a single adapter carrying both would put the
 // method one line away from the code whose subject is not calling it.
 type OrderResolver struct {
-	client VenueOrderReader
-	assets map[ids.VenueInstrument]venue.InstrumentAssets
+	client  VenueOrderReader
+	assets  map[ids.VenueInstrument]venue.InstrumentAssets
+	urgency ratelimit.Priority
 }
 
 // VenueOrderReader is the venue-side capability this adapter needs, declared
@@ -52,7 +53,7 @@ type VenueOrderReader interface {
 // that will own this — domain.Order.Validate already names it as the thing that
 // would let quantity and price assets be checked against the instrument — and
 // when it lands this table is what it replaces.
-func NewOrderResolver(client VenueOrderReader, assets map[ids.VenueInstrument]venue.InstrumentAssets) (*OrderResolver, error) {
+func NewOrderResolver(client VenueOrderReader, assets map[ids.VenueInstrument]venue.InstrumentAssets, urgency ratelimit.Priority) (*OrderResolver, error) {
 	if client == nil {
 		return nil, ErrVenueOrderReaderMissing
 	}
@@ -64,24 +65,25 @@ func NewOrderResolver(client VenueOrderReader, assets map[ids.VenueInstrument]ve
 			return nil, fmt.Errorf("instrument %s: %w", instrument.Symbol, err)
 		}
 	}
-	return &OrderResolver{client: client, assets: assets}, nil
+	if err := urgency.Validate(); err != nil {
+		return nil, fmt.Errorf("order resolver urgency: %w", err)
+	}
+	return &OrderResolver{client: client, assets: assets, urgency: urgency}, nil
 }
 
-// resolveUrgency is the §7.6 shed class every call from this adapter carries.
+// The §7.6 shed class every call from this adapter carries is CONSTRUCTOR-
+// pinned since task #179 (record §70f), where it was a const.
 //
-// It is pinned rather than taken as an argument, and §5.3 is what pins it: "if
-// the resolving query is unavailable/rate-limited, hold new trading and reserve
-// rate-limit budget for recovery — the resolving queries are SAFETY traffic on
-// §7.6's priority ladder, and holding new trading is what frees the Opening band
-// they are reserved above."
-//
-// engine/venue's OrderByClientID deliberately admits all three classes, because
-// a scheduled reconciliation sweep and a live risk read are legitimate callers
-// of the same method. This adapter has exactly one caller with exactly one
-// purpose, so the class is a fact about this path rather than a choice, and a
-// parameter would be an invitation to spend the recovery reserve on something
-// else or — worse — to run recovery under the class that gets shed first.
-const resolveUrgency = ratelimit.PrioritySafety
+// The const's argument — "this adapter has exactly one caller with exactly one
+// purpose" — expired when `arblab baseline record` became a second caller: an
+// operator maintenance command whose join re-runs Resolve and whose sweep can
+// issue up to 32 pages per order, which the Safety pin would spend out of the
+// emergency reserve. §5.3's rule still holds for the boot path — the resolving
+// queries are SAFETY traffic and boot wiring passes exactly that — while the
+// record command's wiring passes Routine, so a maintenance sweep is shed
+// before the reserve rather than out of it. The zero value is refused at
+// construction, so a wiring that forgot to choose does not silently inherit
+// either rung.
 
 // maxSweepPages bounds the paging loop below.
 //
@@ -114,7 +116,7 @@ func (r *OrderResolver) Resolve(o domain.Order) (ports.VenueOrder, error) {
 	status, err := r.client.OrderByClientID(context.Background(), venue.OrderRef{
 		Instrument:    o.Instrument,
 		ClientOrderID: o.ClientOrderID,
-	}, assets, resolveUrgency)
+	}, assets, r.urgency)
 	if err != nil {
 		// Passed through unwrapped: engine/venue already classified whether this
 		// was a refusal, a timeout or a rate limit, and §5.3 forbids re-deriving
@@ -173,7 +175,7 @@ func (r *OrderResolver) SweepExecutions(o domain.Order, since, until time.Time) 
 	sweep := ports.ExecutionSweep{}
 
 	for pages := 0; pages < maxSweepPages; pages++ {
-		page, err := r.client.Executions(context.Background(), o.Instrument, assets, window, resolveUrgency)
+		page, err := r.client.Executions(context.Background(), o.Instrument, assets, window, r.urgency)
 		if err != nil {
 			return ports.ExecutionSweep{}, err
 		}

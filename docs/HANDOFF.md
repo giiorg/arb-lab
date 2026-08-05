@@ -1,5 +1,79 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
+## Status (2026-08-05, session 103): **#179 IS MID-SLICE AT A COMMITTED SAFE POINT — THE DESIGN (RECORD §70) IS THROUGH THREE ADVERSARIAL ROUNDS WITH ALL FOURTEEN MAJORS FOLDED IN, THE APPLICATION CORE IS IMPLEMENTED AND `make ci` IS GREEN, SIX FIXTURES ARE LOUDLY SKIPPED AWAITING THE BASELINE LOADING PATH, AND ONE `[SPEC EDIT OWED]` MARKER STANDS BY DESIGN.**
+
+**Read record §70 (`docs/superpowers/specs/2026-08-05-m3-179-spot-baseline.md`)
+before touching anything — it is the plan of record, and its review header
+lists every round's findings.** The design: a spot baseline is `B − ours` per
+(venue, account, base asset), recorded by `arblab baseline record` under a
+six-step protocol (Planned-only orders excluded via `MayExistAtVenue`;
+terminal + sweep-concluded + not-`Unattributed`; balance read; `spot_settle`
+wait; BOTH surfaces re-read unchanged; O_EXCL dated document), stored as
+INPUTS (venue words verbatim, per-order rows) with FOUR bindings (journal
+chain mark via new `SQLiteJournal.Head/HashAt`, credential fingerprint,
+account label, config `{path, sha256}` digest pin); asserted inside
+`GateNetDeltaAsserted` at ASSET granularity with base-asset fees subtracted;
+Bybit's unverified walletBalance/locked split gets the both-readings rule
+(pinned only at `locked == 0`, else `SpotUnconcluded` → `OutcomeIncomplete`);
+a spot delta LATCHES only if STABLE across a second look (Reconciler waits
+`spot_settle`, re-runs the idempotent join, re-asserts); a baselined asset
+must not be any spot pair's QUOTE (constructor deny); read priorities are
+constructor-pinned per call site (boot Safety, record Routine — both the new
+balances adapter AND `driven.OrderResolver`, whose const pin expired);
+Binance `GET /api/v3/account` is weight **20** (a summarized fetch misread 10
+— grep raw docs for load-bearing numbers); Bybit wallet-balance joins the
+closed endpoint roster at 50/s (complete-roster ripple = every Bybit profile
+must declare it).
+
+**IMPLEMENTED at this safe point (all green under `make ci`):**
+`domain.Ledger` per-asset fee retention + `OrderRecord.Fees` (+ tests);
+`SQLiteJournal.Head/HashAt` + `ErrJournalMarkBeyondHead` (+ tests);
+`ports.SpotBalances` (Words verbatim, ObservedAt, Unpinned reasons);
+`application.SpotLeg`/`SpotInstrument`(Base+Quote)/`SpotBaseline` +
+`validateSpotLeg` (incl. quote-overlap deny, unconsumed-baseline refusal,
+balances-required-iff-baselines); `Joiner.Assert`'s spot half (roster-driven
+coverage, fee subtraction at the one `feeQuantity` crossing, asset-cell
+grouping, absence-is-zero, per-venue single read + duplicate-row refusal);
+`Assertion.SpotUnexplained`/`SpotUnconcluded` + `Holds`; the taxonomy swap
+(`UnassertedNoPositionSurface` DELETED, `UnassertedBaselineUnrecorded` holds
+— the §7.5 exemption's membership is now empty, marker owed); `Reconciler`
+second look (`SecondLook{Wait,Settle}`, both-or-neither, unwired-meeting-
+delta = named `OutcomeFailed`, precedence NeedsOperator > Incomplete >
+Passed); `driven.SpotBalances` adapter (venue+priority constructor-pinned,
+engine→port reason translation); `engine/venue` balance vocabulary types;
+`driven.OrderResolver` priority now a constructor argument;
+`oms.Deps` gains `SpotBalances`, `SpotBaselines`, `RecoveryReadPriority`
+(required), `SettleWait`+`SpotSettle`; module derives the spot roster from
+`InstrumentAssets`. Profiles §4 gained the dated 2026-08-05 balance-surfaces
+block (weight 20 corrected).
+
+**NOT YET BUILT (the next session's work, §70 has every ruling):**
+(1) engine/venue balance CODECS + client method `SpotBalances(ctx, urgency)`
+(Binance free+locked from unset-`omitZeroBalances` read; Bybit UNIFIED
+coin-less call, both-readings pinning, borrow arm) + transport roster row
+`/v5/account/wallet-balance` → `wallet_balance` (requests, 1s) + every Bybit
+profile/fixture gains the declaration; (2) the baseline DOCUMENT package
+(write O_EXCL; load: digest → chain mark → fingerprint → account/venue →
+rows-vs-prefix → recompute `ours` and `B` via the ONE shared per-venue
+derivation) ; (3) `arblab baseline record` (six-step protocol, Routine
+wiring, prints absorbed delta when a prior baseline is configured);
+(4) reconcile config: `spot_baseline {path,sha256}` OPTIONAL + `spot_settle`
++ root threading (SettleWait=time.Sleep, baselines into oms.Deps) +
+renderer lines for SpotUnexplained/SpotUnconcluded + goldens; (5) UNSKIP the
+six fixtures marked `awaits #179` (grep it) once fixtures can pin a baseline;
+(6) the §70h checklist items 1–24 as tests + the ≥15-mutant campaign;
+(7) spec edits: §7.5 spot paragraph rewrite (discharges the one OWED marker
+in join.go), §5.2 fields, adr-history block, docs → v0.9.49; (8) a fresh
+round-4 design review is OPTIONAL (three rounds converged the shape; the
+final code_diff review is the required one).
+
+**Standing user decisions, unchanged:** the $20/$55 live-test decision; #171;
+§38f. Capture **PID 8495**, never rebuild over `bin/arblab`, `make ci` runs
+`-race` AND the ka staleness gate (needs node), cap `TLC_WORKERS` at 4,
+docs/i18n parity is `bun test`.
+
+---
+
 ## Status (2026-08-05, session 102): **#183 AND #167 ARE CLOSED — TRADING FILTERS HAVE A FETCHED-PROVENANCE WRITER AND AN ADMISSION-TIME AGE GATE, THE KA GENERATOR HAS A ROOT MAKE TARGET AND A CI STALENESS GATE, DOCS ARE v0.9.48, TWENTY MUTANTS ZERO SURVIVED, FINAL code_diff REVIEW SHIP WITH ZERO FINDINGS. MARKER GREP IS ZERO.**
 
 **What session 102 did, in order.** (1) **#167**: `make tutorial-ka` /

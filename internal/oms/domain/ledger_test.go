@@ -482,3 +482,104 @@ func TestKnowsSeparatesARegisteredOrderFromAnAbsentOne(t *testing.T) {
 		t.Error("Knows reports an unregistered order as held")
 	}
 }
+
+// TestFeesSumsPerAssetAndSortsByAsset charges THREE assets whose insertion
+// order (USDT, BNB, BTC) differs from their sorted order (BNB, BTC, USDT), so
+// "sorted by asset" and "insertion order" cannot be the same answer; and the
+// USDT total is built from TWO fills of 0.5 and 0.25 so a last-write-wins
+// mutant cannot mint the 0.75 the sum does.
+func TestFeesSumsPerAssetAndSortsByAsset(t *testing.T) {
+	t.Parallel()
+
+	l := registered(t)
+	charge := func(executionID, asset, amount string) {
+		t.Helper()
+		f := fill(t, executionID, "1")
+		fee, err := fixedpoint.ParseMoney(fixedpoint.Asset(asset), amount)
+		if err != nil {
+			t.Fatalf("ParseMoney(%s, %s): %v", asset, amount, err)
+		}
+		f.Fee = fee
+		if applied, err := l.Apply(f); err != nil || !applied {
+			t.Fatalf("Apply(%s) = (%v, %v), want (true, nil)", executionID, applied, err)
+		}
+	}
+	charge("e1", "USDT", "0.5")
+	charge("e2", "BNB", "0.001")
+	charge("e3", "BTC", "0.0001")
+	charge("e4", "USDT", "0.25")
+
+	fees, err := l.Fees(order)
+	if err != nil {
+		t.Fatalf("Fees: %v", err)
+	}
+	want := []struct{ asset, amount string }{
+		{"BNB", "0.001"}, {"BTC", "0.0001"}, {"USDT", "0.75"},
+	}
+	if len(fees) != len(want) {
+		t.Fatalf("Fees returned %d entries, want %d: %v", len(fees), len(want), fees)
+	}
+	for i, w := range want {
+		if string(fees[i].Asset()) != w.asset || fees[i].Decimal() != w.amount {
+			t.Errorf("Fees[%d] = %s %s, want %s %s",
+				i, fees[i].Decimal(), fees[i].Asset(), w.amount, w.asset)
+		}
+	}
+}
+
+// TestFeesSkipsAZeroChargeAndAnUnknownOrder: a zero fee produces NO entry —
+// an asset charged nothing and an asset never charged are the same fact for
+// the balance arithmetic Fees exists for — and the zero-fee fixture charges a
+// DIFFERENT asset (BNB) beside a real USDT charge, so "skipped the zero" and
+// "skipped everything" cannot collapse.
+func TestFeesSkipsAZeroChargeAndAnUnknownOrder(t *testing.T) {
+	t.Parallel()
+
+	l := registered(t)
+	real := fill(t, "e1", "1")
+	if applied, err := l.Apply(real); err != nil || !applied {
+		t.Fatalf("Apply(e1) = (%v, %v), want (true, nil)", applied, err)
+	}
+	zero := fill(t, "e2", "1")
+	zero.Fee = fixedpoint.ZeroMoney("BNB")
+	if applied, err := l.Apply(zero); err != nil || !applied {
+		t.Fatalf("Apply(e2) = (%v, %v), want (true, nil)", applied, err)
+	}
+
+	fees, err := l.Fees(order)
+	if err != nil {
+		t.Fatalf("Fees: %v", err)
+	}
+	if len(fees) != 1 || string(fees[0].Asset()) != "USDT" || fees[0].Decimal() != "0.5" {
+		t.Fatalf("Fees = %v, want exactly [0.5 USDT] — a zero BNB charge must leave no entry", fees)
+	}
+
+	if _, err := l.Fees("ab-0123456789ABCDEFGHJKMNPQRS-99-00"); !errors.Is(err, domain.ErrFillUnknownOrder) {
+		t.Errorf("Fees(unknown) = %v, want ErrFillUnknownOrder", err)
+	}
+}
+
+// TestFeesIgnoresADuplicateExecution replays the same execution twice and
+// expects the fee counted ONCE — the dedupe set guards the fee sum exactly as
+// it guards the cumulative, and a mutant summing before the dedupe check
+// doubles the 0.5.
+func TestFeesIgnoresADuplicateExecution(t *testing.T) {
+	t.Parallel()
+
+	l := registered(t)
+	f := fill(t, "e1", "1")
+	if applied, err := l.Apply(f); err != nil || !applied {
+		t.Fatalf("first Apply = (%v, %v), want (true, nil)", applied, err)
+	}
+	if applied, err := l.Apply(f); err != nil || applied {
+		t.Fatalf("duplicate Apply = (%v, %v), want (false, nil)", applied, err)
+	}
+
+	fees, err := l.Fees(order)
+	if err != nil {
+		t.Fatalf("Fees: %v", err)
+	}
+	if len(fees) != 1 || fees[0].Decimal() != "0.5" {
+		t.Fatalf("Fees after a duplicate = %v, want [0.5 USDT] once", fees)
+	}
+}

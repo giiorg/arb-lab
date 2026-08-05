@@ -518,6 +518,74 @@ func (j *SQLiteJournal) appendRecord(kind, clientID string, body []byte, detail 
 	return nil
 }
 
+// Head reports the journal's last sequence and that record's hash — the chain
+// mark task #179's baseline document carries, so a baseline can be refused
+// when presented against a history it never attested.
+//
+// An EMPTY journal reports (0, zero-hash, nil), and the zero sequence is the
+// deliberate carrier rather than a zero-value accident: a baseline recorded
+// over an empty journal attested nothing (`ours` was zero by construction), so
+// its mark verifies vacuously — every journal extends the empty one — and the
+// loader's HashAt check is skipped by the seq, not by a flag beside it.
+//
+// It is a method on the concrete adapter rather than on ports.JournalReplay:
+// its consumers are the composition layers (the record command and the boot
+// loader), which construct this type and hand the APPLICATION layer
+// already-verified baseline data. The application never sees a hash, so the
+// port carries none.
+func (j *SQLiteJournal) Head() (uint64, [32]byte, error) {
+	var seq int64
+	var hash []byte
+	err := j.db.QueryRow(`SELECT seq, hash FROM journal ORDER BY seq DESC LIMIT 1`).
+		Scan(&seq, &hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, [32]byte{}, nil
+	}
+	if err != nil {
+		return 0, [32]byte{}, fmt.Errorf("oms journal: read head: %w", err)
+	}
+	if len(hash) != len(genesisHash()) {
+		return 0, [32]byte{}, fmt.Errorf("head at seq %d has a %d-byte hash, want %d: %w",
+			seq, len(hash), len(genesisHash()), ErrJournalChainCorrupt)
+	}
+	var out [32]byte
+	copy(out[:], hash)
+	return uint64(seq), out, nil
+}
+
+// HashAt reports the stored hash of the record at seq, distinguishing a
+// sequence past the head (ErrJournalMarkBeyondHead — the journal LOST records
+// relative to whoever recorded seq) from every other failure.
+//
+// It reads the STORED hash rather than recomputing the chain: whether the
+// stored hashes are trustworthy is the replay's verification question, already
+// asked by the boot this check runs beside, and a second verifier here would
+// be a second copy of the chain rule. What this method answers is only "is the
+// record at seq the same record the caller saw" — identity, not integrity.
+func (j *SQLiteJournal) HashAt(seq uint64) ([32]byte, error) {
+	if seq == 0 {
+		// Zero is the absence of a sequence (chainHead's own rule), so there is
+		// no record it could name; callers with a zero mark skip the check
+		// rather than ask it.
+		return [32]byte{}, fmt.Errorf("oms journal: hash at seq 0: %w", ErrJournalMarkBeyondHead)
+	}
+	var hash []byte
+	err := j.db.QueryRow(`SELECT hash FROM journal WHERE seq = ?`, int64(seq)).Scan(&hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return [32]byte{}, fmt.Errorf("oms journal: no record at seq %d: %w", seq, ErrJournalMarkBeyondHead)
+	}
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("oms journal: read hash at seq %d: %w", seq, err)
+	}
+	if len(hash) != len(genesisHash()) {
+		return [32]byte{}, fmt.Errorf("record at seq %d has a %d-byte hash, want %d: %w",
+			seq, len(hash), len(genesisHash()), ErrJournalChainCorrupt)
+	}
+	var out [32]byte
+	copy(out[:], hash)
+	return out, nil
+}
+
 // chainHead returns the sequence the next record takes and the hash it links
 // to.
 //

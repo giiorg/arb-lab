@@ -256,6 +256,11 @@ var (
 	// splitting one real instrument across two keys (domain.FillKey records the
 	// same hazard on the fill dedupe identity).
 	ErrPositionInstrumentAmbiguous = errors.New("venue: more than one declared instrument matches this position row")
+
+	// ErrSpotUnpinnedReasonInvalid reports a SpotUnpinnedRow whose reason is
+	// the zero value or out of roster — an asset outside the assertion with no
+	// account of why (task #179).
+	ErrSpotUnpinnedReasonInvalid = errors.New("venue: spot balance row names no valid unpinned reason")
 )
 
 // There is deliberately no sentinel here for "funding asked of a spot

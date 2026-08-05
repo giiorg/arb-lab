@@ -45,6 +45,19 @@ type OrderRecord struct {
 	// makes the same point one layer down).
 	Fills int
 
+	// Fees is what the venue charged for this order's executions, one entry per
+	// asset actually charged, sorted by asset. Empty when nothing non-zero was
+	// charged.
+	//
+	// It exists for §7.5's spot balance assertion (task #179): a spot BUY's fee
+	// is deducted from the RECEIVED base asset on both venues, so the balance
+	// credits Cumulative minus the base-asset fee — an assertion that compared
+	// Cumulative alone would report every filled buy as a shortfall of exactly
+	// its fee. The asset is the venue's word per fill (a BNB-discount fee on a
+	// BTCUSDT trade debits BNB), which is why this is a per-asset list and not
+	// one number in the order's base.
+	Fees []fixedpoint.Money
+
 	// AuthorizedAt is the instant this system committed to the single Place,
 	// expressed in the VENUE's own clock frame. It is unset until the order
 	// reaches StateDispatchAuthorized.

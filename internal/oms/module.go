@@ -66,6 +66,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/oms/infrastructure/driven"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
+	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
 )
 
 // Deps is what a composition root supplies.
@@ -196,6 +197,45 @@ type Deps struct {
 	// derived from the symbol, and for the construct (§5.1's SymbolSpec) that
 	// will own it.
 	InstrumentAssets map[ids.VenueInstrument]venue.InstrumentAssets
+
+	// SpotBalances is the venue's spot balance surface — the same client, a
+	// fourth capability, for VenuePositions' reason one surface over: §7.5's
+	// spot assertion compares a wallet against a recorded baseline, and the
+	// use case doing it must not be able to re-resolve an order or
+	// re-enumerate positions to explain a delta away (task #179, record §70).
+	//
+	// Required exactly when SpotBaselines is non-empty; nil otherwise, and a
+	// deployment with spot instruments and no baselines boots to a HOLDING
+	// gate that names UnassertedBaselineUnrecorded rather than to a wiring
+	// error — the first-record flow depends on that ordering (§70g).
+	SpotBalances driven.SpotBalanceReader
+
+	// SpotBaselines is the recorded not-ours portion of the venue's spot
+	// balance, per base asset — the conclusion of the root's verification of
+	// the pinned baseline document (chain mark, credential fingerprint, config
+	// digest, per-order row recomputation), handed here as data. The module
+	// re-validates shape (validateSpotLeg); it cannot re-verify provenance and
+	// does not pretend to.
+	SpotBaselines []application.SpotBaseline
+
+	// RecoveryReadPriority is the §7.6 shed class the order-read surface
+	// (Resolve and the executions sweep) carries — a ROOT's statement since
+	// task #179, where driven.OrderResolver pinned Safety on the argument that
+	// recovery was its only caller. The reconcile boot states Safety (§5.3
+	// names the resolving queries Safety traffic in as many words); `arblab
+	// baseline record` states Routine, because a maintenance sweep must be
+	// shed before the emergency reserve rather than out of it. The zero value
+	// is refused by the adapter's constructor, naming this field.
+	RecoveryReadPriority ratelimit.Priority
+
+	// SettleWait and SpotSettle are the spot second look's two halves (record
+	// §70c): the blocking wait the root supplies — time.Sleep in a binary, a
+	// recording fake in a test, because this layer owns no ambient time — and
+	// §5.2's `spot_settle` bound. Both-or-neither, refused half-wired; a
+	// deployment that leaves them unwired and then meets a spot delta FAILS
+	// the gate by name rather than latching on one look.
+	SettleWait func(time.Duration)
+	SpotSettle time.Duration
 
 	// InstrumentFilters is each tradable instrument's published trading
 	// filters — the lot grid, the tick grid and the two floors §2.4's
@@ -468,7 +508,7 @@ func New(deps Deps) (*Module, error) {
 	}
 
 	// The read half's ACL, beside the write half's and never merged with it.
-	reader, err := driven.NewOrderResolver(deps.VenueOrderReads, deps.InstrumentAssets)
+	reader, err := driven.NewOrderResolver(deps.VenueOrderReads, deps.InstrumentAssets, deps.RecoveryReadPriority)
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("oms: order resolver gateway: %w", err), journal.Close())
 	}
@@ -505,7 +545,44 @@ func New(deps Deps) (*Module, error) {
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("oms: venue positions gateway: %w", err), journal.Close())
 	}
-	joiner, err := application.NewJoiner(reader, positions, orders, deps.Clock, deps.Account, deps.PositionScopes...)
+	// The spot leg's roster is derived from the instrument table — the
+	// validated authority on base assets — while the SCOPES stay a root's
+	// explicit business. The asymmetry is deliberate: a position scope exists
+	// to find exposure on instruments nothing here knows about, so deriving it
+	// would cap it at what we know; the spot roster exists to make every
+	// instrument we DO know answered for, which is exactly a derivation.
+	spot := application.SpotLeg{Baselines: deps.SpotBaselines}
+	for instrument, assets := range deps.InstrumentAssets {
+		if instrument.Product != ids.ProductSpot {
+			continue
+		}
+		spot.Roster = append(spot.Roster, application.SpotInstrument{
+			Instrument: instrument,
+			Base:       assets.Base,
+			Quote:      assets.Quote,
+		})
+	}
+	if deps.SpotBalances != nil {
+		// The boot side rides Safety: §7.6 names §7.5's reconcile in the
+		// Safety row, and an assertion shed under load is an assertion that
+		// does not happen. The record command constructs its OWN adapter at
+		// Routine — the two rungs are the reason the priority is a constructor
+		// argument at all.
+		// The venue is the instrument table's — NewVenuePositions above has
+		// already refused a table naming two, so the first key's venue is a
+		// well-defined function of validated input, not a map-order sample.
+		var v ids.Venue
+		for instrument := range deps.InstrumentAssets {
+			v = instrument.Venue
+			break
+		}
+		balances, err := driven.NewSpotBalances(deps.SpotBalances, v, ratelimit.PrioritySafety)
+		if err != nil {
+			return nil, errors.Join(fmt.Errorf("oms: spot balances gateway: %w", err), journal.Close())
+		}
+		spot.Balances = balances
+	}
+	joiner, err := application.NewJoiner(reader, positions, orders, deps.Clock, deps.Account, spot, deps.PositionScopes...)
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("oms: joiner: %w", err), journal.Close())
 	}
@@ -514,7 +591,8 @@ func New(deps Deps) (*Module, error) {
 	// three use cases the fields above expose, not copies: a reconcile that ran
 	// against a second replayer would rebuild a second projection and assert the
 	// invariant over neither of them.
-	reconciler, err := application.NewReconciler(replayer, joiner, resolver)
+	reconciler, err := application.NewReconciler(replayer, joiner, resolver,
+		application.SecondLook{Wait: deps.SettleWait, Settle: deps.SpotSettle})
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("oms: reconciler: %w", err), journal.Close())
 	}

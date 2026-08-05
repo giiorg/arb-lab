@@ -186,6 +186,8 @@ func fullDeps(t *testing.T) oms.Deps {
 		VenueOrders:     &countingPlacer{ack: venue.OrderAck{VenueOrderID: venueOrderID}},
 		VenueOrderReads: silentReader{},
 		VenuePositions:  silentPositions{},
+		// The boot rung, stated as a root would state it (record §70f).
+		RecoveryReadPriority: ratelimit.PrioritySafety,
 		PositionScopes: []application.PositionScope{
 			{Venue: "binance", Product: ids.ProductLinearPerp, Settle: "USDT"},
 		},

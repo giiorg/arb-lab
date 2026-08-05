@@ -488,6 +488,10 @@ func (r *Runner) startOMS(context.Context) (boot.StopFunc, error) {
 		Clock:             r.clk,
 		Account:           r.cfg.Account,
 		Resolution:        r.cfg.policy(),
+		// §5.3 in as many words: the resolving queries are SAFETY traffic on
+		// §7.6's ladder. The record command's wiring is the Routine caller
+		// the constructor pin exists to distinguish (record §70f).
+		RecoveryReadPriority: ratelimit.PrioritySafety,
 	})
 	if err != nil {
 		r.halted = true

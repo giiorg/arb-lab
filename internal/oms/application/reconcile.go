@@ -2,6 +2,7 @@ package application
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/giiorg/arb-lab/internal/platform/boot"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
@@ -43,15 +44,52 @@ type Reconciler struct {
 	replay  *Replayer
 	join    *Joiner
 	resolve *Resolver
+	look    SecondLook
+}
+
+// SecondLook is the spot delta's stability bracket (task #179, record §70c):
+// before a non-empty SpotUnexplained may LATCH, the boot waits Settle,
+// re-runs the join (idempotent by the fill ledger's dedupe), and re-asserts —
+// only a delta identical across both looks reaches an operator, because the
+// one-look version freezes a late-reporting fill into a false incident,
+// §7.5's own "human in the loop of something no human can decide".
+//
+// Wait is an injected seam rather than a clock read: the application layer
+// owns no ambient time (§3.6 rule on notimenow), so the root supplies the
+// blocking wait — time.Sleep in a binary, a recording fake in a test.
+type SecondLook struct {
+	Wait   func(time.Duration)
+	Settle time.Duration
+}
+
+// wired reports whether the bracket was configured at all.
+func (l SecondLook) wired() bool { return l.Wait != nil }
+
+// validate refuses the half-configured value: a Wait with no positive Settle
+// waits for nothing, and a Settle with no Wait cannot wait at all — either
+// half alone reads as configured while the bracket silently never runs.
+func (l SecondLook) validate() error {
+	if l.Wait == nil && l.Settle == 0 {
+		return nil
+	}
+	if l.Wait == nil || l.Settle <= 0 {
+		return ErrSecondLookHalfWired
+	}
+	return nil
 }
 
 // NewReconciler constructs the use case, refusing a missing phase.
 //
-// All three are required and none is defaulted to a no-op. A Reconciler that
-// could run with a nil Resolver would report the venue-joined gate on a boot
-// where no absence was ever put to §5.3's rule, and an absence nobody resolved
-// is not distinguishable in the report from one that resolved cleanly.
-func NewReconciler(replay *Replayer, join *Joiner, resolve *Resolver) (*Reconciler, error) {
+// All three phases are required and none is defaulted to a no-op. A Reconciler
+// that could run with a nil Resolver would report the venue-joined gate on a
+// boot where no absence was ever put to §5.3's rule, and an absence nobody
+// resolved is not distinguishable in the report from one that resolved
+// cleanly.
+//
+// The second look MAY be left unwired — a derivatives-only deployment has no
+// spot delta to bracket — but a boot that then MEETS a spot delta fails by
+// name rather than latching on one look: see Reconcile.
+func NewReconciler(replay *Replayer, join *Joiner, resolve *Resolver, look SecondLook) (*Reconciler, error) {
 	if replay == nil {
 		return nil, ErrReplayerMissing
 	}
@@ -61,7 +99,10 @@ func NewReconciler(replay *Replayer, join *Joiner, resolve *Resolver) (*Reconcil
 	if resolve == nil {
 		return nil, ErrResolveUseCaseMissing
 	}
-	return &Reconciler{replay: replay, join: join, resolve: resolve}, nil
+	if err := look.validate(); err != nil {
+		return nil, err
+	}
+	return &Reconciler{replay: replay, join: join, resolve: resolve, look: look}, nil
 }
 
 // UnprovedOrder is one order §5.3's rule could not conclude about, and the gate
@@ -234,10 +275,106 @@ func (r *Reconciler) Reconcile(c *boot.Checklist) (Reconciliation, error) {
 		out.Cause = err
 		return out, c.Report(boot.GateNetDeltaAsserted, boot.OutcomeFailed)
 	}
+	// The precedence is the safety claim (record §70c): the latching findings
+	// are checked BEFORE the unconcluded ones, so a boot carrying both a spot
+	// delta and an unpinned balance latches — the incomplete finding must
+	// never mask the one that needs an operator.
 	if assertion.Holds() {
-		return out, c.Report(boot.GateNetDeltaAsserted, boot.OutcomeNeedsOperator)
+		// A holding verdict whose ONLY holding finding is a spot delta gets
+		// the second look before it may latch; anything else — a perp delta,
+		// a foreign symbol, an uncovered instrument — latches on its own
+		// evidence, spot delta or no, because the operator is coming anyway.
+		if !spotDeltaOnly(assertion) {
+			return out, c.Report(boot.GateNetDeltaAsserted, boot.OutcomeNeedsOperator)
+		}
+		if !r.look.wired() {
+			// One look must not mint a permanent operator incident (record
+			// §70c), and silently latching anyway would be exactly that — so
+			// an unwired bracket meeting the one condition it exists for is a
+			// FAILURE that names the wiring, not a latch and not a pass.
+			out.Cause = ErrSecondLookUnwired
+			return out, c.Report(boot.GateNetDeltaAsserted, boot.OutcomeFailed)
+		}
+		r.look.Wait(r.look.Settle)
+		second, err := r.join.Join(rec.Dispatched)
+		if err != nil {
+			out.Cause = err
+			return out, c.Report(boot.GateNetDeltaAsserted, boot.OutcomeFailed)
+		}
+		if len(second.Incomplete) > 0 || len(second.Unattributed) > 0 {
+			// The re-join itself did not conclude: the world is still moving,
+			// and a delta computed over it proves nothing either way.
+			return out, c.Report(boot.GateNetDeltaAsserted, boot.OutcomeIncomplete)
+		}
+		reasserted, err := r.join.Assert(rec.Dispatched)
+		if err != nil {
+			out.Cause = err
+			return out, c.Report(boot.GateNetDeltaAsserted, boot.OutcomeFailed)
+		}
+		out.Assertion = reasserted
+		if !reasserted.Holds() {
+			// The re-join explained it — the late fill's row arrived and moved
+			// ours to meet the wallet. Fall through to the unconcluded check
+			// below rather than passing outright.
+		} else if spotDeltaOnly(reasserted) && spotDeltasEqual(assertion, reasserted) {
+			// STABLE across two looks a settle bound apart: a real delta.
+			return out, c.Report(boot.GateNetDeltaAsserted, boot.OutcomeNeedsOperator)
+		} else if !spotDeltaOnly(reasserted) {
+			// The second look surfaced a finding of another kind; it latches
+			// on its own evidence.
+			return out, c.Report(boot.GateNetDeltaAsserted, boot.OutcomeNeedsOperator)
+		} else {
+			// A delta both looks saw but not the SAME delta: still moving.
+			return out, c.Report(boot.GateNetDeltaAsserted, boot.OutcomeIncomplete)
+		}
+		assertion = reasserted
+	}
+	if len(assertion.SpotUnconcluded) > 0 {
+		// The check ran and refused to conclude about a baselined asset whose
+		// balance semantics were unpinned this read — a resting spot order
+		// completes and the next attempt pins. boot.OutcomeIncomplete's cell,
+		// exactly as the venue join uses it one gate over.
+		return out, c.Report(boot.GateNetDeltaAsserted, boot.OutcomeIncomplete)
 	}
 	return out, c.Report(boot.GateNetDeltaAsserted, boot.OutcomePassed)
+}
+
+// spotDeltaOnly reports whether a holding assertion holds ONLY because of
+// spot deltas — the one finding whose first observation may be a read-skew
+// artifact rather than a fact (record §70c).
+func spotDeltaOnly(a Assertion) bool {
+	if len(a.SpotUnexplained) == 0 {
+		return false
+	}
+	if len(a.Unexplained) > 0 || len(a.Foreign) > 0 {
+		return false
+	}
+	for _, u := range a.Unasserted {
+		if holds, _ := u.Reason.HoldsPosture(); holds {
+			return false
+		}
+	}
+	return true
+}
+
+// spotDeltasEqual reports whether two looks saw the SAME spot deltas — same
+// cells, same numbers. Both slices are sorted by Assert, so the comparison is
+// positional; the quantities compare by value, not representation.
+func spotDeltasEqual(a, b Assertion) bool {
+	if len(a.SpotUnexplained) != len(b.SpotUnexplained) {
+		return false
+	}
+	for i := range a.SpotUnexplained {
+		x, y := a.SpotUnexplained[i], b.SpotUnexplained[i]
+		if x.Venue != y.Venue || x.Asset != y.Asset {
+			return false
+		}
+		cmp, err := x.Unexplained.Cmp(y.Unexplained)
+		if err != nil || cmp != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // resolveAbsences runs §5.3's rule over the orders the venue's order surface did

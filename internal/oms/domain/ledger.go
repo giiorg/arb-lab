@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
@@ -59,6 +60,15 @@ type ledgerOrder struct {
 	ordered    fixedpoint.Quantity
 	cumulative fixedpoint.Quantity
 	fills      int
+
+	// fees is what the venue charged for this order's executions, summed per
+	// asset the venue charged in. Retained since task #179: a spot BUY's fee is
+	// deducted from the RECEIVED base asset on both venues, so §7.5's spot
+	// balance comparison is off by exactly this sum unless it is subtractable —
+	// and the fee's asset is the venue's word (a BNB-discount fee on a BTCUSDT
+	// trade debits BNB), so the key is the asset actually charged, never the
+	// order's own base.
+	fees map[fixedpoint.Asset]fixedpoint.Money
 }
 
 // NewLedger returns an empty ledger.
@@ -170,12 +180,41 @@ func (l *Ledger) Apply(f Fill) (bool, error) {
 			f.Order, f.ExecutionID, err)
 	}
 
+	// The fee sum is computed BEFORE any mutation for the same reason total is:
+	// an overflow here must leave the ledger exactly as it was. A zero fee is
+	// not accumulated — an asset charged nothing and an asset never charged are
+	// the same fact for the balance arithmetic this sum exists for, and an
+	// entry saying "0 BNB" would be a row every reader has to learn to skip.
+	feeSign, err := f.Fee.Sign()
+	if err != nil {
+		return false, fmt.Errorf("order %q execution %q fee: %w",
+			f.Order, f.ExecutionID, err)
+	}
+	var feeTotal fixedpoint.Money
+	if feeSign != 0 {
+		existing, ok := order.fees[f.Fee.Asset()]
+		if !ok {
+			existing = fixedpoint.ZeroMoney(f.Fee.Asset())
+		}
+		feeTotal, err = existing.Add(f.Fee)
+		if err != nil {
+			return false, fmt.Errorf("order %q fees + execution %q: %w",
+				f.Order, f.ExecutionID, err)
+		}
+	}
+
 	// Mutation happens only once nothing further can fail, so a refused fill
 	// leaves no half-applied state behind. §5.3's one-transaction rule is about
 	// durability and this is its in-memory counterpart: the caller's rollback
 	// cannot reach a map this method already wrote.
 	order.cumulative = total
 	order.fills++
+	if feeSign != 0 {
+		if order.fees == nil {
+			order.fees = make(map[fixedpoint.Asset]fixedpoint.Money, 1)
+		}
+		order.fees[f.Fee.Asset()] = feeTotal
+	}
 	l.seen[key] = struct{}{}
 	return true, nil
 }
@@ -225,6 +264,30 @@ func (l *Ledger) FillCount(id ids.ClientOrderID) (int, error) {
 		return 0, fmt.Errorf("order %q: %w", id, ErrFillUnknownOrder)
 	}
 	return order.fills, nil
+}
+
+// Fees reports what the venue charged for a known order's executions, one
+// entry per asset actually charged, sorted by asset.
+//
+// Sorted rather than a map, because its consumer is §7.5's balance arithmetic
+// and its tests: a map hands every caller an iteration-order coin flip, which
+// is this repo's recorded shape for a defect that reproduces only sometimes.
+// An order with no fees (or only zero fees) reports an empty slice — the same
+// fact either way, see Apply.
+func (l *Ledger) Fees(id ids.ClientOrderID) ([]fixedpoint.Money, error) {
+	order, ok := l.orders[id]
+	if !ok {
+		return nil, fmt.Errorf("order %q: %w", id, ErrFillUnknownOrder)
+	}
+	if len(order.fees) == 0 {
+		return nil, nil
+	}
+	fees := make([]fixedpoint.Money, 0, len(order.fees))
+	for _, fee := range order.fees {
+		fees = append(fees, fee)
+	}
+	sort.Slice(fees, func(a, b int) bool { return fees[a].Asset() < fees[b].Asset() })
+	return fees, nil
 }
 
 // Knows reports whether the ledger holds the order.

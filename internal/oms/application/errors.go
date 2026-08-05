@@ -453,4 +453,73 @@ var (
 	// it refuses is a caller that built a bespoke short checklist, which is the
 	// shape §7.5 argues against declaring at all.
 	ErrHoldGateUndeclared = errors.New("oms: checklist does not declare the net-delta gate §6 step 7 files its hold against")
+
+	// The spot-leg constructor refusals (task #179, record §70). Each names the
+	// field whose zero value or contradiction it refuses; see
+	// application.validateSpotLeg for the one cross-field rule.
+
+	// ErrSpotRosterNotSpot reports a roster row naming a derivative instrument.
+	// The roster is the spot assertion's coverage set — a perp in it would be
+	// answered by the balance comparison, which reads a wallet its exposure
+	// never touches (linear perps settle in the quote), so it would assert
+	// "flat" about a position the position enumeration exists to see.
+	ErrSpotRosterNotSpot = errors.New("oms: spot roster names a derivative instrument")
+
+	// ErrSpotRosterBaseUnset reports a roster row with no base asset — the key
+	// the whole comparison is grouped by, unusable as the zero value.
+	ErrSpotRosterBaseUnset = errors.New("oms: spot roster row names no base asset")
+
+	// ErrSpotRosterQuoteUnset reports a roster row with no quote asset — the
+	// field the quote-overlap deny below reads, unusable as the zero value.
+	ErrSpotRosterQuoteUnset = errors.New("oms: spot roster row names no quote asset")
+
+	// ErrSpotBaselineIsQuote reports a baseline for an asset that is a
+	// configured spot pair's QUOTE: that pair spends the asset as
+	// consideration, which `ours` (base flows + same-asset fees) cannot see,
+	// so every journaled trade on it would latch a false delta. Record §70c
+	// rejects computing quote flows in favour of this deny.
+	ErrSpotBaselineIsQuote = errors.New("oms: spot baseline names an asset a configured spot pair spends as its quote")
+
+	// ErrSpotRosterDuplicate reports the same instrument twice in the roster:
+	// both resolutions of a repeat are recoveries that look like they worked
+	// (domain.Ledger.Register's argument, at the config seam).
+	ErrSpotRosterDuplicate = errors.New("oms: spot roster names an instrument twice")
+
+	// ErrSpotBaselineAssetUnset reports a baseline row with no asset.
+	ErrSpotBaselineAssetUnset = errors.New("oms: spot baseline names no asset")
+
+	// ErrSpotBaselineAssetMismatch reports a baseline whose Amount carries a
+	// different asset tag than the row names — two copies of one fact
+	// disagreeing, which is the state the tag exists to make loud.
+	ErrSpotBaselineAssetMismatch = errors.New("oms: spot baseline amount is tagged with a different asset")
+
+	// ErrSpotBaselineDuplicate reports two baselines for one (venue, asset).
+	ErrSpotBaselineDuplicate = errors.New("oms: spot baseline recorded twice for one venue and asset")
+
+	// ErrSpotBaselineUnconsumed reports a baseline for an asset that is not the
+	// base of any configured spot instrument — a row nothing consumes is a
+	// claim nobody checks, and the safe reading of one is that the config and
+	// the document disagree about what this deployment trades.
+	ErrSpotBaselineUnconsumed = errors.New("oms: spot baseline names an asset no configured spot instrument trades")
+
+	// ErrSpotBalancesMissing reports a baseline with no balance surface to
+	// compare it against — an assertion that could never run, refused where the
+	// wiring is the subject.
+	ErrSpotBalancesMissing = errors.New("oms: spot baselines are recorded but no balance surface is wired")
+
+	// ErrBalanceRowDuplicate reports a balance enumeration stating one asset
+	// twice — an adapter contract violation that would otherwise make the
+	// asserted total a declaration-order coin flip.
+	ErrBalanceRowDuplicate = errors.New("oms: balance report states an asset twice")
+
+	// ErrSecondLookHalfWired reports a SecondLook with a Wait and no positive
+	// Settle, or the reverse — either half alone reads as configured while the
+	// bracket silently never runs.
+	ErrSecondLookHalfWired = errors.New("oms: spot second look needs both a wait seam and a positive settle bound")
+
+	// ErrSecondLookUnwired reports a spot delta meeting a Reconciler whose
+	// second look was never configured. Failing by name is the point: one look
+	// must not mint a permanent operator incident, and silently latching would
+	// be exactly that (record §70c).
+	ErrSecondLookUnwired = errors.New("oms: a spot delta needs the second look and none is wired")
 )

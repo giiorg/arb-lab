@@ -141,7 +141,7 @@ func newJoiner(t *testing.T, scopes ...ports.PositionScope) (*application.Joiner
 	if err != nil {
 		t.Fatalf("NewTestClock: %v", err)
 	}
-	j, err := application.NewJoiner(v, p, orders, clk, joinAccount, scopes...)
+	j, err := application.NewJoiner(v, p, orders, clk, joinAccount, application.SpotLeg{}, scopes...)
 	if err != nil {
 		t.Fatalf("NewJoiner: %v", err)
 	}
@@ -459,20 +459,18 @@ func TestJoinRefusesAnOrderThatWasNeverDispatched(t *testing.T) {
 // The limit the report carries, and the property the next boot depends on
 // ---------------------------------------------------------------------------
 
-// TestJoinNamesTheLegItCannotAssert is finding 1 as an assertion: a spot leg has
-// no position surface anywhere, so the invariant covers one leg of a
-// cash-and-carry package and the report has to say so.
+// TestJoinNamesTheLegItCannotAssert is finding 1 as an assertion, re-aimed by
+// task #179: a spot leg with NO recorded baseline is reported
+// UnassertedBaselineUnrecorded — and since the baseline construct made the gap
+// closable, the old exemption is gone and the reason HOLDS the posture.
 //
 // # Slice G2 varied the fixture parameter this test had pinned
 //
 // It used to plant ONE order, on the spot leg, and assert that the Unasserted
 // list held it and did not block. Every instrument that could land in Unasserted
-// was therefore a spot one, so "unasserted because no surface exists anywhere"
-// and "unasserted because no scope covered it" were the same answer, and the
-// exemption §7.5 argues for the first applied to both. The fixture did not
-// contain the thing under test. It now plants BOTH legs against a scope that
-// covers the perp, so the spot leg is unasserted for its own reason while the
-// perp is asserted — and TestAPerpNoScopeCoversHoldsThePosture is the varied case.
+// was therefore a spot one, so the two reasons were the same answer. It plants
+// BOTH legs against a scope that covers the perp, so the spot leg is unasserted
+// for its own reason while the perp is asserted.
 func TestJoinNamesTheLegItCannotAssert(t *testing.T) {
 	t.Parallel()
 
@@ -506,16 +504,17 @@ func TestJoinNamesTheLegItCannotAssert(t *testing.T) {
 		t.Fatalf("Assert: %v", err)
 	}
 	want := []application.UnassertedInstrument{
-		{Instrument: spot(), Reason: application.UnassertedNoPositionSurface},
+		{Instrument: spot(), Reason: application.UnassertedBaselineUnrecorded},
 	}
 	if !reflect.DeepEqual(assertion.Unasserted, want) {
-		t.Errorf("unasserted = %+v, want %+v — the spot leg alone, for the reason that is permanent",
+		t.Errorf("unasserted = %+v, want %+v — the spot leg alone, for the baseline it lacks",
 			assertion.Unasserted, want)
 	}
-	// It must not block: a leg whose invariant can never be asserted would hold
-	// the posture below trading for ever.
-	if assertion.Holds() {
-		t.Errorf("assertion = %+v, want the limit reported rather than enforced", assertion)
+	// It HOLDS since #179: recording a baseline is a one-time operator act, so
+	// the halts-forever argument no longer applies, and an unrecorded baseline
+	// is a wallet the invariant never compared.
+	if !assertion.Holds() {
+		t.Errorf("assertion = %+v, want the unrecorded baseline to HOLD the posture", assertion)
 	}
 }
 
@@ -580,7 +579,7 @@ func TestUnassertedReasonsHoldOrExemptByTable(t *testing.T) {
 		holds   bool
 		wantErr bool
 	}{
-		{application.UnassertedNoPositionSurface, false, false},
+		{application.UnassertedBaselineUnrecorded, true, false},
 		{application.UnassertedScopeNotEnumerated, true, false},
 		{application.UnassertedReasonUnspecified, true, true},
 		{application.UnassertedReason(200), true, true},
@@ -699,23 +698,23 @@ func TestNewJoinerRefusals(t *testing.T) {
 		t.Fatalf("NewTestClock: %v", err)
 	}
 
-	if _, err := application.NewJoiner(nil, p, orders, clk, joinAccount); !errors.Is(err, application.ErrResolverMissing) {
+	if _, err := application.NewJoiner(nil, p, orders, clk, joinAccount, application.SpotLeg{}); !errors.Is(err, application.ErrResolverMissing) {
 		t.Errorf("NewJoiner(no venue) = %v, want ErrResolverMissing", err)
 	}
-	if _, err := application.NewJoiner(v, nil, orders, clk, joinAccount); !errors.Is(err, application.ErrVenuePositionsMissing) {
+	if _, err := application.NewJoiner(v, nil, orders, clk, joinAccount, application.SpotLeg{}); !errors.Is(err, application.ErrVenuePositionsMissing) {
 		t.Errorf("NewJoiner(no positions) = %v, want ErrVenuePositionsMissing", err)
 	}
-	if _, err := application.NewJoiner(v, p, nil, clk, joinAccount); !errors.Is(err, application.ErrOrdersMissing) {
+	if _, err := application.NewJoiner(v, p, nil, clk, joinAccount, application.SpotLeg{}); !errors.Is(err, application.ErrOrdersMissing) {
 		t.Errorf("NewJoiner(no repository) = %v, want ErrOrdersMissing", err)
 	}
-	if _, err := application.NewJoiner(v, p, orders, nil, joinAccount); !errors.Is(err, application.ErrClockMissing) {
+	if _, err := application.NewJoiner(v, p, orders, nil, joinAccount, application.SpotLeg{}); !errors.Is(err, application.ErrClockMissing) {
 		t.Errorf("NewJoiner(no clock) = %v, want ErrClockMissing", err)
 	}
-	if _, err := application.NewJoiner(v, p, orders, clk, ""); !errors.Is(err, application.ErrJoinAccountUnset) {
+	if _, err := application.NewJoiner(v, p, orders, clk, "", application.SpotLeg{}); !errors.Is(err, application.ErrJoinAccountUnset) {
 		t.Errorf("NewJoiner(no account) = %v, want ErrJoinAccountUnset", err)
 	}
 	bad := ports.PositionScope{Venue: perp().Venue, Product: perp().Product}
-	if _, err := application.NewJoiner(v, p, orders, clk, joinAccount, bad); !errors.Is(err, ports.ErrPositionScopeSettleUnset) {
+	if _, err := application.NewJoiner(v, p, orders, clk, joinAccount, application.SpotLeg{}, bad); !errors.Is(err, ports.ErrPositionScopeSettleUnset) {
 		t.Errorf("NewJoiner(scope with no settlement asset) = %v, want ErrPositionScopeSettleUnset", err)
 	}
 }

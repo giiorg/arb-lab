@@ -110,7 +110,7 @@ func px(t *testing.T, v string) fixedpoint.Price {
 
 func newResolverGateway(t *testing.T, r *fakeReader) *driven.OrderResolver {
 	t.Helper()
-	g, err := driven.NewOrderResolver(r, resolverAssets())
+	g, err := driven.NewOrderResolver(r, resolverAssets(), ratelimit.PrioritySafety)
 	if err != nil {
 		t.Fatalf("NewOrderResolver: %v", err)
 	}
@@ -130,10 +130,10 @@ func venueReach() venue.QueryReach {
 func TestNewOrderResolverRefusesAnIncompleteWiring(t *testing.T) {
 	t.Parallel()
 
-	if _, err := driven.NewOrderResolver(nil, resolverAssets()); !errors.Is(err, driven.ErrVenueOrderReaderMissing) {
+	if _, err := driven.NewOrderResolver(nil, resolverAssets(), ratelimit.PrioritySafety); !errors.Is(err, driven.ErrVenueOrderReaderMissing) {
 		t.Errorf("NewOrderResolver(nil, assets) = %v, want ErrVenueOrderReaderMissing", err)
 	}
-	if _, err := driven.NewOrderResolver(&fakeReader{}, nil); !errors.Is(err, driven.ErrInstrumentAssetsMissing) {
+	if _, err := driven.NewOrderResolver(&fakeReader{}, nil, ratelimit.PrioritySafety); !errors.Is(err, driven.ErrInstrumentAssetsMissing) {
 		t.Errorf("NewOrderResolver(reader, nil) = %v, want ErrInstrumentAssetsMissing", err)
 	}
 
@@ -142,11 +142,11 @@ func TestNewOrderResolverRefusesAnIncompleteWiring(t *testing.T) {
 	// the entry it would admit builds Money with no asset tag, whose first
 	// failure is far from here.
 	bad := map[ids.VenueInstrument]venue.InstrumentAssets{resolverPerp(): {Base: "BTC"}}
-	if _, err := driven.NewOrderResolver(&fakeReader{}, bad); err == nil {
+	if _, err := driven.NewOrderResolver(&fakeReader{}, bad, ratelimit.PrioritySafety); err == nil {
 		t.Error("NewOrderResolver with an unusable asset pair = nil, want a refusal")
 	}
 
-	if _, err := driven.NewOrderResolver(&fakeReader{}, resolverAssets()); err != nil {
+	if _, err := driven.NewOrderResolver(&fakeReader{}, resolverAssets(), ratelimit.PrioritySafety); err != nil {
 		t.Errorf("NewOrderResolver with a complete wiring = %v, want nil", err)
 	}
 }

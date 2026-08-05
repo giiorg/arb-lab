@@ -77,6 +77,19 @@ var (
 	// now" — an absence that proves nothing, reported as proof.
 	ErrJournalAnchorRange = errors.New("oms journal: authorization instant is not representable in Unix nanoseconds")
 
+	// ErrJournalMarkBeyondHead reports HashAt asked about a sequence past the
+	// last record — the one answer that means the journal has FEWER records
+	// than something else says it had.
+	//
+	// It is its own sentinel because its one caller, the spot-baseline loader
+	// (task #179), must tell it apart from every other read failure: a chain
+	// mark beyond the head means the journal was truncated or replaced since
+	// the baseline was recorded, which is a named operator refusal, while an
+	// ordinary read error is a wiring fact. Collapsed into one error, the
+	// loader would report tail truncation — the very condition §7.5 records as
+	// undetectable from the chain alone — as a database hiccup.
+	ErrJournalMarkBeyondHead = errors.New("oms journal: chain mark names a sequence past the journal's head")
+
 	// ErrJournalVisitorMissing reports a Replay with no visitor to hand records
 	// to. A nil visitor cannot be treated as "verify only": the walk would
 	// return success having applied nothing, which is exactly what a successful

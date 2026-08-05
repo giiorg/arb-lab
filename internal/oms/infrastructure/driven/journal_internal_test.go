@@ -951,3 +951,85 @@ func tamperClientID(t *testing.T, path string, seq int64, newID string) {
 		t.Fatalf("tamper: updated %d rows (err %v), want 1", n, err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Head / HashAt — the chain mark (#179's baseline binding)
+// ---------------------------------------------------------------------------
+
+// TestHeadAndHashAtNameTheSameRecord appends THREE records, so head, first and
+// "the one before head" are three different sequences — a HashAt reading the
+// head regardless of its argument, or Head reporting the first record, cannot
+// agree with the per-seq reads below.
+func TestHeadAndHashAtNameTheSameRecord(t *testing.T) {
+	t.Parallel()
+
+	j, _ := openTestJournal(t)
+	for i := 0; i < 3; i++ {
+		if err := j.AppendPlanned(testOrder(t, fmt.Sprintf("c-%d", i), "binance", "BTCUSDT")); err != nil {
+			t.Fatalf("AppendPlanned %d: %v", i, err)
+		}
+	}
+
+	seq, headHash, err := j.Head()
+	if err != nil {
+		t.Fatalf("Head: %v", err)
+	}
+	if seq != 3 {
+		t.Fatalf("Head seq = %d after three appends, want 3", seq)
+	}
+	at3, err := j.HashAt(3)
+	if err != nil {
+		t.Fatalf("HashAt(3): %v", err)
+	}
+	if at3 != headHash {
+		t.Error("HashAt(head) disagrees with Head's own hash")
+	}
+	at1, err := j.HashAt(1)
+	if err != nil {
+		t.Fatalf("HashAt(1): %v", err)
+	}
+	at2, err := j.HashAt(2)
+	if err != nil {
+		t.Fatalf("HashAt(2): %v", err)
+	}
+	if at1 == headHash || at2 == headHash || at1 == at2 {
+		t.Error("distinct sequences report identical hashes — HashAt is not reading per-seq")
+	}
+}
+
+// TestHeadOfAnEmptyJournalIsSeqZero: the zero sequence is the deliberate
+// "attested nothing" carrier, not an error.
+func TestHeadOfAnEmptyJournalIsSeqZero(t *testing.T) {
+	t.Parallel()
+
+	j, _ := openTestJournal(t)
+	seq, hash, err := j.Head()
+	if err != nil {
+		t.Fatalf("Head on empty: %v", err)
+	}
+	if seq != 0 || hash != [32]byte{} {
+		t.Errorf("Head on empty = (%d, %x), want (0, zero)", seq, hash)
+	}
+}
+
+// TestHashAtRefusesBeyondHeadAndZero: a mark past the head is the named
+// truncation refusal, and it must fire at head+1 — the tightest boundary —
+// not merely at some huge sequence; zero is the absence of a sequence and
+// gets the same sentinel.
+func TestHashAtRefusesBeyondHeadAndZero(t *testing.T) {
+	t.Parallel()
+
+	j, _ := openTestJournal(t)
+	if err := j.AppendPlanned(testOrder(t, "c-0", "binance", "BTCUSDT")); err != nil {
+		t.Fatalf("AppendPlanned: %v", err)
+	}
+	if _, err := j.HashAt(2); !errors.Is(err, ErrJournalMarkBeyondHead) {
+		t.Errorf("HashAt(head+1) = %v, want ErrJournalMarkBeyondHead", err)
+	}
+	if _, err := j.HashAt(1); err != nil {
+		t.Errorf("HashAt(head) = %v, want nil — the boundary is strictly past the head", err)
+	}
+	if _, err := j.HashAt(0); !errors.Is(err, ErrJournalMarkBeyondHead) {
+		t.Errorf("HashAt(0) = %v, want ErrJournalMarkBeyondHead", err)
+	}
+}

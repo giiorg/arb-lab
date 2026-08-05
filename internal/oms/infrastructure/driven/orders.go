@@ -515,7 +515,8 @@ func (r *MemoryOrderWriteRepository) snapshot(rec *record) (ports.OrderRecord, e
 	// it is necessary, and orders_internal_test.go reaches it.
 	cumulative, cumulativeErr := r.ledger.Cumulative(id)
 	fills, fillsErr := r.ledger.FillCount(id)
-	if err := errors.Join(cumulativeErr, fillsErr); err != nil {
+	fees, feesErr := r.ledger.Fees(id)
+	if err := errors.Join(cumulativeErr, fillsErr, feesErr); err != nil {
 		return ports.OrderRecord{}, fmt.Errorf("write repository: order %q: %w", id, err)
 	}
 
@@ -524,6 +525,7 @@ func (r *MemoryOrderWriteRepository) snapshot(rec *record) (ports.OrderRecord, e
 		State:        rec.state,
 		Cumulative:   cumulative,
 		Fills:        fills,
+		Fees:         fees,
 		AuthorizedAt: rec.authorizedAt,
 		VenueOrderID: rec.venueOrderID,
 		Version:      rec.version,

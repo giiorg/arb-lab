@@ -55,6 +55,64 @@ type Joiner struct {
 	clk       clock.Clock
 	account   string
 	scopes    []ports.PositionScope
+	spot      SpotLeg
+}
+
+// SpotLeg is the spot half of §7.5's assertion: the configured spot roster,
+// the recorded baselines, and the balance surface to compare them against
+// (task #179, record §70).
+//
+// # The roster comes from CONFIGURATION, never from the journal
+//
+// Assert's instrument set is otherwise derived from dispatched orders, and a
+// virgin deployment — configured spot instruments, empty journal, no baseline
+// — would have empty sets everywhere and PASS: §7.5's "satisfied on a boot
+// that issued no position query at all", arriving through the spot leg. The
+// roster is what makes every configured spot instrument answered for, orders
+// or none.
+//
+// # Baselines arrive VERIFIED, as data
+//
+// The chain mark, credential fingerprint, config digest and per-order row
+// recomputation are the loader's (the composition root holds the journal and
+// the transport; this layer must not). What crosses this seam is the
+// conclusion of that verification: per (venue, asset), the recomputed
+// baseline quantity.
+type SpotLeg struct {
+	// Balances is the venue's spot balance surface. Required exactly when
+	// Baselines is non-empty — an assertion cannot compare against a wallet it
+	// cannot read — and unused otherwise.
+	Balances ports.SpotBalances
+
+	// Roster is every configured spot instrument with its base asset.
+	Roster []SpotInstrument
+
+	// Baselines is the recorded not-ours quantity per (venue, base asset).
+	Baselines []SpotBaseline
+}
+
+// SpotInstrument is one configured spot instrument and the asset decomposition
+// its balance assertion is keyed and guarded by.
+//
+// The base is carried rather than derived because the roster's whole purpose
+// is instruments with NO orders — there is no cumulative to read an asset tag
+// from — and the config's asset decomposition is the validated authority. The
+// QUOTE is carried for one rule: a baselined asset must not be another spot
+// pair's quote (validateSpotLeg), because `ours` counts base flows and
+// same-asset fees, so a pair spending the baselined asset as consideration
+// would move the wallet invisibly and latch a false delta.
+type SpotInstrument struct {
+	Instrument ids.VenueInstrument
+	Base       fixedpoint.Asset
+	Quote      fixedpoint.Asset
+}
+
+// SpotBaseline is one recorded baseline: the portion of the venue's balance of
+// Asset that is NOT attributable to this system's journaled orders.
+type SpotBaseline struct {
+	Venue  ids.Venue
+	Asset  fixedpoint.Asset
+	Amount fixedpoint.Quantity
 }
 
 // NewJoiner constructs the use case, refusing a missing port.
@@ -82,7 +140,7 @@ type Joiner struct {
 // NOTHING here knows about, and a scope computed from what we know cannot widen
 // past it. An empty list is legal and means "assert nothing", which the report
 // says out loud — see Join.Unasserted.
-func NewJoiner(v ports.OrderResolver, p ports.VenuePositions, orders ports.OrderWriteRepository, clk clock.Clock, account string, scopes ...ports.PositionScope) (*Joiner, error) {
+func NewJoiner(v ports.OrderResolver, p ports.VenuePositions, orders ports.OrderWriteRepository, clk clock.Clock, account string, spot SpotLeg, scopes ...ports.PositionScope) (*Joiner, error) {
 	if v == nil {
 		return nil, ErrResolverMissing
 	}
@@ -103,6 +161,9 @@ func NewJoiner(v ports.OrderResolver, p ports.VenuePositions, orders ports.Order
 			return nil, err
 		}
 	}
+	if err := validateSpotLeg(spot); err != nil {
+		return nil, err
+	}
 	return &Joiner{
 		venue:     v,
 		positions: p,
@@ -110,7 +171,100 @@ func NewJoiner(v ports.OrderResolver, p ports.VenuePositions, orders ports.Order
 		clk:       clk,
 		account:   account,
 		scopes:    append([]ports.PositionScope(nil), scopes...),
+		spot: SpotLeg{
+			Balances:  spot.Balances,
+			Roster:    append([]SpotInstrument(nil), spot.Roster...),
+			Baselines: append([]SpotBaseline(nil), spot.Baselines...),
+		},
 	}, nil
+}
+
+// validateSpotLeg refuses a spot configuration whose zero values would read as
+// conclusions.
+//
+// The one cross-field rule is the balances port: required exactly when a
+// baseline exists, because a baseline without a readable wallet is an
+// assertion that can never run — refused at construction, where the wiring is
+// the thing being described, rather than at assert time, where it would be
+// diagnosed as a venue problem.
+//
+// A baseline no roster base consumes is refused HERE, which is where §70b's
+// "refused at load" lands in code: the loader hands rows to this constructor
+// in the same call that verified them, so this seam is the one every consumer
+// passes through — including the tests that never build a document.
+func validateSpotLeg(spot SpotLeg) error {
+	bases := make(map[spotAssetKey]struct{}, len(spot.Roster))
+	seen := make(map[ids.VenueInstrument]struct{}, len(spot.Roster))
+	for _, r := range spot.Roster {
+		if err := r.Instrument.Validate(); err != nil {
+			return fmt.Errorf("spot roster instrument: %w", err)
+		}
+		if r.Instrument.Product != ids.ProductSpot {
+			// Spelled against the member rather than !IsPerp(): a product family
+			// added next year is not spot by default, it is a refusal by default.
+			return fmt.Errorf("spot roster holds %s: %w", r.Instrument, ErrSpotRosterNotSpot)
+		}
+		if r.Base == "" {
+			return fmt.Errorf("spot roster %s: %w", r.Instrument, ErrSpotRosterBaseUnset)
+		}
+		if r.Quote == "" {
+			return fmt.Errorf("spot roster %s: %w", r.Instrument, ErrSpotRosterQuoteUnset)
+		}
+		if _, dup := seen[r.Instrument]; dup {
+			return fmt.Errorf("spot roster %s: %w", r.Instrument, ErrSpotRosterDuplicate)
+		}
+		seen[r.Instrument] = struct{}{}
+		bases[spotAssetKey{r.Instrument.Venue, r.Base}] = struct{}{}
+	}
+
+	baselines := make(map[spotAssetKey]struct{}, len(spot.Baselines))
+	for _, b := range spot.Baselines {
+		if err := b.Venue.Validate(); err != nil {
+			return fmt.Errorf("spot baseline venue: %w", err)
+		}
+		if b.Asset == "" {
+			return fmt.Errorf("spot baseline on %s: %w", b.Venue, ErrSpotBaselineAssetUnset)
+		}
+		if err := b.Amount.Validate(); err != nil {
+			return fmt.Errorf("spot baseline %s on %s: %w", b.Asset, b.Venue, err)
+		}
+		if b.Amount.Asset() != b.Asset {
+			return fmt.Errorf("spot baseline %s on %s carries a %s amount: %w",
+				b.Asset, b.Venue, b.Amount.Asset(), ErrSpotBaselineAssetMismatch)
+		}
+		key := spotAssetKey{b.Venue, b.Asset}
+		if _, dup := baselines[key]; dup {
+			return fmt.Errorf("spot baseline %s on %s: %w", b.Asset, b.Venue, ErrSpotBaselineDuplicate)
+		}
+		baselines[key] = struct{}{}
+		if _, consumed := bases[key]; !consumed {
+			return fmt.Errorf("spot baseline %s on %s: %w", b.Asset, b.Venue, ErrSpotBaselineUnconsumed)
+		}
+		// The quote-overlap deny (record §70c, round-3 finding 4): `ours`
+		// counts base flows and same-asset fees, so a configured pair SPENDING
+		// the baselined asset as its quote consideration moves the wallet
+		// where the formula cannot see — the wrong number is made
+		// inexpressible rather than computed. The deny is about the baseline,
+		// not the pair: the same roster without this baseline constructs.
+		for _, r := range spot.Roster {
+			if r.Instrument.Venue == b.Venue && r.Quote == b.Asset {
+				return fmt.Errorf("spot baseline %s on %s is %s's quote: %w",
+					b.Asset, b.Venue, r.Instrument, ErrSpotBaselineIsQuote)
+			}
+		}
+	}
+
+	if len(spot.Baselines) > 0 && spot.Balances == nil {
+		return ErrSpotBalancesMissing
+	}
+	return nil
+}
+
+// spotAssetKey is the spot assertion's granularity: one venue's balance of one
+// asset. Two spot instruments sharing a base share the cell (§70c).
+type spotAssetKey struct {
+	Venue ids.Venue
+	Asset fixedpoint.Asset
 }
 
 // PositionScope is ports.PositionScope, re-exported for the composition seam.
@@ -209,6 +363,32 @@ type Assertion struct {
 	// all, in the venue's spelling, sorted. §7.5's "foreign orders".
 	Foreign []string
 
+	// SpotUnexplained are the spot balance deltas no journaled order explains:
+	// per (venue, base asset) with a recorded baseline, the venue's balance
+	// minus the baseline, against what our spot orders account for (fee-
+	// adjusted — a spot buy's fee is deducted from the received base asset, so
+	// ours is signed cumulative minus fees charged in the asset). §7.5's
+	// "unexplained position delta" for the leg with no position surface:
+	// latching, operator-cleared, never auto-corrected. Both signs latch —
+	// positive is exposure we cannot account for, negative is coins the
+	// journal says we hold that the venue does not.
+	//
+	// The granularity is the ASSET, not the instrument: two spot instruments
+	// sharing a base share one balance, and a delta cannot be attributed
+	// between them. Pinning it on whichever sorted first would become
+	// load-bearing the day a second pair lands, with nothing refusing it.
+	SpotUnexplained []AssetDelta
+
+	// SpotUnconcluded are the baselined assets whose balance semantics this
+	// read could not pin (ports.UnpinnedReason — Bybit's unverified
+	// walletBalance/locked split, or outstanding borrow). Not a delta and not
+	// a pass: the check RAN, concluded, and left work a further attempt may
+	// finish — a resting spot order completes and the next read pins. It does
+	// not join Holds (latching a timer is the halts-with-every-light-green
+	// failure) and it must not vanish into a pass; the reconciliation seam
+	// maps it to boot.OutcomeIncomplete, below NeedsOperator in precedence.
+	SpotUnconcluded []UnconcludedBalance
+
 	// Unasserted are the instruments this join rebuilt fills for and could NOT
 	// compare against a position, each with the reason it could not.
 	//
@@ -249,6 +429,49 @@ type UnassertedInstrument struct {
 	Reason     UnassertedReason
 }
 
+// AssetDelta is one baselined asset's disagreement between the venue's balance
+// and what this system's spot orders account for.
+//
+// Observed is carried PRE-SUBTRACTED (balance minus baseline) for the same
+// reason InstrumentDelta carries Unexplained: the operator acts on the number,
+// and a report that makes the reader subtract is one where a subtraction in
+// the wrong order is invisible.
+type AssetDelta struct {
+	Venue ids.Venue
+	Asset fixedpoint.Asset
+
+	// Expected is the fee-adjusted signed net our spot orders explain.
+	Expected fixedpoint.Quantity
+
+	// Observed is the venue's balance minus the recorded baseline — the
+	// portion of the wallet that OUGHT to be ours.
+	Observed fixedpoint.Quantity
+
+	// Unexplained is Observed − Expected.
+	Unexplained fixedpoint.Quantity
+}
+
+// UnconcludedBalance is one baselined asset the assertion could neither
+// conclude about nor fail: the balance read reported its total unpinnable
+// this read, with the reason.
+type UnconcludedBalance struct {
+	Venue  ids.Venue
+	Asset  string
+	Reason ports.UnpinnedReason
+}
+
+// UnpinnedReason is ports.UnpinnedReason, re-exported for the composition
+// seam — PositionScope's argument, one type over: a root that renders the
+// report must NAME the reason type to switch on it, and §3.6 rule 6 forbids
+// any root importing oms/application/ports. The members ride along for the
+// same reason.
+type UnpinnedReason = ports.UnpinnedReason
+
+const (
+	UnpinnedLockedSplitUnverified = ports.UnpinnedLockedSplitUnverified
+	UnpinnedBorrowOutstanding     = ports.UnpinnedBorrowOutstanding
+)
+
 // UnassertedReason is why an instrument the join rebuilt fills for was left out
 // of the net-delta assertion.
 //
@@ -273,15 +496,26 @@ const (
 	// exactly the state this type exists to make unwritable.
 	UnassertedReasonUnspecified UnassertedReason = iota
 
-	// UnassertedNoPositionSurface is §7.5's own case: the instrument's product
-	// family has no position surface at any venue, so no enumeration could ever
-	// cover it. Spot, and only spot.
+	// UnassertedBaselineUnrecorded is a SPOT instrument whose base asset has no
+	// recorded baseline at its venue, so the balance comparison cannot run.
 	//
-	// A spot balance is not a position — it holds coins this system never bought
-	// — so comparing it to our exposure needs a recorded baseline nothing in this
-	// spec defines (task #179). Until one exists the spot leg's exposure rests on
-	// the executions sweep alone.
-	UnassertedNoPositionSurface
+	// [SPEC EDIT OWED] §7.5's spot paragraph still states the must-not-hold
+	// exemption and "until a baseline is defined"; record §70g owns the
+	// rewrite, which lands before slice #179 closes.
+	//
+	// It replaced UnassertedNoPositionSurface in task #179 (record §70), and
+	// the posture answer flipped with it. The old member was §7.5's permanent,
+	// venue-imposed gap — no venue publishes a position surface for spot, so no
+	// enumeration could EVER cover it, and holding the posture on a gap no
+	// action could close would halt a correct system for ever. The baseline
+	// construct closes the gap: recording one is a one-time operator act
+	// (`arblab baseline record`, then pin the document), on the same footing as
+	// spend_lock_dir. What remains is a deployment that has not done it — and
+	// that deployment's spot balance may be hiding exposure the journal does
+	// not explain, which is exactly the epistemic position of a derivative
+	// outside every scope. The old exemption's membership is empty and §7.5's
+	// spot paragraph now says so.
+	UnassertedBaselineUnrecorded
 
 	// UnassertedScopeNotEnumerated is a DERIVATIVE instrument that no configured
 	// scope covers: an enumeration this deployment did not declare, or one it
@@ -296,6 +530,11 @@ const (
 
 const maxUnassertedReason = UnassertedScopeNotEnumerated
 
+// The roster above holds NO member that exempts an instrument from the
+// posture: HoldsPosture answers true for every valid reason since task #179.
+// The method stays — the question is the reason's to answer, and a member
+// added next year gets asked it by exhaustiveswitch rather than defaulted.
+
 // Validate reports whether r names a reason, excluding the sentinel.
 func (r UnassertedReason) Validate() error {
 	if r == UnassertedReasonUnspecified || r > maxUnassertedReason {
@@ -309,8 +548,8 @@ func (r UnassertedReason) String() string {
 	switch r {
 	case UnassertedReasonUnspecified:
 		return "UnassertedReasonUnspecified"
-	case UnassertedNoPositionSurface:
-		return "UnassertedNoPositionSurface"
+	case UnassertedBaselineUnrecorded:
+		return "UnassertedBaselineUnrecorded"
 	case UnassertedScopeNotEnumerated:
 		return "UnassertedScopeNotEnumerated"
 	}
@@ -320,19 +559,21 @@ func (r UnassertedReason) String() string {
 // HoldsPosture reports whether an instrument left out for this reason must hold
 // the boot posture below trading.
 //
-// The two answers are not two degrees of the same thing. A permanent gap held
-// against the posture halts a correct system for ever, which is why §7.5 exempts
-// it; an unconfigured enumeration exempted is the invariant reporting a pass over
-// an account it did not read, which is the check saying "clear" about a question
-// it never asked.
+// Every current member answers TRUE, and the method survives that: the
+// question belongs to the reason rather than to a caller counting reasons it
+// recognises, and the exemption that once lived here (a permanent gap held
+// against the posture halts a correct system for ever) lost its member when
+// task #179 made the spot gap closable. An unrecorded baseline exempted would
+// be the invariant reporting a pass over a wallet it did not compare, which is
+// the check saying "clear" about a question it never asked.
 //
 // It mirrors UnprovedReason.RetryMayLift down to the signature, deliberately: the
 // two are the same shape of decision — a property of the reason, not of the
 // caller — and a reader who has understood one has understood this one.
 func (r UnassertedReason) HoldsPosture() (bool, error) {
 	switch r {
-	case UnassertedNoPositionSurface:
-		return false, nil
+	case UnassertedBaselineUnrecorded:
+		return true, nil
 	case UnassertedScopeNotEnumerated:
 		return true, nil
 	case UnassertedReasonUnspecified:
@@ -367,7 +608,7 @@ func (r UnassertedReason) HoldsPosture() (bool, error) {
 // removing it SURVIVED. An unreachable guard is worse than no guard — it reads as
 // handled, and the next reader stops asking who guarantees the invariant.
 func (a Assertion) Holds() bool {
-	if len(a.Unexplained) > 0 || len(a.Foreign) > 0 {
+	if len(a.Unexplained) > 0 || len(a.Foreign) > 0 || len(a.SpotUnexplained) > 0 {
 		return true
 	}
 	for _, u := range a.Unasserted {
@@ -375,6 +616,11 @@ func (a Assertion) Holds() bool {
 			return true
 		}
 	}
+	// SpotUnconcluded is deliberately NOT here: it is the ran-and-concluded,
+	// work-remains outcome, and latching it would demand operator clearance
+	// for a timer. The reconciliation seam maps it to OutcomeIncomplete,
+	// BELOW NeedsOperator — so a boot carrying both a delta and an unpinned
+	// row latches on the delta, and the unpinned row never masks it.
 	return false
 }
 
@@ -431,6 +677,7 @@ func (j *Joiner) Join(dispatched []ids.ClientOrderID) (Join, error) {
 func (j *Joiner) Assert(dispatched []ids.ClientOrderID) (Assertion, error) {
 	report := Assertion{}
 	expected := make(map[ids.VenueInstrument]fixedpoint.Quantity, len(dispatched))
+	fees := make(map[spotAssetKey]fixedpoint.Quantity)
 
 	for _, id := range dispatched {
 		rec, err := j.load(id)
@@ -450,9 +697,38 @@ func (j *Joiner) Assert(dispatched []ids.ClientOrderID) (Assertion, error) {
 			return report, fmt.Errorf("assert order %q: %w", id, err)
 		}
 		expected[rec.Order.Instrument] = running
+
+		// Fees are collected over SPOT orders only, keyed by the asset the venue
+		// charged in — never by the order's own base. Both scopings are §70c's:
+		// a BNB-discount fee on a BTCUSDT spot trade debits the spot BNB
+		// balance, so the fee that moves a baselined asset can ride another
+		// pair's order; while a Binance FUTURES fee debits the futures wallet,
+		// which the spot balance read never sees, so summing perp fees would
+		// subtract from a wallet they never touched.
+		if rec.Order.Instrument.Product == ids.ProductSpot {
+			for _, fee := range rec.Fees {
+				q, err := feeQuantity(fee)
+				if err != nil {
+					return report, fmt.Errorf("assert order %q fee: %w", id, err)
+				}
+				key := spotAssetKey{rec.Order.Instrument.Venue, fee.Asset()}
+				total, ok := fees[key]
+				if !ok {
+					total = fixedpoint.ZeroQuantity(fee.Asset())
+				}
+				total, err = total.Add(q)
+				if err != nil {
+					return report, fmt.Errorf("assert order %q fees: %w", id, err)
+				}
+				fees[key] = total
+			}
+		}
 	}
 
 	if err := j.assert(expected, &report); err != nil {
+		return report, err
+	}
+	if err := j.assertSpot(expected, fees, &report); err != nil {
 		return report, err
 	}
 
@@ -469,7 +745,29 @@ func (j *Joiner) Assert(dispatched []ids.ClientOrderID) (Assertion, error) {
 	sort.Slice(report.Unasserted, func(a, b int) bool {
 		return report.Unasserted[a].Instrument.String() < report.Unasserted[b].Instrument.String()
 	})
+	sort.Slice(report.SpotUnexplained, func(a, b int) bool {
+		x, y := report.SpotUnexplained[a], report.SpotUnexplained[b]
+		if x.Venue != y.Venue {
+			return x.Venue < y.Venue
+		}
+		return x.Asset < y.Asset
+	})
+	sort.Slice(report.SpotUnconcluded, func(a, b int) bool {
+		x, y := report.SpotUnconcluded[a], report.SpotUnconcluded[b]
+		if x.Venue != y.Venue {
+			return x.Venue < y.Venue
+		}
+		return x.Asset < y.Asset
+	})
 	return report, nil
+}
+
+// feeQuantity is the ONE site where a fee crosses dimensions: a fee charged in
+// an asset is a flow OF that asset, and where flows net against holdings the
+// dimension is quantity-of-asset. Same asset tag, same canonical scale —
+// lossless, no rounding decision arises.
+func feeQuantity(fee fixedpoint.Money) (fixedpoint.Quantity, error) {
+	return fixedpoint.QuantityFromMantissa(fee.Asset(), fee.Mantissa())
 }
 
 // load reads one order and refuses one the venue cannot hold.
@@ -671,30 +969,200 @@ func (j *Joiner) assert(expected map[ids.VenueInstrument]fixedpoint.Quantity, re
 		if _, done := asserted[instrument]; done {
 			continue
 		}
+		if instrument.Product == ids.ProductSpot {
+			// The spot half answers for every spot instrument — asserted against
+			// its baseline or reported UnassertedBaselineUnrecorded — so a spot
+			// instrument here is not uncovered, it is merely not a derivative.
+			// See assertSpot.
+			continue
+		}
+		// A DERIVATIVE no scope covered: an enumeration this deployment did not
+		// declare, or one declared for another venue or family. A position
+		// surface EXISTS for it and was not asked, so the venue may be holding
+		// exposure the account was never queried about.
 		report.Unasserted = append(report.Unasserted, UnassertedInstrument{
 			Instrument: instrument,
-			Reason:     unassertedReason(instrument),
+			Reason:     UnassertedScopeNotEnumerated,
 		})
 	}
 	return nil
 }
 
-// unassertedReason says why no scope covered this instrument.
+// assertSpot is the spot half of §7.5's invariant (task #179, record §70):
+// per (venue, base asset) with a recorded baseline, the venue's balance minus
+// the baseline must equal what our spot orders account for.
 //
-// The discriminator is the product family and it is a VENUE FACT rather than a
-// configuration one, which is what makes it decidable here: neither venue
-// publishes a position surface for spot, so a spot instrument is outside every
-// enumeration that could ever be configured. Anything else has a surface, and its
-// absence from the scope list is a statement about this deployment's wiring.
+// # The coverage set is the roster UNION the journal, and the roster is what
+// # makes a virgin boot honest
 //
-// It does not consult j.scopes, and that is not an omission: this function is
-// only ever reached for an instrument no scope covered, so asking again would
-// only re-derive the loop's own answer.
-func unassertedReason(instrument ids.VenueInstrument) UnassertedReason {
-	if instrument.Product.IsPerp() {
-		return UnassertedScopeNotEnumerated
+// A configured spot instrument with no orders must still be answered for —
+// asserted or reported — or a boot over an empty journal passes having
+// compared nothing. A journal-held spot instrument the config has DROPPED
+// still contributes: its fills moved the same wallet, so its expected and its
+// fees stay in the cell's arithmetic, and if its base has no baseline it is
+// reported unrecorded exactly like a configured one. The cell is the asset,
+// so "covered" is a property of the base, never of which instrument earned it.
+func (j *Joiner) assertSpot(expected map[ids.VenueInstrument]fixedpoint.Quantity, fees map[spotAssetKey]fixedpoint.Quantity, report *Assertion) error {
+	// Every spot instrument in play, with its base: the roster's word first,
+	// the cumulative's asset tag for journal-only instruments.
+	instruments := make(map[ids.VenueInstrument]fixedpoint.Asset, len(j.spot.Roster))
+	for _, r := range j.spot.Roster {
+		instruments[r.Instrument] = r.Base
 	}
-	return UnassertedNoPositionSurface
+	for instrument, quantity := range expected {
+		if instrument.Product != ids.ProductSpot {
+			continue
+		}
+		if _, known := instruments[instrument]; !known {
+			instruments[instrument] = quantity.Asset()
+		}
+	}
+	if len(instruments) == 0 {
+		return nil
+	}
+
+	baselines := make(map[spotAssetKey]fixedpoint.Quantity, len(j.spot.Baselines))
+	for _, b := range j.spot.Baselines {
+		baselines[spotAssetKey{b.Venue, b.Asset}] = b.Amount
+	}
+
+	// Group instruments into cells and split covered from unrecorded.
+	cells := make(map[spotAssetKey][]ids.VenueInstrument, len(instruments))
+	for instrument, base := range instruments {
+		key := spotAssetKey{instrument.Venue, base}
+		cells[key] = append(cells[key], instrument)
+	}
+
+	balances := make(map[ids.Venue]ports.BalanceReport)
+	keys := make([]spotAssetKey, 0, len(cells))
+	for key := range cells {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(a, b int) bool {
+		if keys[a].Venue != keys[b].Venue {
+			return keys[a].Venue < keys[b].Venue
+		}
+		return keys[a].Asset < keys[b].Asset
+	})
+
+	for _, key := range keys {
+		baseline, recorded := baselines[key]
+		if !recorded {
+			for _, instrument := range cells[key] {
+				report.Unasserted = append(report.Unasserted, UnassertedInstrument{
+					Instrument: instrument,
+					Reason:     UnassertedBaselineUnrecorded,
+				})
+			}
+			continue
+		}
+
+		venueReport, err := j.spotBalances(key.Venue, balances)
+		if err != nil {
+			return err
+		}
+		if reason, unpinned := unpinnedReason(venueReport, key.Asset); unpinned {
+			if err := reason.Validate(); err != nil {
+				return fmt.Errorf("assert spot %s on %s: %w", key.Asset, key.Venue, err)
+			}
+			report.SpotUnconcluded = append(report.SpotUnconcluded, UnconcludedBalance{
+				Venue:  key.Venue,
+				Asset:  string(key.Asset),
+				Reason: reason,
+			})
+			continue
+		}
+
+		// An asset absent from the rows is a ZERO balance — a real answer,
+		// available only because the enumeration is unscoped (ports.SpotBalances).
+		total := fixedpoint.ZeroQuantity(key.Asset)
+		for _, row := range venueReport.Rows {
+			if row.Asset == key.Asset {
+				total = row.Total
+				break
+			}
+		}
+
+		ours := fixedpoint.ZeroQuantity(key.Asset)
+		for _, instrument := range cells[key] {
+			mine, has := expected[instrument]
+			if !has {
+				continue
+			}
+			ours, err = ours.Add(mine)
+			if err != nil {
+				return fmt.Errorf("assert spot %s on %s: %w", key.Asset, key.Venue, err)
+			}
+		}
+		if feeTotal, charged := fees[key]; charged {
+			ours, err = ours.Sub(feeTotal)
+			if err != nil {
+				return fmt.Errorf("assert spot %s on %s fees: %w", key.Asset, key.Venue, err)
+			}
+		}
+
+		observed, err := total.Sub(baseline)
+		if err != nil {
+			return fmt.Errorf("assert spot %s on %s baseline: %w", key.Asset, key.Venue, err)
+		}
+		unexplained, err := observed.Sub(ours)
+		if err != nil {
+			return fmt.Errorf("assert spot %s on %s: %w", key.Asset, key.Venue, err)
+		}
+		sign, err := unexplained.Sign()
+		if err != nil {
+			return fmt.Errorf("assert spot %s on %s: %w", key.Asset, key.Venue, err)
+		}
+		if sign == 0 {
+			continue
+		}
+		report.SpotUnexplained = append(report.SpotUnexplained, AssetDelta{
+			Venue:       key.Venue,
+			Asset:       key.Asset,
+			Expected:    ours,
+			Observed:    observed,
+			Unexplained: unexplained,
+		})
+	}
+	return nil
+}
+
+// spotBalances reads one venue's enumeration exactly once per Assert, however
+// many cells it serves — the report is one answer about one wallet, and two
+// reads could disagree mid-walk, attributing one instant's balance to one
+// asset and another's to its neighbour.
+func (j *Joiner) spotBalances(venue ids.Venue, cache map[ids.Venue]ports.BalanceReport) (ports.BalanceReport, error) {
+	if report, done := cache[venue]; done {
+		return report, nil
+	}
+	report, err := j.spot.Balances.Balances(ports.SpotBalanceScope{Venue: venue})
+	if err != nil {
+		return ports.BalanceReport{}, fmt.Errorf("assert spot balances on %s: %w", venue, err)
+	}
+	seen := make(map[fixedpoint.Asset]struct{}, len(report.Rows))
+	for _, row := range report.Rows {
+		if _, dup := seen[row.Asset]; dup {
+			// Two rows for one asset would make the cell's total a declaration-
+			// order coin flip — the adapter contract violation is refused here,
+			// where it is an error, not downstream where it is a wrong number.
+			return ports.BalanceReport{}, fmt.Errorf("assert spot balances on %s: asset %s reported twice: %w",
+				venue, row.Asset, ErrBalanceRowDuplicate)
+		}
+		seen[row.Asset] = struct{}{}
+	}
+	cache[venue] = report
+	return report, nil
+}
+
+// unpinnedReason reports whether the venue's read left this asset without one
+// pinnable total.
+func unpinnedReason(report ports.BalanceReport, asset fixedpoint.Asset) (ports.UnpinnedReason, bool) {
+	for _, u := range report.Unpinned {
+		if u.Asset == string(asset) {
+			return u.Reason, true
+		}
+	}
+	return ports.UnpinnedReasonUnspecified, false
 }
 
 // compare records one instrument's disagreement, if there is one.

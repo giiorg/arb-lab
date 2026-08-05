@@ -170,4 +170,10 @@ var (
 	// (application.UnassertedReason); this is about a scope that could never be
 	// SERVED, which is a different mistake in a different field.
 	ErrPositionScopeSurfaceAbsent = errors.New("oms: position scope names a family with no position surface")
+
+	// ErrUnpinnedReasonInvalid reports an UnpinnedBalance whose reason is the
+	// zero value or out of roster — an asset outside the assertion with no
+	// account of why, which is the state the type exists to make unwritable
+	// (UnassertedReason's argument, one port over).
+	ErrUnpinnedReasonInvalid = errors.New("oms: unpinned balance names no valid reason")
 )
