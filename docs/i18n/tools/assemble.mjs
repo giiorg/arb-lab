@@ -3,6 +3,8 @@
 //
 //   node tools/assemble.mjs           -> writes docs/tutorial.ka.md
 //   node tools/assemble.mjs --check   -> validates and prints, writes nothing
+//   node tools/assemble.mjs --verify  -> fails if docs/tutorial.ka.md on disk differs
+//                                        from a fresh assemble (make tutorial-ka-check)
 //
 // The guide has to *splice* Georgian into index.html because both languages ship in one
 // file. Here the Georgian is its own file, so it is assembled instead: the output is a
@@ -79,6 +81,19 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const text = assemble();
   if (process.argv.includes("--check")) {
     console.log(`OK — ${fragments().length} fragments, ${Buffer.byteLength(text)} bytes`);
+  } else if (process.argv.includes("--verify")) {
+    // The bun suite (tests/parity.test.js) asserts the same equality, but CI has
+    // node and no bun — this is the node-only spelling of that assertion, so the
+    // guard runs where `make ci` runs.
+    const onDisk = existsSync(OUT) ? readFileSync(OUT, "utf8") : null;
+    if (onDisk !== text) {
+      console.error(
+        `${OUT} is stale against docs/i18n/ka/tutorial/ — ` +
+          `run \`make tutorial-ka\` and commit the result. Never hand-edit it.`
+      );
+      process.exit(1);
+    }
+    console.log(`OK — ${OUT} matches a fresh assemble`);
   } else {
     mkdirSync(dirname(OUT), { recursive: true });
     writeFileSync(OUT, text);

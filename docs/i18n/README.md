@@ -32,6 +32,11 @@ node tools/assemble.mjs           # regenerate, or refuse and say why
 bun test
 ```
 
+From the repo root, `make tutorial-ka` runs the regeneration and `make
+tutorial-ka-check` fails if the generated file is stale against the fragments.
+The check is part of `make ci` (node-only — CI has no bun), so a doc-set bump
+that forgets the Georgian file fails the build rather than stranding it.
+
 Bulk run (roughly 15 minutes, 6-way parallel):
 
 ```sh

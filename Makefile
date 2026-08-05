@@ -32,7 +32,7 @@ help: ## list targets
 		| awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: ci
-ci: fmt-check vet lint test ## everything CI runs
+ci: fmt-check tutorial-ka-check vet lint test ## everything CI runs
 
 .PHONY: test
 test: ## race-enabled tests, both modules (pinned rapid seed)
@@ -100,6 +100,20 @@ fmt: ## format both modules
 fmt-check: ## fail if anything is unformatted
 	@out=$$(gofmt -l . 2>/dev/null); \
 	if [ -n "$$out" ]; then echo "unformatted files:"; echo "$$out"; exit 1; fi
+
+# docs/tutorial.ka.md is GENERATED from the fragments in docs/i18n/ka/tutorial/
+# and never hand-edited. The generator lives under docs/i18n/tools/ — not tools/
+# — so these targets are what makes it findable from the repo root; without them
+# a grep of Makefile and tools/ reads as "there is no generator". The check is
+# node-only on purpose: the fuller bun suite (docs/i18n/tests) does not run in
+# CI, and a guard nothing runs is the same stranding one layer out.
+.PHONY: tutorial-ka
+tutorial-ka: ## regenerate docs/tutorial.ka.md from the Georgian fragments
+	node docs/i18n/tools/assemble.mjs
+
+.PHONY: tutorial-ka-check
+tutorial-ka-check: ## fail if docs/tutorial.ka.md is stale against its fragments
+	@node docs/i18n/tools/assemble.mjs --verify
 
 .PHONY: tidy
 tidy: ## go mod tidy, both modules
