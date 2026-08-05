@@ -108,9 +108,21 @@ func TestBinancePositionsEnumeratesWithoutASymbol(t *testing.T) {
 	if call.Path != "/fapi/v3/positionRisk" {
 		t.Errorf("path = %q, want /fapi/v3/positionRisk — V2 returns every symbol whether or not it has a position, so an absent row there is not a flat account", call.Path)
 	}
-	if call.Cost.Weight != 5 {
-		t.Errorf("weight = %d, want 5 (V3's published IP weight; the changelog raised V2's to 10)", call.Cost.Weight)
+	// 20 is the CONSERVATIVE arm of an unverified conditional weight ("5 with
+	// symbol, 20 without", task #180): this call sends no symbol, so under that
+	// reading it costs 20 and charging 5 undercounts the IP budget four times
+	// against the limit whose breach is a ban. Correct under the conditional
+	// reading, pessimistic by 15 under the flat one. A direct read of the venue's
+	// published line is the loosening trigger — and when it happens, this literal
+	// is what has to change, which is why it is stated here rather than derived
+	// from the code under test.
+	if call.Cost.Weight != 20 {
+		t.Errorf("weight = %d, want 20 — the symbol-less enumeration charges the "+
+			"conservative arm of #180's unverified conditional weight", call.Cost.Weight)
 	}
+	// The two claims are joined on purpose: the weight is only right BECAUSE no
+	// symbol is sent, so a change that starts sending one has to fail here rather
+	// than quietly make the charge pessimistic for a different reason.
 	for _, p := range call.Params {
 		if p.Key == "symbol" {
 			t.Errorf("params carry symbol=%q — a symbol-scoped read can only ask about instruments this system already knows, which is the one set that cannot contain a foreign position", p.Value)

@@ -29,13 +29,34 @@ import (
 // silence carries it. V2 would have to be read as a list to filter, and every row
 // it returns for a symbol we never traded would be a false foreign position.
 //
-// V3 is also the version that is not deprecation-announced, and the version whose
-// published weight can be reproduced: the V2 endpoint page still states IP weight
-// 5 while the changelog raised it (2024-08-07, verbatim: "GET
-// /fapi/v2/positionRisk: 5->10"). Charging a venue-published figure the venue's
-// own changelog contradicts is how an IP budget is undercounted by half against
-// the limit that bans it, and the contradiction is recorded in Profiles §9 rather
-// than resolved here.
+// V3 is also the version that is not deprecation-announced.
+//
+// # The charged weight is the CONSERVATIVE reading of an unverified figure
+//
+// This endpoint's published weight is not settled (task #180, Profiles §9). Two
+// readings are in play: a flat 5, which is what was recorded when this code was
+// written, and a CONDITIONAL "5 with symbol, 20 without", reported 2026-08-05 by
+// a read this project cannot treat as a source — `developers.binance.com` now
+// answers every headless fetcher with a WAF challenge, so nobody here has read
+// the line directly.
+//
+// The two readings are not symmetric for us, because this call deliberately
+// sends no symbol (see EncodePositions): under the conditional reading every
+// position read costs 20 and is being charged 5. Undercounting an IP budget by
+// four times, against the limit whose breach is the ban §7.6 exists to avoid, is
+// the failure this figure decides — so the cost charged is 20, which is correct
+// under the conditional reading and merely pessimistic by 15 under the flat one,
+// once per reconcile pass.
+//
+// Reading the published line is therefore a LOOSENING trigger, never a
+// correctness prerequisite: if the venue's own page says a flat 5, this drops to
+// 5 with the citation. Nothing else in the system depends on which it is.
+//
+// The related fact about the SOURCE is recorded in Profiles §9 rather than
+// resolved here: the V2 endpoint page and the venue's changelog disagreed for
+// two years (2024-08-07, verbatim: "GET /fapi/v2/positionRisk: 5->10", against a
+// page that went on saying 5), which is why a figure from either alone is
+// treated as a claim rather than as a fact.
 //
 // # The direction is in the SIGN, and one-way mode is what makes that readable
 //
@@ -82,7 +103,10 @@ func binancePositionsRoute(p ids.ProductCategory) (string, ratelimit.Cost, error
 	case ids.ProductSpot:
 		return "", ratelimit.Cost{}, fmt.Errorf("binance spot: %w", ErrPositionSurfaceAbsent)
 	case ids.ProductLinearPerp:
-		return "/fapi/v3/positionRisk", ratelimit.Cost{Weight: 5}, nil
+		// 20, not 5: the conservative arm of an unverified conditional weight,
+		// charged for the symbol-less enumeration this codec always sends. See
+		// the file comment — a direct read of the published line loosens it.
+		return "/fapi/v3/positionRisk", ratelimit.Cost{Weight: 20}, nil
 	case ids.ProductInversePerp:
 		return "", ratelimit.Cost{}, fmt.Errorf("%s: %w", p, ErrOrderFamilyUnrouted)
 	}

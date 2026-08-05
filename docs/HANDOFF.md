@@ -37,7 +37,32 @@ fixture asked verify for one window, and verify walks exactly ONE file earlier
 than the range, so the three-file setup never had its first file read. Both were
 aimed correctly and unobservable; neither was findable by reading the test.
 
-**#180 is IN PROGRESS and blocked on one paste.** `developers.binance.com` now
+**#180 turned up a live undercharge, and the conservative arm is LANDED while
+the figure stays unverified.** A browser-side AI summary (operator-run,
+2026-08-05) reported `/fapi/v3/positionRisk` at **"5 with `symbol`, 20
+without"**. §7.5's enumeration deliberately sends **no** symbol, so under that
+reading every position read costs 20 and the code was charging **5** — a
+four-times undercount of the IP budget, in the direction whose end is the ban
+§7.6 exists to avoid. **The reading is NOT verified and was not recorded as a
+venue fact** (a summarizer is the exact channel that misreported
+`/api/v3/account` as 10 against a raw-docs 20 two sessions ago; profiles §9 now
+records the unsettled STATE, both candidate readings and their provenance).
+What landed is the both-readings response: `binancePositionsRoute` charges
+**20**, correct under the conditional reading and pessimistic by 15 once per
+reconcile pass under the flat one, with the argument at the decision site, a
+test pinning the literal, and a killed mutant (M23). **A direct read of the
+published line is a LOOSENING trigger, not a prerequisite.**
+
+Three further tells about that summary, all recorded: it answered the
+"does the endpoint page still carry its own sentence" question with the
+**changelog's** 2024-07-24 sentence and the changelog URL; it cited ONE
+aggregated catalog page for both endpoints, where "which endpoint owns this
+Weight line" is a judgement rather than a reading, and V2/V3 are adjacent
+there; and it reported V2's page as now saying **10**, i.e. that the two-year
+page-vs-changelog discrepancy §9 recorded may since have been fixed at source —
+also unread.
+
+**#180 is still OPEN, and what remains is one look at one line.** `developers.binance.com` now
 serves an **AWS WAF JavaScript challenge** (HTTP 202, empty body) to curl and to
 any headless fetcher, and the recorded §9 URLs 302 to a restructured catalog path
 (`/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/trade#position-information-v3`).

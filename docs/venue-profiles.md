@@ -1100,7 +1100,8 @@ up the contradiction in the weight row. Bybit's static docs were fetched directl
 
 ### Binance USDⓈ-M — two versions of one endpoint, and their silences mean opposite things
 
-- **`GET /fapi/v3/positionRisk`** — IP **weight 5**; parameters `symbol` (optional), `timestamp`
+- **`GET /fapi/v3/positionRisk`** — IP weight **UNSETTLED, see the ⚠ block below (task #180)**;
+  parameters `symbol` (optional), `timestamp`
   (required), `recvWindow` (≤60000). Response rows carry `symbol`, `positionSide`, `positionAmt`,
   `entryPrice`, `breakEvenPrice`, `markPrice`, `unRealizedProfit`, `liquidationPrice`,
   `isolatedMargin`, `notional`, `marginAsset`, `isolatedWallet`, `initialMargin`, `maintMargin`,
@@ -1116,11 +1117,38 @@ up the contradiction in the weight row. Bybit's static docs were fetched directl
   not exist on the family; on V3 it means the account is flat there. §7.5 reads this surface to
   decide whether the venue holds exposure nothing here can account for, so *flat* has to be a
   CONCLUSION — and V3 is the version whose silence carries it.
-- **⚠ A published figure and the changelog DISAGREE, and the endpoint page is the stale one.** The V2
-  page still states IP weight 5 while the 2024-08-07 entry raised it to 10. Nothing here depends on
-  V2's number, and the discrepancy is recorded because it is evidence about the source: an endpoint
-  page can lag its own changelog, and under-charging a weight is the direction that ends in the IP
-  ban §7.6 exists to avoid. Re-verify both figures in a browser before live trading.
+- **⚠ THE V3 WEIGHT IS NOT VERIFIED, and this block records that state rather than a number
+  (2026-08-05, task #180 — still open).** What is verified, from the 2026-08-03 read: the V2 endpoint
+  page stated IP weight 5 while the venue's own 2024-08-07 changelog entry raised it to 10 (verbatim:
+  *"`GET /fapi/v2/positionRisk`: 5->10"*), so an endpoint page can lag its own changelog for years.
+  What is NOT verified: **V3's weight, in either of its two candidate readings** — a flat **5**, which
+  is what this section recorded on 2026-08-03 through a server-side rendering proxy, and a
+  CONDITIONAL **"5 with `symbol`, 20 without"**, reported 2026-08-05 by a browser-side AI summary.
+  Neither is a source under this document's rule: the first came through a rendering proxy of a
+  client-rendered page, the second through a summarizer — **the class of read that already misreported
+  `GET /api/v3/account` as weight 10 when the raw docs say 20** (v0.9.49's own correction). A summary
+  is not evidence about a number; the number has to be read.
+  - **The two readings are NOT symmetric for this deployment, because §7.5's enumeration sends no
+    `symbol`.** Under the conditional reading every position read costs 20. The engine therefore
+    charges **20** — correct under the conditional reading, pessimistic by 15 once per reconcile pass
+    under the flat one — because under-charging a weight is the direction that ends in the IP ban §7.6
+    exists to avoid. The conservative charge is a code decision made against uncertainty, **not a
+    venue fact**, and it is recorded as such in `positions_binance.go`.
+  - **A direct read of the published line is a LOOSENING trigger**, never a correctness prerequisite:
+    a page that says a flat 5 drops the charge to 5 with its citation, and nothing else in the system
+    depends on which reading is true.
+  - **Method note, and it retires the technique this section was written with.** As of 2026-08-05
+    `developers.binance.com` answers curl and every headless fetcher with an **AWS WAF JavaScript
+    challenge** (HTTP 202, empty body, `awsWafCookieDomainList` shell), and the URLs below **302** into
+    a restructured catalog tree
+    (`/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/trade#position-information-v3`).
+    The SSR-proxy route named at the head of this section no longer reaches the page, so the remaining
+    channels are a real browser or the venue's own `X-MBX-USED-WEIGHT-1M` response header — the latter
+    being the venue's actual accounting rather than its prose, and available on testnet with the
+    credential #171 is waiting on.
+  - Unverified in the other direction too: the same 2026-08-05 summary reported that V2's page now
+    says **10**, i.e. that the two-year discrepancy above may since have been resolved at the source.
+    Also unread, also pending the same look.
 - **Direction is in the SIGN.** `positionAmt` is signed; `positionSide` is `BOTH` in one-way mode
   (§4.1 pins one-way as refuse-to-trade). A hedge-mode account answers with a `LONG` row and a
   `SHORT` row for one symbol, whose net is a subtraction no field states.
