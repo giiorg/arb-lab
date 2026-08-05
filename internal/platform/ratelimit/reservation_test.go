@@ -468,6 +468,47 @@ func TestConsumeCapacityBoundaryAndWrap(t *testing.T) {
 	}
 }
 
+func TestConsumeAdmitsZeroChargePastSiblingCapacity(t *testing.T) {
+	t.Parallel()
+	p := reservationProfile(5)
+	p.Limits = append(p.Limits, ratelimit.Limit{
+		Name: "orders_1m", Scope: ratelimit.ScopeFamily, Family: ids.ProductSpot,
+		Dimension: ratelimit.DimensionOrders, Interval: time.Second,
+		OpeningCeiling: 5, RoutineCeiling: 5, Capacity: 5,
+	})
+	p.Uncounted = nil
+	tc, err := clock.NewTestClock(start, nil)
+	if err != nil {
+		t.Fatalf("NewTestClock: %v", err)
+	}
+	g, err := ratelimit.New(tc, p)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r := ratelimit.Request{
+		Family: ids.ProductSpot, Priority: ratelimit.PriorityRoutine,
+		Cost: ratelimit.Cost{Orders: 1},
+	}
+	h, _, err := g.Reserve([]ratelimit.Request{r})
+	if err != nil {
+		t.Fatalf("Reserve: %v", err)
+	}
+	if err := g.Observe(ids.ProductSpot, "weight_1m", 6); err != nil {
+		t.Fatalf("Observe weight window: %v", err)
+	}
+	if got := usedOf(t, g, ids.ProductSpot, "weight_1m"); got != 6 {
+		t.Fatalf("Used after fold = %d, want 6 past capacity 5", got)
+	}
+
+	d, err := h.Consume(r)
+	if err != nil || !d.Admitted {
+		t.Fatalf("Consume = (%+v, %v), want admission", d, err)
+	}
+	if got := usedOf(t, g, ids.ProductSpot, "orders_1m"); got != 1 {
+		t.Fatalf("Used on charged sibling = %d, want 1", got)
+	}
+}
+
 func TestFreeAtIgnoresOccupancyWhileAdmissionCountsIt(t *testing.T) {
 	t.Parallel()
 	p := reservationProfile(10)
@@ -502,4 +543,80 @@ func TestFreeAtIgnoresOccupancyWhileAdmissionCountsIt(t *testing.T) {
 		t.Fatalf("Check = %+v, want refusal with charges-only expiry", d)
 	}
 	_ = h.Cancel()
+}
+
+func TestAdmissionCountsReservedAtCeilingBoundaries(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		reserved uint64
+		want     bool
+	}{
+		{"one unit fits at ceiling minus one", 5, true},
+		{"one unit is refused at the ceiling", 6, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			g, _ := newReservationGovernor(t, 10)
+			mustAcquire(t, g, reservationRequest(4))
+			h, _, err := g.Reserve([]ratelimit.Request{reservationRequest(tc.reserved)})
+			if err != nil {
+				t.Fatalf("Reserve: %v", err)
+			}
+			t.Cleanup(func() { _ = h.Cancel() })
+			if got := usedOf(t, g, ids.ProductSpot, "weight_1m"); got != 4 {
+				t.Fatalf("Used = %d, want 4", got)
+			}
+			if got := reservedOf(t, g, ids.ProductSpot, "weight_1m"); got != tc.reserved {
+				t.Fatalf("Reserved = %d, want %d", got, tc.reserved)
+			}
+
+			d, err := g.Check(reservationRequest(1))
+			if err != nil {
+				t.Fatalf("Check: %v", err)
+			}
+			if d.Admitted != tc.want {
+				t.Fatalf("Check admitted = %v, want %v (%+v)", d.Admitted, tc.want, d)
+			}
+		})
+	}
+
+	t.Run("reservation above a lower-priority availability does not underflow", func(t *testing.T) {
+		p := reservationProfile(10)
+		p.Limits[0].OpeningCeiling = 8
+		tc, err := clock.NewTestClock(start, nil)
+		if err != nil {
+			t.Fatalf("NewTestClock: %v", err)
+		}
+		g, err := ratelimit.New(tc, p)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		charge := reservationRequest(4)
+		charge.Priority = ratelimit.PrioritySafety
+		mustAcquire(t, g, charge)
+		occupied := reservationRequest(6)
+		occupied.Priority = ratelimit.PrioritySafety
+		h, _, err := g.Reserve([]ratelimit.Request{occupied})
+		if err != nil {
+			t.Fatalf("Reserve: %v", err)
+		}
+		t.Cleanup(func() { _ = h.Cancel() })
+		if got := usedOf(t, g, ids.ProductSpot, "weight_1m"); got != 4 {
+			t.Fatalf("Used = %d, want 4 below opening ceiling 8", got)
+		}
+		if got := reservedOf(t, g, ids.ProductSpot, "weight_1m"); got != 6 {
+			t.Fatalf("Reserved = %d, want 6 above availability 4", got)
+		}
+
+		probe := reservationRequest(1)
+		probe.Priority = ratelimit.PriorityOpening
+		d, err := g.Check(probe)
+		if err != nil {
+			t.Fatalf("Check: %v", err)
+		}
+		if d.Admitted || d.Reason != ratelimit.ReasonCeiling {
+			t.Fatalf("Check = %+v, want ceiling refusal", d)
+		}
+	})
 }

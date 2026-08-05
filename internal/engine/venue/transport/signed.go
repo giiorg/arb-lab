@@ -218,7 +218,12 @@ func NewSignedClient(cfg SignedClientConfig) (*SignedClient, error) {
 			return nil, fmt.Errorf("base URL port %q is outside 1-65535: %w", port, ErrHostNotCanonical)
 		}
 	}
-	req, _ := http.NewRequest("GET", base, nil)
+	req, err := http.NewRequest("GET", base, nil)
+	if err != nil {
+		// Unreachable: url.Parse above already accepted the same base URL, but
+		// keep the constructor error named if those validations ever diverge.
+		return nil, fmt.Errorf("base URL request: %w: %w", ErrHostUnserializable, err)
+	}
 	if err := req.WriteProxy(io.Discard); err != nil {
 		return nil, fmt.Errorf("base URL host %q: %w: %w", cfg.Host, ErrHostUnserializable, err)
 	}

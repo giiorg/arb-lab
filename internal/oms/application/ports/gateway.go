@@ -64,7 +64,7 @@ type OrderPlacer interface {
 	// codec, the planner and recovery. Landed as §4's Place signature, §5.3's
 	// command→class table and §7.6's carrier paragraph; the rejected field is
 	// recorded there too, so a later slice reopens it deliberately.
-	// [SPEC EDIT OWED] §4 must carry the package hold on this Place signature.
+	// Landed as §4's Place signature [v0.9.47, record §68].
 	// A nil hold is the single-order acquire-at-send mode; package execution
 	// supplies the reservation minted before its first fsync.
 	Place(o domain.Order, u Urgency, hold *ratelimit.Hold) (Ack, error)

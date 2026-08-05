@@ -1,6 +1,64 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-05, session 100): **#188'S DESIGN CONVERGED (ROUND 11 SHIP) AND THE IMPLEMENTATION LANDED THE SAME SESSION — A-1…A-18 COMPLETE, `make ci` GREEN ON BOTH MODULES VERIFIED BY THE ORCHESTRATOR, MARKER GREP = EXACTLY THE ONE OWED. THE WORK IS UNCOMMITTED-THEN-COMMITTED AS THE SESSION-END SAFE POINT. TWO REVIEW FINDINGS ARE QUEUED AND NOT YET FIXED; THE MUTATION CAMPAIGN HAS NOT RUN; DOCS ARE STILL v0.9.46.**
+## Status (2026-08-05, session 101): **#188 IS CLOSED — THE POST-WRITE REVIEW COMPLETED WITH FIVE FINDINGS ALL FIXED AND RE-VERIFIED, THE COLLAPSE CHECKLIST CAUGHT TWO OF §68e's OWN NAMED FIXTURES ABSENT, THE FOURTEEN-MUTANT CAMPAIGN RAN WITH ZERO SURVIVED, AND DOCS ARE v0.9.47. MARKER GREP IS ZERO.**
+
+**What session 101 did, in order.** (1) The two queued findings fixed
+through codex session `impl-188-reservation` and the diffs read by the
+orchestrator: `Hold.Consume` gained `admits`' `units == 0` guard with the
+§68e discrimination fixture demonstrated red-then-green (the guard was
+absent from **Appendix A-2 itself** — corrected in the record), and
+signed.go's dry-run names its unreachable error. (2) The post-write
+review COMPLETED over every remaining file (wire/app/config + the four
+root lifecycle fixtures — faithful to A-15…A-17 including round 8/9's
+shapes — renderer + golden, module/acceptance/exercise, and all new test
+files). It produced finding 3: **A-18's "after the fold-miss lines"
+order had NO observer** — no fixture combined `FoldMisses` and
+`Reserved`, so swapping the render loops passed everything; the golden is
+extended and the swap was demonstrated red both ways. (3) The collapse
+checklist ran BEFORE the campaign and caught findings 4/5 — §68e's
+reserved-heavy admits boundary fixtures (`used+reserved == ceiling ±1`
+plus the cross-priority `reserved > avail` underflow corner) and the
+round-7 alias-pair lock fixture were specified and ABSENT; both added,
+green against unchanged production code. (4) The campaign per §68e/A-19:
+fourteen mutants, zero SURVIVED — results block in §68e, including one
+PANIC!! re-verified as an assertion kill on the single fixture, one
+genuine NOBUILD!! re-aimed (orphaned `math` import), and the
+**`MUTATE_TIMEOUT=180` spelling trap**: A-19's own unitless spelling
+fails `go test -timeout` at flag parse and reads as NOBUILD!! — §68e now
+says `180s`. `holds[i]`→`holds[0]` was KILLED by the port-contract
+fixture's distinct holds and recorded as behavior-equivalent in the
+shipped composition, per §68e. (5) Docs to v0.9.47: §7.6 gains the
+reservation + one-spender-lock clause and the §67-premise scoping
+sentence (the per-host slice is now machine-checked; the premise stays
+operational only across hosts and against lock-unaware processes); §6
+step 6 gains reserve-before-fan-out; §4's Place carries the hold
+(discharging the one [SPEC EDIT OWED] marker in ports/gateway.go); §5.2
+gains `spend_lock_dir` (required, with example) and the
+signing-readiness construction sentence beside the recvWindow rule;
+adr-history has the dated block; §68's WIP banner is replaced with the
+closure. Tutorial parity checked: its rate-limit mentions are venue
+facts, not §7.6 clause teaching — no edit, ka untouched (#167 still
+pending). `make ci` green on both modules, verified by the orchestrator
+after every write batch and once uncached at the end.
+
+**What the next session picks from (no ordered debt left on #188):**
+open tasks #171 (Bybit signer vs a real testnet credential — also the
+fold-miss baseline #187 assigned it), #179 (spot-leg exposure baseline),
+#183/#184 (trading filters: fetched provenance + single-order Dispatch
+conformance), #153 (restart_boundary ruling), #159 (capture restart
+timeout raise), #167 (ka assemble make target), #177 (FM-9's consumer —
+milestone 4). Clock-bound: #158 (§38f off-host archive, ~2026-09-30) and
+#152 (`arblab crossvenue gate`, BCHUSDT binds ~2026-09-30).
+
+**Standing user decisions, unchanged:** the $20/$55 live-test decision —
+its single-spender confirmation now names exactly the remainder the
+spend lock cannot check (across hosts, lock-unaware processes); #171;
+§38f. Capture **PID 8495**, never rebuild over `bin/arblab`, `make ci`
+runs `-race`, cap `TLC_WORKERS` at 4, docs/i18n parity is `bun test`.
+
+---
+
+## Status (2026-08-05, session 100 — HISTORICAL): **#188'S DESIGN CONVERGED (ROUND 11 SHIP) AND THE IMPLEMENTATION LANDED THE SAME SESSION — A-1…A-18 COMPLETE, `make ci` GREEN ON BOTH MODULES VERIFIED BY THE ORCHESTRATOR, MARKER GREP = EXACTLY THE ONE OWED. THE WORK IS UNCOMMITTED-THEN-COMMITTED AS THE SESSION-END SAFE POINT. TWO REVIEW FINDINGS ARE QUEUED AND NOT YET FIXED; THE MUTATION CAMPAIGN HAS NOT RUN; DOCS ARE STILL v0.9.46.**
 
 **Where the implementation came from.** A second-model codex session
 (`impl-188-reservation`) built Appendix A verbatim in two turns — the

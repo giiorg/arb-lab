@@ -67,6 +67,11 @@ func (h *Hold) Consume(r Request) (Decision, error) {
 	for _, w := range entry.windows {
 		used := w.usedAt(now)
 		units := r.Cost.units(w.limit.Dimension)
+		// A request that costs this dimension nothing cannot push the window
+		// over, even when a venue reading has ratcheted used past capacity.
+		if units == 0 {
+			continue
+		}
 		if used <= w.limit.Capacity && units <= w.limit.Capacity-used {
 			continue
 		}

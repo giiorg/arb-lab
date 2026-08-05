@@ -1,6 +1,7 @@
 # M3 task #188 — package-level budget reservation + the one-spender guard (§68)
 
-> **WIP (session 99).** Design brief drafted; round 1 NO-SHIP (3B/1M/1m,
+> **CLOSED (session 101, 2026-08-05, v0.9.47).** The arc, kept as history:
+> design brief drafted; round 1 NO-SHIP (3B/1M/1m,
 > all accepted: untimed occupancy, three-state hold entries,
 > credential-bound spend lock); orchestrator interim fix (mandatory
 > deferred Cancel — occupancy does not self-heal); round 2 NO-SHIP
@@ -46,19 +47,27 @@
 > resumed): A-1…A-18 complete, zero stated deviations, the §68b.5a
 > wall.go constancy caveat re-verified by the builder, exactly one
 > [SPEC EDIT OWED] marker (ports.OrderPlacer.Place), `make ci` green on
-> both modules VERIFIED BY THE ORCHESTRATOR. Post-write review is
-> partially done (platform/transport/venue/oms layers read against
-> Appendix A) with TWO QUEUED FINDINGS, not yet fixed: (1) DEFECT —
-> `Hold.Consume` (hold.go, the capacity loop) lacks `admits`' `units ==
-> 0` guard, so a fold past capacity on a window an entry charges ZERO
-> units on refuses the leg — a §68e discrimination-fixture violation;
-> fix is `if units == 0 { continue }` plus its fixture; (2) NIT —
-> signed.go's WriteProxy dry-run discards the `http.NewRequest` error
-> before dereferencing (unreachable, but name the unreachability).
-> Next: loop both through the SAME codex session, re-verify, finish the
-> post-write review (root/renderer/test files unread), collapse
-> checklist, mutation campaign per §68e/A-19, docs to v0.9.47, close
-> #188.**
+> both modules VERIFIED BY THE ORCHESTRATOR. Session 101 closed the
+> slice: the post-write review COMPLETED over every remaining file
+> (root lifecycle, renderer + golden, module/acceptance/exercise and all
+> new test files) and produced five findings, all fixed through the same
+> codex session and re-verified — (1) the `Hold.Consume` zero-unit
+> DEFECT (the guard was absent from Appendix A-2 itself; corrected
+> there), (2) the signed.go dry-run error nit, (3) the A-18 line-order
+> claim had NO observer (no fixture combined FoldMisses and Reserved;
+> the golden is extended and the loop swap demonstrated red both ways),
+> (4) §68e's reserved-heavy admits boundary fixtures were specified and
+> ABSENT (added: ceiling−1 / at-ceiling / the cross-priority
+> reserved>avail underflow corner), (5) §68e's alias-pair lock fixture
+> likewise (added, with its own collapse guard). The collapse checklist
+> ran BEFORE the campaign, per this record's own rule — findings 4 and
+> 5 are what it caught. The campaign: FOURTEEN mutants, ZERO SURVIVED
+> (§68e's results block below, incl. the MUTATE_TIMEOUT spelling trap
+> it exposed and two re-aims). Docs landed as v0.9.47 (§7.6 reservation
+> + one-spender clause and the §67-premise scoping sentence, §6 step
+> 6's reserve-before-fan-out, §4's Place signature discharging the one
+> [SPEC EDIT OWED] marker, §5.2's `spend_lock_dir` + signing-readiness
+> sentence, adr-history block). Marker grep: ZERO. Task #188 CLOSED.**
 
 **Task:** #188 — legs acquire rate-limit capacity independently after fan-out.
 Filed during #185's design review (round 4 classified the concurrent-leg
@@ -1401,7 +1410,14 @@ this record.
   word: a pause in force → `Decision{Reason: ReasonPaused,
   NotBefore: pausedUntil}`, nothing charged; for each of the entry's
   windows, with `used := w.usedAt(now)` and
-  `units := r.Cost.units(w.limit.Dimension)`,
+  `units := r.Cost.units(w.limit.Dimension)`, **a zero-`units` window is
+  skipped first — mirroring `admits`' `units == 0 → true` guard**
+  *(CORRECTION, session-101 post-write review: this appendix originally
+  specified the unguarded form, and the builder built it verbatim — a
+  fold ratcheting `used` past capacity on a window the entry charges
+  ZERO on then refused a leg whose charge cannot violate that window,
+  manufacturing the very post-fsync episode this slice removes; the
+  §68e discrimination fixture was demonstrated red then green)*; then
   `used > w.limit.Capacity || units > w.limit.Capacity - used` →
   `Decision{Reason: ReasonCeiling}` via the existing `worseThan`
   attribution, nothing charged, entry still reserved (§68b.1: the
@@ -1712,10 +1728,46 @@ composed real-adapter test), (4) `Consume` → `Acquire` in `Do`'s hold
 branch (killed by exact-`Used` assertions), (5) `defer spend.Close()`
 inside `newOrderClient` (killed by root fixture 1), (6) delete the
 `oms.New` error-arm release (killed by root fixture 4), plus §68e's
-boundary and wrap fixtures. `MUTATE_MODULE` unset; `MUTATE_TIMEOUT=180`
-where the exercise suite is in scope. Marker grep zero at close — the
+boundary and wrap fixtures. `MUTATE_MODULE` unset; `MUTATE_TIMEOUT=180s`
+where the exercise suite is in scope *(CORRECTION, session 101: this
+line originally spelled it `=180`, unitless — `go test -timeout`
+rejects a unitless duration at flag parse, producing a non-zero exit
+with zero `--- FAIL` lines that mutate.sh classifies `NOBUILD!!`: a
+verdict about a mutant issued by a run the mutant never saw. It fired
+live on mutant 6 below.)*. Marker grep zero at close — the
 one [SPEC EDIT OWED] (§4 Place signature / §6 step 6) lands with the
 docs below.
+
+**Campaign results (session 101, run by the orchestrator): fourteen
+mutants, zero SURVIVED.** (1) `holds[i]`→nil at the fan-out: PANIC!! in
+the package-wide run (a hold-consuming fake placer nil-derefs first),
+re-verified as a clean ASSERTION kill on the single threading fixture
+(`received hold 0x0, want …`); (2) `holds[i]`→`holds[0]`: killed by the
+port-contract fixture's DISTINCT minted holds — recorded as
+behavior-equivalent in the shipped single-venue composition, where the
+driven adapter returns one pointer per leg; the kill is the CONTRACT's,
+not the composition's; (3) skip-last-leg in the driven adapter
+(`reqs[:len(reqs)-1]`): killed by the composed real-stack test (2
+failing); (4) `Consume`→`Acquire` in `Do`'s hold branch: killed by the
+exact `Used`/`Reserved` counters (3 failing — under Acquire the
+occupancy never converts, so `Reserved` stays non-zero); (5) `defer
+spend.Close()` injected in `newOrderClient`: killed by root fixture 1;
+(6) delete the `oms.New` error-arm release: killed by root fixture 4 —
+after the `MUTATE_TIMEOUT` correction above; (7) consume boundary `<=`
+weakened to `<`: killed by the at-capacity-admits case; (8) the
+capacity conjunction replaced by the naive wrapping sum: killed by the
+MaxUint64 case; (9) delete the `units == 0` guard: killed by the
+discrimination fixture; (10) delete `admits`' `reserved >= avail`
+clause: killed by the session-101 boundary fixtures (finding 4);
+(11) Reserve's overflow check made unfireable
+(`math.MaxUint64-units`→`math.MaxUint64`, re-aimed after the deletion
+form orphaned the `math` import — a genuine NOBUILD!!): killed by the
+overflow fixture; (12) hold-vector `!=` weakened to `<`: killed by the
+long-vector case; (13) `Place` drops `call.Hold`: killed by the
+residual-`Reserved` assertion; (14) the renderer loop swap (multi-line,
+outside mutate.sh's reach): demonstrated red against the extended
+golden and green after revert, by hand. The `admits` `>=`→`>` narrowing
+remains the documented expected-equivalent and was not claimed.
 
 ### A-20. Out of scope, recorded
 

@@ -218,7 +218,9 @@ func TestReconcileReportGoldenNoMiss(t *testing.T) {
 			Venue:  ids.Venue("bybit"),
 			Paused: true, PausedUntil: time.Date(2026, 8, 4, 16, 30, 0, 0, time.UTC),
 			PauseKind: ratelimit.PenaltyThrottle,
-			Limits:    []ratelimit.LimitState{{Name: "order_realtime"}},
+			Limits: []ratelimit.LimitState{{
+				Name: "order_realtime", FoldMisses: 1, Reserved: 2,
+			}},
 		},
 		Blocking: []boot.Gate{boot.GateAccountPosture},
 		Storage:  errors.New("journal on nfs"),
@@ -234,6 +236,8 @@ func TestReconcileReportGoldenNoMiss(t *testing.T) {
 	want := "posture:  PostureReconcileOnly (this binary reports 4 of §7.5's 8 gates; the rest have no producer yet)\n" +
 		"verdict:  ExitOperator\n" +
 		"latched:  [GateNetDeltaAsserted]  <- operator clearance required; a retry will not lift these\n" +
+		"ratelimit: bybit order_realtime: 1 response(s) carried no usable budget reading this run (§7.6 fold-health — venue-side corrections were missed)\n" +
+		"ratelimit: bybit order_realtime: 2 unit(s) reserved for an in-flight package\n" +
 		"ratelimit: bybit paused until 2026-08-04T16:30:00Z (PenaltyThrottle — a hard pause, not an operator matter)\n" +
 		"blocking: [GateAccountPosture]\n" +
 		"storage:  journal on nfs\n" +

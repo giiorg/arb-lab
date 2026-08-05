@@ -113,6 +113,43 @@ func TestAcquireSpendLockKeysOnlyByDomain(t *testing.T) {
 	}
 }
 
+func TestAcquireSpendLockCollidesAcrossVenueAliasesInOneDomain(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	cred, err := NewCredential("shared-key", "shared-secret")
+	if err != nil {
+		t.Fatalf("NewCredential: %v", err)
+	}
+	prod, err := NewBinanceSigner("binance_prod", cred)
+	if err != nil {
+		t.Fatalf("NewBinanceSigner prod: %v", err)
+	}
+	testnet, err := NewBinanceSigner("binance_testnet", cred)
+	if err != nil {
+		t.Fatalf("NewBinanceSigner testnet: %v", err)
+	}
+	if prod.Venue() == testnet.Venue() {
+		t.Fatalf("signer aliases collapsed to %q", prod.Venue())
+	}
+	if prod.SpendDomain() != SpendDomainBinance || testnet.SpendDomain() != SpendDomainBinance {
+		t.Fatalf("signer domains = (%q, %q), want (%q, %q)",
+			prod.SpendDomain(), testnet.SpendDomain(), SpendDomainBinance, SpendDomainBinance)
+	}
+
+	first, err := AcquireSpendLock(dir, prod.SpendDomain(), cred)
+	if err != nil {
+		t.Fatalf("AcquireSpendLock prod: %v", err)
+	}
+	t.Cleanup(func() { _ = first.Close() })
+	second, err := AcquireSpendLock(dir, testnet.SpendDomain(), cred)
+	if second != nil {
+		_ = second.Close()
+	}
+	if !errors.Is(err, ErrSpendLockHeld) {
+		t.Fatalf("AcquireSpendLock testnet alias = %v, want ErrSpendLockHeld", err)
+	}
+}
+
 func TestSpendLockCloseReleasesAndIsIdempotent(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
