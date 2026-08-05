@@ -307,6 +307,8 @@ func Verify(cfg VerifyConfig) (*Report, error) {
 			st.gapRanges = append(st.gapRanges, scan.gapRanges...)
 			st.hasPredecessor = true
 			st.lastSeq, st.known = scan.chainLast, scan.chainKnown
+			st.sequenced, st.truncated = scan.chainSeen.any, scan.chainSeen.truncated
+			st.writer = scan.chainWriter
 		}
 
 		// Holes are reconciled against gap records for the whole STREAM rather
@@ -532,7 +534,10 @@ func assignVerdicts(rep *Report) {
 	}
 	flagged := make(map[at]bool, len(rep.Findings))
 	for _, f := range rep.Findings {
-		if f.Kind == FindingWindowAbsent {
+		// Per KIND, at a site the compiler and exhaustiveswitch both check. This
+		// loop used to name window_absent inline, which made "flags the window"
+		// the silent default for every kind added afterwards (§71c).
+		if !f.Kind.AffectsVerdict() {
 			continue
 		}
 		flagged[at{f.Stream.String(), f.Window}] = true
@@ -697,10 +702,106 @@ type chainState struct {
 	lastSeq uint64
 	known   bool
 
+	// sequenced, truncated and writer are §71's three: what a zero prev_last_seq
+	// claim COST, which restart_boundary used to answer without asking.
+	//
+	// sequenced is monotone and set by either kind of evidence that a sequence
+	// exists — a Data record read, or a non-zero prev_last_seq claim adopted.
+	// The second half is the load-bearing one: verify walks at most one file
+	// earlier than the range, so a narrowed run whose first walked file is a
+	// silent hour has no Data record to see, and its adopted claim is the only
+	// thing that says this stream sequences at all.
+	//
+	// truncated is monotone and reports that some preceding walk stopped short —
+	// aborted on bytes that were present and wrong, or ended in a torn tail — so
+	// absence of evidence stops being evidence of absence.
+	//
+	// The concrete hazard is the OPEN record in the bytes nobody read, not the
+	// Data record: a run that died mid-file and was restarted into the same hour
+	// appends a second Open (§38i), so an unread tail can hold the identity this
+	// seam should be compared against, and `writer` would then name a process two
+	// removed from the one that wrote the successor. The classification falls back
+	// to the conservative name rather than comparing against a stale identity.
+	//
+	// writer is the previous Open record's identity, which is what tells a living
+	// writer's rotation from a new process: the same (host, pid) on both sides of
+	// a seam did not restart. It is a CONJUNCT that narrows a name and never a
+	// predicate that removes a row — PIDs are reused, and a rule that silenced
+	// the row on identity alone would consume a non-reuse guarantee the OS does
+	// not offer (§71d).
+	sequenced bool
+	truncated bool
+	writer    writerIdentity
+
 	// holes and gapRanges accumulate across the stream's files, for the
 	// boundary-straddling reconciliation Verify's comment describes.
 	holes     []holeAt
 	gapRanges []seqRange
+}
+
+// seenSequence is what the walk knows about whether this stream has carried a
+// sequence, and — separately — whether it is in a position to know.
+//
+// The two fields are not one tri-state on purpose: `any` is a fact the walk
+// read, `truncated` is a fact about the walk itself, and collapsing them would
+// make "no sequence here" and "no sequence I could see" the same answer. They
+// are the same answer for the hole check and the OPPOSITE answer for §71's,
+// which is why this type is separate from running/runningKnown.
+type seenSequence struct {
+	// any is monotone across the stream's files: a Data record was read, or a
+	// non-zero prev_last_seq claim was adopted from an Open record.
+	any bool
+
+	// truncated is monotone: a walk aborted on bytes that were present and wrong,
+	// or ended in a torn tail, so the record that would have set `any` may exist
+	// in bytes nobody read.
+	truncated bool
+}
+
+// none reports that this stream is KNOWN to have carried no sequence — which
+// takes both halves, because an unread tail is not an empty one.
+func (s seenSequence) none() bool { return !s.any && !s.truncated }
+
+// why names the reason a zero claim is being reported as a restart, for the
+// finding's Detail. Ordered by which fact dominates: a sequence that exists
+// makes the writer identity beside the point.
+func (s seenSequence) why(prev, here writerIdentity) string {
+	switch {
+	case s.any:
+		return "the stream has carried a sequence"
+	case s.truncated:
+		return "a walk stopped short, so an earlier sequence cannot be ruled out"
+	default:
+		return fmt.Sprintf("writer %s to %s", prev, here)
+	}
+}
+
+// writerIdentity is which process wrote an Open record, as the record itself
+// states it (writer.go's openPayload carries Host and PID).
+//
+// known is separate from the two fields rather than derived from them, because
+// the case it exists for is an Open record whose payload does NOT parse: the
+// zero value of a struct compares equal to another zero value, so an unreadable
+// identity beside an unreadable identity would read as "the same writer" — the
+// one answer that must not fall out of an absence.
+type writerIdentity struct {
+	host  string
+	pid   int
+	known bool
+}
+
+// same reports that both identities are known and name the same process.
+func (w writerIdentity) same(other writerIdentity) bool {
+	return w.known && other.known && w.host == other.host && w.pid == other.pid
+}
+
+// String renders an identity for a finding's Detail, including the unknown case
+// — a reader comparing two of these needs to see WHICH side was unreadable.
+func (w writerIdentity) String() string {
+	if !w.known {
+		return "unknown"
+	}
+	return fmt.Sprintf("%s/%d", w.host, w.pid)
 }
 
 // reconcileHoles classifies every sequence hole as explained or not.
@@ -743,6 +844,13 @@ type fileScan struct {
 
 	chainLast  uint64
 	chainKnown bool
+
+	// chainSeen and chainWriter are §71's carry: what this file leaves known
+	// about whether the stream has a sequence, and which process wrote its last
+	// Open record. They ride beside chainLast because they answer the same
+	// question one file later — what did the next file's zero claim COST.
+	chainSeen   seenSequence
+	chainWriter writerIdentity
 
 	// aborted reports that the walk stopped at bytes that were present and
 	// wrong, so every count below is a count of the records BEFORE that point
@@ -845,6 +953,8 @@ func verifyFile(cfg VerifyConfig, key StreamKey, f archiveFile, st chainState) (
 	s.lo += headerLen
 
 	running, runningKnown := st.lastSeq, st.known
+	seen := seenSequence{any: st.sequenced, truncated: st.truncated}
+	writer := st.writer
 	var opens int
 	var aborted, sawClose bool
 	var closeSeq uint64
@@ -888,11 +998,21 @@ func verifyFile(cfg VerifyConfig, key StreamKey, f archiveFile, st chainState) (
 			var op openPayload
 			if err := json.Unmarshal(rec.Payload, &op); err != nil {
 				add(FindingMalformed, offset, "Open payload does not parse: %v", err)
+				// The identity goes UNKNOWN rather than unchanged: carrying the
+				// previous file's writer past a record that could not be read
+				// would let the next seam compare against a process this one
+				// never claimed to be (§71c).
+				writer = writerIdentity{}
 				break
 			}
 			findings = append(findings, checkOpenIdentity(key, f, offset, op)...)
 			running, runningKnown = checkOpenContinuity(
-				add, offset, op, opens, st.hasPredecessor, running, runningKnown)
+				add, offset, op, opens, st.hasPredecessor, running, runningKnown, seen, writer)
+			// After the check, never before: both facts describe the state the
+			// NEXT seam is judged against, and folding this Open's own claim in
+			// first would make every non-zero claim its own evidence.
+			seen.any = seen.any || op.PrevLastSeq > 0
+			writer = writerIdentity{host: op.Host, pid: op.PID, known: true}
 			opens++
 		case RecordKindData:
 			if scan.dataRecords == 0 {
@@ -912,6 +1032,7 @@ func verifyFile(cfg VerifyConfig, key StreamKey, f archiveFile, st chainState) (
 				}
 			}
 			running, runningKnown = rec.CaptureSeq, true
+			seen.any = true
 			scan.lastSeq = rec.CaptureSeq
 		case RecordKindAlive:
 			scan.aliveTicks++
@@ -1035,11 +1156,21 @@ func verifyFile(cfg VerifyConfig, key StreamKey, f archiveFile, st chainState) (
 	scan.chainLast, scan.chainKnown = running, runningKnown
 	if sawClose {
 		scan.chainLast, scan.chainKnown = closeSeq, true
+		// The mirror of the paragraph above, for §71's fact: the successor's
+		// prev_last_seq is written from this same number, so a Close claiming a
+		// sequence is evidence a sequence existed even when the walk read no Data
+		// record — a file whose data lives past a corruption is exactly that case.
+		seen.any = seen.any || closeSeq > 0
 	}
 	scan.aborted = aborted
 	if aborted {
 		scan.chainKnown = false
 	}
+	// Carried whatever stopped the walk. tornTail and aborted are the two ways
+	// the bytes that would have set `any` can go unread, and both make the next
+	// seam's classification the conservative one (§71c).
+	seen.truncated = seen.truncated || aborted || scan.tornTail
+	scan.chainSeen, scan.chainWriter = seen, writer
 	return scan, findings, nil
 }
 
@@ -1088,17 +1219,30 @@ func checkOpenIdentity(key StreamKey, f archiveFile, offset int64, op openPayloa
 // ended without reading that file. So zero beside a predecessor is a recorded
 // restart rather than a break, and the state is reset to unknown so the file's
 // first Data record does not read as a hole running back to sequence one.
+//
+// Which zero it is, is §71's ruling and the reason `seen` is a parameter: a zero
+// claim on a stream that has carried no sequence, written by the same process
+// that wrote the predecessor, is a living writer rotating a file and cost
+// nothing (unsequenced_boundary). Every other zero is restart_boundary,
+// including the case where the walk cannot tell — see seenSequence.
 func checkOpenContinuity(
 	add func(FindingKind, int64, string, ...any),
 	offset int64, op openPayload, opens int, hasPredecessorFile bool,
-	running uint64, runningKnown bool,
+	running uint64, runningKnown bool, seen seenSequence, prev writerIdentity,
 ) (uint64, bool) {
 	hasPredecessor := hasPredecessorFile || opens > 0
 	switch {
 	case op.PrevLastSeq == 0:
 		if hasPredecessor {
-			add(FindingRestartBoundary, offset,
-				"declares no predecessor while an earlier file or run exists")
+			here := writerIdentity{host: op.Host, pid: op.PID, known: true}
+			if seen.none() && prev.same(here) {
+				add(FindingUnsequencedBoundary, offset,
+					"declares no predecessor on a stream with no sequence, same writer %s", here)
+			} else {
+				add(FindingRestartBoundary, offset,
+					"declares no predecessor while an earlier file or run exists (%s)",
+					seen.why(prev, here))
+			}
 		}
 		return 0, false
 	case !hasPredecessor:

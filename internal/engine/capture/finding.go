@@ -234,14 +234,44 @@ const (
 	FindingGapRecord FindingKind = "gap_record"
 
 	// FindingRestartBoundary is a file that declares no predecessor
-	// (prev_last_seq == 0) while a predecessor exists.
+	// (prev_last_seq == 0) while a predecessor exists AND something could have
+	// been lost across the seam.
 	//
 	// A new process legitimately restarts the reader's counter, and a writer
 	// opening a FRESH file has no way to know where the previous hour ended
 	// without reading it — so zero is honest rather than wrong, and the
 	// discontinuity is real coverage loss: the process was down across the
 	// boundary. Reported so the loss is counted, not so it is blamed.
+	//
+	// The qualifier is §71's, and it is what keeps the name true: a stream whose
+	// predecessor also ended at zero, written across the seam by the same
+	// (host, pid), lost nothing and is FindingUnsequencedBoundary.
 	FindingRestartBoundary FindingKind = "restart_boundary"
+
+	// FindingUnsequencedBoundary is the same zero claim on a seam that cost
+	// nothing: the predecessor's own end was zero, and the Open records on both
+	// sides name the same writer.
+	//
+	// It exists because "declares no predecessor" is a point in a PRODUCT of two
+	// properties — the claim, and whether a sequence existed to lose — and
+	// restart_boundary was one name over both (§71b). A REST-overlay source mints
+	// Rest records and no Data records (§32h, slice E: "a Rest record is not a
+	// Data record"), so its lastSeq never leaves zero and every hourly rotation
+	// declares no predecessor truthfully. Reporting that as a restart cost 24 of
+	// 50 findings on a clean day and made every such hour VerdictGapped, for an
+	// hour in which a living writer rotated a file.
+	//
+	// The row is kept rather than suppressed: a boundary is worth a line, and the
+	// distinction the operator needs is between a name that says "the process was
+	// down" and one that says "the same writer rotated a stream that has no
+	// sequence". Its expected count is an INSTRUMENT — one per REST-overlay
+	// source per rotation, exactly — so a day that does not produce that many is
+	// itself the signal.
+	//
+	// It is the one kind that does not flag its window (AffectsVerdict), because
+	// a verdict answers what a replay would get and this seam costs a replay
+	// nothing.
+	FindingUnsequencedBoundary FindingKind = "unsequenced_boundary"
 
 	// FindingContinuityUnknown is a cross-file continuity claim that could not be
 	// checked, because the walk of the predecessor file stopped at a corruption
@@ -314,13 +344,53 @@ func (k FindingKind) Class() FindingClass {
 		return ClassIntegrity
 	case FindingWindowAbsent, FindingTornTail, FindingNoClose, FindingNoData,
 		FindingAliveShort, FindingGapRecord, FindingSeqHole,
-		FindingRestartBoundary, FindingContinuityUnknown,
+		FindingRestartBoundary, FindingUnsequencedBoundary, FindingContinuityUnknown,
 		FindingUnmanifested, FindingManifestAbsent:
 		return ClassCoverage
 	case FindingUnspecified:
 		return ClassUnspecified
 	}
 	return ClassUnspecified
+}
+
+// AffectsVerdict reports whether a finding of this kind makes its window
+// VerdictGapped.
+//
+// It exists to put the decision where a decision can be checked. The rule used
+// to live inside assignVerdicts as "any finding but window_absent", which is a
+// default nobody chose per kind: a kind added next year inherits "flags the
+// window" from a `for` loop, and the verdict column — §32k's answer to what a
+// replay of this hour would GET — changes for reasons its author never
+// considered. Here the exhaustive switch and §3.6 rule 10 make that a
+// compile-and-lint failure instead.
+//
+// Everything true here is today's behaviour, deliberately: this slice changed
+// exactly one answer. window_absent keeps the exclusion it always had — its
+// window is VerdictAbsent, decided before this runs, and flagging it would be a
+// second judgement about an hour with no file. unsequenced_boundary is the new
+// false: the same writer rotating a stream that carries no sequence costs a
+// replay nothing, so VerdictReplayable is the TRUE answer and VerdictGapped was
+// the wrong one (§71b).
+func (k FindingKind) AffectsVerdict() bool {
+	switch k {
+	case FindingChecksum, FindingMalformed, FindingFileHeader,
+		FindingDigestMismatch, FindingDigestMissing, FindingRecordCount,
+		FindingSeqNotAscending, FindingSeqHole, FindingSeqHoleUnexplained,
+		FindingCrossFileBreak, FindingStrayFile, FindingTornTail,
+		FindingNoClose, FindingNoData, FindingAliveShort, FindingGapRecord,
+		FindingRestartBoundary, FindingContinuityUnknown,
+		FindingManifestMissingFile, FindingManifestMismatch,
+		FindingManifestUnreadable, FindingUnmanifested, FindingManifestAbsent:
+		return true
+	case FindingWindowAbsent, FindingUnsequencedBoundary:
+		return false
+	case FindingUnspecified:
+		// Not a declared kind. Flagging is the direction that fails loudly: a
+		// finding minted with no kind is a defect in this package, and a window
+		// that reads gapped is easier to chase than one that reads clean.
+		return true
+	}
+	return true
 }
 
 // Validate reports whether k is a declared kind, excluding the zero value.

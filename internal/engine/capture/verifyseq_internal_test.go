@@ -83,16 +83,36 @@ func (b *archiveBuilder) open(prevLast uint64) { b.t.Helper(); b.openAs(b.key, b
 // moved-file check.
 func (b *archiveBuilder) openAs(key StreamKey, window time.Time, prevLast uint64) {
 	b.t.Helper()
+	b.openAsProcess(key, window, prevLast, fixtureHost, fixturePID)
+}
+
+// openAsProcess is openAs with the WRITER named.
+//
+// §71's boundary classification turns on the Open record's (host, pid) pair, and
+// one test process has exactly one PID — so an archive written by two different
+// processes is precisely a state the real writer cannot produce in a test, which
+// is what this deliberately dumb builder exists for.
+func (b *archiveBuilder) openAsProcess(
+	key StreamKey, window time.Time, prevLast uint64, host string, pid int,
+) {
+	b.t.Helper()
 	vi := key.Source.Instrument
 	b.emit(RecordKindOpen, b.lastSeq, b.marshal(openPayload{
 		Venue: string(vi.Venue), Product: string(vi.Product), Contract: string(vi.Contract),
 		Symbol: vi.Symbol, Stream: string(key.Source.Stream), Topic: key.Topic,
 		Format: fmt.Sprintf("v%d.%d", FormatMajor, FormatMinor),
-		Window: window.Format(time.RFC3339), Host: "fixture", PID: 1,
+		Window: window.Format(time.RFC3339), Host: host, PID: pid,
 		PrevLastSeq: prevLast,
 		Provenance:  Provenance{Tool: "capture-test", GitSHA: "deadbeef", ConfigHash: "cafe"},
 	}))
 }
+
+// The identity every hand-built fixture writes unless it is varying it. Named
+// rather than inline so a test that changes one of the two says so.
+const (
+	fixtureHost = "fixture"
+	fixturePID  = 1
+)
 
 func (b *archiveBuilder) data(seq uint64) {
 	b.t.Helper()

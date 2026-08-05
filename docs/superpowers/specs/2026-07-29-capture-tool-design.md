@@ -454,6 +454,14 @@ out-of-process:
 (CRC, digest, duplicate or non-monotonic `CaptureSeq`, evidence of two writers) — the archive is lying;
 `2` = coverage below threshold — the archive is honest and thin.
 
+**Amended by §71 (2026-08-05, task #153):** the continuity half of item 3 splits one of its
+findings. A `prev_last_seq` of zero beside a predecessor was reported as `restart_boundary`
+whatever the predecessor was, which on a REST-overlay source — no `Data` records, so `lastSeq`
+never leaves zero (§32h, slice E) — fired once per rotation forever and made every such hour
+`gapped`. The seam where the predecessor also ended at zero and both Open records name the same
+`(host, pid)` is now `unsequenced_boundary`, coverage, and the one finding kind that does not
+flag its window. Read §71 before citing this section on what a boundary means.
+
 **The positive control, per §31g rule 4's own sentence** (*"a monitor that has never reported a problem
 has not been shown able to"*): an acceptance test builds a healthy archive and asserts `verify` reports
 **clean** — then, separately, kills a stream mid-capture, corrupts one byte, truncates a file mid-record,

@@ -1,6 +1,69 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-05, session 106): **#179 IS CLOSED — DOCS AT v0.9.49, THE ONE `[SPEC EDIT OWED]` MARKER DISCHARGED, AND THE FINAL `code_diff` REVIEW RAN TWO ROUNDS: NO-SHIP WITH FOUR MAJORS (ALL VALIDATED AND FOLDED, RECORD §70i, EIGHT-MUTANT ADDENDUM — CAMPAIGN TOTAL 28 ZERO SURVIVED), THEN SHIP. `make ci` GREEN UNCACHED ON BOTH MODULES. THE SPOT LEG'S EXPOSURE BASELINE IS DONE END TO END.**
+## Status (2026-08-05, session 107): **#153 IS RULED AND CLOSED — `restart_boundary` SPLITS BY EVIDENCE, THE NEW `unsequenced_boundary` IS THE ONE VERDICT-NEUTRAL KIND, 22 MUTANTS WITH TWO SURVIVORS FOUND AND FIXED, `make ci` GREEN UNCACHED BOTH MODULES. #180 IS IN PROGRESS AND WAITING ON ONE PASTE FROM THE OPERATOR.**
+
+**#153, the ruling (record §71).** `restart_boundary` was one name over a
+PRODUCT of two properties — the `prev_last_seq == 0` claim, and whether a
+sequence existed to lose. On a REST-overlay source the second is permanently
+false (slice E: a Rest record is not a Data record, so `lastSeq` never leaves
+zero), so it fired once per hour per source: **24 of 50 findings on a clean
+day**. The user chose "split the kind by evidence" from three options, and the
+table is now: predecessor ended `> 0` → `restart_boundary`; predecessor ended
+`0` **and** both Open records name the same `(host, pid)` → the new
+`unsequenced_boundary`; identity differs or the walk was truncated →
+`restart_boundary`. **Nothing is silenced** — every seam is still a coverage
+finding on the report; one class got a name that says what is known.
+
+**What the task's framing did NOT say, and it is the bigger half.**
+`assignVerdicts` flags a window on ANY finding but `window_absent`, so every
+REST-overlay hour has been reporting **`VerdictGapped`** — §32k's answer to
+*what would a replay of this hour get* — for an hour in which a living writer
+rotated a file and lost nothing. `FindingKind.AffectsVerdict()` is now an
+exhaustive switch with no default (every existing kind returns today's answer;
+only the new kind is neutral), so a kind added later makes the verdict decision
+where the compiler and `exhaustiveswitch` both check it.
+
+**Side finding, fixed here (§71e):** `finding_test.go`'s roster — the map whose
+own doc says a kind with no producer is unreachable — had drifted by **five**
+members (every manifest kind). A test that ranges over a map cannot see the
+member that is not in it. It is now a `producerFor` SWITCH, gate-enforced;
+deleting one case and running `make lint` fails by name, demonstrated.
+
+**The campaign found two fixture defects, both worth remembering.** M9: the
+adopted-claim fixture SEALED its silent hour, and a sealed file states its
+sequence twice (Open claim + Close payload), so deleting one source changed
+nothing — the fixture absorbed its own variation. M13: the stale-identity
+fixture asked verify for one window, and verify walks exactly ONE file earlier
+than the range, so the three-file setup never had its first file read. Both were
+aimed correctly and unobservable; neither was findable by reading the test.
+
+**#180 is IN PROGRESS and blocked on one paste.** `developers.binance.com` now
+serves an **AWS WAF JavaScript challenge** (HTTP 202, empty body) to curl and to
+any headless fetcher, and the recorded §9 URLs 302 to a restructured catalog path
+(`/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/trade#position-information-v3`).
+The Claude Chrome extension was not connected this session. The operator offered
+to open the pages; **what is needed, verbatim, not summarized** (a summarized
+fetch is what misread `/api/v3/account` as weight 10 two sessions ago): (1) the
+V3 page's **Weight** line and whether it is CONDITIONAL on `symbol` — this
+deployment deliberately sends none, and `positions_binance.go:85` charges
+`ratelimit.Cost{Weight: 5}` for the no-symbol enumeration; (2) the V2 page's
+Weight line as printed today (we recorded 5; the 2024-08-07 changelog entry says
+`5->10`, so the question is whether the page is still stale); (3) any changelog
+entry **after 2024-08-07** naming `positionRisk`. Undercharging a weight is the
+direction that ends in the IP ban §7.6 exists to avoid.
+
+**Open work otherwise unchanged:** the standing operator decisions ($20/$55 live
+test + #171's Bybit testnet credential + §38f's off-host archive target); #177
+(FM-9's consumer, milestone 4); #184 (Dispatch filter conformance, awaits its
+first real caller); #159 (raise the nine Binance depth20 `first_data_timeout`
+10s → 30s at the next capture restart); #152 (`arblab crossvenue gate`, BCHUSDT
+binds ~2026-09-30). Capture **PID 8495**, never rebuild over `bin/arblab`,
+`make ci` runs `-race` AND the ka staleness gate (needs node), cap
+`TLC_WORKERS` at 4, docs/i18n parity is `bun test`.
+
+---
+
+## Status (2026-08-05, session 106 — HISTORICAL): **#179 IS CLOSED — DOCS AT v0.9.49, THE ONE `[SPEC EDIT OWED]` MARKER DISCHARGED, AND THE FINAL `code_diff` REVIEW RAN TWO ROUNDS: NO-SHIP WITH FOUR MAJORS (ALL VALIDATED AND FOLDED, RECORD §70i, EIGHT-MUTANT ADDENDUM — CAMPAIGN TOTAL 28 ZERO SURVIVED), THEN SHIP. `make ci` GREEN UNCACHED ON BOTH MODULES. THE SPOT LEG'S EXPOSURE BASELINE IS DONE END TO END.**
 
 **(e) The spec edits, v0.9.48 → v0.9.49.** §7.5's spot paragraph is rewritten
 into two: the baseline construct DEFINED (`baseline := B − ours` per
