@@ -176,7 +176,7 @@ func Run(ctx context.Context, snap config.Snapshot[Config], wall *clock.Wall,
 	// one bootstrap read.
 	boot := config.Snapshot[reconcile.Config]{Value: snap.Value.OMS, Rev: snap.Rev}
 	r, err := reconcile.NewRunner(boot, wall, reg, stderr,
-		reconcile.WithInstrumentFilters(filters))
+		reconcile.WithInstrumentFilters(filters, snap.Value.Reference.MaxAge.Duration()))
 	if err != nil {
 		return Report{}, err
 	}

@@ -3,6 +3,7 @@ package application
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/giiorg/arb-lab/internal/oms/application/ports"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
@@ -44,13 +45,14 @@ import (
 // DispatchAuthority). Serialisation of Execute itself is the composition
 // root's, on the same terms the dispatcher states for Dispatch.
 type Executor struct {
-	journal  ports.Journal
-	placer   ports.OrderPlacer
-	orders   ports.OrderWriteRepository
-	clk      clock.Clock
-	auth     *DispatchAuthority
-	filters  map[ids.VenueInstrument]domain.TradingFilters
-	reserver ports.CapacityReserver
+	journal      ports.Journal
+	placer       ports.OrderPlacer
+	orders       ports.OrderWriteRepository
+	clk          clock.Clock
+	auth         *DispatchAuthority
+	filters      map[ids.VenueInstrument]domain.TradingFilters
+	filterMaxAge time.Duration
+	reserver     ports.CapacityReserver
 }
 
 // NewExecutor constructs the use case FROM the process's dispatcher, and the
@@ -77,26 +79,44 @@ type Executor struct {
 // pre-filters build) planned it, not by this process's. filters.go states the
 // argument in full. NewPlanner's nil-map contract holds here identically: a
 // nil map executes nothing, refusing each package on its first leg.
+//
+// # filterMaxAge is the deployment's declared row-age tolerance (§69)
+//
+// The boot-time check proves the rows were fresh when the process STARTED;
+// this bound is the same tolerance re-judged at every package's admission,
+// because a long-running process's map stays green while the venue moves. The
+// bound and the map are one policy, so half of it is a wiring error with a
+// name: a non-empty map needs a positive bound, and a bound over an empty map
+// is a root claiming a tolerance for rows it never supplied.
 func NewExecutor(d *Dispatcher, filters map[ids.VenueInstrument]domain.TradingFilters,
-	reserver ports.CapacityReserver) (*Executor, error) {
+	filterMaxAge time.Duration, reserver ports.CapacityReserver) (*Executor, error) {
 	if d == nil {
 		return nil, ErrDispatcherMissing
 	}
 	if err := validateFilters(filters); err != nil {
 		return nil, err
 	}
+	if len(filters) > 0 && filterMaxAge <= 0 {
+		return nil, fmt.Errorf("filter max age %s with %d filter rows: %w",
+			filterMaxAge, len(filters), ErrFilterMaxAgeInvalid)
+	}
+	if len(filters) == 0 && filterMaxAge != 0 {
+		return nil, fmt.Errorf("filter max age %s with no filter rows: %w",
+			filterMaxAge, ErrFilterMaxAgeInvalid)
+	}
 	if reserver == nil {
 		return nil, ErrReserverMissing
 	}
 	// d's own constructor refused every nil, so these copies are known good.
 	return &Executor{
-		journal:  d.journal,
-		placer:   d.placer,
-		orders:   d.orders,
-		clk:      d.clk,
-		auth:     d.auth,
-		filters:  filters,
-		reserver: reserver,
+		journal:      d.journal,
+		placer:       d.placer,
+		orders:       d.orders,
+		clk:          d.clk,
+		auth:         d.auth,
+		filters:      filters,
+		filterMaxAge: filterMaxAge,
+		reserver:     reserver,
 	}, nil
 }
 
@@ -255,7 +275,11 @@ func (e *Executor) Execute(c *boot.Checklist, refs []DispatchRef, urgency ports.
 		return Execution{}, err
 	}
 
-	records, err := e.preflight(refs)
+	// ONE admission instant for the whole package: a two-leg package judged at
+	// two instants could straddle the filter-age bound and refuse
+	// asymmetrically, which is the package-atomicity harm §62d closed on the
+	// conformance side re-opened on the freshness side.
+	records, err := e.preflight(refs, e.clk.Now())
 	if err != nil {
 		return Execution{}, err
 	}
@@ -381,8 +405,8 @@ func actFor(u ports.Urgency) boot.Act {
 }
 
 // preflight establishes that the whole package may be sent. Everything here is
-// a read.
-func (e *Executor) preflight(refs []DispatchRef) ([]ports.OrderRecord, error) {
+// a read. now is the package's one admission instant, stamped by Execute.
+func (e *Executor) preflight(refs []DispatchRef, now time.Time) ([]ports.OrderRecord, error) {
 	seen := make(map[ids.ClientOrderID]struct{}, len(refs))
 	recs := make([]ports.OrderRecord, 0, len(refs))
 	var trade ids.TradeID
@@ -460,6 +484,31 @@ func (e *Executor) preflight(refs []DispatchRef) ([]ports.OrderRecord, error) {
 		if err := conformsToFilters(e.filters, rec.Order.Instrument,
 			rec.Order.Quantity, rec.Order.LimitPrice); err != nil {
 			return nil, fmt.Errorf("execute package leg %d: %q: %w", i, rec.Order.ClientOrderID, err)
+		}
+		// §69's freshness half, beside the conformance it qualifies: conforming
+		// to a row the venue may have moved past is a claim about the ROW, and
+		// this is the claim about its date. The bound is inclusive — a row aged
+		// exactly the tolerance still admits — and the entry is known present
+		// because conformsToFilters just consulted it.
+		//
+		// A FUTURE row refuses first, with its own sentinel: a negative age
+		// passes the staleness comparison trivially, and it has a real
+		// producer — a backward wall-clock step after boot, exactly the event
+		// platform/clock's clamp exists for, met here on a map resolved before
+		// the step. The operator's fix differs too: a stale row wants a fresh
+		// revision, a future row wants the clock investigated.
+		f := e.filters[rec.Order.Instrument]
+		if f.ObservedAt.After(now) {
+			return nil, fmt.Errorf("execute package leg %d: %q filters for %s observed %s, after the admission instant %s: %w",
+				i, rec.Order.ClientOrderID, rec.Order.Instrument,
+				f.ObservedAt.Format(time.RFC3339), now.Format(time.RFC3339),
+				ErrFiltersFromTheFuture)
+		}
+		if age := now.Sub(f.ObservedAt); age > e.filterMaxAge {
+			return nil, fmt.Errorf("execute package leg %d: %q filters for %s observed %s, %s ago against a %s bound: %w",
+				i, rec.Order.ClientOrderID, rec.Order.Instrument,
+				f.ObservedAt.Format(time.RFC3339), age.Round(time.Second),
+				e.filterMaxAge, ErrFiltersStaleAtAdmission)
 		}
 	}
 	return recs, nil

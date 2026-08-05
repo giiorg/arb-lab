@@ -3,6 +3,7 @@ package application_test
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/giiorg/arb-lab/internal/oms/application"
 	"github.com/giiorg/arb-lab/internal/oms/application/ports"
@@ -88,8 +89,11 @@ func threeLegPlan(t *testing.T) application.TradePlan {
 // 0.05; spot tick 25, perp tick 20): at a power-of-ten grid, "whole multiple
 // of the step" and "has few enough decimal places" are the same predicate, so
 // a digit-counting implementation would pass every fixture. And the two
-// instruments' filters DIFFER in every member, so a planner that read one
-// leg's filters for the other is distinguishable from a correct one.
+// instruments' filters DIFFER in every member — the observation instants
+// included — so a planner that read one leg's filters for the other is
+// distinguishable from a correct one. Both instants sit well inside
+// testFilterMaxAge of testNow, so the executor fixtures built on this map
+// exercise their own claims, not §69's staleness refusal.
 func testFilters(t *testing.T) map[ids.VenueInstrument]domain.TradingFilters {
 	t.Helper()
 	return map[ids.VenueInstrument]domain.TradingFilters{
@@ -98,15 +102,22 @@ func testFilters(t *testing.T) map[ids.VenueInstrument]domain.TradingFilters {
 			MinQty:      qty(t, "0.05"),
 			Tick:        price(t, "25"),
 			MinNotional: usdt(t, "5000"),
+			ObservedAt:  testNow.Add(-1 * time.Hour),
 		},
 		perp(): {
 			Step:        qty(t, "0.05"),
 			MinQty:      qty(t, "0.1"),
 			Tick:        price(t, "20"),
 			MinNotional: usdt(t, "10000"),
+			ObservedAt:  testNow.Add(-2 * time.Hour),
 		},
 	}
 }
+
+// testFilterMaxAge is the executor fixtures' declared row-age bound —
+// comfortably above both testFilters instants' ages, for testFilters' stated
+// reason. The §69 freshness battery varies the ages against it deliberately.
+const testFilterMaxAge = 24 * time.Hour
 
 func usdt(t *testing.T, v string) fixedpoint.Money {
 	t.Helper()

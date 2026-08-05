@@ -57,6 +57,9 @@ func dispatch(args []string, stdout, stderr io.Writer) int {
 	if len(args) >= 2 && args[0] == "reconcile" && args[1] == "run" {
 		return reconcileRun(args[2:], stdout, stderr)
 	}
+	if len(args) >= 2 && args[0] == "reference" && args[1] == "fetch" {
+		return referenceFetch(args[2:], stdout, stderr)
+	}
 	if len(args) >= 2 && args[0] == "exercise" && args[1] == "run" {
 		return exerciseRun(args[2:], stdout, stderr)
 	}
@@ -79,6 +82,7 @@ usage:
   arblab crossvenue sim   -params <file> -out <file> [-root <dir>] [-rest <dir>]
   arblab crossvenue gate  -before <RFC3339> -out <file> [-root <dir>] [-rest <dir>] [-reference <file>]
   arblab reconcile run    -config <file>
+  arblab reference fetch  -reference <in.json> -out <out.json>
   arblab exercise run     -config <file>
 
 calibrate fetch commits one closed family-1 dataset identity (venue REST

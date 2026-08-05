@@ -1,5 +1,80 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
+## Status (2026-08-05, session 102): **#183 AND #167 ARE CLOSED — TRADING FILTERS HAVE A FETCHED-PROVENANCE WRITER AND AN ADMISSION-TIME AGE GATE, THE KA GENERATOR HAS A ROOT MAKE TARGET AND A CI STALENESS GATE, DOCS ARE v0.9.48, TWENTY MUTANTS ZERO SURVIVED, FINAL code_diff REVIEW SHIP WITH ZERO FINDINGS. MARKER GREP IS ZERO.**
+
+**What session 102 did, in order.** (1) **#167**: `make tutorial-ka` /
+`make tutorial-ka-check` land, the check wired into `make ci` as
+`assemble.mjs --verify` — the node-only spelling of the bun parity
+assertion, because CI has node and no bun. Bite-checked: a hand-edit of
+the generated file and a real fragment change both kill; a
+trailing-newline probe was a NO-OP (unfence trims it — the mutation must
+be in the equivalence class the code distinguishes); regen shown
+byte-stable. Committed 2009e96. (2) **#183 design** (record **§69**): one
+adversarial design-review round returned five majors, ALL validated
+against code and folded in — non-2xx/redirect bodies earning a `fetched`
+stamp, cell binding missing quote/status/contractType (a SUSPENDED
+instrument keeps valid numerics — the asymmetric-rejection harm arriving
+through the freshness mechanism itself), backward-clock negative age
+reading as fresh, path-textual overwrite guard (symlinks defeat it;
+O_EXCL doesn't), and the one-instant claim having no discriminating
+fixture on a fixed clock. (3) **#183 implementation**, split: the
+orchestrator built `transport.PublicClient` (params-carrying Poller
+sibling, shared `doGet`, redirects surfaced as 3xx results),
+`TradingFilters.ObservedAt` (required — zero-value-unusable in the safe
+direction), the Executor's admission freshness (ONE `clk.Now()` per
+package; inclusive bound; `ErrFiltersStaleAtAdmission` +
+`ErrFiltersFromTheFuture` as separate sentinels because the operator's
+fix differs), and the `FilterMaxAge` threading (oms.Deps →
+`WithInstrumentFilters(filters, maxAge)` — one option because it is one
+policy; the exercise root reuses `Reference.MaxAge` so ONE declared
+tolerance governs boot and admission); a codex session
+(`impl-183-fetcher`) built the fetcher + `arblab reference fetch` from
+§69b verbatim — four pure decoders over trimmed 2026-08-05 live-probe
+fixtures (fapi's roster fixture holds THREE symbols with BTCUSDT in the
+middle, asserted in-test; the spot fixture keeps both LOT_SIZE and
+MARKET_LOT_SIZE with their live different steps), all-or-error document
+assembly, O_EXCL + partial-write cleanup, and a 429-with-poisoned-body
+fixture that proves status-precedes-decode DISCRIMINATELY (decode-first
+returns the wrong sentinel). Every changed file read by the
+orchestrator; one one-liner applied directly (trailing newline on the
+written document). (4) **Evidence**: §69d checklist run before the
+campaign — the one-instant claim needed a STEPPING clock (on a fixed
+fake, one read and per-leg reads are observationally identical); twenty
+mutants, zero SURVIVED (19 harness kills; one NOBUILD re-aimed — the sed
+orphaned the file's only `http` use). (5) **Docs v0.9.48**: §2.4 gains
+the twice-judged max row age, §40d the unsigned-public-fetch writer
+shape, `ProvenanceFetched`'s comment carries both writer shapes,
+venue-profiles §5 gains the dated 2026-08-05 re-probe note
+(`lotSizeFilter`/`priceFilter` parent keys pinned; padding-verbatim
+fact), adr-history has the dated block with the five-finding table, §69's
+WIP banner is the closure record. (6) Final fresh `code_diff` review:
+**SHIP, zero findings** — the reviewer also ran a LIVE
+`arblab reference fetch` against the committed document: all four cells
+fetched, bound and validated, values matching. `make ci` green both
+modules, verified uncached by the orchestrator.
+
+**Deferred WITH arguments (do not silently reopen):** the Planner's
+freshness mirror and hot-reload land with the long-running engine's own
+loop (§69b — the planner has no clock, its one caller is one-shot, and
+the executor covers the replay path); #184's single-order Dispatch
+surface is untouched and still owed to its own task.
+
+**What the next session picks from:** open tasks #171 (Bybit signer vs a
+real testnet credential), #179 (spot-leg exposure baseline), #184
+(Dispatch filter conformance — waits on §6.7's compensating-trade
+caller), #153 (restart_boundary ruling), #159 (capture restart timeout
+raise), #177 (FM-9's consumer — milestone 4), #180 (browser-confirm
+positionRisk weights). Clock-bound: #158 (§38f off-host archive,
+~2026-09-30) and #152 (`arblab crossvenue gate`, BCHUSDT binds
+~2026-09-30).
+
+**Standing user decisions, unchanged:** the $20/$55 live-test decision;
+#171; §38f. Capture **PID 8495**, never rebuild over `bin/arblab`,
+`make ci` runs `-race` AND the ka staleness gate (needs node), cap
+`TLC_WORKERS` at 4, docs/i18n parity is `bun test`.
+
+---
+
 ## Status (2026-08-05, session 101): **#188 IS CLOSED — THE POST-WRITE REVIEW COMPLETED WITH FIVE FINDINGS ALL FIXED AND RE-VERIFIED, THE COLLAPSE CHECKLIST CAUGHT TWO OF §68e's OWN NAMED FIXTURES ABSENT, THE FOURTEEN-MUTANT CAMPAIGN RAN WITH ZERO SURVIVED, AND DOCS ARE v0.9.47. MARKER GREP IS ZERO.**
 
 **What session 101 did, in order.** (1) The two queued findings fixed

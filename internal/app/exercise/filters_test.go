@@ -83,6 +83,17 @@ func TestTradingFiltersResolveTheCommittedShape(t *testing.T) {
 		t.Errorf("perp filters %s/%s/%s/%s, want 0.001/0.001/0.1/50",
 			p.Step.Decimal(), p.MinQty.Decimal(), p.Tick.Decimal(), p.MinNotional.Decimal())
 	}
+
+	// §69's carrier claim: the row's observation instant crosses into the OMS
+	// vocabulary, because the executor re-judges the age at every package
+	// admission and a map without dates cannot be asked. Asserted against the
+	// WRITTEN instant — a dropped propagation would leave the zero value,
+	// which Validate refuses later and farther from the cause.
+	want := filtersBase.Add(-time.Hour)
+	if !s.ObservedAt.Equal(want) || !p.ObservedAt.Equal(want) {
+		t.Errorf("observed instants %s/%s, want both %s",
+			s.ObservedAt, p.ObservedAt, want)
+	}
 }
 
 func TestTradingFiltersRefuseAnUnreadableReference(t *testing.T) {

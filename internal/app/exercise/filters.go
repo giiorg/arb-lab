@@ -87,6 +87,11 @@ func (c Config) tradingFilters(clk clock.Clock) (map[ids.VenueInstrument]omsdoma
 			MinQty:      lots.MinQty,
 			Tick:        lots.Tick,
 			MinNotional: lots.MinNotional,
+			// The row's own observation instant, carried into the OMS
+			// vocabulary so the executor can re-judge the age at every
+			// package admission (§69) — the boot check above proves
+			// freshness only at THIS instant.
+			ObservedAt: lots.Provenance.ObservedAt,
 		}
 	}
 	return out, nil

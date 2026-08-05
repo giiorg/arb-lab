@@ -1,0 +1,82 @@
+{
+  "timezone": "UTC",
+  "serverTime": 1785909617351,
+  "futuresType": "U_MARGINED",
+  "rateLimits": [
+    {
+      "rateLimitType": "REQUEST_WEIGHT",
+      "interval": "MINUTE",
+      "intervalNum": 1,
+      "limit": 2400
+    }
+  ],
+  "exchangeFilters": [],
+  "assets": [
+    {"asset": "USDT", "marginAvailable": true, "autoAssetExchange": "-10000"},
+    {"asset": "BTC", "marginAvailable": true, "autoAssetExchange": "-0.10000000"},
+    {"asset": "ETC", "marginAvailable": true, "autoAssetExchange": "0"},
+    {"asset": "XRP", "marginAvailable": true, "autoAssetExchange": "0"}
+  ],
+  "symbols": [
+    {
+      "symbol": "ETCUSDT",
+      "pair": "ETCUSDT",
+      "contractType": "PERPETUAL",
+      "deliveryDate": 4133404800000,
+      "onboardDate": 1579161600000,
+      "status": "TRADING",
+      "baseAsset": "ETC",
+      "quoteAsset": "USDT",
+      "marginAsset": "USDT",
+      "pricePrecision": 3,
+      "quantityPrecision": 2,
+      "filters": [
+        {"filterType": "PRICE_FILTER", "minPrice": "0.001", "tickSize": "0.001", "maxPrice": "100000"},
+        {"stepSize": "0.01", "maxQty": "400000", "filterType": "LOT_SIZE", "minQty": "0.01"},
+        {"filterType": "MARKET_LOT_SIZE", "minQty": "0.01", "stepSize": "0.01", "maxQty": "40000"},
+        {"filterType": "MAX_NUM_ORDERS", "limit": 200},
+        {"filterType": "MIN_NOTIONAL", "notional": "20"}
+      ]
+    },
+    {
+      "symbol": "BTCUSDT",
+      "pair": "BTCUSDT",
+      "contractType": "PERPETUAL",
+      "deliveryDate": 4133404800000,
+      "onboardDate": 1567965300000,
+      "status": "TRADING",
+      "baseAsset": "BTC",
+      "quoteAsset": "USDT",
+      "marginAsset": "USDT",
+      "pricePrecision": 2,
+      "quantityPrecision": 3,
+      "filters": [
+        {"filterType": "PRICE_FILTER", "minPrice": "556.80", "tickSize": "0.10", "maxPrice": "4529764"},
+        {"stepSize": "0.001", "minQty": "0.001", "maxQty": "1000", "filterType": "LOT_SIZE"},
+        {"filterType": "MARKET_LOT_SIZE", "maxQty": "120", "stepSize": "0.001", "minQty": "0.001"},
+        {"filterType": "MAX_NUM_ORDERS", "limit": 200},
+        {"filterType": "MIN_NOTIONAL", "notional": "50"}
+      ]
+    },
+    {
+      "symbol": "XRPUSDT",
+      "pair": "XRPUSDT",
+      "contractType": "PERPETUAL",
+      "deliveryDate": 4133404800000,
+      "onboardDate": 1578298800000,
+      "status": "TRADING",
+      "baseAsset": "XRP",
+      "quoteAsset": "USDT",
+      "marginAsset": "USDT",
+      "pricePrecision": 4,
+      "quantityPrecision": 1,
+      "filters": [
+        {"filterType": "PRICE_FILTER", "tickSize": "0.0001", "maxPrice": "100000", "minPrice": "0.0143"},
+        {"maxQty": "10000000", "filterType": "LOT_SIZE", "stepSize": "0.1", "minQty": "0.1"},
+        {"stepSize": "0.1", "filterType": "MARKET_LOT_SIZE", "maxQty": "2000000", "minQty": "0.1"},
+        {"filterType": "MAX_NUM_ORDERS", "limit": 200},
+        {"filterType": "MIN_NOTIONAL", "notional": "5"}
+      ]
+    }
+  ]
+}

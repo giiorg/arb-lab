@@ -58,6 +58,7 @@ package oms
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/giiorg/arb-lab/internal/engine/venue"
 	"github.com/giiorg/arb-lab/internal/oms/application"
@@ -211,6 +212,18 @@ type Deps struct {
 	// first plan says so, rather than one whose first plan reaches a venue
 	// unchecked.
 	InstrumentFilters map[ids.VenueInstrument]domain.TradingFilters
+
+	// FilterMaxAge is the deployment's declared tolerance for the age of a
+	// filters row at package admission (§69) — the same tolerance the
+	// planning binary's boot check judges against its reference file, handed
+	// here so the executor re-judges it at every package, because a
+	// long-running process's boot-fresh map stays green while the venue moves.
+	//
+	// Required to be positive exactly when InstrumentFilters is non-empty, and
+	// zero exactly when it is empty — the pair is one policy, and
+	// application.ErrFilterMaxAgeInvalid names a root that supplies half of
+	// it. The reconcile-only root supplies neither and loses nothing.
+	FilterMaxAge time.Duration
 
 	// Clock is the time seam §11 requires and §5.3's stable-not-found rule
 	// depends on: the dispatcher stamps the authorization anchor in the venue's
@@ -448,7 +461,8 @@ func New(deps Deps) (*Module, error) {
 
 	// The same gateway is narrowed into placement and reservation capabilities;
 	// reserve-here/place-there cannot be wired by the root.
-	executor, err := application.NewExecutor(dispatcher, deps.InstrumentFilters, placer)
+	executor, err := application.NewExecutor(dispatcher, deps.InstrumentFilters,
+		deps.FilterMaxAge, placer)
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("oms: executor: %w", err), journal.Close())
 	}

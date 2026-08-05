@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/giiorg/arb-lab/internal/oms/domain"
 	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
@@ -21,6 +22,21 @@ func validFilters(t *testing.T) domain.TradingFilters {
 		MinQty:      qty(t, "0.002"),
 		Tick:        price(t, "0.1"),
 		MinNotional: filterUSDT(t, "50"),
+		ObservedAt:  time.Date(2026, 8, 3, 5, 9, 0, 0, time.UTC),
+	}
+}
+
+// TestTradingFiltersObservedAtRequired: §69's carrier claim — a filters value
+// with no observation instant refuses at Validate, where the message names
+// the field, not inside the admission arithmetic where a zero instant would
+// answer the age question in whichever direction the comparison takes.
+func TestTradingFiltersObservedAtRequired(t *testing.T) {
+	t.Parallel()
+
+	f := validFilters(t)
+	f.ObservedAt = time.Time{}
+	if err := f.Validate(); !errors.Is(err, domain.ErrFilterObservedAtUnset) {
+		t.Fatalf("Validate() with zero ObservedAt = %v, want ErrFilterObservedAtUnset", err)
 	}
 }
 

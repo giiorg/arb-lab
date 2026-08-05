@@ -20,10 +20,14 @@ import (
 type ProvenanceClass string
 
 const (
-	// ProvenanceFetched marks a revision landed by an authenticated
-	// programmatic fetch from the venue (milestone 3/4 — no adapter writes
-	// this yet, and §40d's account-real precondition keys on it: it is a
-	// precondition of any live order).
+	// ProvenanceFetched marks a revision landed by a programmatic fetch from
+	// the venue. Two writer shapes carry it, split by what the endpoint
+	// answers for (§69): FEE rows require the authenticated fetch (the venue
+	// answers for the ACCOUNT's tier; milestone 3/4 — no adapter writes fee
+	// rows yet, and §40d's account-real precondition keys on exactly that),
+	// while LOT-FILTER rows are written by the unsigned public fetch (arblab
+	// reference fetch), because there the public endpoint is the venue's own
+	// definition of the fact.
 	ProvenanceFetched ProvenanceClass = "fetched"
 
 	// ProvenanceHandRecorded marks a revision a human verified and entered,

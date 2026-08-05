@@ -197,21 +197,25 @@ func fullDeps(t *testing.T) oms.Deps {
 			// Grids deliberately off the powers of ten, and distinct per
 			// instrument — planning_test.go's testFilters states the collapse
 			// argument. The cashAndCarry fixture (0.5 BTC at 50000/50100)
-			// conforms non-trivially to both.
+			// conforms non-trivially to both; the observation instants sit
+			// inside FilterMaxAge of the test clock's start.
 			spotInstrument(): {
 				Step:        mustQty(t, "0.025"),
 				MinQty:      mustQty(t, "0.05"),
 				Tick:        mustPx(t, "25"),
 				MinNotional: mustUSDT(t, "5000"),
+				ObservedAt:  time.Date(2026, 8, 3, 11, 0, 0, 0, time.UTC),
 			},
 			perpInstrument(): {
 				Step:        mustQty(t, "0.05"),
 				MinQty:      mustQty(t, "0.1"),
 				Tick:        mustPx(t, "20"),
 				MinNotional: mustUSDT(t, "10000"),
+				ObservedAt:  time.Date(2026, 8, 3, 10, 0, 0, 0, time.UTC),
 			},
 		},
-		Clock: clk,
+		FilterMaxAge: 24 * time.Hour,
+		Clock:        clk,
 		Resolution: application.ResolutionPolicy{
 			MaxLanding:  30 * time.Second,
 			SweepMargin: 5 * time.Second,
@@ -609,14 +613,20 @@ func TestExecuteComposesReservationThroughTheRealVenueStack(t *testing.T) {
 	deps.InstrumentAssets = map[ids.VenueInstrument]venue.InstrumentAssets{
 		spot: {Base: "BTC", Quote: "USDT"}, perp: {Base: "BTC", Quote: "USDT"},
 	}
+	// Observation instants anchor to THIS test's clock, not fullDeps' — the
+	// two fixtures start years apart, and a date fresh against one is from
+	// the future against the other.
+	observed := time.UnixMilli(1700000000000).UTC()
 	deps.InstrumentFilters = map[ids.VenueInstrument]domain.TradingFilters{
 		spot: {
 			Step: mustQty(t, "0.025"), MinQty: mustQty(t, "0.05"),
 			Tick: mustPx(t, "25"), MinNotional: mustUSDT(t, "5000"),
+			ObservedAt: observed.Add(-1 * time.Hour),
 		},
 		perp: {
 			Step: mustQty(t, "0.05"), MinQty: mustQty(t, "0.1"),
 			Tick: mustPx(t, "20"), MinNotional: mustUSDT(t, "10000"),
+			ObservedAt: observed.Add(-2 * time.Hour),
 		},
 	}
 	m := newModule(t, deps)

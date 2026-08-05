@@ -37,6 +37,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/giiorg/arb-lab/internal/engine/venue/transport"
 	"github.com/giiorg/arb-lab/internal/oms"
@@ -243,8 +244,13 @@ type Option func(*Runner)
 // right for it. The caller that plans (the exercise root) owns the reference
 // document, the freshness bound and the resolution, and hands this boot only
 // the finished vocabulary oms/domain already speaks.
-func WithInstrumentFilters(filters map[ids.VenueInstrument]omsdomain.TradingFilters) Option {
-	return func(r *Runner) { r.filters = filters }
+//
+// maxAge is §69's admission-time row-age bound, carried WITH the map because
+// the two are one policy — oms.Deps documents the pairing rule, and a caller
+// that could supply them through two options could also supply half.
+func WithInstrumentFilters(filters map[ids.VenueInstrument]omsdomain.TradingFilters,
+	maxAge time.Duration) Option {
+	return func(r *Runner) { r.filters, r.filterMaxAge = filters, maxAge }
 }
 
 // NewRunner assembles §7.5's boot for a caller that needs to hold it open —
@@ -317,6 +323,10 @@ type Runner struct {
 	// module's planner refuses every leg, which is what a boot that was
 	// handed no venue grids must do about orders.
 	filters map[ids.VenueInstrument]omsdomain.TradingFilters
+
+	// filterMaxAge is the bound WithInstrumentFilters supplied beside the map;
+	// zero for the reconcile binary, for the map's own reason.
+	filterMaxAge time.Duration
 
 	// governor is the venue's §7.6 budget, held here because the root is the
 	// alert deliverer ratelimit's Snapshot doc names: the transports spend
@@ -474,6 +484,7 @@ func (r *Runner) startOMS(context.Context) (boot.StopFunc, error) {
 		PositionScopes:    r.cfg.scopes(),
 		InstrumentAssets:  r.cfg.assets(),
 		InstrumentFilters: r.filters,
+		FilterMaxAge:      r.filterMaxAge,
 		Clock:             r.clk,
 		Account:           r.cfg.Account,
 		Resolution:        r.cfg.policy(),

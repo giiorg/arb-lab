@@ -72,7 +72,7 @@ func TestGovernorConsumeRefusalsRemainResolvable(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewDispatcher: %v", err)
 			}
-			executor, err := application.NewExecutor(dispatcher, testFilters(t), reserver)
+			executor, err := application.NewExecutor(dispatcher, testFilters(t), testFilterMaxAge, reserver)
 			if err != nil {
 				t.Fatalf("NewExecutor: %v", err)
 			}

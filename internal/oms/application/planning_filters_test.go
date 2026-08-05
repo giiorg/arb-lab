@@ -3,6 +3,7 @@ package application_test
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/giiorg/arb-lab/internal/oms/application"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
@@ -252,7 +253,7 @@ func TestConstructionRefusesAnUnusableFiltersEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	if _, err := application.NewExecutor(d, broken(), newFakeReserver(t)); !errors.Is(err, domain.ErrFilterStepNotPositive) {
+	if _, err := application.NewExecutor(d, broken(), testFilterMaxAge, newFakeReserver(t)); !errors.Is(err, domain.ErrFilterStepNotPositive) {
 		t.Errorf("NewExecutor over a zero-step entry = %v, want ErrFilterStepNotPositive", err)
 	}
 }
@@ -304,12 +305,14 @@ func TestTheRealVenueAsymmetryIsRefusedWhole(t *testing.T) {
 			MinQty:      qty(t, "0.00001"),
 			Tick:        price(t, "0.01"),
 			MinNotional: usdt(t, "5"),
+			ObservedAt:  testNow.Add(-1 * time.Hour),
 		},
 		perp(): {
 			Step:        qty(t, "0.001"),
 			MinQty:      qty(t, "0.001"),
 			Tick:        price(t, "0.1"),
 			MinNotional: usdt(t, "50"),
+			ObservedAt:  testNow.Add(-2 * time.Hour),
 		},
 	}
 

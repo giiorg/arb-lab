@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 )
@@ -52,6 +53,18 @@ type TradingFilters struct {
 	// own limit price — the price the venue's filter reads for a limit order.
 	// A declared zero is legal for MinQty's reason.
 	MinNotional fixedpoint.Money
+
+	// ObservedAt is when these values were read from their source — the
+	// reference row's own observation instant, carried HERE because the age
+	// question is asked long after the resolving layer is gone: filters move
+	// server-side without notice, and a long-running process's map stays green
+	// while the venue judges the current grid (§69). The executor refuses a
+	// row older than the deployment's declared bound at package admission.
+	//
+	// Required, and the direction is the one that is right when somebody
+	// forgets it: an unset instant reads as infinitely stale and refuses,
+	// never as fresh forever.
+	ObservedAt time.Time
 }
 
 // Validate reports whether the filters could verify anything.
@@ -100,6 +113,10 @@ func (f TradingFilters) Validate() error {
 		return fmt.Errorf("min notional: %w", err)
 	} else if sign < 0 {
 		return fmt.Errorf("min notional %s: %w", f.MinNotional, ErrFilterFloorNegative)
+	}
+
+	if f.ObservedAt.IsZero() {
+		return fmt.Errorf("observed at: %w", ErrFilterObservedAtUnset)
 	}
 
 	if f.MinQty.Asset() != f.Step.Asset() {

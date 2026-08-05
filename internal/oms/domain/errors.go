@@ -300,4 +300,11 @@ var (
 	// named here rather than surfacing inside a planner check attributed to
 	// whichever member the check happened to read.
 	ErrFilterAssetsDisagree = errors.New("oms: trading filter members disagree about the instrument's assets")
+
+	// ErrFilterObservedAtUnset reports a TradingFilters value with no
+	// observation instant. The age question is asked at every package
+	// admission (§69), and a zero instant would answer it in whichever
+	// direction the comparison happened to take — so it is refused at
+	// Validate, where the message names the field rather than the arithmetic.
+	ErrFilterObservedAtUnset = errors.New("oms: trading filter observation instant unset")
 )

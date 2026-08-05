@@ -124,26 +124,33 @@ func (p *Poller) URL() string { return p.cfg.URL() }
 // is a lie two records deep — the status says the venue answered, the bytes
 // are not what it answered.
 func (p *Poller) Fetch(ctx context.Context) (PollResult, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.cfg.URL(), nil)
+	return doGet(ctx, p.client, p.cfg.URL(), p.cfg.ReadLimit)
+}
+
+// doGet is the one GET both the Poller and the PublicClient perform — shared
+// as code rather than restated, so the two REST reads cannot come to disagree
+// about what a refusal is.
+func doGet(ctx context.Context, client *http.Client, url string, readLimit int64) (PollResult, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return PollResult{}, fmt.Errorf("transport: build request %s: %w", p.cfg.URL(), err)
+		return PollResult{}, fmt.Errorf("transport: build request %s: %w", url, err)
 	}
-	resp, err := p.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
-		return PollResult{}, fmt.Errorf("transport: %s: %w", p.cfg.URL(), err)
+		return PollResult{}, fmt.Errorf("transport: %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 
 	// Read one byte past the limit so "exactly at the limit" and "over it"
 	// are distinguishable — LimitReader alone returns the same bytes for
 	// both, and the boundary is where a wrong comparison hides.
-	body, err := io.ReadAll(io.LimitReader(resp.Body, p.cfg.ReadLimit+1))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, readLimit+1))
 	if err != nil {
-		return PollResult{}, fmt.Errorf("transport: read %s: %w", p.cfg.URL(), err)
+		return PollResult{}, fmt.Errorf("transport: read %s: %w", url, err)
 	}
-	if int64(len(body)) > p.cfg.ReadLimit {
+	if int64(len(body)) > readLimit {
 		return PollResult{}, fmt.Errorf("transport: %s body exceeds %d bytes: %w",
-			p.cfg.URL(), p.cfg.ReadLimit, ErrBodyTooLarge)
+			url, readLimit, ErrBodyTooLarge)
 	}
 	return PollResult{Status: resp.StatusCode, Body: body}, nil
 }

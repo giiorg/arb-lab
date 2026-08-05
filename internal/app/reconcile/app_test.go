@@ -706,12 +706,18 @@ func TestWithInstrumentFiltersReachesTheRunner(t *testing.T) {
 	filters := map[ids.VenueInstrument]omsdomain.TradingFilters{perp: {}}
 
 	r, err := NewRunner(snapshotOf(t, cfg), testWall(t, cfg),
-		observability.NewRegistry(), io.Discard, WithInstrumentFilters(filters))
+		observability.NewRegistry(), io.Discard, WithInstrumentFilters(filters, 36*time.Hour))
 	if err != nil {
 		t.Fatalf("NewRunner: %v", err)
 	}
 	if _, ok := r.filters[perp]; !ok || len(r.filters) != 1 {
 		t.Fatalf("runner filters = %v, want the supplied one-entry map", r.filters)
+	}
+	// The bound rides the same option as the map — §69's one-policy rule — so
+	// the threading claim covers both halves. 36h is deliberately not a value
+	// any config default could collide with.
+	if r.filterMaxAge != 36*time.Hour {
+		t.Fatalf("runner filterMaxAge = %v, want 36h", r.filterMaxAge)
 	}
 
 	bare, err := NewRunner(snapshotOf(t, cfg), testWall(t, cfg),

@@ -39,6 +39,13 @@ var (
 	ErrPathMalformed  = errors.New("transport: path must start with / and not end with /")
 	ErrReadLimitRange = errors.New("transport: read limit must be positive")
 
+	// The public client's own refusals: a present query parameter must have
+	// both halves. An empty key is a forgotten argument; an empty value is one
+	// the venue would answer with its unscoped or error behaviour rather than
+	// refuse, which is the silent-widening direction.
+	ErrParamKeyUnset   = errors.New("transport: public request param key unset")
+	ErrParamValueUnset = errors.New("transport: public request param value unset")
+
 	// The signed client's configuration refusals. Every one of these is a
 	// request that could never be accepted by any venue, caught before a byte
 	// goes out — the same configuration/runtime line the sentinels above draw,

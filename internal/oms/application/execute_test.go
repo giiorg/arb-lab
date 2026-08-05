@@ -61,7 +61,7 @@ func newExecutor(t *testing.T) (*application.Executor, *fakeJournal, *fakePlacer
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	e, err := application.NewExecutor(d, testFilters(t), newFakeReserver(t))
+	e, err := application.NewExecutor(d, testFilters(t), testFilterMaxAge, newFakeReserver(t))
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
@@ -142,7 +142,7 @@ func executorWithReserver(t *testing.T, reserver ports.CapacityReserver) (*appli
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	e, err := application.NewExecutor(d, testFilters(t), reserver)
+	e, err := application.NewExecutor(d, testFilters(t), testFilterMaxAge, reserver)
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
@@ -215,7 +215,7 @@ func TestNewExecutorRefusesAMissingDispatcher(t *testing.T) {
 	// One refusal where five used to be: the executor is built FROM the
 	// dispatcher, whose own constructor already refused every nil port, so the
 	// only missing collaborator this constructor can meet is the dispatcher.
-	if _, err := application.NewExecutor(nil, testFilters(t), newFakeReserver(t)); !errors.Is(err, application.ErrDispatcherMissing) {
+	if _, err := application.NewExecutor(nil, testFilters(t), testFilterMaxAge, newFakeReserver(t)); !errors.Is(err, application.ErrDispatcherMissing) {
 		t.Errorf("NewExecutor(nil) = %v, want ErrDispatcherMissing", err)
 	}
 
@@ -226,10 +226,10 @@ func TestNewExecutorRefusesAMissingDispatcher(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	if _, err := application.NewExecutor(d, testFilters(t), newFakeReserver(t)); err != nil {
+	if _, err := application.NewExecutor(d, testFilters(t), testFilterMaxAge, newFakeReserver(t)); err != nil {
 		t.Errorf("NewExecutor(dispatcher) = %v, want nil", err)
 	}
-	if _, err := application.NewExecutor(d, testFilters(t), nil); !errors.Is(err, application.ErrReserverMissing) {
+	if _, err := application.NewExecutor(d, testFilters(t), testFilterMaxAge, nil); !errors.Is(err, application.ErrReserverMissing) {
 		t.Errorf("NewExecutor without reserver = %v, want ErrReserverMissing", err)
 	}
 }
@@ -309,7 +309,7 @@ func TestExecuteRunsLegsInParallel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	e, err := application.NewExecutor(gated, testFilters(t), newFakeReserver(t))
+	e, err := application.NewExecutor(gated, testFilters(t), testFilterMaxAge, newFakeReserver(t))
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
@@ -537,7 +537,7 @@ func TestExecuteCancelsOnlyTheUnsentRemainderOnAMixedResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	executor, err := application.NewExecutor(dispatcher, testFilters(t), reserver)
+	executor, err := application.NewExecutor(dispatcher, testFilters(t), testFilterMaxAge, reserver)
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
@@ -972,7 +972,7 @@ func TestTheAuthorityIsSharedAcrossDispatchPaths(t *testing.T) {
 		t.Fatalf("Dispatch = %v", err)
 	}
 
-	e, err := application.NewExecutor(d, testFilters(t), newFakeReserver(t))
+	e, err := application.NewExecutor(d, testFilters(t), testFilterMaxAge, newFakeReserver(t))
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
@@ -1001,7 +1001,7 @@ func TestTheAuthorityIsSharedAcrossDispatchPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	split, err := application.NewExecutor(other, testFilters(t), newFakeReserver(t))
+	split, err := application.NewExecutor(other, testFilters(t), testFilterMaxAge, newFakeReserver(t))
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}

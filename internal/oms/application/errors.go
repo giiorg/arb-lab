@@ -16,6 +16,32 @@ var (
 	ErrReserverMissing   = errors.New("oms: executor has no capacity reserver")
 	ErrHoldVectorInvalid = errors.New("oms: capacity reserver returned an invalid hold vector")
 
+	// ErrFilterMaxAgeInvalid reports an executor whose filter map and row-age
+	// bound disagree about whether filters are in play: a non-empty map with a
+	// non-positive bound, or a bound declared over an empty map. The pair is
+	// one policy (§69), and half of it is a wiring error whose message can
+	// name the root — not a first order that refuses for a reason assembled
+	// two fields apart.
+	ErrFilterMaxAgeInvalid = errors.New("oms: executor filter max age and filter map disagree")
+
+	// ErrFiltersStaleAtAdmission reports a package leg whose filters row is
+	// older than the deployment's declared tolerance at the package's one
+	// admission instant (§69). The boot-time check proves rows were fresh when
+	// the process started; this is the same tolerance re-judged where the age
+	// matters, because filters move server-side without notice and a
+	// long-running process's map stays green while the venue judges the
+	// current grid. The fix for tripping it is a fresh revision (arblab
+	// reference fetch), never a wider bound.
+	ErrFiltersStaleAtAdmission = errors.New("oms: trading filters older than the declared bound at package admission")
+
+	// ErrFiltersFromTheFuture reports a filters row observed AFTER the
+	// package's admission instant. A negative age would pass the staleness
+	// comparison trivially, and it has a real producer: a backward wall-clock
+	// step after boot, met by a map that was resolved before the step. Named
+	// apart from staleness because the fix differs — a stale row wants a
+	// fresh revision, a future row wants the clock investigated.
+	ErrFiltersFromTheFuture = errors.New("oms: trading filters observed after the package admission instant")
+
 	// ErrClockMissing reports a use case constructed with no clock.
 	//
 	// It is the dispatcher's because that is where §5.3's authorization anchor is
