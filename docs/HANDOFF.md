@@ -1,6 +1,71 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-06, session 109): **MILESTONE 4 IS OPEN. SLICE A (#198, §4.1's ACCOUNT POSTURE) IS MID-SLICE — THE VENUE CODECS AND THEIR 13 TESTS LAND, `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO. THREE OPERATOR RULINGS ARE RECORDED AND ARE THE SLICE'S SPINE. NO SPEC EDITS YET (docs stay v0.9.50).**
+## Status (2026-08-06, session 110): **`internal/risk` EXISTS — §4.1's RULES, THE GUARD USE CASE AND THE ACL ALL LAND (#198 items 2–4 of 11). 21 MUTANTS, ONE SURVIVOR FOUND AND FIXED, `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO. ONE OPERATOR RULING IS NOW OWED (§73j F9) AND NOTHING IS BLOCKED BY IT.**
+
+**Read `docs/superpowers/specs/2026-08-06-m4-198-account-posture.md` §73j
+first** — it carries this session's findings, the 21-mutant table, and the F9
+ruling that is owed.
+
+**WHAT LANDED.** `internal/risk/domain` (the posture vocabulary in risk's own
+words, `Requirement` with its roster-and-pins, the two per-dialect rule tables
+transcribed from Profiles §2, `Check`, and the `Verdict`),
+`internal/risk/application` + `application/ports` (`PostureGuard.Assert` and
+`AccountPostureSource`), and `internal/risk/infrastructure/driven` (the ACL over
+`engine/venue`'s posture surface). **The `risk` bounded context now exists** —
+one of the three `CLAUDE.md`'s layout diagram has claimed all along.
+
+**THE ONE THING THAT NEEDS YOU — §73j F9, and it is not a bug.** F4 ruled that
+per-symbol coverage is answered from the configured roster, so a configured
+symbol the venue said nothing about REFUSES. The consequence F4 did not state:
+Binance's `isAutoAddMargin` comes from `positionRisk`, which enumerates
+**positions**, so a **flat account refuses on every configured symbol** — and
+§73c-2 puts the same read before every trade, so the gate that must pass before
+the first position opens cannot pass until a position exists. Bybit is the same
+for all three of its per-symbol settings **if** `position/list` omits
+never-traded symbols, which nobody here has established. A gate that cannot pass
+is not conservative, it is broken — §5.2 already refuses a config value *"that
+makes the permitted region unreachable"*, and this is that shape arriving through
+a rule. **Three candidates are written out in §73j F9** (keep strict + a manual
+per-symbol bootstrap; per-setting reliance on Profiles §2's recorded "off by
+default" for Binance auto-add-margin only; or keep the refusal and classify it as
+`OutcomeIncomplete`/`NeedsOperator` at the gate). **The strict reading is what is
+implemented** — the safe direction, left in place rather than silently loosened.
+Nothing downstream is blocked: (3) would land in item 7.
+
+**Three claims worth not re-deriving.** The rule tables are asserted against a
+roster written out **by hand** in `check_internal_test.go`, because a test that
+reads the table agrees with whatever the table says. `Verdict.Evaluated` exists
+because "passed" and "nothing happened" are the same zero value, and
+`Satisfied()` **refuses** a verdict that evaluated nothing — which is what stops
+a failed read decaying into a clean posture, and is tested through the guard.
+And the ACL's presence mapping carries all three of the venue's silences across
+distinctly; collapsing any two is how a field the venue never mentioned becomes a
+value the rules conclude from.
+
+**M26 was the campaign's one survivor and its lesson is inverted.**
+`Assert`'s scope check is unreachable through `NewPostureGuard` (the constructor
+validated the venue), so the mutant that made it return a clean verdict survived.
+The branch is not dead — `var g PostureGuard` reaches it, and without it the next
+line panics inside §7.5's boot. The fix was a **test for the zero-value guard**,
+not a deleted branch.
+
+**STILL NOT DONE — items 5–11.** The Portfolio-Margin attestation document and
+its two-act pin; the leverage-pin config field; `app/reconcile` wiring with
+`GateAccountPosture` moving out of `ExitClass`'s producerless arm; item 7a (the
+two Bybit endpoints in every rate-limit profile); the §73g checklist as fixtures
+plus the full campaign; spec edits to v0.9.51; the final review; and F9's ruling.
+**Nothing yet calls the guard** — it has no caller, exactly as `GateAccountPosture`
+has no producer.
+
+**Everything below the venue codecs is still fixture-tested and has never met a
+real account** (§73f). Unchanged: three standing operator decisions, credentials
+deferred, capture **PID 8495**, never rebuild over `bin/arblab`, `make ci` runs
+`-race` AND the ka staleness gate (needs node), cap `TLC_WORKERS` at 4,
+docs/i18n parity is `bun test`. Docs stay at **v0.9.50** — no spec edits yet.
+
+---
+
+## Status (2026-08-06, session 109 — HISTORICAL): **MILESTONE 4 IS OPEN. SLICE A (#198, §4.1's ACCOUNT POSTURE) IS MID-SLICE — THE VENUE CODECS AND THEIR 13 TESTS LAND, `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO. THREE OPERATOR RULINGS ARE RECORDED AND ARE THE SLICE'S SPINE. NO SPEC EDITS YET (docs stay v0.9.50).**
 
 **Read `docs/superpowers/specs/2026-08-06-m4-198-account-posture.md` (record
 §73) before touching any of this.** It carries the six pre-code findings, the

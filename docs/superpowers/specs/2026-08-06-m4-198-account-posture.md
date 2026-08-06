@@ -431,12 +431,151 @@ same thing.
 
 ---
 
+## §73j — What items 2–4 found once the rules existed (session 110)
+
+Items 2, 3 and 4 of §73h landed: `internal/risk/domain` (the vocabulary, the
+requirement, the two rule tables, `Check` and the verdict),
+`internal/risk/application` + `ports` (the guard use case and
+`AccountPostureSource`), and `internal/risk/infrastructure/driven` (the ACL over
+`engine/venue`'s surface). **The `risk` bounded context now exists** — one of the
+three the layout diagram has claimed since before any of them did.
+
+### F9 — The roster-scoped coverage rule can make the gate UNREACHABLE, and that needs a ruling
+
+**This is the one finding on this slice that is not settled, and it is a
+consequence of F4 rather than a departure from it.**
+
+F4 ruled that per-symbol coverage is answered from the **configured roster**,
+because a check driven by the venue's returned rows examines zero symbols on a
+flat account. The rules implement that, and a configured symbol with no
+observation is `ReasonUnobserved` — a refusal.
+
+What F4 did not state is the consequence, which arrives immediately:
+
+| Setting | Answered by | Rows on a FLAT account |
+|---|---|---|
+| Binance `marginType`, leverage | `GET /fapi/v1/symbolConfig` | every symbol (the codec refuses an empty array) |
+| Binance `isAutoAddMargin` | `GET /fapi/v3/positionRisk` | **none** — v3 enumerates positions |
+| Bybit `positionIdx`, leverage, auto-add-margin | `GET /v5/position/list` | **unknown** — whether Bybit returns a row for a configured-but-never-traded symbol is not established anywhere, and `posture_bybit.go` says so |
+
+So on Binance a flat account refuses on auto-add-margin for **every** configured
+symbol, and §73c-2 puts the same read before every trade — which means the gate
+that must pass before the first position can open cannot pass **until** a
+position exists. On Bybit, the same for all three per-symbol settings **if** the
+venue omits rows for never-traded symbols.
+
+**A gate that cannot pass is not a conservative gate; it is a broken one**, and
+this repo has already written the argument down one level up: §5.2 refuses a
+config value *"that makes the permitted region unreachable"*, by name, at
+startup. This is that shape, arriving through a rule rather than through a
+config field.
+
+It is **not** a defect in the code as written — the strict reading is the safe
+direction and is what F4 ruled — so it is left implemented and recorded here
+rather than silently loosened. The candidates, for the operator:
+
+1. **Keep it strict.** The operator establishes a position record per configured
+   symbol out of band before the bot may trade (on Bybit, setting leverage
+   creates one; on Binance, a dust position does). Cost: a manual bootstrap step
+   per symbol, and one that must be redone whenever a symbol joins the roster.
+   Benefit: no symbol is ever traded whose posture was not read.
+2. **Per-setting default reliance.** Profiles §2 records Binance
+   `isAutoAddMargin` as *"read-only — no REST setter, **off by default**"*, so
+   for that ONE setting a symbol with no position row could be treated as
+   satisfied on a recorded venue fact. Leverage and position mode would stay
+   strict: their defaults are not recorded, and leverage drives liq distance
+   directly. Cost: one check now rests on a documented default rather than an
+   observation, and the argument is per-venue and per-setting rather than
+   general.
+3. **A distinct outcome rather than a distinct verdict.** Keep the refusal and
+   classify it for `boot` as `OutcomeIncomplete`/`NeedsOperator` rather than a
+   flat failure, so the operator-facing line says *"no position record exists
+   for ETHUSDT, so this cannot be established"* instead of reading like a
+   posture violation. Cost: the domain cannot today tell "the venue enumerated
+   and this symbol had none" from "the probe never answered" — it would need the
+   report to carry which probes ran, which is a shape change to
+   `AccountPostureReport`.
+
+**Nothing downstream is blocked by the ruling**: the guard and the ACL are
+unaffected by any of the three, and (3) lands in the gate wiring (item 7) rather
+than in the rules. It is listed as **item 11**.
+
+The Bybit half of the table is also a **loosening trigger for #171**: one
+credentialed `position/list` against a never-traded symbol answers it.
+
+### M20 — A defensive branch with no reachable caller reported SURVIVED
+
+`PostureGuard.Assert` validates the scope it builds from the requirement. Through
+`NewPostureGuard` that branch is unreachable — the constructor validated the
+venue — so the mutation that turns it into a clean verdict **survived**.
+
+The branch is not dead, though: it is reachable through `var g PostureGuard`,
+whose `source` is nil, so **without it the next line panics** — a crash inside
+§7.5's boot, taking down the gate whose job is refusing to trade. The fix was a
+test for the zero-value guard, not a deleted branch, and the mutant is caught.
+This is [[unreachable-sentinel-reads-as-handled]] with the opposite resolution
+to the usual one: the branch was right and the suite could not reach it.
+
+### The campaign — 21 mutants this session, all caught
+
+| # | Mutation | Verdict |
+|---|---|---|
+| M5 | roster coverage checks only the FIRST configured symbol (F4) | caught (30) |
+| M6 | an unobserved required check PASSES | caught (10) |
+| M7 | a setting the venue did not state PASSES (F2) | caught (5) |
+| M8 | an empty coin enumeration passes the borrow rules vacuously | caught (3) |
+| M9 | the account-kind whitelist admits the unlisted `2` (F5) | caught (7) |
+| M10 | an UNATTESTED Portfolio-Margin claim passes (§73c-1) | caught (6) |
+| M11 | an attestation of Portfolio-Margin ON passes | caught (2) |
+| M12 | word comparison stops folding case | caught (1) |
+| M13 | any readable borrow figure satisfies the zero requirement | caught (3) |
+| M14 | every symbol is checked against the FIRST symbol's pin (F3) | caught (21) |
+| M15 | an ambiguity does not count as a check that ran | caught (1) |
+| M16 | a verdict that evaluated NOTHING reports satisfied | caught (1) |
+| M17 | failures sort account-wide LAST, buried under per-symbol rows | caught (3) |
+| M18 | an EMPTY roster validates, making every per-symbol rule vacuous | caught (2) |
+| M19 | a leverage pin of ZERO validates (§3.6 rule 4) | caught (2) |
+| M20 | an UNSTATED attestation trips the not-consumed refusal | caught (30) |
+| M21 | the posture read is shed as Routine traffic | caught (1) |
+| M22 | an EMPTY venue field translates as STATED | caught (1) |
+| M23 | the two silences collapse into one | caught (2) |
+| M24 | a scope naming another venue is answered by this one | caught (1) |
+| M25 | a FAILED READ becomes a clean verdict | caught (1) |
+| M26 | an unconstructed guard reports a clean posture | **SURVIVED → fixed → caught (1)** |
+
+Three reported `NO-OP!!` first (the `return` lines sit one or two below the
+condition the eye lands on) and one reported `NOBUILD!!` — `case AttestationOff,
+AttestationUnstated:` is a *duplicate case*, which is a bad sed rather than a
+compiler-enforced claim. Re-aimed at the branch's own `return` instead.
+
+**M12 killed exactly ONE test**, which is the useful part of its result: the
+case-folding fixture is the only thing in the suite that can see the fold, so
+without it `EqualFold` and `==` are the same predicate.
+
+### Two smaller decisions worth not re-litigating
+
+- **Failure reasons are a product of "was there evidence" and "did it satisfy",
+  not a severity ladder** — `Unobserved` (no observation at all) and `Unstated`
+  (an observation the venue did not fill in) are different files to open: a
+  coverage gap versus a wire-shape change. [[a-vocabulary-with-one-axis-loses-a-case]]
+- **`Verdict.Evaluated` exists because "passed" and "nothing happened" are the
+  same zero value**, and the second is the one a gate is most likely to be handed
+  (it IS the zero value). `Satisfied()` refuses a verdict that evaluated nothing
+  rather than agreeing with it, which is what makes a failed read unable to decay
+  into a clean posture.
+- **Observations from symbols NOT on the configured roster are ignored, not
+  failed.** §4.1's requirement is stated over configured symbols; an unexpected
+  position elsewhere is §7.5's net-delta invariant's subject, not this gate's.
+  Recorded so a later session does not read the silence as an oversight.
+
+---
+
 ## §73h — Work items
 
-1. `engine/venue` posture codecs, both venues + roster rows + weights.
-2. `internal/risk/domain` — the rules and the verdict type.
-3. `internal/risk/application` + ports — the guard use case.
-4. `internal/risk/infrastructure/driven` — the ACL adapter.
+1. ~~`engine/venue` posture codecs, both venues + roster rows + weights.~~ **DONE** (session 109)
+2. ~~`internal/risk/domain` — the rules and the verdict type.~~ **DONE** (session 110)
+3. ~~`internal/risk/application` + ports — the guard use case.~~ **DONE** (session 110)
+4. ~~`internal/risk/infrastructure/driven` — the ACL adapter.~~ **DONE** (session 110)
 5. The Portfolio-Margin attestation document + its two-act config pin.
 6. The leverage pin config field (absent → refuse).
 7. `app/reconcile` wiring; `GateAccountPosture` moves across `ExitClass`.
@@ -447,3 +586,6 @@ same thing.
 9. Spec edits → v0.9.51: §4.1/§6.3/§7.5 annotations, Profiles §2's marked
    unknown read path, §12 item 4's slice annotation, ADR §3's dated block.
 10. Final fresh `code_diff` review.
+11. **OPERATOR RULING OWED — §73j F9's unreachable-gate consequence.** Choose
+    between strict / per-setting default reliance / a distinct boot outcome.
+    Nothing else in the slice is blocked by it; (3) would land in item 7.
