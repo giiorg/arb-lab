@@ -33,24 +33,30 @@ import (
 //
 // # The charged weight is the CONSERVATIVE reading of an unverified figure
 //
-// This endpoint's published weight is not settled (task #180, Profiles §9). Two
-// readings are in play: a flat 5, which is what was recorded when this code was
-// written, and a CONDITIONAL "5 with symbol, 20 without", reported 2026-08-05 by
-// a read this project cannot treat as a source — `developers.binance.com` now
-// answers every headless fetcher with a WAF challenge, so nobody here has read
-// the line directly.
+// This endpoint's published weight is not settled (task #180, Profiles §9).
+// THREE readings are in play, none of them read directly — a flat 5, which is
+// what was recorded when this code was written, and two CONDITIONAL ones from
+// two different AI summarizers on 2026-08-05, "5 with symbol, 20 without" and
+// "1 with symbol, 10 without". `developers.binance.com` answers every headless
+// fetcher with a WAF challenge, so nobody here has read the line directly.
 //
-// The two readings are not symmetric for us, because this call deliberately
-// sends no symbol (see EncodePositions): under the conditional reading every
-// position read costs 20 and is being charged 5. Undercounting an IP budget by
-// four times, against the limit whose breach is the ban §7.6 exists to avoid, is
-// the failure this figure decides — so the cost charged is 20, which is correct
-// under the conditional reading and merely pessimistic by 15 under the flat one,
-// once per reconcile pass.
+// The readings are not symmetric for us, because this call deliberately sends no
+// symbol (see EncodePositions): every conditional reading charges us its
+// expensive arm. Undercounting an IP budget, against the limit whose breach is
+// the ban §7.6 exists to avoid, is the failure this figure decides — so the cost
+// charged is 20, the MAXIMUM over the candidates rather than the newest of them,
+// which makes it correct-or-pessimistic under each (exact at 5/20, over by 10 at
+// 1/10, over by 15 at a flat 5) once per reconcile pass.
+//
+// The two summaries disagree by a factor of two on the same line, which is the
+// argument for the max rather than against the figure: what they AGREE on is the
+// conditional shape, and the shape is the half that binds a symbol-less caller.
 //
 // Reading the published line is therefore a LOOSENING trigger, never a
-// correctness prerequisite: if the venue's own page says a flat 5, this drops to
-// 5 with the citation. Nothing else in the system depends on which it is.
+// correctness prerequisite: if the venue's own page states a lower figure for
+// the symbol-less call, this drops to it with the citation. Nothing else in the
+// system depends on which it is, and no further unread candidate below 20 can
+// change this line.
 //
 // The related fact about the SOURCE is recorded in Profiles §9 rather than
 // resolved here: the V2 endpoint page and the venue's changelog disagreed for

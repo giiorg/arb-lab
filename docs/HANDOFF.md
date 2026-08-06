@@ -1,6 +1,94 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-05, session 107): **#153 IS RULED AND CLOSED — `restart_boundary` SPLITS BY EVIDENCE, THE NEW `unsequenced_boundary` IS THE ONE VERDICT-NEUTRAL KIND, 22 MUTANTS WITH TWO SURVIVORS FOUND AND FIXED, `make ci` GREEN UNCACHED BOTH MODULES. #180 IS IN PROGRESS AND WAITING ON ONE PASTE FROM THE OPERATOR.**
+## Status (2026-08-05, session 108): **MILESTONE 3 IS RECORDED COMPLETE — §12's ROSTER IS HONEST AGAIN, AND THE CLOSURE PASS FOUND ONE CLAUSE LISTED WITH NO CODE ANYWHERE: `sizing-by-live-tier` IS REASSIGNED TO MILESTONE 4. DOCS AT v0.9.50, `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO. #180 GAINED A THIRD UNREAD CANDIDATE AND STAYS OPEN.**
+
+**Read `docs/superpowers/specs/2026-08-05-m3-197-milestone-closure-pass.md`
+(record §72) before reopening any of this.** ADR §3 has the dated block; §12's
+item 3 carries the consolidated annotation and item 4 the reassigned clause.
+
+**Why the pass ran.** §12's item 3 carried a landing annotation for every slice
+through **E (v0.9.35)** and then stopped, with the doc set at **v0.9.49** — five
+slices and a twenty-eight-task tail unrecorded on the roster, and no sentence
+anywhere stating the milestone done. That is **§47e finding 1's shape**
+(milestone 1 recorded complete with half of `engine/venue` undelivered), and the
+`SPEC EDIT OWED` grep is structurally blind to it.
+
+**The first question was whether the roster had been deliberately DEMOTED**, in
+which case the gap is correct and the fix is one sentence. **It had not:** the
+annotation is an explicit close item in the slice-**C2a** and slice-**C2b**
+records, appears in **no** record from slice F1 onward, and was retired by no
+ruling. It lapsed between two same-day sessions. `adr-history` had already named
+that mechanism on the capture release — a state that *"expired silently"*, where
+*"the close's reading pass is what re-derived it; the grep, by construction,
+could not."*
+
+**THE FINDING — eight of item 3's nine clauses check out; the ninth has no code
+at all.** `MMR`, `maintenance margin`, `leverageBracket`, `risk limit`,
+`marginTier`: **zero** non-test hits across `internal/`. No `internal/risk/`. No
+sizing function of any kind. **And this document's own traceability table had
+already filed it elsewhere** — `| C4 tiered MMR | Profiles §1, core §7.1 |`,
+where §7.1 is *"Sizing for survival & the margin top-up protocol"*, a section
+§12 gives to **milestone 4** in terms. Three further grounds: `planning.go`'s
+`Quantity` is a **designed** input that `Plan` verifies rather than trusts (the
+single-writer OMS is the wrong home for a producer); the live-tier MMR needs a
+signed `GET /fapi/v1/leverageBracket` read that only milestone 4's
+account/margin-mode verification makes meaningful; and `tutorial.md`'s
+acceptance checklist had **already paired** *"live-tier MMR sizing + margin
+top-up protocol"* as one clause. **User ruled: misfiled — move it.** Item 3's
+text is annotated, not rewritten (milestone 1's scope-correction precedent), and
+item 4 gains it beside the §7.1 top-up protocol.
+
+**What the finding is really about.** The venue fact is **recorded and read by
+nobody** (profiles: *"fetch `GET /fapi/v1/leverageBracket` at runtime — table
+not otherwise readable `[→ C4]`"*, signed `USER_DATA`, IP weight 1), and **eight
+comments across seven packages** name liq-distance as a quantity computed
+*elsewhere* — each locally true, collectively a chain of deferrals with **no
+terminal**. No gate can see that: every comment is correct, and the grep polices
+only *marked* claims. **The failure direction is a halt, not a wrong number** —
+with no producer, `Plan` cannot be handed a size at all, so nothing mis-sizes,
+which is exactly how it survived five slices, the tail and a formal-model
+campaign. **Nothing in this system sizes a trade today.** That is now stated in
+§12 item 4 rather than implied nowhere.
+
+**#180 gained a THIRD unread candidate and did not close.** An operator-supplied
+second AI summarizer reported *"1 for a single symbol; 10 when the symbol
+parameter is omitted"*, against the first summary's *"5 with `symbol`, 20
+without"* and §9's recorded flat **5**. **Two summarizers, a factor of two
+apart** — and the second carries all three recorded tells: every answer from
+**one aggregated catalog page**, V2 and V3 consequently reported as carrying the
+**byte-identical** weight line (which *weakens* the earlier "V2 now says 10"
+report rather than corroborating it), and changelog citations that are
+`google.com/search?q=…` **redirects** rather than the changelog. **What the
+disagreement DOES establish is the SHAPE:** both independently report a
+*conditional* weight and neither reports the flat row, and the shape is the
+load-bearing half because §7.5's enumeration always sends no `symbol`. **The
+charged 20 is the MAXIMUM over all three candidates** — correct-or-pessimistic
+under each, and **no further candidate below 20 can move the code**, which is
+the property that makes the task safe to leave open. Profiles §9 and
+`positions_binance.go`'s file comment both record all three readings.
+
+**Only a direct read closes #180:** the V3 endpoint page's own Weight line in a
+real browser (**not** the aggregated `/api/rest-api/trade` catalog, **not** a
+summarizer), or the venue's `X-MBX-USED-WEIGHT-1M` response header on testnet —
+the venue's actual accounting rather than its prose — which needs #171's
+credential. `developers.binance.com` still answers every headless fetcher with an
+AWS WAF JS challenge, and `list_connected_browsers` returned empty again this
+session.
+
+**Open work, unchanged otherwise:** #177 (FM-9's consumer — now unblocked in
+principle by nothing, still milestone 4's generation ladder); #184 (awaits its
+first real caller); #159 (at the next capture restart); #152 and #158
+(clock-bound, ~2026-09-30); the three standing operator decisions (the $20/$55
+live test, #171's Bybit testnet credential, §38f's off-host archive target).
+**Milestone 4 is ADMITTED but NOT SCHEDULED** — §47c's boundary is untouched by
+this session, and it is the part a later session silently widens. Capture **PID
+8495**, never rebuild over `bin/arblab`, `make ci` runs `-race` AND the ka
+staleness gate (needs node), cap `TLC_WORKERS` at 4, docs/i18n parity is
+`bun test`.
+
+---
+
+## Status (2026-08-05, session 107 — HISTORICAL): **#153 IS RULED AND CLOSED — `restart_boundary` SPLITS BY EVIDENCE, THE NEW `unsequenced_boundary` IS THE ONE VERDICT-NEUTRAL KIND, 22 MUTANTS WITH TWO SURVIVORS FOUND AND FIXED, `make ci` GREEN UNCACHED BOTH MODULES. #180 IS IN PROGRESS AND WAITING ON ONE PASTE FROM THE OPERATOR.**
 
 **#153, the ruling (record §71).** `restart_boundary` was one name over a
 PRODUCT of two properties — the `prev_last_seq == 0` claim, and whether a
