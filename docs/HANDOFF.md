@@ -1,6 +1,61 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-06, session 110): **`internal/risk` EXISTS — §4.1's RULES, THE GUARD USE CASE AND THE ACL ALL LAND (#198 items 2–4 of 11). 21 MUTANTS, ONE SURVIVOR FOUND AND FIXED, `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO. ONE OPERATOR RULING IS NOW OWED (§73j F9) AND NOTHING IS BLOCKED BY IT.**
+## Status (2026-08-06, session 111): **`GateAccountPosture` HAS A PRODUCER. #198 items 5, 6, 7 and 7a LAND — the attestation document, the leverage pin, the boot wiring and the endpoint roster. 15 MUTANTS, TWO REAL GAPS FOUND AND FIXED, `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO.**
+
+**Read `docs/superpowers/specs/2026-08-06-m4-198-account-posture.md` §73k
+first** — it carries this session's five findings (F10–F14) and the mutant table.
+
+**WHAT LANDED.** `internal/risk/infrastructure/attestation` (the Portfolio-Margin
+document and its verifying loader, no writer); the `leverage` pin on
+`InstrumentConfig` and the `portfolio_margin_attestation` two-act pin in §5.2's
+schema; `Config.PostureRequirement` and the REST-dialect → account-model mapping;
+a `posture` phase in `app/reconcile` between oms and reconcile; and
+`GateAccountPosture` **moved across `ExitClass`** into the produced arm, which is
+what that arm's comment has instructed since slice G2. The renderer prints every
+failed check by name.
+
+**THE SESSION'S FINDING — a gate's REFUSING paths were the untested ones.** Two
+mutants survived: a posture read and found WRONG reporting as passed, and a
+posture that could not be read at all reporting as passed. Every boot fixture in
+the repo served a clean posture, so both refusing paths were reachable and
+unasserted. Both are now pinned, and so is the DISTINCTION between them:
+read-and-wrong is `OutcomeNeedsOperator` and latches (§73c-3 forbids this engine
+repairing a posture, so no retry lifts it); could-not-be-read is `OutcomeFailed`,
+which a retry may answer. A third survivor (`M33`) is a documented unreachable
+interlock, left in place with its reason.
+
+**TWO OPERATOR QUESTIONS ARE NOW OWED, and they are one conversation** (task
+#199). §73j **F9**: per-symbol coverage is answered from the configured roster, so
+a flat Binance account refuses on `isAutoAddMargin` for every symbol — the gate
+that must pass before the first position opens cannot pass until one exists.
+§73k **F14**: all four Binance probes are on the FUTURES host and the
+`symbolConfig` codec refuses an empty array, so a spot-only Binance deployment
+cannot answer §4.1 at all. Nothing downstream is blocked by either.
+
+**THREE THINGS NOT TO RE-DERIVE.** The attestation copies #179's baseline shape
+correctly and is **not** equally strong — the baseline's chain mark falsifies it,
+and nothing here plays that role (F10; #171's credential is the loosening
+trigger). A deployment with **no derivative instrument is valid** — §5.2's venue
+block is singular, so that is the spot half of a cross-venue carry — and the
+empty roster reaches `risk/domain` as a stated fact (`RosterCoverage`) rather
+than as either unsafe default (F11). And this root's import fence forbade
+`internal/risk` while `declaredGates()` had listed the gate for five slices; the
+exemption is exact-path and **keyed to the gate it was granted for**, so it
+lapses when its reason does (F12).
+
+**STILL NOT DONE — items 8, 9, 10.** The §73g checklist as fixtures plus the
+remainder of the campaign; spec edits to v0.9.51; the final fresh `code_diff`
+review. Plus F9 and F14's ruling (item 11).
+
+**Everything below the venue codecs is still fixture-tested and has never met a
+real account** (§73f). Unchanged: three standing operator decisions, credentials
+deferred, capture **PID 8495**, never rebuild over `bin/arblab`, `make ci` runs
+`-race` AND the ka staleness gate (needs node), cap `TLC_WORKERS` at 4,
+docs/i18n parity is `bun test`. Docs stay at **v0.9.50** — no spec edits yet.
+
+---
+
+## Status (2026-08-06, session 110 — HISTORICAL): **`internal/risk` EXISTS — §4.1's RULES, THE GUARD USE CASE AND THE ACL ALL LAND (#198 items 2–4 of 11). 21 MUTANTS, ONE SURVIVOR FOUND AND FIXED, `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO. ONE OPERATOR RULING IS NOW OWED (§73j F9) AND NOTHING IS BLOCKED BY IT.**
 
 **Read `docs/superpowers/specs/2026-08-06-m4-198-account-posture.md` §73j
 first** — it carries this session's findings, the 21-mutant table, and the F9
