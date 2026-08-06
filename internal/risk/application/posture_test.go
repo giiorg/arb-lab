@@ -47,8 +47,9 @@ func observedAt(t *testing.T) clock.ServerTime {
 
 func requirement() domain.Requirement {
 	return domain.Requirement{
-		Venue:   testVenue,
-		Dialect: domain.DialectBinanceClassic,
+		Venue:    testVenue,
+		Dialect:  domain.DialectBinanceClassic,
+		Coverage: domain.RosterCoverageDerivatives,
 		Symbols: []domain.SymbolPin{
 			{Symbol: "BTCUSDT", Leverage: 5},
 			{Symbol: "ETHUSDT", Leverage: 3},

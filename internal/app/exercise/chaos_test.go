@@ -189,7 +189,7 @@ func chaosConfig(t *testing.T, dir, host string) string {
   "instruments": [
     {"venue": "binance", "product": "spot", "symbol": "BTCUSDT", "base": "BTC", "quote": "USDT"},
     {"venue": "binance", "product": "linear_perp", "contract": "linear", "symbol": "BTCUSDT",
-     "base": "BTC", "quote": "USDT"}
+     "base": "BTC", "quote": "USDT", "leverage": 5}
   ],
   "position_scopes": [
     {"venue": "binance", "product": "linear_perp", "settle": "USDT"}

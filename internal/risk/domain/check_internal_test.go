@@ -148,17 +148,17 @@ func TestRulesForRefusesAnUnknownDialectRatherThanReturningNothing(t *testing.T)
 	}
 }
 
-// dialectConsumesAttestation is derived from the table rather than restated as
-// a constant, so the two cannot disagree. This is the test that would catch a
+// ConsumesAttestation is derived from the table rather than restated as a
+// constant, so the two cannot disagree. This is the test that would catch a
 // constant reintroduced beside it.
 func TestDialectConsumesAttestationTracksTheTable(t *testing.T) {
-	if !dialectConsumesAttestation(DialectBinanceClassic) {
+	if !DialectBinanceClassic.ConsumesAttestation() {
 		t.Fatal("Binance classic has the Portfolio-Margin rule and must consume the attestation")
 	}
-	if dialectConsumesAttestation(DialectBybitUTA) {
+	if DialectBybitUTA.ConsumesAttestation() {
 		t.Fatal("Bybit UTA has no Portfolio-Margin rule and must not consume the attestation")
 	}
-	if dialectConsumesAttestation(Dialect("unknown")) {
+	if Dialect("unknown").ConsumesAttestation() {
 		t.Fatal("an unknown dialect consumes nothing")
 	}
 }

@@ -127,6 +127,73 @@ type SymbolPin struct {
 	Leverage int
 }
 
+// RosterCoverage says WHY the configured roster is the shape it is.
+//
+// # The carrier exists because an empty roster has two meanings
+//
+// ErrRosterEmpty refuses an empty roster, and the reason is sound: every
+// per-symbol rule folds over it, finds nothing, and reports a clean posture for
+// an account nobody looked at. But a deployment that configures NO derivative
+// instrument derives an empty roster legitimately — and that is not a corner
+// case here, because §5.2's venue block is singular, so one deployment is one
+// venue's account and the spot leg of a cross-venue carry is exactly such a
+// document.
+//
+// The two readings want opposite treatment and neither default is safe: refuse
+// the empty roster and a legitimate spot-only account can never boot; admit it
+// and a forgotten roster passes vacuously. So the discriminating fact is FORCED
+// into the type rather than inferred from `len(Symbols)`
+// ([[a-policy-with-no-carrier]]). The zero value names neither, and is refused.
+//
+// Both disagreements are refused too — derivatives with an empty roster, and no
+// derivatives with a populated one — so this cannot become a flag that says one
+// thing while the slice beside it says another.
+type RosterCoverage uint8
+
+const (
+	// RosterCoverageUnspecified is the zero value: nobody said. Refused, so a
+	// Requirement built without thinking about coverage cannot claim the
+	// permissive reading.
+	RosterCoverageUnspecified RosterCoverage = iota
+
+	// RosterCoverageDerivatives is the ordinary case: this deployment trades
+	// derivative instruments and Symbols lists every one of them.
+	RosterCoverageDerivatives
+
+	// RosterCoverageNoDerivatives states that this deployment configures no
+	// derivative instrument at all, so Symbols is empty as a FACT.
+	//
+	// The account-wide rules still run — they are most of the Bybit table, and
+	// two of them (spot-margin mode, per-coin borrow) are about the spot leg
+	// specifically. What lapses is only the per-symbol half, and it lapses
+	// because there are no symbols, which the verdict's Evaluated count still
+	// reports honestly.
+	RosterCoverageNoDerivatives
+)
+
+const maxRosterCoverage = RosterCoverageNoDerivatives
+
+// Validate reports whether c names a declared member, excluding the zero.
+func (c RosterCoverage) Validate() error {
+	if c == RosterCoverageUnspecified || c > maxRosterCoverage {
+		return fmt.Errorf("roster coverage %d: %w", uint8(c), ErrRosterCoverageInvalid)
+	}
+	return nil
+}
+
+// String implements fmt.Stringer.
+func (c RosterCoverage) String() string {
+	switch c {
+	case RosterCoverageUnspecified:
+		return "RosterCoverageUnspecified"
+	case RosterCoverageDerivatives:
+		return "RosterCoverageDerivatives"
+	case RosterCoverageNoDerivatives:
+		return "RosterCoverageNoDerivatives"
+	}
+	return fmt.Sprintf("RosterCoverage(%d)", uint8(c))
+}
+
 // Requirement is §4.1's posture requirement for one venue's account.
 type Requirement struct {
 	// Venue is whose account this is about, checked against the report's.
@@ -134,6 +201,10 @@ type Requirement struct {
 
 	// Dialect selects the rule table.
 	Dialect Dialect
+
+	// Coverage says whether Symbols is empty as a FACT or by omission. See
+	// RosterCoverage — neither reading of an empty roster is safe as a default.
+	Coverage RosterCoverage
 
 	// Symbols is the CONFIGURED roster and its pins — the coverage answer for
 	// every per-symbol rule.
@@ -165,8 +236,20 @@ func (r Requirement) Validate() error {
 	if err := r.PortfolioMargin.Validate(); err != nil {
 		return fmt.Errorf("posture requirement on %s: %w", r.Venue, err)
 	}
-	if len(r.Symbols) == 0 {
+	if err := r.Coverage.Validate(); err != nil {
+		return fmt.Errorf("posture requirement on %s: %w", r.Venue, err)
+	}
+	// Both directions of disagreement are refused, so the carrier cannot say one
+	// thing while the slice beside it says another. The first is the vacuity
+	// ErrRosterEmpty has always guarded; the second is a caller that stated "no
+	// derivatives" and then listed some, where believing the flag would silently
+	// drop every per-symbol check for symbols it was handed.
+	if r.Coverage == RosterCoverageDerivatives && len(r.Symbols) == 0 {
 		return fmt.Errorf("posture requirement on %s: %w", r.Venue, ErrRosterEmpty)
+	}
+	if r.Coverage == RosterCoverageNoDerivatives && len(r.Symbols) > 0 {
+		return fmt.Errorf("posture requirement on %s states no derivatives and lists %d symbol(s): %w",
+			r.Venue, len(r.Symbols), ErrRosterCoverageDisagrees)
 	}
 
 	seen := make(map[string]struct{}, len(r.Symbols))
@@ -185,7 +268,7 @@ func (r Requirement) Validate() error {
 		}
 	}
 
-	if r.PortfolioMargin != AttestationUnstated && !dialectConsumesAttestation(r.Dialect) {
+	if r.PortfolioMargin != AttestationUnstated && !r.Dialect.ConsumesAttestation() {
 		return fmt.Errorf("posture requirement on %s (%s) pins %s: %w",
 			r.Venue, r.Dialect, r.PortfolioMargin, ErrAttestationNotConsumed)
 	}

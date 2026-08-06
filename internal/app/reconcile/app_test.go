@@ -27,6 +27,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 	"github.com/giiorg/arb-lab/internal/platform/observability"
 	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
+	riskdomain "github.com/giiorg/arb-lab/internal/risk/domain"
 )
 
 // This file checks the composition root (slice G2, record §58).
@@ -126,7 +127,7 @@ func validConfig(t *testing.T, journal string) Config {
 		Instruments: []InstrumentConfig{
 			{Venue: "binance", Product: ids.ProductSpot, Symbol: "BTCUSDT", Base: "BTC", Quote: "USDT"},
 			{Venue: "binance", Product: ids.ProductLinearPerp, Contract: ids.ContractLinear,
-				Symbol: "BTCUSDT", Base: "BTC", Quote: "USDT"},
+				Symbol: "BTCUSDT", Base: "BTC", Quote: "USDT", Leverage: 5},
 		},
 		PositionScopes: []ScopeConfig{
 			{Venue: "binance", Product: ids.ProductLinearPerp, Settle: "USDT"},
@@ -277,6 +278,46 @@ func TestConfigRefusals(t *testing.T) {
 			c.SpotBaseline = &BaselinePinConfig{Path: "/var/lib/arblab/baseline.json",
 				SHA256: testPinDigest[:32]}
 		}},
+
+		// #198 item 6 — the leverage pin. Zero is the value the field takes
+		// when the line is simply absent from the file, which is the case that
+		// matters: an unpinned leverage reads as "any leverage is acceptable".
+		{"leverage pin missing on a derivative", ErrConfigFieldUnset, func(c *Config) {
+			c.Instruments[1].Leverage = 0
+		}},
+		{"leverage pin negative on a derivative", ErrConfigFieldUnset, func(c *Config) {
+			c.Instruments[1].Leverage = -5
+		}},
+		// The mirror: pinned where no §4.1 rule is scoped to read it.
+		{"leverage pin on a spot instrument", ErrConfigFieldInvalid, func(c *Config) {
+			c.Instruments[0].Leverage = 5
+		}},
+
+		// #198 item 5 — the Portfolio-Margin attestation pin. Same four shape
+		// rows as spot_baseline's, because it is the same two-act pin.
+		{"attestation path unset", ErrConfigFieldUnset, func(c *Config) {
+			c.PortfolioMarginAttestation = &AttestationPinConfig{SHA256: testPinDigest}
+		}},
+		{"attestation sha256 unset", ErrConfigFieldUnset, func(c *Config) {
+			c.PortfolioMarginAttestation = &AttestationPinConfig{Path: "/var/lib/arblab/pm.json"}
+		}},
+		{"attestation sha256 not hex", ErrConfigFieldInvalid, func(c *Config) {
+			c.PortfolioMarginAttestation = &AttestationPinConfig{Path: "/var/lib/arblab/pm.json",
+				SHA256: strings.Repeat("zx", 32)}
+		}},
+		{"attestation sha256 wrong length", ErrConfigFieldInvalid, func(c *Config) {
+			c.PortfolioMarginAttestation = &AttestationPinConfig{Path: "/var/lib/arblab/pm.json",
+				SHA256: testPinDigest[:32]}
+		}},
+		// The consumption rule, and the pin is WELL-FORMED for spot_baseline's
+		// reason: a malformed one would answer the same sentinel one check
+		// earlier and this row would never reach the rule it is named after.
+		// Bybit UTA's table has no Portfolio-Margin row, so nothing reads it.
+		{"attestation pinned on an account model that reads none", ErrConfigFieldInvalid, func(c *Config) {
+			c.Venue.Dialect = DialectBybit
+			c.PortfolioMarginAttestation = &AttestationPinConfig{Path: "/var/lib/arblab/pm.json",
+				SHA256: testPinDigest}
+		}},
 	}
 	for _, c := range cases {
 		cfg := validConfig(t, "/var/lib/arblab/journal.db")
@@ -308,6 +349,127 @@ func TestConfigAcceptsTheSpotPairsPositiveControls(t *testing.T) {
 	spotless.SpotSettle = config.Duration{}
 	if err := spotless.Validate(); err != nil {
 		t.Errorf("a spotless deployment with neither spot field must validate: %v", err)
+	}
+}
+
+// TestPostureRequirementDerivesTheRosterFromTheDerivatives is #198 item 6's
+// central claim, and the fixture is built against the collapse checklist rather
+// than against the code:
+//
+//   - TWO derivative instruments, with DIFFERENT pins (5 and 3). One would make
+//     "every derivative" and "the first derivative" the same roster, and equal
+//     pins would make "this symbol's pin" and "the first symbol's pin" the same
+//     value ([[fixture-count-of-one-collapses]], and §73g item 1 — the same
+//     collapse risk/domain's own M14 was aimed at).
+//   - The two derivatives carry DIFFERENT symbols, and the spot row carries the
+//     symbol of the FIRST of them. A derivation that filtered on something
+//     other than the product would pick the spot row up and nothing about the
+//     symbol list would look wrong.
+//   - The pins are asserted per symbol, not as a set: a roster built by pairing
+//     the right symbols with the wrong pins passes any length or membership
+//     check.
+func TestPostureRequirementDerivesTheRosterFromTheDerivatives(t *testing.T) {
+	t.Parallel()
+
+	cfg := validConfig(t, "/var/lib/arblab/journal.db")
+	cfg.Instruments = []InstrumentConfig{
+		{Venue: "binance", Product: ids.ProductSpot, Symbol: "BTCUSDT", Base: "BTC", Quote: "USDT"},
+		{Venue: "binance", Product: ids.ProductLinearPerp, Contract: ids.ContractLinear,
+			Symbol: "BTCUSDT", Base: "BTC", Quote: "USDT", Leverage: 5},
+		{Venue: "binance", Product: ids.ProductLinearPerp, Contract: ids.ContractLinear,
+			Symbol: "ETHUSDT", Base: "ETH", Quote: "USDT", Leverage: 3},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+
+	req, err := cfg.PostureRequirement(riskdomain.AttestationOff)
+	if err != nil {
+		t.Fatalf("PostureRequirement: %v", err)
+	}
+	if req.Venue != cfg.Venue.Venue {
+		t.Errorf("requirement names %s, config names %s", req.Venue, cfg.Venue.Venue)
+	}
+	if req.Dialect != riskdomain.DialectBinanceClassic {
+		t.Errorf("dialect = %s, want %s", req.Dialect, riskdomain.DialectBinanceClassic)
+	}
+	if req.Coverage != riskdomain.RosterCoverageDerivatives {
+		t.Errorf("coverage = %s, want %s", req.Coverage, riskdomain.RosterCoverageDerivatives)
+	}
+	if req.PortfolioMargin != riskdomain.AttestationOff {
+		t.Errorf("the attestation must arrive as handed, got %s", req.PortfolioMargin)
+	}
+
+	want := map[string]int{"BTCUSDT": 5, "ETHUSDT": 3}
+	if len(req.Symbols) != len(want) {
+		t.Fatalf("roster = %+v, want %d rows (the spot leg must not be on it)", req.Symbols, len(want))
+	}
+	for _, p := range req.Symbols {
+		pin, listed := want[p.Symbol]
+		if !listed {
+			t.Errorf("roster carries %s, which is not a configured derivative", p.Symbol)
+			continue
+		}
+		if p.Leverage != pin {
+			t.Errorf("%s pinned at %d, config says %d", p.Symbol, p.Leverage, pin)
+		}
+	}
+}
+
+// TestPostureRequirementOnASpotOnlyDeploymentStatesTheEmptyRoster is the shape
+// the first cut of validatePosture refused outright (record §73k F11). §5.2's
+// venue block is singular, so a cross-venue carry's spot half is exactly this
+// document, and refusing it would refuse a deployment this project is building
+// toward.
+//
+// The claim is not merely "it validates": it is that the empty roster arrives
+// at risk/domain as a STATED fact. A requirement that validated with the
+// unspecified zero would be one where "no derivatives configured" and "the
+// roster was forgotten" are the same value again.
+func TestPostureRequirementOnASpotOnlyDeploymentStatesTheEmptyRoster(t *testing.T) {
+	t.Parallel()
+
+	cfg := spotOnly(t, "/var/lib/arblab/journal.db")
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("a spot-only deployment must validate: %v", err)
+	}
+
+	req, err := cfg.PostureRequirement(riskdomain.AttestationOff)
+	if err != nil {
+		t.Fatalf("PostureRequirement: %v", err)
+	}
+	if req.Coverage != riskdomain.RosterCoverageNoDerivatives {
+		t.Errorf("coverage = %s, want %s", req.Coverage, riskdomain.RosterCoverageNoDerivatives)
+	}
+	if len(req.Symbols) != 0 {
+		t.Errorf("roster = %+v, want empty", req.Symbols)
+	}
+}
+
+// TestPostureDialectIsStatedAndNotDefaulted covers the mapping both ways plus
+// its refusal. The two rows must DISAGREE — a mapping that returned the Binance
+// model for everything would satisfy a one-row table.
+func TestPostureDialectIsStatedAndNotDefaulted(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		in   Dialect
+		want riskdomain.Dialect
+	}{
+		{DialectBinance, riskdomain.DialectBinanceClassic},
+		{DialectBybit, riskdomain.DialectBybitUTA},
+	} {
+		got, err := tc.in.PostureDialect()
+		if err != nil {
+			t.Errorf("%s: %v", tc.in, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("%s maps to %s, want %s", tc.in, got, tc.want)
+		}
+	}
+	if _, err := Dialect("kraken").PostureDialect(); !errors.Is(err, ErrDialectUnknown) {
+		t.Errorf("an unknown dialect must have no account model, got %v", err)
 	}
 }
 
@@ -786,6 +948,12 @@ func pinnedCleanBaseline(t *testing.T, account, apiKey, apiSecret string) *Basel
 // a baseline is pinned: no scope is required for spot, so Assert enumerates
 // nothing, and an empty journal has no dispatched order to join. The clean
 // boot test pins one and serves the single wallet read that buys.
+// It is ALSO the deployment shape #198 item 6 nearly outlawed and did not: a
+// document with no derivative instrument derives an empty §4.1 posture roster,
+// and the first cut of validatePosture refused it. §5.2's venue block is
+// singular, so this is the ordinary shape of a cross-venue carry's spot half —
+// the empty roster is now carried to risk/domain as a STATED fact instead
+// (RosterCoverageNoDerivatives), and this fixture is the reason that was found.
 func spotOnly(t *testing.T, journal string) Config {
 	t.Helper()
 	cfg := validConfig(t, journal)

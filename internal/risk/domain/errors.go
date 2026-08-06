@@ -65,13 +65,35 @@ var (
 	// no venue, or no observed-at instant.
 	ErrReportUnusable = errors.New("risk: posture report is unusable")
 
-	// ErrRosterEmpty reports a requirement with no configured symbols.
+	// ErrRosterEmpty reports a requirement that claims to trade derivatives and
+	// then lists none.
 	//
 	// The empty roster is the vacuity this whole file is written against: every
 	// per-symbol rule folds over it, finds nothing to check, and reports a
-	// clean posture for an account nobody looked at. A deployment that trades
-	// no symbols does not need a posture gate.
-	ErrRosterEmpty = errors.New("risk: posture requirement configures no symbols")
+	// clean posture for an account nobody looked at.
+	//
+	// It fires on the CARRIER's word rather than on `len(Symbols)` alone, and
+	// the distinction is #198 item 6's finding: a deployment configuring only
+	// spot instruments derives an empty roster legitimately, and §5.2's venue
+	// block being singular makes that the ordinary shape of a cross-venue
+	// carry's spot half. See RosterCoverage.
+	ErrRosterEmpty = errors.New("risk: posture requirement trades derivatives and configures no symbols")
+
+	// ErrRosterCoverageInvalid reports a requirement whose roster coverage is
+	// the unspecified zero or an undeclared value.
+	//
+	// The zero is refused rather than read as either meaning, because a
+	// Requirement built without thinking about coverage must not get the
+	// permissive one by default.
+	ErrRosterCoverageInvalid = errors.New("risk: posture requirement roster coverage is not a declared value")
+
+	// ErrRosterCoverageDisagrees reports a requirement stating that no
+	// derivative is configured while listing symbols.
+	//
+	// The mirror refusal of ErrRosterEmpty, and it is the one that keeps the
+	// carrier from becoming a flag nobody checks: believing it over the slice
+	// would silently drop every per-symbol rule for symbols the caller supplied.
+	ErrRosterCoverageDisagrees = errors.New("risk: posture requirement roster coverage disagrees with its symbols")
 
 	// ErrRosterDuplicate reports one symbol configured twice — two pins for one
 	// symbol, where the one that loses is decided by iteration order.

@@ -13,6 +13,8 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
+	riskdomain "github.com/giiorg/arb-lab/internal/risk/domain"
+	"github.com/giiorg/arb-lab/internal/risk/infrastructure/attestation"
 )
 
 // Config is §5.2's configuration schema for the OMS, which is the construct three
@@ -102,12 +104,61 @@ type Config struct {
 	// not the same claim.
 	SpotSettle config.Duration `json:"spot_settle,omitempty"`
 
+	// PortfolioMarginAttestation pins the operator's Portfolio-Margin
+	// attestation document — the path AND its sha256, for the same reason
+	// SpotBaseline carries both: the digest is the second act (task #198,
+	// record §73c-1).
+	//
+	// OPTIONAL as a FIELD and not as a fact. Absence is not a config error and
+	// it is not a pass either: it produces domain.AttestationUnstated, and
+	// §4.1's Binance rule table turns that into a named gate refusal
+	// (ReasonUnattested) that tells the operator which fact to establish. A
+	// required field would report the same account state as a malformed
+	// document, which sends them to the wrong file.
+	//
+	// Refused on a deployment whose account model has no check that reads it —
+	// see Validate. A pinned document nothing consumes is #179's precedent
+	// exactly: the operator who pinned it believes a check is running.
+	PortfolioMarginAttestation *AttestationPinConfig `json:"portfolio_margin_attestation,omitempty"`
+
 	// WatchdogSilence is §7.4's host-silence threshold and StopBudget is what each
 	// phase's closer is allotted. boot.Sequence refuses a total teardown at or
 	// above the threshold, because an ordinary restart that outlasts it presents
 	// to the watchdog exactly as a dead host.
 	WatchdogSilence config.Duration `json:"watchdog_silence"`
 	StopBudget      config.Duration `json:"stop_budget"`
+}
+
+// AttestationPinConfig is the Portfolio-Margin attestation document's pin.
+//
+// Both halves required, on BaselinePinConfig's argument — and here the digest
+// carries more weight than it does there, because the attestation package has no
+// writer to guard with O_EXCL. It is the only thing standing between "somebody
+// edited the file" and "the gate consumes a different claim".
+type AttestationPinConfig struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+}
+
+func (p AttestationPinConfig) validate() error {
+	if p.Path == "" {
+		return fmt.Errorf("portfolio_margin_attestation.path: %w", ErrConfigFieldUnset)
+	}
+	if p.SHA256 == "" {
+		return fmt.Errorf("portfolio_margin_attestation.sha256: %w", ErrConfigFieldUnset)
+	}
+	raw, err := hex.DecodeString(p.SHA256)
+	if err != nil || len(raw) != sha256.Size {
+		return fmt.Errorf("portfolio_margin_attestation.sha256 %q is not a 32-byte hex digest: %w",
+			p.SHA256, ErrConfigFieldInvalid)
+	}
+	return nil
+}
+
+// Pin is the loader's value. A method rather than a shared struct so that the
+// config schema and the attestation package can be edited independently.
+func (p AttestationPinConfig) Pin() attestation.Pin {
+	return attestation.Pin{Path: p.Path, SHA256: p.SHA256}
 }
 
 // BaselinePinConfig is the spot baseline document's pin: where it is and what
@@ -167,6 +218,39 @@ func (d Dialect) Validate() error {
 		return nil
 	}
 	return fmt.Errorf("dialect %q: %w", string(d), ErrDialectUnknown)
+}
+
+// PostureDialect is which ACCOUNT MODEL §4.1's rule table is keyed on.
+//
+// # A REST dialect and an account model are not the same thing
+//
+// This field selects a signer, a codec and two readers — all properties of the
+// wire. risk/domain's Dialect selects a rule table, which is a property of the
+// account: Binance's classic segregated account and its Portfolio Margin
+// account speak the SAME REST dialect and require different postures. So the
+// mapping is stated rather than assumed, and it is stated here, in the root
+// that already owns the four-collaborators-from-one-name collapse.
+//
+// # Mapping binance → binance-classic is not circular
+//
+// It looks like it assumes the answer the posture is about to check. It does
+// not: the binance-classic table's Portfolio-Margin row is precisely what
+// refuses an account that turns out to be the other model. Choosing the classic
+// table for a PM account produces a REFUSAL, not a wrong pass — the rules are
+// asserted against the model we require, and the gate's whole job is to find
+// out we are not on it.
+//
+// An unknown dialect is an error and never a default, on ErrDialectUnknown's
+// standing argument: a default table would judge an account model nobody
+// selected.
+func (d Dialect) PostureDialect() (riskdomain.Dialect, error) {
+	switch d {
+	case DialectBinance:
+		return riskdomain.DialectBinanceClassic, nil
+	case DialectBybit:
+		return riskdomain.DialectBybitUTA, nil
+	}
+	return "", fmt.Errorf("dialect %q has no account posture model: %w", string(d), ErrDialectUnknown)
 }
 
 // VenueConfig is §5.2's per-venue block: "endpoints, key refs (never inline
@@ -314,6 +398,36 @@ type InstrumentConfig struct {
 	// check then enforces against everything else and fails far from here.
 	Base  fixedpoint.Asset `json:"base"`
 	Quote fixedpoint.Asset `json:"quote"`
+
+	// Leverage is §4.1's operator-declared leverage pin, as a whole multiplier.
+	// REQUIRED on a derivative instrument, REFUSED on a spot one.
+	//
+	// # It lives on the instrument row rather than in a posture roster
+	//
+	// §4.1's per-symbol checks are answered over the CONFIGURED roster rather
+	// than over the venue's returned rows (record §73b F4), so something has to
+	// say which symbols those are. A separate `posture.symbols` block would be a
+	// second list beside this one, and the disagreement that matters between
+	// them is the silent one: an instrument this deployment trades that the
+	// posture block does not name is a symbol traded without its margin mode,
+	// position mode or leverage ever being checked. Deriving the roster from the
+	// instruments makes that unrepresentable, which is the same argument
+	// risk/domain's SymbolPin makes about the roster and the pins being one
+	// list — here applied one level out.
+	//
+	// It is NOT the argument PositionScopes rejects. That enumeration is
+	// deliberately independent because it exists to find exposure on
+	// instruments this system never heard of, so a scope derived from the
+	// configured set could not widen past it. This roster asks the opposite
+	// question — "was every symbol we will trade verified" — where the derived
+	// set is exactly the right one and cannot omit a traded symbol.
+	//
+	// The pin itself is not derivable and is stated here or nowhere: a pin read
+	// from the venue at first boot compares the venue against itself and is
+	// self-consistent under every mutation, so it cannot fail on the one boot
+	// that would catch an account configured wrong before this system touched it
+	// (record §73b F3).
+	Leverage int `json:"leverage,omitempty"`
 }
 
 // Instrument is the identity this row names.
@@ -470,11 +584,60 @@ func (c Config) Validate() error {
 	if !hasSpot && c.SpotBaseline != nil {
 		return fmt.Errorf("spot_baseline configured with no spot instrument: %w", ErrConfigFieldInvalid)
 	}
+	if err := c.validatePosture(); err != nil {
+		return err
+	}
 	if c.WatchdogSilence.Duration() <= 0 {
 		return fmt.Errorf("watchdog_silence: %w", ErrConfigFieldUnset)
 	}
 	if c.StopBudget.Duration() <= 0 {
 		return fmt.Errorf("stop_budget: %w", ErrConfigFieldUnset)
+	}
+	return nil
+}
+
+// validatePosture is §4.1's half of the document: whether a requirement can be
+// derived from it at all, and whether this account model reads an attestation.
+//
+// # A deployment with no derivative instrument is VALID, and that is a finding
+//
+// The first cut of this refused one, on the argument that a cash-and-carry
+// system's reconcile boot exists to establish that a carry can be traded. The
+// argument does not survive §5.2's own schema: the venue block is SINGULAR — "a
+// deployment trading two venues runs two of these, against two journals" — so
+// the spot half of a cross-venue carry is a document with no perpetual in it,
+// and refusing it would refuse a shape this project is actively building toward.
+// A narrowing carries an argument, and that one was mine rather than the spec's
+// (record §73k F11).
+//
+// So the empty roster is passed to risk/domain as a STATED fact instead, which
+// is why RosterCoverage exists. What lapses on such a deployment is the
+// per-symbol half of §4.1; the account-wide rules still run, and two of Bybit's
+// (spot-margin mode, per-coin borrow) are about the spot leg specifically.
+func (c Config) validatePosture() error {
+	// Derived here and passed rather than re-derived by the caller: the roster
+	// and the carrier must come from ONE read of the instrument table, or the
+	// pair can disagree about a document neither of them changed.
+	if _, err := c.PostureRequirement(riskdomain.AttestationUnstated); err != nil {
+		return fmt.Errorf("§4.1 posture requirement: %w", err)
+	}
+	if c.PortfolioMarginAttestation == nil {
+		return nil
+	}
+	if err := c.PortfolioMarginAttestation.validate(); err != nil {
+		return err
+	}
+	// Asked of the DIALECT's own rule table rather than restated as "binance
+	// only": the table is where the Portfolio-Margin row lives, so a second
+	// account model that grows one is covered without an edit here, and one
+	// that loses it stops accepting the pin without an edit either.
+	dialect, err := c.Venue.Dialect.PostureDialect()
+	if err != nil {
+		return err
+	}
+	if !dialect.ConsumesAttestation() {
+		return fmt.Errorf("portfolio_margin_attestation pinned on a %s account, whose posture has no check that reads it: %w",
+			dialect, ErrConfigFieldInvalid)
 	}
 	return nil
 }
@@ -559,7 +722,71 @@ func (c InstrumentConfig) validate() error {
 	if err := c.Instrument().Validate(); err != nil {
 		return err
 	}
-	return venue.InstrumentAssets{Base: c.Base, Quote: c.Quote}.Validate()
+	if err := (venue.InstrumentAssets{Base: c.Base, Quote: c.Quote}).Validate(); err != nil {
+		return err
+	}
+	// §3.6 rule 4 in its most literal form: an unpinned leverage reads as "any
+	// leverage is acceptable", which computes the safety gate in our favour with
+	// nothing failing. risk/domain refuses a non-positive pin too — this is the
+	// same claim made where the operator can see which LINE of their file is
+	// missing it, rather than as a requirement they never typed.
+	if c.Product.IsPerp() && c.Leverage <= 0 {
+		return fmt.Errorf("leverage pin %d on a derivative instrument: %w", c.Leverage, ErrConfigFieldUnset)
+	}
+	// A pin on a spot row is refused rather than ignored, on #179's precedent:
+	// no §4.1 rule is scoped to a spot symbol, so an operator who wrote one
+	// believes a check is running that is not.
+	if !c.Product.IsPerp() && c.Leverage != 0 {
+		return fmt.Errorf("leverage pin %d on a spot instrument, which no posture rule reads: %w",
+			c.Leverage, ErrConfigFieldInvalid)
+	}
+	return nil
+}
+
+// PostureRequirement builds §4.1's requirement for this deployment, given the
+// attestation the root loaded (or domain.AttestationUnstated where no document
+// is pinned).
+//
+// The roster is DERIVED from the derivative instruments — see
+// InstrumentConfig.Leverage for why that direction is the safe one here and the
+// opposite of PositionScopes'. Spot rows are excluded because no §4.1 rule is
+// scoped to a spot symbol; §7.5 asserts the spot leg against a recorded
+// baseline instead.
+//
+// It returns a VALIDATED requirement or an error, so a caller cannot hand the
+// guard one that would evaluate nothing.
+func (c Config) PostureRequirement(attested riskdomain.Attestation) (riskdomain.Requirement, error) {
+	dialect, err := c.Venue.Dialect.PostureDialect()
+	if err != nil {
+		return riskdomain.Requirement{}, err
+	}
+	var symbols []riskdomain.SymbolPin
+	for _, in := range c.Instruments {
+		if !in.Product.IsPerp() {
+			continue
+		}
+		symbols = append(symbols, riskdomain.SymbolPin{Symbol: in.Symbol, Leverage: in.Leverage})
+	}
+	// The carrier comes from the SAME walk that built the roster, so the two
+	// cannot describe different documents. Stating it from `len(symbols)` is
+	// what makes it a fact about this config rather than a flag somebody set:
+	// the reading it rules out — an empty roster meaning "forgotten" — is not
+	// expressible here, because the roster is derived rather than typed.
+	coverage := riskdomain.RosterCoverageDerivatives
+	if len(symbols) == 0 {
+		coverage = riskdomain.RosterCoverageNoDerivatives
+	}
+	req := riskdomain.Requirement{
+		Venue:           c.Venue.Venue,
+		Dialect:         dialect,
+		Coverage:        coverage,
+		Symbols:         symbols,
+		PortfolioMargin: attested,
+	}
+	if err := req.Validate(); err != nil {
+		return riskdomain.Requirement{}, err
+	}
+	return req, nil
 }
 
 func (r ResolutionConfig) validate(v VenueConfig) error {

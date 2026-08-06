@@ -215,14 +215,19 @@ func rulesFor(d Dialect) ([]rule, error) {
 	return nil, fmt.Errorf("posture dialect %q: %w", string(d), ErrDialectUnknown)
 }
 
-// dialectConsumesAttestation reports whether the dialect's table has a rule
-// that reads the operator attestation.
+// ConsumesAttestation reports whether the dialect's table has a rule that reads
+// the operator attestation.
 //
 // It is derived from the table rather than restated as a per-dialect constant,
 // because a constant and a table are two statements of one fact and the pair
-// disagrees the moment either moves. Requirement.Validate is its caller: a
-// pinned attestation nothing consumes is refused (#179's precedent).
-func dialectConsumesAttestation(d Dialect) bool {
+// disagrees the moment either moves.
+//
+// Two callers, one question, two different moments. Requirement.Validate is the
+// last line of defence: a pinned attestation nothing consumes is refused
+// (#179's precedent). The composition root asks it FIRST, so the operator gets
+// a refusal that names the config field they wrote rather than one that names a
+// requirement they never typed — which is why this is exported.
+func (d Dialect) ConsumesAttestation() bool {
 	rules, err := rulesFor(d)
 	if err != nil {
 		// An unknown dialect consumes nothing, and Requirement.Validate has

@@ -183,7 +183,7 @@ func reconcileConfig(t *testing.T) reconcile.Config {
 		Instruments: []reconcile.InstrumentConfig{
 			{Venue: "binance", Product: ids.ProductSpot, Symbol: "BTCUSDT", Base: "BTC", Quote: "USDT"},
 			{Venue: "binance", Product: ids.ProductLinearPerp, Contract: ids.ContractLinear,
-				Symbol: "BTCUSDT", Base: "BTC", Quote: "USDT"},
+				Symbol: "BTCUSDT", Base: "BTC", Quote: "USDT", Leverage: 5},
 		},
 		PositionScopes: []reconcile.ScopeConfig{
 			{Venue: "binance", Product: ids.ProductLinearPerp, Settle: "USDT"},

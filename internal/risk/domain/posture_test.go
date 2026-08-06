@@ -77,8 +77,9 @@ func unsaid(s domain.Setting, scope domain.Scope, subject string, p domain.Prese
 
 func binanceRequirement() domain.Requirement {
 	return domain.Requirement{
-		Venue:   testBinance,
-		Dialect: domain.DialectBinanceClassic,
+		Venue:    testBinance,
+		Dialect:  domain.DialectBinanceClassic,
+		Coverage: domain.RosterCoverageDerivatives,
 		Symbols: []domain.SymbolPin{
 			{Symbol: firstSymbol, Leverage: firstPin},
 			{Symbol: secondSymbol, Leverage: secondPin},
@@ -89,8 +90,9 @@ func binanceRequirement() domain.Requirement {
 
 func bybitRequirement() domain.Requirement {
 	return domain.Requirement{
-		Venue:   testBybit,
-		Dialect: domain.DialectBybitUTA,
+		Venue:    testBybit,
+		Dialect:  domain.DialectBybitUTA,
+		Coverage: domain.RosterCoverageDerivatives,
 		Symbols: []domain.SymbolPin{
 			{Symbol: firstSymbol, Leverage: firstPin},
 			{Symbol: secondSymbol, Leverage: secondPin},
@@ -315,6 +317,46 @@ func TestCheckEmptyReportFailsEveryCheckAndCountsThem(t *testing.T) {
 				t.Fatalf("Satisfied() = %v, %v; want false, nil", ok, err)
 			}
 		})
+	}
+}
+
+// TestCheckOnADeploymentWithNoDerivativesStillRunsTheAccountRules is the claim
+// RosterCoverageNoDerivatives has to earn. Admitting an empty roster is only
+// safe if what remains is a real check — otherwise the carrier is just a way to
+// spell the vacuous verdict ErrRosterEmpty existed to refuse.
+//
+// The instrument is an EXACT COUNT rather than a "> 0"
+// ([[a-known-exact-count-is-an-instrument]]): Bybit's table is four
+// account-scope rules, two asset-scope rules and three symbol-scope ones, so
+// against an empty report the derivatives roster of two evaluates 4 + 2 + 3×2 =
+// 12 and the no-derivatives one evaluates 4 + 2 + 0 = 6. A count that came out
+// at 12 would mean the roster was ignored; one at 4 would mean the asset rules
+// went with it; one at 0 would be the vacuum itself.
+func TestCheckOnADeploymentWithNoDerivativesStillRunsTheAccountRules(t *testing.T) {
+	spotOnly := bybitRequirement()
+	spotOnly.Coverage = domain.RosterCoverageNoDerivatives
+	spotOnly.Symbols = nil
+
+	rep := domain.Report{Venue: testBybit, ObservedAt: observedAt(t)}
+	v := checkT(t, spotOnly, rep)
+
+	const accountAndAssetRules = 4 + 2
+	if v.Evaluated != accountAndAssetRules {
+		t.Fatalf("evaluated %d, want %d — the account-wide and per-asset rules, and no per-symbol ones:\n%s",
+			v.Evaluated, accountAndAssetRules, v)
+	}
+	if len(v.Failures) != accountAndAssetRules {
+		t.Fatalf("failed %d of %d, want all of them:\n%s", len(v.Failures), accountAndAssetRules, v)
+	}
+	for _, f := range v.Failures {
+		if f.Scope == domain.ScopeSymbol {
+			t.Errorf("a deployment with no derivatives produced a per-symbol failure: %+v", f)
+		}
+	}
+	// And it is still a REFUSAL. The point of admitting the empty roster is
+	// that the remaining rules judge the account, not that the gate opens.
+	if ok, err := v.Satisfied(); ok || err != nil {
+		t.Fatalf("Satisfied() = %v, %v; want false, nil", ok, err)
 	}
 }
 
@@ -733,6 +775,27 @@ func TestRequirementValidate(t *testing.T) {
 			name: "an attestation value nobody declared",
 			edit: func(r *domain.Requirement) { r.PortfolioMargin = domain.Attestation(9) },
 			want: domain.ErrAttestationInvalid,
+		},
+		{
+			// The carrier's zero. Refused rather than read as either meaning,
+			// which is what stops a hand-built Requirement getting the
+			// permissive one for free.
+			name: "coverage unstated",
+			edit: func(r *domain.Requirement) { r.Coverage = domain.RosterCoverageUnspecified },
+			want: domain.ErrRosterCoverageInvalid,
+		},
+		{
+			name: "coverage is not a declared value",
+			edit: func(r *domain.Requirement) { r.Coverage = domain.RosterCoverage(9) },
+			want: domain.ErrRosterCoverageInvalid,
+		},
+		{
+			// The MIRROR of the empty-roster refusal, and the one that keeps
+			// the carrier honest: believing the flag over the slice would drop
+			// every per-symbol rule for symbols the caller supplied.
+			name: "no derivatives claimed while listing symbols",
+			edit: func(r *domain.Requirement) { r.Coverage = domain.RosterCoverageNoDerivatives },
+			want: domain.ErrRosterCoverageDisagrees,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

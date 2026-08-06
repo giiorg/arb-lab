@@ -570,15 +570,138 @@ without it `EqualFold` and `==` are the same predicate.
 
 ---
 
+## §73k — What items 5 and 6 found (session 111)
+
+Item 5 landed `internal/risk/infrastructure/attestation` (the document, the
+verifying loader, no writer) and item 6 landed the config half: the leverage
+pin on the instrument row, the `portfolio_margin_attestation` two-act pin, the
+REST-dialect → account-model mapping, and `Config.PostureRequirement`.
+
+### F10 — The attestation has no falsifier, and #179's did
+
+**Not a defect. A limit, recorded so nobody re-derives it as a strength.**
+
+§73c-1 specified the attestation as *"invalidated by events, never by time"*,
+copying #179's baseline shape. The copy is right about form and the two
+documents are not equally strong, because #179's clause had a **carrier** and
+this one does not:
+
+| | #179 baseline | PM attestation |
+|---|---|---|
+| Bound to the deployment | venue, account, credential | venue, account, credential |
+| Bound to a **history** | journal chain mark — a journal that moved refuses it | **nothing** |
+| Event that invalidates the fact | a journaled order — observable | somebody enabling Portfolio Margin — **reaches no endpoint this system reads** |
+
+So a loaded attestation is a point-in-time claim whose entire strength is the
+operator's word plus the deliberateness of the two acts. Every available
+mitigation is worse than saying so: a time bound is what §73c-1 ruled out, and
+inferring the fact from a sibling endpoint's behaviour is the unread-venue
+reasoning §73c-1 rejected. **The loosening trigger is #171's credential** — if
+any classic `/fapi` response distinguishes a PM account, the attestation gains a
+cross-check and stops being the only evidence.
+
+Two things follow in the code and are worth not undoing. `Method` is required
+and never parsed, because it is the whole inputs-not-conclusions content here —
+`off` alone is a bare assertion, `off` plus which screen was read is a claim the
+next operator can re-check. And `Observer` is required, because this is the one
+input in the system with no machine provenance at all.
+
+### F11 — "Every deployment has a perpetual" is a narrowing I invented
+
+**Found by a test fixture refusing to die, which is the useful part.**
+
+Item 6 derives §4.1's per-symbol roster from the configured DERIVATIVE
+instruments (F4's ruling, one level out). `Requirement.Validate` refuses an
+empty roster, so the first cut refused a document with no derivative
+instrument at config-validate time, arguing that a cash-and-carry system's
+reconcile boot exists to establish that a carry can be traded.
+
+The argument does not survive §5.2's own schema. **`Config.Venue` is singular**
+— *"a deployment trading two venues runs two of these, against two journals"* —
+so the spot half of a cross-venue carry IS a document with no perpetual in it,
+and §45 is an active workstream. The refusal would have outlawed a shape this
+project is building toward, and it was my narrowing rather than the spec's
+([[a-narrowing-carries-an-argument]]).
+
+The tell arrived before the reasoning did: `spotOnly`, a fixture six lifecycle
+tests use, stopped validating. Rewriting it into `perpOnly` "fixed" the suite
+and would have buried the finding — two of its callers are about the spot
+baseline specifically and could not follow.
+
+**The fix is a carrier, not a default.** `RosterCoverage` is now a field on
+`Requirement`, because an empty roster has two meanings and NEITHER default is
+safe: refuse it and a legitimate spot-only account can never boot, admit it and
+a forgotten roster passes vacuously ([[a-policy-with-no-carrier]]). The zero
+value names neither and is refused, and **both** disagreements are refused —
+derivatives-with-empty-roster (the old `ErrRosterEmpty`) and
+no-derivatives-while-listing-symbols (new), so the flag cannot say one thing
+while the slice beside it says another.
+
+What is admitted is not a vacuous verdict, and that claim is its own test with
+an exact count: Bybit's table is 4 account-scope + 2 asset-scope + 3
+symbol-scope rules, so against an empty report a two-symbol roster evaluates
+**12** and a no-derivatives one evaluates **6**. 12 would mean the roster was
+ignored, 4 would mean the asset rules went with it, 0 would be the vacuum
+itself ([[a-known-exact-count-is-an-instrument]]).
+
+### F12 — This root's import fence forbids the context it is about to produce a gate for
+
+`app/reconcile/imports_test.go` lists `internal/risk` among the roots §7.5's
+boot *"must not depend on"*, and has since slice G2 — while `declaredGates()`
+in the same package has listed `boot.GateAccountPosture` for just as long. **The
+fence and the gate roster disagreed**, and item 7 cannot land until it is
+resolved.
+
+The fence's argument is that importing another context is how a boot phase
+acquires a collaborator that **assumes** the posture this phase has not yet
+decided. That is true of marketdata, strategy, treasury and audit. It is false
+of §4.1's posture guard, which does not assume the boot posture — it is one of
+the eight gates that **decides** it. The entry generalised from one family of
+cases to a whole directory ([[an-exemption-argued-from-one-cause]]).
+
+**The exemption is keyed to its reason rather than to its argument**, which is
+the part worth copying:
+
+- **exact package paths, never prefixes** — a new package under `risk/` is
+  refused until somebody adds it and argues;
+- **`TestRiskExemptionIsKeyedToTheGateItProduces`** fails if this root imports
+  `risk` while not declaring `GateAccountPosture`, so the permission lapses
+  automatically the day its reason does ([[a-rejections-reason-can-expire]]);
+- **a negative control** — five permitted paths and a fence that stopped biting
+  both report zero hits, so `forbidden()` is asked directly about risk packages
+  NOT on the list.
+
+Stated rather than implied: a second use case added INSIDE one of the five
+exempted packages still rides in free.
+
+### Two smaller decisions
+
+- **No `Write` in the attestation package.** #179 needed `arblab baseline
+  record` because minting a baseline meant reading the venue and the journal.
+  This document has no input a machine holds — every field is the operator's own
+  word, and the config digest is one `sha256sum`. A writer beside the loader
+  would be a producer with no caller, which is what F6 refused one layer out.
+  The two-act rule survives without it: the digest is pinned, so an in-place
+  edit refuses until the config edit is taken.
+- **`binance` → `binance-classic` is not circular.** It looks like it assumes
+  the answer the posture is about to check. Choosing the classic table for a PM
+  account produces a **refusal** (the Portfolio-Margin row), not a wrong pass —
+  the rules are asserted against the model we require, and the gate's job is to
+  find out we are not on it.
+
+---
+
 ## §73h — Work items
 
 1. ~~`engine/venue` posture codecs, both venues + roster rows + weights.~~ **DONE** (session 109)
 2. ~~`internal/risk/domain` — the rules and the verdict type.~~ **DONE** (session 110)
 3. ~~`internal/risk/application` + ports — the guard use case.~~ **DONE** (session 110)
 4. ~~`internal/risk/infrastructure/driven` — the ACL adapter.~~ **DONE** (session 110)
-5. The Portfolio-Margin attestation document + its two-act config pin.
-6. The leverage pin config field (absent → refuse).
-7. `app/reconcile` wiring; `GateAccountPosture` moves across `ExitClass`.
+5. ~~The Portfolio-Margin attestation document + its two-act config pin.~~ **DONE** (session 111)
+6. ~~The leverage pin config field (absent → refuse).~~ **DONE** (session 111) — plus
+   `RosterCoverage`, which F11 forced.
+7. `app/reconcile` wiring; `GateAccountPosture` moves across `ExitClass`. The
+   import fence is already narrowed (F12), so this is no longer blocked.
    - **7a.** Declare `account_info` and `spot_margin_status` in every rate-limit
      profile (endpoint scope, `DimensionRequests`, 1s window) — §73i F7. Without
      them the first posture read's fold is refused by name.
