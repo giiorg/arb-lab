@@ -3,6 +3,7 @@ package venue_test
 import (
 	"errors"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/giiorg/arb-lab/internal/engine/venue"
@@ -36,15 +37,20 @@ import (
 // Binance
 // ---------------------------------------------------------------------------
 
-// TestBinanceEncodePostureIsFourProbesOnTheFuturesFamily pins the step list.
+// TestBinanceEncodePostureIsThreeProbesOnTheFuturesFamily pins the step list.
 //
 // The step COUNT and the probe set are the claim record §73c-2 quotes a cost
-// from — "one Binance posture read is four calls and 80 weight" — so they are
+// from — "one Binance posture read is three calls and 60 weight" — so they are
 // asserted rather than described. A probe silently dropped from EncodePosture
 // would leave its setting unobserved, and an unobserved setting is one the
 // domain reports as absent: a refusal, but for the wrong reason and naming the
 // wrong endpoint.
-func TestBinanceEncodePostureIsFourProbesOnTheFuturesFamily(t *testing.T) {
+//
+// It is also the test that pins record §73o's fold: /fapi/v3/positionRisk is NOT
+// among these paths, because it does not publish the field §4.1 was reading from
+// it. Re-adding a per-symbol probe against a POSITION enumeration would restore
+// a gate no flat account can pass.
+func TestBinanceEncodePostureIsThreeProbesOnTheFuturesFamily(t *testing.T) {
 	steps, err := binanceCodec(t).EncodePosture()
 	if err != nil {
 		t.Fatalf("EncodePosture: %v", err)
@@ -53,7 +59,6 @@ func TestBinanceEncodePostureIsFourProbesOnTheFuturesFamily(t *testing.T) {
 		venue.PostureProbeMultiAssets,
 		venue.PostureProbePositionDual,
 		venue.PostureProbeSymbolConfig,
-		venue.PostureProbePositionRisk,
 	}
 	if len(steps) != len(want) {
 		t.Fatalf("EncodePosture rendered %d steps, want %d", len(steps), len(want))
@@ -73,8 +78,16 @@ func TestBinanceEncodePostureIsFourProbesOnTheFuturesFamily(t *testing.T) {
 	// own constant: a total derived from the same constant the encoder used
 	// stays self-consistent under any change to it, which is the shared-
 	// constant vacuity this repo has paid for.
-	if weight != 80 {
-		t.Errorf("one posture read charges %d weight, want 80 — record §73c-2 quotes this figure", weight)
+	if weight != 60 {
+		t.Errorf("one posture read charges %d weight, want 60 — record §73c-2 quotes this figure", weight)
+	}
+	for _, step := range steps {
+		if step.Call.Path == "/fapi/v3/positionRisk" || step.Call.Path == "/fapi/v2/positionRisk" {
+			t.Errorf("posture probes %s — no posture setting is read from a POSITION "+
+				"enumeration (record §73o): V3 does not publish isAutoAddMargin at all, "+
+				"and neither version answers for a configured symbol holding no position",
+				step.Call.Path)
+		}
 	}
 }
 
@@ -153,22 +166,37 @@ func TestBinanceDecodePositionDualSeparatesAbsentFromFalse(t *testing.T) {
 	}
 }
 
-// TestBinanceDecodeSymbolConfigReadsEverySymbol is the cardinality claim.
+// TestBinanceDecodeSymbolConfigReadsEverySymbol is the cardinality claim, and
+// since record §73o it is also where ALL THREE per-symbol settings are read.
 //
-// Two symbols, and the SECOND is the one out of posture. A decoder that reads
-// the first row and returns passes a one-row fixture and this one's first half.
+// Two symbols, and the SECOND is the one out of posture on every setting. A
+// decoder that reads the first row and returns passes a one-row fixture and this
+// one's first half.
+//
+// Two fixture dimensions are deliberately varied rather than pinned, because
+// pinning either makes a real distinction unreachable:
+//
+//   - auto-add-margin DIFFERS between the two symbols. Pinned to one value,
+//     "this row's field" and "the first row's field" are the same answer, which
+//     is the defect the margin-mode and leverage columns already guard against.
+//   - the two rows state it in DIFFERENT JSON TYPES — a bool and a string.
+//     Binance's own spec-generated connector declares this one field a bool on
+//     symbolConfig and a string on positionRisk V2, so a fixture using one type
+//     throughout cannot tell a decoder that reads both from one that reads the
+//     type the fixture happened to pick (record §73o).
 func TestBinanceDecodeSymbolConfigReadsEverySymbol(t *testing.T) {
 	body := `[
-		{"symbol":"BTCUSDT","marginType":"ISOLATED","leverage":3},
-		{"symbol":"ETHUSDT","marginType":"CROSSED","leverage":20}
+		{"symbol":"BTCUSDT","marginType":"ISOLATED","leverage":3,"isAutoAddMargin":false},
+		{"symbol":"ETHUSDT","marginType":"CROSSED","leverage":20,"isAutoAddMargin":"true"}
 	]`
 	obs, err := binanceCodec(t).DecodePostureStep(venue.PostureProbeSymbolConfig,
 		transport.Response{Body: []byte(body)})
 	if err != nil {
 		t.Fatalf("DecodePostureStep: %v", err)
 	}
-	if len(obs) != 4 {
-		t.Fatalf("produced %d observations, want 4 (margin mode + leverage, per symbol)", len(obs))
+	if len(obs) != 6 {
+		t.Fatalf("produced %d observations, want 6 (margin mode + leverage + "+
+			"auto-add-margin, per symbol)", len(obs))
 	}
 
 	got := map[string]string{}
@@ -182,10 +210,12 @@ func TestBinanceDecodeSymbolConfigReadsEverySymbol(t *testing.T) {
 		got[o.Subject+"/"+o.Setting.String()] = o.Value
 	}
 	for key, want := range map[string]string{
-		"BTCUSDT/PostureMarginMode": "ISOLATED",
-		"BTCUSDT/PostureLeverage":   "3",
-		"ETHUSDT/PostureMarginMode": "CROSSED",
-		"ETHUSDT/PostureLeverage":   "20",
+		"BTCUSDT/PostureMarginMode":    "ISOLATED",
+		"BTCUSDT/PostureLeverage":      "3",
+		"BTCUSDT/PostureAutoAddMargin": "false",
+		"ETHUSDT/PostureMarginMode":    "CROSSED",
+		"ETHUSDT/PostureLeverage":      "20",
+		"ETHUSDT/PostureAutoAddMargin": "true",
 	} {
 		if got[key] != want {
 			t.Errorf("%s = %q, want %q", key, got[key], want)
@@ -193,13 +223,60 @@ func TestBinanceDecodeSymbolConfigReadsEverySymbol(t *testing.T) {
 	}
 }
 
+// TestBinanceSymbolConfigSeparatesAbsentAutoAddMarginFromFalse.
+//
+// `false` is the PASSING value, so this is the same claim the multiAssets test
+// makes and the reason the wire field is not a plain bool. It matters more here
+// than it did before record §73o: under the old positionRisk probe a symbol with
+// no answer produced NO observation and the domain's roster coverage check
+// refused it as Unobserved. Now the row exists and the FIELD is missing, which
+// is a different file for an operator to open — a wire-shape change rather than
+// a coverage gap — and it must arrive as Unstated, not as a pass.
+func TestBinanceSymbolConfigSeparatesAbsentAutoAddMarginFromFalse(t *testing.T) {
+	body := `[{"symbol":"BTCUSDT","marginType":"ISOLATED","leverage":3}]`
+	obs, err := binanceCodec(t).DecodePostureStep(venue.PostureProbeSymbolConfig,
+		transport.Response{Body: []byte(body)})
+	if err != nil {
+		t.Fatalf("DecodePostureStep: %v", err)
+	}
+	var found bool
+	for _, o := range obs {
+		if o.Setting != venue.PostureAutoAddMargin {
+			continue
+		}
+		found = true
+		if o.Presence != venue.PostureAbsent {
+			t.Errorf("an OMITTED isAutoAddMargin decoded as %s — false is the value "+
+				"§4.1 requires, so reading absence as it passes the check the field exists "+
+				"to make", o.Presence)
+		}
+		if o.Value != "" {
+			t.Errorf("absent auto-add-margin carries value %q, want empty", o.Value)
+		}
+	}
+	// The observation must be PRODUCED, not skipped: a decoder that emits
+	// nothing for the missing field leaves the domain to infer the gap from a
+	// roster count, which reports the wrong reason and names no field.
+	if !found {
+		t.Fatalf("no auto-add-margin observation for a row that omitted the field; got %+v", obs)
+	}
+}
+
 // TestBinanceDecodeSymbolConfigRefusesEmptyAndDuplicate.
 //
-// The empty case is the interesting one and it is asymmetric with positionRisk
-// below: symbolConfig is unscoped configuration, so no rows is a wrong-shaped
-// answer, while positionRisk enumerates positions and no rows is a flat
-// account. Reading the first as an empty roster would give a report with no
-// per-symbol observations, against which every per-symbol rule folds vacuously.
+// The empty case is the interesting one: symbolConfig is unscoped
+// CONFIGURATION, so no rows is a wrong-shaped answer. Reading it as an empty
+// roster would give a report with no per-symbol observations, against which
+// every per-symbol rule folds vacuously.
+//
+// The duplicate refusal is NOT record §73n F19 reopened, and the distinction is
+// the point. F19 folded the two POSITION enumerations to report duplicate rows,
+// because a hedge-mode account answers with a LONG row and a SHORT row and that
+// duplicate is evidence of a §4.1 violation. symbolConfig holds one row per
+// symbol whatever the position mode is, so a duplicate here has no documented
+// venue behaviour behind it — and the two rows could disagree about the very
+// setting being asserted. Binance hedge mode is still named directly, and
+// account-wide, by the dualSidePosition probe.
 func TestBinanceDecodeSymbolConfigRefusesEmptyAndDuplicate(t *testing.T) {
 	codec := binanceCodec(t)
 
@@ -218,78 +295,42 @@ func TestBinanceDecodeSymbolConfigRefusesEmptyAndDuplicate(t *testing.T) {
 	}
 }
 
-// TestBinanceDecodePositionRiskAllowsEmptyAndRefusesContradiction.
+// TestBinanceAutoAddMarginRefusesAContradictionBetweenTheTwoSpellings.
 //
-// Two claims. An empty enumeration is a flat account and produces NO
-// observations — deliberately not an "auto-add-margin is off" conclusion, which
-// is the flat-account vacuity of record §73b F4. And a row stating both
-// spellings of auto-add-margin with different answers is refused, because
+// A row stating both spellings with different answers is refused, because
 // picking a spelling there silently picks an answer.
-func TestBinanceDecodePositionRiskAllowsEmptyAndRefusesContradiction(t *testing.T) {
+//
+// The fixture carries TWO symbols and the contradiction is on the SECOND. With
+// one row, "refuses a contradicting row" and "refuses if the FIRST row
+// contradicts" are the same claim, and a decoder that checked only the row it
+// started with would pass.
+func TestBinanceAutoAddMarginRefusesAContradictionBetweenTheTwoSpellings(t *testing.T) {
 	codec := binanceCodec(t)
 
-	empty, err := codec.DecodePostureStep(venue.PostureProbePositionRisk,
-		transport.Response{Body: []byte(`[]`)})
-	if err != nil {
-		t.Fatalf("empty positionRisk: %v", err)
-	}
-	if len(empty) != 0 {
-		t.Fatalf("a flat account produced %d observations, want 0 — an absent symbol must "+
-			"reach the domain's roster check as MISSING, not as a passing value", len(empty))
-	}
-
-	contradiction := `[{"symbol":"BTCUSDT","isAutoAddMargin":"true","autoAddMargin":false}]`
-	if _, err := codec.DecodePostureStep(venue.PostureProbePositionRisk,
-		transport.Response{Body: []byte(contradiction)}); !errors.Is(err, venue.ErrPostureUnreadable) {
+	contradiction := `[
+		{"symbol":"BTCUSDT","marginType":"ISOLATED","leverage":3,"isAutoAddMargin":"false","autoAddMargin":false},
+		{"symbol":"ETHUSDT","marginType":"ISOLATED","leverage":3,"isAutoAddMargin":"true","autoAddMargin":false}
+	]`
+	err := postureDecodeErr(t, codec, contradiction)
+	if !errors.Is(err, venue.ErrPostureUnreadable) {
 		t.Errorf("contradictory auto-add-margin error = %v, want ErrPostureUnreadable", err)
+	}
+	// The refusal must name the symbol it is about. A read refused over a
+	// message naming no symbol sends an operator to every configured row.
+	if err != nil && !strings.Contains(err.Error(), "ETHUSDT") {
+		t.Errorf("contradiction error = %q, want it to name ETHUSDT", err)
 	}
 
 	// Positive control: the two spellings agreeing is not an error, or the
 	// refusal above would be a predicate that objects to everything.
-	agree := `[{"symbol":"BTCUSDT","isAutoAddMargin":"false","autoAddMargin":false}]`
-	obs, err := codec.DecodePostureStep(venue.PostureProbePositionRisk,
+	agree := `[{"symbol":"BTCUSDT","marginType":"ISOLATED","leverage":3,"isAutoAddMargin":"false","autoAddMargin":false}]`
+	obs, err := codec.DecodePostureStep(venue.PostureProbeSymbolConfig,
 		transport.Response{Body: []byte(agree)})
 	if err != nil {
 		t.Fatalf("agreeing spellings: %v", err)
 	}
-	if len(obs) != 1 || obs[0].Value != "false" || obs[0].Setting != venue.PostureAutoAddMargin {
-		t.Fatalf("agreeing spellings = %+v, want one PostureAutoAddMargin %q", obs, "false")
-	}
-}
-
-// TestBinanceDecodePositionRiskReportsBothSidesOfAHedgedSymbol is F19's Binance
-// half, and the mirror of the Bybit test below (record §73n).
-//
-// Profiles §9 records the cause verbatim: "A hedge-mode account answers with a
-// LONG row and a SHORT row for one symbol." Hedge mode is a §4.1 violation, so
-// refusing the read here discarded the three probes already decoded — including
-// the account-wide dualSidePosition answer that names the same violation — and
-// reported the whole posture as unestablishable rather than as refused.
-func TestBinanceDecodePositionRiskReportsBothSidesOfAHedgedSymbol(t *testing.T) {
-	body := `[
-		{"symbol":"BTCUSDT","positionSide":"LONG","isAutoAddMargin":"false"},
-		{"symbol":"BTCUSDT","positionSide":"SHORT","isAutoAddMargin":"true"}
-	]`
-	obs, err := binanceCodec(t).DecodePostureStep(venue.PostureProbePositionRisk,
-		transport.Response{Body: []byte(body)})
-	if err != nil {
-		t.Fatalf("DecodePostureStep: %v", err)
-	}
-	if len(obs) != 2 {
-		t.Fatalf("produced %d observations, want 2 (one per hedge row)", len(obs))
-	}
-	// The DISAGREEING answers both survive. Keeping either one would answer
-	// §4.1's auto-add-margin question for this symbol from a row picked here.
-	var words []string
-	for _, o := range obs {
-		if o.Subject != "BTCUSDT" || o.Setting != venue.PostureAutoAddMargin {
-			t.Fatalf("observation %+v, want BTCUSDT auto-add-margin", o)
-		}
-		words = append(words, o.Value)
-	}
-	sort.Strings(words)
-	if len(words) != 2 || words[0] != "false" || words[1] != "true" {
-		t.Fatalf("auto-add-margin words = %v, want both rows' answers", words)
+	if got := postureOne(t, obs, "BTCUSDT", venue.PostureAutoAddMargin); got.Value != "false" {
+		t.Fatalf("agreeing spellings gave auto-add-margin %q, want %q", got.Value, "false")
 	}
 }
 
@@ -299,16 +340,111 @@ func TestBinanceDecodePositionRiskReportsBothSidesOfAHedgedSymbol(t *testing.T) 
 // contradiction — the domain's own comparison folds case, and refusing here
 // would lose the whole read over a spelling. The contradiction test above is the
 // negative control that this fold does not admit a real disagreement.
+//
+// The word travels VERBATIM. Normalising it here would hide which of the two the
+// venue actually sent, and the domain's own comparison is what folds case.
 func TestBinanceAutoAddMarginFoldsCaseAcrossTheTwoSpellings(t *testing.T) {
-	body := `[{"symbol":"BTCUSDT","isAutoAddMargin":"FALSE","autoAddMargin":false}]`
-	obs, err := binanceCodec(t).DecodePostureStep(venue.PostureProbePositionRisk,
+	body := `[{"symbol":"BTCUSDT","marginType":"ISOLATED","leverage":3,"isAutoAddMargin":"FALSE","autoAddMargin":false}]`
+	obs, err := binanceCodec(t).DecodePostureStep(venue.PostureProbeSymbolConfig,
 		transport.Response{Body: []byte(body)})
 	if err != nil {
 		t.Fatalf("DecodePostureStep: %v", err)
 	}
-	if len(obs) != 1 || obs[0].Value != "FALSE" {
-		t.Fatalf("observations = %+v, want one carrying the venue's own word verbatim", obs)
+	if got := postureOne(t, obs, "BTCUSDT", venue.PostureAutoAddMargin); got.Value != "FALSE" {
+		t.Fatalf("auto-add-margin = %q, want the venue's own word %q verbatim", got.Value, "FALSE")
 	}
+}
+
+// TestBinanceAutoAddMarginRefusesAShapeThatIsNeitherBoolNorString.
+//
+// The decoder accepts two JSON types because Binance declares two, and this is
+// the boundary that makes that a reading rather than a shrug: any OTHER shape is
+// an ERROR naming the field, not a nil.
+//
+// A nil would decay into "the venue did not state it" — which is a true sentence
+// about a DIFFERENT world, the one where the key is missing. Both refuse, so no
+// posture is wrongly passed either way; what differs is which document the
+// operator opens, and a wire-shape change and a coverage gap are not the same
+// file (record §73j's two-axis failure vocabulary).
+//
+// The positive control is the whole point of the case list: `false` and
+// `"false"` must both still decode, or "refuses a bad shape" is satisfied by a
+// decoder that refuses everything.
+func TestBinanceAutoAddMarginRefusesAShapeThatIsNeitherBoolNorString(t *testing.T) {
+	codec := binanceCodec(t)
+	row := func(value string) string {
+		return `[{"symbol":"BTCUSDT","marginType":"ISOLATED","leverage":3,"isAutoAddMargin":` + value + `}]`
+	}
+
+	for _, bad := range []string{`1`, `0`, `{}`, `[]`, `{"enabled":false}`} {
+		err := postureDecodeErr(t, codec, row(bad))
+		if !errors.Is(err, venue.ErrPostureUnreadable) {
+			t.Errorf("isAutoAddMargin %s: error = %v, want ErrPostureUnreadable", bad, err)
+		}
+		if err != nil && !strings.Contains(err.Error(), "isAutoAddMargin") {
+			t.Errorf("isAutoAddMargin %s: error = %q, want it to name the field", bad, err)
+		}
+	}
+
+	for _, good := range []struct {
+		json     string
+		want     string
+		presence venue.PosturePresence
+	}{
+		{`false`, "false", venue.PostureStated},
+		{`true`, "true", venue.PostureStated},
+		{`"false"`, "false", venue.PostureStated},
+		// An explicit null is an ABSENT field, not a bad shape — and the
+		// presence is what says so, since the value is "" either way.
+		{`null`, "", venue.PostureAbsent},
+	} {
+		obs, err := codec.DecodePostureStep(venue.PostureProbeSymbolConfig,
+			transport.Response{Body: []byte(row(good.json))})
+		if err != nil {
+			t.Fatalf("isAutoAddMargin %s: %v", good.json, err)
+		}
+		got := postureOne(t, obs, "BTCUSDT", venue.PostureAutoAddMargin)
+		if got.Value != good.want || got.Presence != good.presence {
+			t.Errorf("isAutoAddMargin %s decoded as %s %q, want %s %q",
+				good.json, got.Presence, got.Value, good.presence, good.want)
+		}
+	}
+}
+
+// postureDecodeErr decodes a symbolConfig body and returns the error, failing
+// the test if the decode unexpectedly SUCCEEDED — which a bare `err != nil`
+// check would report as a passing case.
+func postureDecodeErr(t *testing.T, codec venue.AccountPostureCodec, body string) error {
+	t.Helper()
+	obs, err := codec.DecodePostureStep(venue.PostureProbeSymbolConfig,
+		transport.Response{Body: []byte(body)})
+	if err == nil {
+		t.Fatalf("decode succeeded and produced %+v, want a refusal", obs)
+	}
+	return err
+}
+
+// postureOne returns the single (subject, setting) observation, failing the test
+// if there is not exactly one.
+//
+// It does NOT collapse into a string helper returning "" for a missing
+// observation: "" is also what an ABSENT field carries, so a `want ""` case and
+// a decoder that produced no observation at all would be indistinguishable —
+// which is precisely the claim the null case below is making.
+func postureOne(t *testing.T, obs []venue.PostureObservation,
+	subject string, setting venue.PostureSetting) venue.PostureObservation {
+	t.Helper()
+	var found []venue.PostureObservation
+	for _, o := range obs {
+		if o.Subject == subject && o.Setting == setting {
+			found = append(found, o)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("%s/%s: %d observations, want exactly 1 (all: %+v)",
+			subject, setting, len(found), obs)
+	}
+	return found[0]
 }
 
 // TestBinanceRefusesBybitProbes covers the grouped case in the decode switch.
@@ -548,7 +684,6 @@ func TestBybitRefusesBinanceProbes(t *testing.T) {
 	for _, probe := range []venue.PostureProbe{
 		venue.PostureProbeMultiAssets,
 		venue.PostureProbeSymbolConfig,
-		venue.PostureProbePositionRisk,
 		venue.PostureProbePositionDual,
 	} {
 		if _, err := codec.DecodePostureStep(probe,

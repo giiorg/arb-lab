@@ -3,10 +3,12 @@ package driven
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/giiorg/arb-lab/internal/engine/venue"
+	"github.com/giiorg/arb-lab/internal/engine/venue/transport"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
@@ -297,5 +299,124 @@ func TestNewAccountPostureRefusesAMissingClientOrVenue(t *testing.T) {
 	}
 	if _, err := NewAccountPosture(&fakeReader{}, ids.Venue("")); err == nil {
 		t.Fatal("an adapter with no venue must be refused")
+	}
+}
+
+// TestBybitHedgeRowsReachTheDomainAsAnAmbiguity is record §73n F19's
+// composition witness, and it lives here because record §73o took it away from
+// where it used to be.
+//
+// # Why a test that crosses three layers, when all three have their own suites
+//
+// F19 was a defect that existed only BETWEEN layers: the codec refused a hedged
+// position enumeration, so `ReasonAmbiguous` — a domain failure reason with a
+// fixture whose comment calls it "the posture violation this rule exists to
+// catch" — had no production path that could reach it. Both layers' suites were
+// green, and encoded contradictory premises about the same wire shape.
+//
+// Its end-to-end fixture was a hedge-mode BINANCE boot, whose duplicate came
+// from §4.1 reading `/fapi/v3/positionRisk`. Record §73o moved that read to
+// `symbolConfig`, which holds one row per symbol whatever the position mode is —
+// so Binance can no longer produce a duplicate per-symbol key at all, and the
+// only remaining producer is Bybit's `position/list`, which genuinely is a
+// position enumeration. Deleting the Binance fixture without replacing it would
+// have restored exactly the blind spot F19 was found in.
+//
+// # What it composes, and what it deliberately does not
+//
+// The REAL Bybit codec decodes a REAL hedge body; the REAL adapter translates
+// it; the REAL rules judge it. What is faked is only the transport. It stops
+// short of a boot, because the outcome half — a read-and-wrong posture LATCHES
+// rather than inviting a retry — is asserted end to end by
+// TestBootOnAHedgeModeAccountLatchesAndStillNamesEveryOtherCheck, which the
+// account-wide position-mode mismatch still drives.
+func TestBybitHedgeRowsReachTheDomainAsAnAmbiguity(t *testing.T) {
+	codec, err := venue.NewBybitOrderCodec(adapterVenue)
+	if err != nil {
+		t.Fatalf("NewBybitOrderCodec: %v", err)
+	}
+
+	// Hedge mode: one row per SIDE for one symbol, positionIdx 1 and 2.
+	// Profiles §9 records the shape; the two rows AGREE on leverage and
+	// auto-add-margin, so the position mode is the only key that doubles and
+	// the ambiguity cannot be an artefact of a disagreeing value.
+	const hedged = `{"result":{"list":[
+		{"symbol":"BTCUSDT","positionIdx":1,"leverage":"5","autoAddMargin":0},
+		{"symbol":"BTCUSDT","positionIdx":2,"leverage":"5","autoAddMargin":0}
+	]}}`
+	obs, err := codec.DecodePostureStep(venue.PostureProbePositionList,
+		transport.Response{Body: []byte(hedged)})
+	if err != nil {
+		t.Fatalf("the codec refused a hedged position enumeration: %v — that refusal IS "+
+			"F19, and it converts a posture READ AND FOUND WRONG into one that could "+
+			"not be read", err)
+	}
+
+	report, err := adapterT(t, &fakeReader{report: venueReport(t, obs...)}).
+		AccountPosture(ports.PostureScope{Venue: adapterVenue})
+	if err != nil {
+		t.Fatalf("AccountPosture: %v", err)
+	}
+
+	verdict, err := domain.Check(domain.Requirement{
+		Venue:    adapterVenue,
+		Dialect:  domain.DialectBybitUTA,
+		Coverage: domain.RosterCoverageDerivatives,
+		Symbols:  []domain.SymbolPin{{Symbol: "BTCUSDT", Leverage: 5}},
+	}, report)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+
+	var found *domain.Failure
+	for i, f := range verdict.Failures {
+		if f.Setting == domain.SettingPositionMode && f.Subject == "BTCUSDT" {
+			found = &verdict.Failures[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("no per-symbol position-mode failure for a HEDGED account:\n%s", verdict)
+	}
+	if found.Reason != domain.ReasonAmbiguous {
+		t.Fatalf("reason = %s, want ReasonAmbiguous — two answers on one key is not a "+
+			"mismatch against one of them, and picking either would answer §4.1's "+
+			"question from a row chosen here", found.Reason)
+	}
+	// BOTH answers are named. A failure reporting one of them has folded the
+	// two rows into an answer, which is the only thing F19's original argument
+	// ever actually forbade.
+	for _, side := range []string{"1", "2"} {
+		if !strings.Contains(found.Observed, side) {
+			t.Errorf("observed = %q, want both hedge sides named", found.Observed)
+		}
+	}
+
+	// The positive control: the same path with ONE row is not an ambiguity, or
+	// this test would pass against a rule that called every position-mode
+	// answer ambiguous.
+	oneWay, err := codec.DecodePostureStep(venue.PostureProbePositionList,
+		transport.Response{Body: []byte(
+			`{"result":{"list":[{"symbol":"BTCUSDT","positionIdx":0,"leverage":"5","autoAddMargin":0}]}}`)})
+	if err != nil {
+		t.Fatalf("one-way position list: %v", err)
+	}
+	clean, err := adapterT(t, &fakeReader{report: venueReport(t, oneWay...)}).
+		AccountPosture(ports.PostureScope{Venue: adapterVenue})
+	if err != nil {
+		t.Fatalf("AccountPosture (one-way): %v", err)
+	}
+	v2, err := domain.Check(domain.Requirement{
+		Venue:    adapterVenue,
+		Dialect:  domain.DialectBybitUTA,
+		Coverage: domain.RosterCoverageDerivatives,
+		Symbols:  []domain.SymbolPin{{Symbol: "BTCUSDT", Leverage: 5}},
+	}, clean)
+	if err != nil {
+		t.Fatalf("Check (one-way): %v", err)
+	}
+	for _, f := range v2.Failures {
+		if f.Setting == domain.SettingPositionMode && f.Reason == domain.ReasonAmbiguous {
+			t.Errorf("a ONE-WAY account reported ReasonAmbiguous on its position mode:\n%s", v2)
+		}
 	}
 }

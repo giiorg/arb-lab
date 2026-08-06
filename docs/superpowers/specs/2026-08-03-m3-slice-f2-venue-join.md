@@ -72,8 +72,29 @@ symbol does not exist; V3's absent row means the account is flat there. This
 surface is read to decide whether the venue holds exposure nothing here can
 account for, which makes *flat* a conclusion — and V3 is the version whose
 silence carries it. Profiles §4 has cited *"`GET /fapi/v2/positionRisk` (or v3)"*
-since 2026-07-20 for a different consumer (`isAutoAddMargin`), where the
-parenthetical is harmless; for this consumer the two are not interchangeable.
+since 2026-07-20 for a different consumer (`isAutoAddMargin`), ~~where the
+parenthetical is harmless~~; for this consumer the two are not interchangeable.
+
+> **STRUCK 2026-08-06 (task #199 item 1, record §73o). The parenthetical was not
+> harmless — it was the defect, and this sentence is where it was written down
+> and dismissed in one breath.** `GET /fapi/v3/positionRisk` does not publish
+> `isAutoAddMargin` **at all** (Binance's spec-generated connector, confirming
+> this session's own twenty-field V3 transcription exactly), so §4.1's Binance
+> posture gate refused on **every** account for the three sessions between this
+> record and its correction. The correct sentence is: *for that consumer the two
+> are not interchangeable either, in the opposite direction — and neither of them
+> is right, because a POSITION enumeration cannot answer for a configured symbol
+> holding no position.* §4.1 now reads the setting from `GET
+> /fapi/v1/symbolConfig`.
+>
+> **Why it is worth striking rather than only superseding.** This paragraph did
+> the hard part — it noticed that two consumers read one endpoint and that the
+> versions are not interchangeable — and then spent one clause ruling the other
+> consumer out. A dismissal costs a clause and buys a premise nobody re-derives;
+> the falsifier was one grep of the other consumer's field list.
+> [[a-reassuring-claim-generalized-from-one-input]], and the second instance in
+> this project after §73k F14's *"Bybit is not symmetric — answerable
+> regardless"*. **Two now, both in records that were otherwise right.**
 
 A second fact came out of the verification and is recorded as evidence about the
 source rather than as a venue fact we depend on: the **V2 endpoint page still

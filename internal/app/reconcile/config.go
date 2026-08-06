@@ -257,7 +257,7 @@ func (d Dialect) Validate() error {
 // rather than through a value.
 //
 // It bites in both directions and on both venues, which is why it is derived
-// rather than listed: all four Binance probes ride the futures family, so a
+// rather than listed: all three Binance probes ride the futures family, so a
 // deployment trading only spot must still declare a futures endpoint (record
 // §73k F14); and on Bybit TWO probes ride spot while two ride linear-perp, so
 // either one-sided deployment is short one. §73k F14's note that Bybit is "not

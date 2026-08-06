@@ -85,9 +85,10 @@ type rule struct {
 //
 // The cell reads: `GET /fapi/v1/multiAssetsMargin`==false;
 // `GET /fapi/v1/symbolConfig`.marginType==ISOLATED; Portfolio-Margin OFF;
-// `positionRisk.isAutoAddMargin`==false; one-way
+// `symbolConfig.isAutoAddMargin`==false; one-way
 // `positionSide/dual`.dualSidePosition==false; configured leverage matches pin.
-// Six checks, six rows.
+// Six checks, six rows — and THREE of them ride symbolConfig, which is why six
+// checks need only three probes (record §73o).
 var binanceClassicRules = []rule{
 	{
 		setting: SettingMultiAssets,
@@ -123,7 +124,7 @@ var binanceClassicRules = []rule{
 		setting: SettingAutoAddMargin,
 		scope:   ScopeSymbol,
 		expect:  expectation{kind: expectWord, words: []string{"false"}},
-		why:     "Profiles §2: positionRisk.isAutoAddMargin==false (read-only, no REST setter)",
+		why:     "Profiles §2: symbolConfig.isAutoAddMargin==false (read-only, no REST setter)",
 	},
 }
 

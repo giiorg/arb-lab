@@ -67,13 +67,17 @@ const (
 	PostureProbeMultiAssets
 
 	// PostureProbeSymbolConfig is Binance GET /fapi/v1/symbolConfig — the
-	// per-symbol margin type and configured leverage.
+	// per-symbol margin type, configured leverage AND auto-add-margin.
+	//
+	// All three per-symbol settings come from this one call, and that is a
+	// correction rather than a convenience (record §73o). §4.1's auto-add-
+	// margin was read from GET /fapi/v3/positionRisk until 2026-08-06, when
+	// Binance's own spec-generated connector confirmed what Profiles §9's
+	// dated transcription had already listed: V3 does not publish the field.
+	// A POSITION enumeration also cannot answer for a symbol holding no
+	// position, which made the gate unpassable on every account (record §73j
+	// F9 — this is its Binance half, dissolved rather than ruled on).
 	PostureProbeSymbolConfig
-
-	// PostureProbePositionRisk is Binance GET /fapi/v3/positionRisk — read
-	// here ONLY for isAutoAddMargin, which Profiles §2 records as having no
-	// REST setter and no other read path.
-	PostureProbePositionRisk
 
 	// PostureProbePositionDual is Binance GET /fapi/v1/positionSide/dual —
 	// one-way vs Hedge position mode, which emits no venue event and is
@@ -119,8 +123,6 @@ func (p PostureProbe) String() string {
 		return "PostureProbeMultiAssets"
 	case PostureProbeSymbolConfig:
 		return "PostureProbeSymbolConfig"
-	case PostureProbePositionRisk:
-		return "PostureProbePositionRisk"
 	case PostureProbePositionDual:
 		return "PostureProbePositionDual"
 	case PostureProbeAccountInfo:

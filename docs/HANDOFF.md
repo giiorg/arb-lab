@@ -1,6 +1,73 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-06, session 114): **#198 ITEM 10 LANDS — THE FINAL `code_diff` REVIEW RETURNED NO-SHIP WITH TWO MAJORS, BOTH FOLDED. DOCS v0.9.52, SIX MUTANTS ALL CAUGHT, `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO. ONLY ITEM 11 (#199's OPERATOR RULING) REMAINS.**
+## Status (2026-08-06, session 115): **#199 ITEM 1 — THE OWED OPERATOR RULING WAS A DEFECT REPORT. §4.1's BINANCE GATE REFUSED ON EVERY ACCOUNT, NOT ONLY FLAT ONES. DOCS v0.9.53, NINE MUTANTS ALL CAUGHT, `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
+
+**Read `docs/superpowers/specs/2026-08-06-m4-198-account-posture.md` §73o
+first** — the verified field lists, the fold, the collapse checklist, the mutant
+table, and what it deliberately does NOT settle.
+
+**THE HEADLINE: A QUESTION FILED FOR AN OPERATOR TURNED OUT NOT TO BE A CHOICE.**
+Item 11 was to put four candidate rulings for §73j F9 / §73k F14 / §73m F18 to
+the user. Settling F18's underlying **fact** first removed most of the question.
+`GET /fapi/v3/positionRisk` **does not publish `isAutoAddMargin` at all** — so
+the probe was aimed at an endpoint without the field, and the gate refused on
+**every** Binance account: a flat symbol got no row (`ReasonUnobserved`), a
+positioned symbol got a row with the field missing (`ReasonUnstated`). F9's
+candidate 1 (*bootstrap a position per symbol*) would not have worked.
+
+**THE FOLD COSTS NOTHING.** `GET /fapi/v1/symbolConfig` publishes **all three**
+per-symbol settings for every configured symbol, position or not — and it was
+already being probed. So: the read moved, the fourth probe and its enum member
+were **deleted** (four probes → three, 80 weight → 60, six checks on three
+calls), and **#199's candidate 4 was superseded by something cheaper than
+itself.** A flat Binance account now boots clean, which no fixture in this repo
+could previously produce.
+
+**THE SOURCE IS THE OTHER HALF OF THE FINDING.** `developers.binance.com`
+answers every non-browser client with an **AWS WAF challenge** (#180's blocker,
+still total; the old `binance-docs.github.io` mirror now 302s into the same SPA).
+WebFetch was deliberately not used — §9 already holds two contradicting
+summarizer readings of this endpoint. The way in was
+**`github.com/binance/binance-connector-go`**, Binance's own connector whose
+models are generated from their OpenAPI spec: raw, version-controlled,
+venue-published text. Its V3 field list matches Profiles §9's dated 2026-08-03
+transcription **exactly**, so §9's twenty were never an abbreviation. **It
+carries no weight annotations at all, so #180 is untouched** — a source answers
+the questions it answers.
+
+**THE READING PASS FOUND WHERE THE DEFECT WAS DISMISSED.**
+`2026-08-03-m3-slice-f2-venue-join.md` — the record that *established* the V2/V3
+distinction — said of the other consumer: *"where the parenthetical is
+harmless."* Struck in place. **Second instance of one pattern in this project**,
+after §73k F14's *"Bybit is not symmetric — answerable regardless"*: a
+subordinate clause ruling a neighbouring consumer out, inside a record that is
+otherwise right. In both cases the falsifier was a grep of a file the slice
+already had.
+
+**ONE COVERAGE CONSEQUENCE WAS NOTICED RATHER THAN ABSORBED.** Deleting the
+Binance positionRisk posture read removed `ReasonAmbiguous`'s only **end-to-end**
+witness (symbolConfig holds one row per symbol whatever the position mode is;
+Binance hedge mode is still named account-wide by `dualSidePosition`).
+`TestBybitHedgeRowsReachTheDomainAsAnAmbiguity` replaces it — real codec, real
+ACL, real rules — because F19's lesson is that a between-layers defect is
+invisible to either layer's suite.
+
+**WHAT IS STILL OPEN, and #199 is now genuinely one question.** Whether a
+spot-only Binance deployment should have to route the futures family (F14/F20 —
+all three remaining probes ride it). Beside it, one **loosening trigger** for
+#171: whether Bybit's `position/list` answers for a configured-but-never-traded
+symbol — because all three of Bybit's per-symbol settings ride it, so if it
+omits such rows, **Bybit now has exactly the shape Binance just lost.**
+
+**Everything below the venue codecs is still fixture-tested and has never met a
+real account** (§73f). Unchanged: three standing operator decisions, credentials
+deferred, capture **PID 8495**, never rebuild over `bin/arblab`, `make ci` runs
+`-race` AND the ka staleness gate (needs node), cap `TLC_WORKERS` at 4,
+docs/i18n parity is `bun test`.
+
+---
+
+## Status (2026-08-06, session 114 — HISTORICAL): **#198 ITEM 10 LANDS — THE FINAL `code_diff` REVIEW RETURNED NO-SHIP WITH TWO MAJORS, BOTH FOLDED. DOCS v0.9.52, SIX MUTANTS ALL CAUGHT, `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO. ONLY ITEM 11 (#199's OPERATOR RULING) REMAINS.**
 
 **Read `docs/superpowers/specs/2026-08-06-m4-198-account-posture.md` §73n
 first** — it carries both majors, the three minors, the rejected alternatives,

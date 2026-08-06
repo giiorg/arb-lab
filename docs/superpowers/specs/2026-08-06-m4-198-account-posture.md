@@ -1164,10 +1164,246 @@ a fold that keeps `strings` used, both caught.
     two majors, both folded, plus three minors; six mutants, all caught; docs to
     v0.9.52. Record **§73n**. Both majors were cross-layer, and F20 falsified a
     sentence §73k F14 had recorded as reassurance.
-11. **OPERATOR RULING OWED — §73j F9's unreachable-gate consequence**, now with
-    §73k F14 beside it (a spot-only Binance deployment cannot answer §4.1 at
-    all). Choose between strict / per-setting default reliance / a distinct boot
-    outcome / **§73m F18's fourth candidate — read the per-symbol settings from
-    the endpoint version that enumerates every symbol** (which needs one page
-    read or one credentialed call to confirm the field is published there).
-    Nothing else in the slice is blocked by it.
+11. ~~**OPERATOR RULING OWED** — §73j F9 + §73k F14 + §73m F18.~~ **PARTLY
+    DISCHARGED, and not by ruling** (session 115, task #199 item 1, §73o):
+    F18 and F9's Binance half were a **defect**, not a choice. What remains for
+    an operator is F14/F20 alone — whether a spot-only deployment should have to
+    route the futures family — plus one loosening trigger for #171 (whether
+    Bybit's `position/list` answers for a never-traded symbol). Nothing else in
+    the slice is blocked by either.
+
+---
+
+## §73o — The owed ruling was a defect report (session 115, task #199 item 1)
+
+**Item 11 was to put four candidate rulings to an operator. The first thing
+attempted instead was to settle F18's underlying FACT, and the fact removed the
+question.** §4.1's auto-add-margin probe was aimed at an endpoint that does not
+publish the field, so the Binance gate refused on **every** account — not, as
+§73j F9 recorded, only on flat ones.
+
+### What was verified, and why the source class is the finding
+
+`developers.binance.com` answers every non-browser client with **HTTP 202 and an
+AWS WAF challenge**, and the legacy `binance-docs.github.io/apidocs/futures/en/`
+now 302s into the same SPA. That is #180's standing blocker, and it is total.
+WebFetch was deliberately **not** used: §9 already records two contradicting
+summarizer readings of this very endpoint, and a third would be the same
+non-evidence.
+
+**The way in was `github.com/binance/binance-connector-go`** — Binance's own
+actively-maintained connector, whose per-endpoint response models are generated
+from their OpenAPI spec. Raw, greppable, version-controlled, venue-published, and
+each model's endpoint confirmable against `api_trade.go` / `api_account.go` in
+the same tree.
+
+| Endpoint | Publishes |
+|---|---|
+| `GET /fapi/v3/positionRisk` | 20 fields — **no `isAutoAddMargin`, no `marginType`, no `leverage`** |
+| `GET /fapi/v2/positionRisk` | 16 fields — including `isAutoAddMargin` (**string**), `marginType`, `leverage` |
+| `GET /fapi/v1/symbolConfig` | `symbol`, `marginType`, **`isAutoAddMargin` (bool)**, `leverage`, `maxNotionalValue` |
+
+**V3's twenty match Profiles §9's dated 2026-08-03 transcription exactly.** Two
+independent reads of one endpoint agreeing is the strongest statement this
+project can make about a field list, and it settles §73m's open pair — §9's list
+was **not** an abbreviation.
+
+**A source answers the questions it answers, and saying which is part of
+recording it.** The connector carries **no weight annotations at all**, so #180's
+`positionRisk` weight contradiction is untouched and still needs a browser or a
+credential. Recorded in Profiles §2 beside the answer, so the next reader does
+not assume the blocker moved.
+
+### The defect is larger than F9 stated, in a way F9 could not have seen
+
+F9 said: a flat account refuses, because auto-add-margin comes from a POSITION
+enumeration. True, and incomplete. The field is not on V3 **at all**, so:
+
+| Account state | V3's answer | Decodes as | Failure reason |
+|---|---|---|---|
+| symbol is flat | no row | no observation | `ReasonUnobserved` |
+| symbol holds a position | a row **without the field** | absent | `ReasonUnstated` |
+
+Every Binance account, in every state, on every configured symbol. F9's
+candidate 1 — *establish a position record per symbol out of band* — would not
+have worked, and an operator who took it would have done the manual bootstrap and
+watched the gate refuse anyway.
+
+### The fold, and why it costs less than any candidate that was on the table
+
+`symbolConfig` publishes all three per-symbol settings and returns a row per
+configured symbol whether or not it holds a position. So:
+
+- the read moved onto the probe that was **already being issued**;
+- `PostureProbePositionRisk` and its `EncodePosture` step were **deleted** —
+  four probes become three, 80 weight becomes 60, six checks ride three calls;
+- the enum member went with it, because a member no producer emits is a false
+  branch that `exhaustiveswitch` is perfectly happy with
+  ([[declared-enum-member-nothing-emits]]).
+
+**#199's candidate 4 was superseded by something cheaper than itself.** It
+proposed reading V2 — an every-symbol enumeration, correct, but costing a second
+version of one endpoint to maintain and a weight change. The V1 call this project
+already makes was strictly better and nobody had looked at its field list.
+
+**One claim rests on the new source alone**: that `symbolConfig` publishes the
+field. §2 and §9 never said either way, because nobody had asked. It was landable
+before #171/#180 because of its **direction** — if the claim is wrong the field
+decodes as absent and the gate refuses, which is exactly what it already did. A
+change that cannot manufacture a wrong pass does not need a credential first.
+[[an-unverified-split-wants-the-shared-model]] in its permissive-direction form.
+
+### The mechanism, which outlives the instance
+
+§7.5 chose V3 on an argument stated explicitly as *"a safety decision, not a
+preference"*: on V2 a missing row means the symbol does not exist on the family,
+on V3 it means the account is flat, and the net-delta invariant needs *flat* to
+be a **conclusion**. Entirely correct for the question §7.5 asks. §4.1 asks the
+opposite question and inherited the choice.
+
+[[a-narrowing-carries-an-argument]] covers that far. **This instance goes one
+step further, and the step is the part worth keeping:** the inherited choice was
+not merely out of scope — the field §4.1 wanted **was never on the version it
+inherited**. A scope error leaves the mechanism working on the wrong question; a
+field error leaves it working on nothing.
+
+**Why no test could have found it.** A fixture states what its author believes
+the venue sends, so every fixture in the repo put `isAutoAddMargin` on a
+positionRisk row and the codec read it back
+([[fixture-that-states-its-fact-twice]], one turn out: the fixture cannot falsify
+a claim about **what the venue sends**, only about what this code does with what
+it is handed). The falsifier had to be a field list read from the venue — so the
+missing tool was a **source class**, not a sharper argument, and the WAF is why
+nobody had one for four sessions.
+
+### An elaborate defence built over a field that was not there
+
+`binanceAutoAddMarginWord` read **both** spellings and refused a contradiction,
+with a careful argument about Binance typing this concern two ways across its own
+surfaces. The argument is right. V3 publishes neither spelling, so the whole
+mechanism was unreachable. Care at the decode layer cannot detect that the probe
+is aimed at the wrong endpoint; only reading the endpoint's field list against
+the struct can.
+
+It survives the move, and the connector **upgraded its premise from suspicion to
+fact**: `isAutoAddMargin` is declared a **bool** on `symbolConfig` and a
+**string** on `positionRisk` V2. One field name, one venue, two declared types.
+So the wire fields are `json.RawMessage` and one function states the reading —
+and any shape that is neither bool nor string is an **error naming the field**
+rather than a nil, because a nil would decay into *"the venue did not say"*,
+which is a true sentence about a different world and files a wire-shape change
+under a coverage gap.
+
+### A coverage consequence noticed rather than absorbed
+
+Deleting the Binance posture read of positionRisk removed **`ReasonAmbiguous`'s
+only end-to-end witness.** `symbolConfig` holds one row per symbol whatever the
+position mode is, so Binance can no longer produce a duplicate per-symbol key at
+all; hedge mode is still named directly and account-wide by `dualSidePosition`,
+which is what that boot test now asserts.
+
+The reason keeps its producer — Bybit's `position/list`, a genuine position
+enumeration — but its **composition** coverage would have been silently lost.
+**F19's whole lesson is that a defect between two layers is invisible to either
+layer's own suite**, so dropping its composition fixture would have restored
+exactly the blind spot it was found in.
+`TestBybitHedgeRowsReachTheDomainAsAnAmbiguity` replaces it: the real Bybit codec
+decodes a real hedge body, the real ACL translates it, the real rules judge it,
+and a one-way positive control sits beside it. Mutant M48 confirms it is the only
+witness in its package.
+
+### The collapse checklist, run on the new fixtures before writing them
+
+- **Cardinality** — auto-add-margin **differs between the two symbols**. Pinned
+  to one value, "this row's field" and "the first row's field" are the same
+  answer ([[fixture-count-of-one-collapses]]).
+- **Format** — the two rows state it in **different JSON types**, a bool and a
+  string. One type throughout cannot tell a decoder that reads both from one that
+  reads whichever type the fixture happened to pick
+  ([[format-collapse-two-fields-render-alike]] on the type axis).
+- **Order** — the contradiction fixture puts the contradiction on the **second**
+  symbol, so "refuses a contradicting row" and "refuses if the first row
+  contradicts" are different claims
+  ([[a-selection-fixture-must-split-the-picking-rules]]).
+- **The helper's own collapse, caught while writing it.** A `postureWord()`
+  returning `""` for a missing observation would have made the `null` case —
+  whose claim is *absent, not a bad shape* — indistinguishable from a decoder
+  that produced nothing at all. Replaced by `postureOne()`, which fails unless
+  exactly one observation exists and asserts `Presence` alongside `Value`.
+
+### A fixture whose NAME was part of the defect
+
+`binancePostureBodies` in `internal/app/exercise` held one entry serving **two
+readers that ask opposite questions of the same path**, with a comment warning
+the next author to satisfy both decoders. That comment was the collision's
+symptom being managed rather than removed. It is now `binanceBootBodies`, each
+path has exactly one reader, and the account is **flat while the boot is clean** —
+which before this session it could not be.
+
+### The campaign — nine mutants, all caught
+
+| # | Mutation | Verdict |
+|---|---|---|
+| M42 | symbolConfig reports auto-add-margin as a second LEVERAGE answer | caught (5) |
+| M43 | every auto-add-margin answer reads as ABSENT | caught (4) |
+| M44 | an unreadable shape decays into "the venue did not say" | caught (1) |
+| M45 | the bool spelling inverts | caught (4) |
+| M46 | a contradiction between the two spellings is accepted | caught (1) |
+| M47 | **the per-symbol probe is aimed back at the POSITION enumeration** | caught (6) |
+| M48 | the Bybit enumeration reports only the FIRST hedge row (F19 regressed) | caught (1) |
+| M49 | the posture read is charged half its conservative weight | caught (1) |
+| M50 | auto-add-margin is reported ACCOUNT-wide, not per symbol | caught (6) |
+
+**M47 is the one that matters**: re-aiming the probe at `positionRisk` is this
+defect restored, and six tests fail. Before the session that mutation would have
+been the *unmutated* code.
+
+Two `NOBUILD!!` and two `NO-OP!!` first. Both NOBUILDs were bad seds naming an
+orphaned identifier (*"declared and not used: err"*, *"strings imported and not
+used"*) — the re-aim signal, not a compiler-enforced claim
+([[nobuild-verdict-read-the-compiler-error]]). Both NO-OPs were stale line
+numbers after the file had grown.
+
+### What this does NOT settle
+
+- **#180 is untouched.** The weight question needs a browser or a credential; the
+  connector has no weight annotations.
+- **F14/F20 is still an operator question.** All three remaining Binance probes
+  ride the futures family, so a spot-only deployment must still declare a futures
+  endpoint. What is open is whether that is the right requirement for an account
+  with no futures leg — not whether the failure is diagnosable, which `[v0.9.52]`
+  already made it.
+- **Bybit's half of F9 is still unestablished**, and it is now the only place the
+  original shape could still bite: all three of Bybit's per-symbol settings ride
+  `position/list`, so if that omits never-traded symbols, Bybit has exactly what
+  Binance just lost. One credentialed read settles it (#171).
+- **Nothing below the venue codecs has met a real account** (§73f), unchanged.
+
+### What the reading pass found, beside the (zero) OWED grep
+
+The grep gates **marked** claims and is structurally blind to a rule the code
+silently broke, so a reading pass runs beside it. It found one thing, and it is
+the sentence where this defect was written down and dismissed in the same breath.
+
+`2026-08-03-m3-slice-f2-venue-join.md` — the record that established the V2/V3
+distinction in the first place — says the version choice matters *"for this
+consumer"* and adds, of `isAutoAddMargin`: **"where the parenthetical is
+harmless."** It is now struck in place.
+
+That paragraph did the hard part. It noticed two consumers read one endpoint and
+that their silences mean opposite things. Then it spent **one clause** ruling the
+other consumer out, and that clause held for three sessions across a WAF blocker
+that made it unfalsifiable by every route anyone tried.
+
+**This is the second instance of one pattern in this project**, and the first was
+in this same record's slice: §73k F14's *"Bybit is not symmetric — answerable
+regardless"*, struck by F20. Both are
+[[a-reassuring-claim-generalized-from-one-input]] — a claim whose grammatical
+mood is *reassurance*, sitting inside a record that is otherwise right, costing
+one clause to write and buying a premise nobody re-derives. In both cases the
+falsifier was a **grep of a file the same slice already had**: `Family:` for F20,
+a field list for this one.
+
+Worth promoting to a habit on that evidence: **when a record rules a neighbouring
+consumer out in a subordinate clause, that clause is a finding waiting to happen.
+Check it in the same session, because it costs a grep now and a defect later.**

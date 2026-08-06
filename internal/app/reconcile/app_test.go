@@ -1061,31 +1061,34 @@ func testWall(t *testing.T, cfg Config) *clock.Wall {
 // could not exist: with no baseline the spot leg correctly held
 // GateNetDeltaAsserted at UnassertedBaselineUnrecorded, so "clean" was not a
 // reachable verdict for a spot deployment.
-// binancePostureBodies is §4.1's four Binance probes answered CLEANLY.
+// binancePostureBodies is §4.1's three Binance probes answered CLEANLY, plus
+// §7.5's position enumeration.
 //
 // The deployment this serves configures no derivative instrument, so the
 // per-symbol rules fold over an empty roster (RosterCoverageNoDerivatives) and
 // what has to pass is the account-wide half: multi-assets off, one-way position
 // mode, and the Portfolio-Margin attestation, which no endpoint here answers.
 //
-// # The two symbol-scoped bodies are NOT empty, and the asymmetry is a finding
+// # symbolConfig is NOT empty, and that is a finding rather than tidiness
 //
-// `symbolConfig` returns a row for BTCUSDT even though this deployment trades
-// no perpetual, because the VENUE's answer does not depend on our config — a
-// Binance account has a margin type and a leverage per futures symbol whether or
-// not anything here trades it, and §73j recorded that observations for symbols
-// off the configured roster are IGNORED rather than failed. `positionRisk`
-// stays empty because it enumerates POSITIONS and this account holds none.
+// It returns a row for BTCUSDT even though this deployment trades no perpetual,
+// because the VENUE's answer does not depend on our config — a Binance account
+// has a margin type, a leverage and an auto-add-margin per futures symbol
+// whether or not anything here trades it, and §73j recorded that observations
+// for symbols off the configured roster are IGNORED rather than failed.
 //
-// The distinction is load-bearing rather than cosmetic: the codec REFUSES an
-// empty symbolConfig array (a futures account always has rows, so an empty one
-// means the read was wrong-shaped) and accepts an empty positionRisk. Serving
-// `[]` for both is what this fixture did first, and the refusal it produced is
-// record §73k F14 — on Binance a spot-only deployment cannot answer §4.1 at all.
+// The codec REFUSES an empty symbolConfig array (a futures account always has
+// rows, so an empty one means the read was wrong-shaped). Serving `[]` for it is
+// what this fixture did first, and the refusal that produced is record §73k F14
+// — on Binance a spot-only deployment cannot answer §4.1 at all.
+//
+// `positionRisk` is empty because it enumerates POSITIONS and this account holds
+// none. Since record §73o that is a fact about §7.5's reader ALONE: no posture
+// probe reads this path, so an empty answer here can no longer refuse a gate.
 var binancePostureBodies = map[string]string{
 	"/fapi/v1/multiAssetsMargin": `{"multiAssetsMargin":false}`,
 	"/fapi/v1/positionSide/dual": `{"dualSidePosition":false}`,
-	"/fapi/v1/symbolConfig":      `[{"symbol":"BTCUSDT","marginType":"ISOLATED","leverage":5}]`,
+	"/fapi/v1/symbolConfig":      `[{"symbol":"BTCUSDT","marginType":"ISOLATED","leverage":5,"isAutoAddMargin":false}]`,
 	"/fapi/v3/positionRisk":      `[]`,
 }
 
@@ -1353,14 +1356,14 @@ func TestBootRunsEveryPhaseAndReportsClean(t *testing.T) {
 	if got := accountReads.Load(); got != 1 {
 		t.Errorf("the venue saw %d account reads, want exactly 1", got)
 	}
-	// Four posture probes, the exact figure §73c-2 measured for a Binance read.
-	// An exact count because it is the one instrument that distinguishes "the
-	// posture was asserted" from "the verdict was satisfied for another reason"
-	// — a guard that read nothing produces a verdict that evaluated nothing,
-	// and Satisfied() would have refused it, but a guard that read THREE of
-	// four probes would not be visible in the outcome at all.
-	if got := postureReads.Load(); got != 4 {
-		t.Errorf("the venue saw %d posture probes, want exactly 4", got)
+	// Three posture probes, the exact figure §73c-2 measures for a Binance read
+	// since record §73o. An exact count because it is the one instrument that
+	// distinguishes "the posture was asserted" from "the verdict was satisfied
+	// for another reason" — a guard that read nothing produces a verdict that
+	// evaluated nothing, and Satisfied() would have refused it, but a guard that
+	// read TWO of three probes would not be visible in the outcome at all.
+	if got := postureReads.Load(); got != 3 {
+		t.Errorf("the venue saw %d posture probes, want exactly 3", got)
 	}
 	if ok, err := rep.AccountPosture.Satisfied(); !ok || err != nil {
 		t.Errorf("the report's verdict = %v, %v; want satisfied:\n%s", ok, err, rep.AccountPosture)
@@ -1415,7 +1418,7 @@ func perpRoster(t *testing.T, journal string) Config {
 	return cfg
 }
 
-// rosterPostureBodies answers §4.1's four Binance probes for perpRoster's
+// rosterPostureBodies answers §4.1's three Binance probes for perpRoster's
 // deployment.
 //
 // secondLeverage is the parameter under test in the negative case below; every
@@ -1426,13 +1429,24 @@ func rosterPostureBodies(secondLeverage int) map[string]string {
 	return map[string]string{
 		"/fapi/v1/multiAssetsMargin": `{"multiAssetsMargin":false}`,
 		"/fapi/v1/positionSide/dual": `{"dualSidePosition":false}`,
+		// All THREE per-symbol settings ride this one row since record §73o.
+		// The two symbols state auto-add-margin in different JSON TYPES on
+		// purpose — Binance declares the field a bool on symbolConfig and a
+		// string on positionRisk V2, and a fixture using one type throughout
+		// cannot tell a decoder that reads both from one that reads whichever
+		// type the fixture happened to pick.
 		"/fapi/v1/symbolConfig": fmt.Sprintf(
-			`[{"symbol":"BTCUSDT","marginType":"ISOLATED","leverage":%d},`+
-				`{"symbol":"ETHUSDT","marginType":"ISOLATED","leverage":%d}]`,
+			`[{"symbol":"BTCUSDT","marginType":"ISOLATED","leverage":%d,"isAutoAddMargin":false},`+
+				`{"symbol":"ETHUSDT","marginType":"ISOLATED","leverage":%d,"isAutoAddMargin":"false"}]`,
 			firstBootPin, secondLeverage),
+
+		// §7.5's net-delta enumeration only. It carries NO posture field: since
+		// record §73o nothing in §4.1 reads this path, and a fixture still
+		// stating isAutoAddMargin here would keep a dead premise alive — the
+		// next author would read it as evidence the posture probe wants it.
 		"/fapi/v3/positionRisk": `[` +
-			`{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"0","isAutoAddMargin":"false"},` +
-			`{"symbol":"ETHUSDT","positionSide":"BOTH","positionAmt":"0","isAutoAddMargin":"false"}]`,
+			`{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"0"},` +
+			`{"symbol":"ETHUSDT","positionSide":"BOTH","positionAmt":"0"}]`,
 	}
 }
 
@@ -1557,31 +1571,36 @@ func TestBootRefusesWhenTheSECONDConfiguredSymbolViolatesItsOwnPin(t *testing.T)
 	}
 }
 
-// TestBootOnAFlatAccountRefusesEveryConfiguredSymbol is record §73j F9 as an
-// EXECUTABLE claim rather than a paragraph, and it is the evidence task #199's
-// ruling needs.
+// TestBootOnAFlatAccountPassesEveryConfiguredSymbol is record §73j F9's Binance
+// half, inverted — the test that was promised it would change when #199 ruled,
+// changing because the ruling turned out to be a defect report (record §73o).
 //
-// F9 is not a bug report, it is a consequence nobody had run: per-symbol
-// coverage is answered from the CONFIGURED roster (F4), and Binance's
-// auto-add-margin comes from positionRisk, which enumerates POSITIONS. So an
-// account holding none — every cold boot, and every deployment before its first
-// trade — refuses on isAutoAddMargin for every configured symbol, and §73c-2 puts
-// the same read before every trade. The gate that must pass before the first
-// position opens cannot pass until a position exists.
+// F9 was a consequence nobody had run: per-symbol coverage is answered from the
+// CONFIGURED roster (F4), and Binance's auto-add-margin was read from
+// positionRisk, which enumerates POSITIONS. So an account holding none — every
+// cold boot, and every deployment before its first trade — refused on
+// isAutoAddMargin for every configured symbol, and §73c-2 puts the same read
+// before every trade. The gate that had to pass before the first position opened
+// could not pass until a position existed.
 //
-// The assertion is deliberately of the STRICT reading, which is what is
-// implemented: a fixture must not silently answer a question left to an operator
-// ([[a-known-exact-count-is-an-instrument]] — the count is what makes it
-// unambiguous which rule fired). When #199 rules, this test changes with it, and
-// its failure is the reminder that it must.
-func TestBootOnAFlatAccountRefusesEveryConfiguredSymbol(t *testing.T) {
+// It was never a question for an operator. `GET /fapi/v1/symbolConfig` publishes
+// isAutoAddMargin itself, for every configured symbol, position or not — so
+// F9's Binance half is dissolved rather than ruled on, and the strict reading it
+// was weighing costs nothing.
+//
+// The fixture is the SAME flat account. positionRisk answers `[]` — nothing in
+// §4.1 reads it any more, and the boot must be clean anyway.
+func TestBootOnAFlatAccountPassesEveryConfiguredSymbol(t *testing.T) {
 	t.Setenv(testKeyVar, "key")
 	t.Setenv(testSecretVar, "secret")
 
 	bodies := rosterPostureBodies(secondBootPin)
-	// A flat account: symbolConfig still answers for both symbols (a futures
-	// account is configured whether or not it holds anything), and positionRisk
-	// is empty because it enumerates positions. That asymmetry is the finding.
+	// A genuinely flat account: symbolConfig answers for both symbols (a
+	// futures account is configured whether or not it holds anything), and
+	// positionRisk is EMPTY because it enumerates positions. Before §73o that
+	// asymmetry was the finding; now it is simply irrelevant to §4.1, and this
+	// line is what proves it — restore the posture probe to positionRisk and
+	// this test fails on both symbols.
 	bodies["/fapi/v3/positionRisk"] = `[]`
 	srv := rosterPostureServer(t, bodies)
 	defer srv.Close()
@@ -1594,36 +1613,66 @@ func TestBootOnAFlatAccountRefusesEveryConfiguredSymbol(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if o, declared := r.checklist.Outcome(boot.GateAccountPosture); !declared || o != boot.OutcomeNeedsOperator {
-		t.Fatalf("GateAccountPosture = %s (declared %v), want OutcomeNeedsOperator", o, declared)
+	if o, declared := r.checklist.Outcome(boot.GateAccountPosture); !declared || o != boot.OutcomePassed {
+		t.Fatalf("GateAccountPosture = %s (declared %v), want OutcomePassed:\n%s",
+			o, declared, rep.AccountPosture)
 	}
-	// Exactly two failures — one per configured symbol, and nothing else. A
-	// roster of one could not tell "every configured symbol refuses" from "a
-	// configured symbol refuses", which is the whole weight of F9.
-	if n := len(rep.AccountPosture.Failures); n != 2 {
-		t.Fatalf("%d failures, want one per configured symbol:\n%s", n, rep.AccountPosture)
+	if n := len(rep.AccountPosture.Failures); n != 0 {
+		t.Fatalf("%d failures on a clean flat account:\n%s", n, rep.AccountPosture)
 	}
-	for _, want := range []string{"BTCUSDT", "ETHUSDT"} {
-		var found bool
-		for _, f := range rep.AccountPosture.Failures {
-			if f.Subject != want {
-				continue
-			}
-			found = true
-			if f.Setting != riskdomain.SettingAutoAddMargin {
-				t.Errorf("%s failed on %s, want SettingAutoAddMargin", want, f.Setting)
-			}
-			// UNOBSERVED, not a mismatch: the venue said nothing about this
-			// symbol. The two spellings send an operator to different places —
-			// one to their account, one to their config.
-			if f.Reason != riskdomain.ReasonUnobserved {
-				t.Errorf("%s failed with %s, want %s", want, f.Reason, riskdomain.ReasonUnobserved)
-			}
+	// Passing is only half the claim: a verdict that evaluated NOTHING also has
+	// no failures, and it is the zero value a broken read most easily produces.
+	// The count is stated as a literal rather than derived from the roster, so
+	// a roster that silently emptied cannot agree with it
+	// ([[a-known-exact-count-is-an-instrument]]).
+	//
+	// Nine: three account-wide for binance-classic (multi-assets, position
+	// mode, Portfolio-Margin) and three per-symbol across two symbols.
+	if got := rep.AccountPosture.Evaluated; got != 9 {
+		t.Errorf("Evaluated = %d, want 9 — a flat account must still be JUDGED on "+
+			"every check, not merely produce no failures:\n%s", got, rep.AccountPosture)
+	}
+	// The count pins the ARITY but not WHICH checks ran, and the verdict
+	// carries no per-key coverage accessor. So the claim "auto-add-margin is
+	// live, per symbol, on this surface" is made the only way it can be
+	// falsified: by a boot where the SECOND symbol's answer violates it.
+	//
+	// Second, not first: with the violation on BTCUSDT, "checks every symbol"
+	// and "checks the first symbol" give the same answer.
+	t.Run("and the check is live on the second symbol", func(t *testing.T) {
+		bad := rosterPostureBodies(secondBootPin)
+		bad["/fapi/v3/positionRisk"] = `[]`
+		bad["/fapi/v1/symbolConfig"] = fmt.Sprintf(
+			`[{"symbol":"BTCUSDT","marginType":"ISOLATED","leverage":%d,"isAutoAddMargin":false},`+
+				`{"symbol":"ETHUSDT","marginType":"ISOLATED","leverage":%d,"isAutoAddMargin":true}]`,
+			firstBootPin, secondBootPin)
+		srv := rosterPostureServer(t, bad)
+		defer srv.Close()
+
+		cfg := perpRoster(t, filepath.Join(t.TempDir(), "journal.db"))
+		routeTo(t, &cfg, srv)
+		r := newRunnerFor(t, cfg, func(string) error { return nil })
+
+		rep, err := r.run(t)
+		if err != nil {
+			t.Fatalf("Run: %v", err)
 		}
-		if !found {
-			t.Errorf("no failure names %s:\n%s", want, rep.AccountPosture)
+		if n := len(rep.AccountPosture.Failures); n != 1 {
+			t.Fatalf("%d failures, want exactly 1 (ETHUSDT's auto-add-margin):\n%s",
+				n, rep.AccountPosture)
 		}
-	}
+		f := rep.AccountPosture.Failures[0]
+		if f.Subject != "ETHUSDT" || f.Setting != riskdomain.SettingAutoAddMargin {
+			t.Errorf("failure = %s/%s, want ETHUSDT/SettingAutoAddMargin", f.Subject, f.Setting)
+		}
+		// MISMATCHED, not unobserved: the venue answered and the answer is
+		// wrong. That is the reason F9's world could never produce, and the two
+		// send an operator to different places — one to their account's
+		// settings, one to a coverage gap.
+		if f.Reason != riskdomain.ReasonMismatch {
+			t.Errorf("failure reason = %s, want %s", f.Reason, riskdomain.ReasonMismatch)
+		}
+	})
 }
 
 // TestPostureRefusesWhenNoVenueClientWasBuilt holds the typed-nil interlock
@@ -1716,29 +1765,45 @@ func bybitPostureConfig(t *testing.T, journal string) Config {
 // composition, and it is the fixture neither layer's own suite could hold
 // (record §73n).
 //
-// The account is in HEDGE mode — a §4.1 violation — so `positionRisk` answers
-// with a LONG row and a SHORT row for one symbol (Profiles §9, verbatim). The
-// codec used to refuse that whole read, which meant:
+// The account is in HEDGE mode — a §4.1 violation. F19's original defect was
+// that the codec REFUSED the hedged `positionRisk` read outright, which meant:
 //
 //   - the violation reported as OutcomeFailed — "the posture could not be
 //     established, a retry may lift it" — for an account no retry will change;
 //   - the three probes already decoded were DISCARDED, including the account-wide
 //     dualSidePosition answer that names the same violation directly.
 //
-// Both halves are asserted here. The same account also breaks §7.5's join
-// (positions_binance refuses a hedge row by name, ErrPositionModeNotOneWay),
-// which is a DIFFERENT gate — this test is about the posture gate speaking
-// first and speaking correctly.
+// # What record §73o changed here, and what it did NOT
+//
+// §4.1 no longer reads positionRisk at all, so on BINANCE a hedged account can
+// no longer produce a duplicate per-symbol key: `symbolConfig` holds one row per
+// symbol whatever the position mode is. The violation is still named — directly,
+// and account-wide, by dualSidePosition — and the LATCH is what this test is
+// really about, so that half is unchanged and is asserted below.
+//
+// The ambiguity half moved rather than vanished. ReasonAmbiguous keeps its
+// producer on Bybit, whose `position/list` genuinely is a position enumeration,
+// and TestBybitHedgeRowsReachTheDomainAsAnAmbiguity in
+// risk/infrastructure/driven is the composition witness for it. That test exists
+// because THIS one stopped being able to be it, and F19's whole lesson is that a
+// defect between two layers is invisible to either layer's own suite.
+//
+// The same account also breaks §7.5's join (positions_binance refuses a hedge
+// row by name, ErrPositionModeNotOneWay), which is a DIFFERENT gate — this test
+// is about the posture gate speaking first and speaking correctly.
 func TestBootOnAHedgeModeAccountLatchesAndStillNamesEveryOtherCheck(t *testing.T) {
 	t.Setenv(testKeyVar, "key")
 	t.Setenv(testSecretVar, "secret")
 
 	bodies := rosterPostureBodies(secondBootPin)
 	bodies["/fapi/v1/positionSide/dual"] = `{"dualSidePosition":true}`
+	// The hedged rows stay on §7.5's enumeration, where they still belong: this
+	// fixture is a hedge-mode account on BOTH surfaces, not a hedge flag with a
+	// one-way position book.
 	bodies["/fapi/v3/positionRisk"] = `[` +
-		`{"symbol":"BTCUSDT","positionSide":"LONG","positionAmt":"0","isAutoAddMargin":"false"},` +
-		`{"symbol":"BTCUSDT","positionSide":"SHORT","positionAmt":"0","isAutoAddMargin":"false"},` +
-		`{"symbol":"ETHUSDT","positionSide":"BOTH","positionAmt":"0","isAutoAddMargin":"false"}]`
+		`{"symbol":"BTCUSDT","positionSide":"LONG","positionAmt":"0"},` +
+		`{"symbol":"BTCUSDT","positionSide":"SHORT","positionAmt":"0"},` +
+		`{"symbol":"ETHUSDT","positionSide":"BOTH","positionAmt":"0"}]`
 	srv := rosterPostureServer(t, bodies)
 	defer srv.Close()
 
@@ -1765,32 +1830,34 @@ func TestBootOnAHedgeModeAccountLatchesAndStillNamesEveryOtherCheck(t *testing.T
 		t.Errorf("ExitClass() = %s, want ExitOperator; latched = %v", got, rep.Latched)
 	}
 
-	// 2. Every other check still ran. Nine rules over this roster plus the one
-	// duplicated key is 10 — the exact count is the instrument, because a read
-	// that died at the fourth probe would report a verdict of zero.
-	if rep.AccountPosture.Evaluated != 10 {
-		t.Errorf("evaluated %d checks, want 10 (nine rules + one duplicate key):\n%s",
+	// 2. Every other check still ran. Nine rules over this roster — three
+	// account-wide and three per-symbol across two symbols — and the exact count
+	// is the instrument, because a read that died at any probe would report a
+	// verdict of zero and "no failures" would read the same as "clean".
+	//
+	// It was TEN before record §73o, and the missing one is not a lost check:
+	// the tenth was the DUPLICATE key a hedged positionRisk produced, and §4.1
+	// no longer reads that surface. The nine rules are the same nine.
+	if rep.AccountPosture.Evaluated != 9 {
+		t.Errorf("evaluated %d checks, want 9 (three account-wide + three per symbol):\n%s",
 			rep.AccountPosture.Evaluated, rep.AccountPosture)
 	}
 
-	// 3. Both failures are named, and they are DIFFERENT failures: the
-	// account-wide mode from probe 2, and the per-symbol ambiguity from probe 4.
-	// Asserting only one of them would pass on a verdict that lost the other.
-	var mode, ambiguous bool
-	for _, f := range rep.AccountPosture.Failures {
-		switch {
-		case f.Setting == riskdomain.SettingPositionMode && f.Scope == riskdomain.ScopeAccount:
-			mode = f.Reason == riskdomain.ReasonMismatch && f.Observed == "true"
-		case f.Setting == riskdomain.SettingAutoAddMargin && f.Subject == "BTCUSDT":
-			ambiguous = f.Reason == riskdomain.ReasonAmbiguous
-		}
+	// 3. The violation is named, ONCE, account-wide, and it carries the venue's
+	// own word. Asserting merely that something failed would pass on a verdict
+	// that failed for an unrelated reason — and every per-symbol check on this
+	// account is clean, which is what makes the count below meaningful.
+	if n := len(rep.AccountPosture.Failures); n != 1 {
+		t.Fatalf("%d failures, want exactly 1 (the account-wide position mode):\n%s",
+			n, rep.AccountPosture)
 	}
-	if !mode {
-		t.Errorf("no account-wide SettingPositionMode mismatch naming the venue's word:\n%s", rep.AccountPosture)
+	f := rep.AccountPosture.Failures[0]
+	if f.Setting != riskdomain.SettingPositionMode || f.Scope != riskdomain.ScopeAccount {
+		t.Errorf("failure = %s/%s, want an account-wide SettingPositionMode", f.Scope, f.Setting)
 	}
-	if !ambiguous {
-		t.Errorf("no ReasonAmbiguous on BTCUSDT's auto-add-margin — the two hedge rows must reach the domain:\n%s",
-			rep.AccountPosture)
+	if f.Reason != riskdomain.ReasonMismatch || f.Observed != "true" {
+		t.Errorf("failure = %s observing %q, want ReasonMismatch observing %q",
+			f.Reason, f.Observed, "true")
 	}
 }
 
@@ -1807,7 +1874,7 @@ func TestConfigRefusesADeploymentThatRoutesNoPostureFamily(t *testing.T) {
 
 	journal := filepath.Join(t.TempDir(), "journal.db")
 
-	// Binance: all four probes are on the futures family (record §73k F14).
+	// Binance: all three probes are on the futures family (record §73k F14).
 	spot := spotOnly(t, journal)
 	dropFamily(&spot, ids.ProductLinearPerp)
 	if err := spot.Validate(); !errors.Is(err, ErrFamilyUnrouted) {

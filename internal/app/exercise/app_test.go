@@ -38,38 +38,44 @@ const binanceAccountBody = `{"balances":[` +
 	`{"asset":"BTC","free":"1.00000000","locked":"0.00000000"},` +
 	`{"asset":"USDT","free":"1000.00000000","locked":"0.00000000"}]}`
 
-// binancePostureBodies answers §4.1's four Binance probes for a CLEAN account
-// matching this package's fixture config (task #198 item 7).
+// binanceBootBodies answers every unauthenticated-shaped GET §7.5's boot makes
+// against Binance for a CLEAN, FLAT account matching this package's fixture
+// config (task #198 item 7, record §73o).
 //
-// `symbolConfig` and `positionRisk` both carry a BTCUSDT row, and the second is
-// the one worth explaining: §4.1's per-symbol coverage is answered from the
-// CONFIGURED roster, so a configured symbol the venue said nothing about
-// refuses (ReasonUnobserved). `isAutoAddMargin` comes from positionRisk, which
-// enumerates POSITIONS — so a genuinely flat account refuses here, which is the
-// open operator question recorded as §73j F9 and task #199. These fixtures take
-// F9's candidate 1 (a position record exists per configured symbol) because a
-// fixture must not silently answer a question left to the operator.
-var binancePostureBodies = map[string]string{
+// It is NOT called `binancePostureBodies` any more, and the rename is part of
+// the finding rather than tidying. Under that name the map held one entry
+// serving TWO
+// readers that ask opposite questions of the same path, with a comment warning
+// the next author to satisfy both decoders — and the reason those two readers
+// collided is that §4.1's auto-add-margin probe should never have been on a
+// POSITION enumeration at all. Record §73o moved it, so the collision is gone
+// and each path below has exactly one reader.
+//
+// The account is FLAT and the boot is CLEAN, which is the fold's whole visible
+// effect. Before §73o the BTCUSDT position row was load-bearing for the boot:
+// auto-add-margin came from positionRisk, so a configured symbol holding no
+// position refused (ReasonUnobserved — §73j F9's Binance half). All three
+// per-symbol settings now ride `symbolConfig`, which enumerates every configured
+// symbol whether or not it holds anything.
+var binanceBootBodies = map[string]string{
+	// §4.1's three posture probes.
 	"/fapi/v1/multiAssetsMargin": `{"multiAssetsMargin":false}`,
 	"/fapi/v1/positionSide/dual": `{"dualSidePosition":false}`,
-	"/fapi/v1/symbolConfig":      `[{"symbol":"BTCUSDT","marginType":"ISOLATED","leverage":5}]`,
-	// ONE body serves two readers: §7.5's net-delta enumeration and §4.1's
-	// auto-add-margin probe both call /fapi/v3/positionRisk, so the row must
-	// satisfy BOTH decoders — positionSide/positionAmt for the first,
-	// isAutoAddMargin for the second. A fixture carrying only the posture
-	// fields breaks the invariant read, which is how this was found.
-	"/fapi/v3/positionRisk": `[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"0","isAutoAddMargin":"false"}]`,
+	"/fapi/v1/symbolConfig":      `[{"symbol":"BTCUSDT","marginType":"ISOLATED","leverage":5,"isAutoAddMargin":false}]`,
+
+	// §7.5's net-delta enumeration — a DIFFERENT question, which is why V3 is
+	// right here and was wrong for §4.1: this reader needs *flat* to be a
+	// conclusion, and §4.1 needed a value for a symbol that may be flat.
+	"/fapi/v3/positionRisk": `[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"0"}]`,
 }
 
-// servePosture answers a posture probe and reports whether it did, so each fake
-// venue in this package routes the four the same way. It replaces the bare
-// positionRisk arm every one of them carried: that arm returned `[]`, which
-// under §4.1's roster-scoped coverage is a REFUSAL rather than a flat account.
-func servePosture(w http.ResponseWriter, r *http.Request) bool {
+// serveBootReads answers one of those GETs and reports whether it did, so each
+// fake venue in this package routes them the same way.
+func serveBootReads(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method != http.MethodGet {
 		return false
 	}
-	body, ok := binancePostureBodies[r.URL.Path]
+	body, ok := binanceBootBodies[r.URL.Path]
 	if !ok {
 		return false
 	}
@@ -626,7 +632,7 @@ func TestABanDuringDispatchIsSurfaced(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusTeapot)
 			fmt.Fprint(w, `{"code":-1003,"msg":"Way too much request weight used; IP banned."}`)
-		case servePosture(w, r):
+		case serveBootReads(w, r):
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/account":
 			// The boot's spot assertion reads the wallet the pinned baseline
 			// explains in full — a zero delta, so the boot stays clean and the

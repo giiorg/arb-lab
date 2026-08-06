@@ -77,33 +77,32 @@ type chaosVenue struct {
 	unexpected []string
 }
 
-// binancePostureBodies and servePosture mirror the in-package fixtures
+// binanceBootBodies and serveBootReads mirror the in-package fixtures
 // (app_test.go) because this file is an EXTERNAL test package and cannot see
 // them. The duplication is one map and one function; sharing them would mean
 // exporting test helpers from the production package.
 //
-// The positionRisk row is the load-bearing one: §4.1's per-symbol coverage is
-// answered from the CONFIGURED roster, so a configured symbol the venue said
-// nothing about REFUSES. A flat account therefore refuses — the open operator
-// question recorded as §73j F9 and task #199 — and these fixtures take its
-// candidate 1 rather than answering it silently.
-var binancePostureBodies = map[string]string{
+// The account is FLAT and the boot is CLEAN. Before record §73o it could not be
+// both: §4.1's auto-add-margin was read from a POSITION enumeration, so a
+// configured symbol holding no position refused (§73j F9's Binance half) and
+// this fixture had to establish a position row to boot. All three per-symbol
+// settings now ride `symbolConfig`, which enumerates every configured symbol.
+var binanceBootBodies = map[string]string{
+	// §4.1's three posture probes.
 	"/fapi/v1/multiAssetsMargin": `{"multiAssetsMargin":false}`,
 	"/fapi/v1/positionSide/dual": `{"dualSidePosition":false}`,
-	"/fapi/v1/symbolConfig":      `[{"symbol":"BTCUSDT","marginType":"ISOLATED","leverage":5}]`,
-	// ONE body serves two readers: §7.5's net-delta enumeration and §4.1's
-	// auto-add-margin probe both call /fapi/v3/positionRisk, so the row must
-	// satisfy BOTH decoders — positionSide/positionAmt for the first,
-	// isAutoAddMargin for the second. A fixture carrying only the posture
-	// fields breaks the invariant read, which is how this was found.
-	"/fapi/v3/positionRisk": `[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"0","isAutoAddMargin":"false"}]`,
+	"/fapi/v1/symbolConfig":      `[{"symbol":"BTCUSDT","marginType":"ISOLATED","leverage":5,"isAutoAddMargin":false}]`,
+
+	// §7.5's net-delta enumeration — a DIFFERENT question, which is why V3 is
+	// right here and was wrong for §4.1.
+	"/fapi/v3/positionRisk": `[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"0"}]`,
 }
 
-func servePosture(w http.ResponseWriter, r *http.Request) bool {
+func serveBootReads(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method != http.MethodGet {
 		return false
 	}
-	body, ok := binancePostureBodies[r.URL.Path]
+	body, ok := binanceBootBodies[r.URL.Path]
 	if !ok {
 		return false
 	}
@@ -149,7 +148,7 @@ func (v *chaosVenue) handler(t *testing.T) http.Handler {
 		case r.Method == http.MethodGet && (r.URL.Path == "/api/v3/myTrades" || r.URL.Path == "/fapi/v1/userTrades"):
 			fmt.Fprint(w, `[]`)
 
-		case servePosture(w, r):
+		case serveBootReads(w, r):
 
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/account":
 			// Both runs' boots assert the spot leg against the pinned seq-0

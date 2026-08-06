@@ -216,7 +216,7 @@ func (c *BybitOrderCodec) DecodePostureStep(probe PostureProbe, resp transport.R
 
 	case PostureProbeUnspecified,
 		PostureProbeMultiAssets, PostureProbeSymbolConfig,
-		PostureProbePositionRisk, PostureProbePositionDual:
+		PostureProbePositionDual:
 		// Binance's probes and the sentinel, named rather than defaulted
 		// (§3.6 rule 10) — the mirror of the Binance codec's arm.
 		return nil, fmt.Errorf("bybit cannot answer %s: %w", probe, ErrPostureUnreadable)
