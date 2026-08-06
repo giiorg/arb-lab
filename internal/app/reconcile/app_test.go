@@ -977,19 +977,22 @@ func pinnedCleanBaseline(t *testing.T, account, apiKey, apiSecret string) *Basel
 // singular, so this is the ordinary shape of a cross-venue carry's spot half —
 // the empty roster is now carried to risk/domain as a STATED fact instead
 // (RosterCoverageNoDerivatives), and this fixture is the reason that was found.
+// spotOnly is a deployment that TRADES only spot — F11's legitimate shape, the
+// spot half of a cross-venue carry.
+//
+// # It still declares the futures endpoint, and that is EVIDENCE (record §73n F20)
+//
+// All four Binance posture probes ride the futures family, so §4.1's gate is
+// unanswerable to a document that routes none — which config validation now
+// refuses by name rather than leaving to be discovered as an unestablishable
+// posture on every boot. Before that rule this helper trimmed the endpoint list
+// to [:1] and every test built on it exercised a deployment whose posture gate
+// could never conclude. The trim is gone; what makes this fixture spot-only is
+// the INSTRUMENT roster, which is what RosterCoverageNoDerivatives is about.
 func spotOnly(t *testing.T, journal string) Config {
 	t.Helper()
 	cfg := validConfig(t, journal)
 	cfg.Instruments = cfg.Instruments[:1]
-	cfg.Venue.Endpoints = cfg.Venue.Endpoints[:1]
-	cfg.Venue.Limits = []LimitConfig{
-		{Name: "ip_requests", Scope: "venue", Dimension: "requests", Interval: dur(t, "5s"),
-			OpeningCeiling: 300, RoutineCeiling: 400, Capacity: 500},
-		{Name: "weight_1m", Scope: "family", Product: ids.ProductSpot, Dimension: "weight",
-			Interval: dur(t, "1m"), OpeningCeiling: 4200, RoutineCeiling: 5400, Capacity: 6000},
-		{Name: "orders_10s", Scope: "family", Product: ids.ProductSpot, Dimension: "orders",
-			Interval: dur(t, "10s"), OpeningCeiling: 70, RoutineCeiling: 90, Capacity: 100},
-	}
 	cfg.PositionScopes = nil
 	return cfg
 }
@@ -1162,22 +1165,8 @@ func TestAPostureThatWasReadAndFoundWrongLatches(t *testing.T) {
 
 	dir := t.TempDir()
 	cfg := spotOnly(t, filepath.Join(dir, "journal.db"))
-	cfg.Venue.Endpoints[0].Scheme = "http"
-	cfg.Venue.Endpoints[0].Host = strings.TrimPrefix(srv.URL, "http://")
 	cfg.SpotBaseline = pinnedCleanBaseline(t, cfg.Account, "key", "secret")
-	cfg.Venue.Endpoints = append(cfg.Venue.Endpoints, EndpointConfig{
-		Product: ids.ProductLinearPerp, Scheme: "http",
-		Host: strings.TrimPrefix(srv.URL, "http://"),
-	})
-	cfg.Venue.Limits = append(cfg.Venue.Limits,
-		LimitConfig{Name: "weight_1m", Scope: "family", Product: ids.ProductLinearPerp,
-			Dimension: "weight", Interval: dur(t, "1m"),
-			OpeningCeiling: 1680, RoutineCeiling: 2160, Capacity: 2400},
-		LimitConfig{Name: "orders_1m", Scope: "family", Product: ids.ProductLinearPerp,
-			Dimension: "orders", Interval: dur(t, "1m"),
-			OpeningCeiling: 840, RoutineCeiling: 1080, Capacity: 1200},
-	)
-	cfg.PortfolioMarginAttestation = pinnedPortfolioMarginAttestation(t, cfg.Account, "key", "secret")
+	routeTo(t, &cfg, srv)
 	r := newRunnerFor(t, cfg, func(string) error { return nil })
 
 	rep, err := r.run(t)
@@ -1248,22 +1237,8 @@ func TestAPostureThatCouldNotBeReadIsIncompleteNotAnAlert(t *testing.T) {
 
 	dir := t.TempDir()
 	cfg := spotOnly(t, filepath.Join(dir, "journal.db"))
-	cfg.Venue.Endpoints[0].Scheme = "http"
-	cfg.Venue.Endpoints[0].Host = strings.TrimPrefix(srv.URL, "http://")
 	cfg.SpotBaseline = pinnedCleanBaseline(t, cfg.Account, "key", "secret")
-	cfg.Venue.Endpoints = append(cfg.Venue.Endpoints, EndpointConfig{
-		Product: ids.ProductLinearPerp, Scheme: "http",
-		Host: strings.TrimPrefix(srv.URL, "http://"),
-	})
-	cfg.Venue.Limits = append(cfg.Venue.Limits,
-		LimitConfig{Name: "weight_1m", Scope: "family", Product: ids.ProductLinearPerp,
-			Dimension: "weight", Interval: dur(t, "1m"),
-			OpeningCeiling: 1680, RoutineCeiling: 2160, Capacity: 2400},
-		LimitConfig{Name: "orders_1m", Scope: "family", Product: ids.ProductLinearPerp,
-			Dimension: "orders", Interval: dur(t, "1m"),
-			OpeningCeiling: 840, RoutineCeiling: 1080, Capacity: 1200},
-	)
-	cfg.PortfolioMarginAttestation = pinnedPortfolioMarginAttestation(t, cfg.Account, "key", "secret")
+	routeTo(t, &cfg, srv)
 	r := newRunnerFor(t, cfg, func(string) error { return nil })
 
 	rep, err := r.run(t)
@@ -1319,30 +1294,17 @@ func TestBootRunsEveryPhaseAndReportsClean(t *testing.T) {
 
 	dir := t.TempDir()
 	cfg := spotOnly(t, filepath.Join(dir, "journal.db"))
-	cfg.Venue.Endpoints[0].Scheme = "http"
-	cfg.Venue.Endpoints[0].Host = strings.TrimPrefix(srv.URL, "http://")
 	cfg.SpotBaseline = pinnedCleanBaseline(t, cfg.Account, "key", "secret")
 	// §4.1's posture read (#198 item 7) lives on the FUTURES host, so a
 	// deployment that trades spot only still has to route the perp family for
-	// the gate to be answerable at all — see record §73k F14, which is what
-	// this line is evidence of rather than a fixture convenience.
-	cfg.Venue.Endpoints = append(cfg.Venue.Endpoints, EndpointConfig{
-		Product: ids.ProductLinearPerp, Scheme: "http",
-		Host: strings.TrimPrefix(srv.URL, "http://"),
-	})
-	cfg.Venue.Limits = append(cfg.Venue.Limits,
-		LimitConfig{Name: "weight_1m", Scope: "family", Product: ids.ProductLinearPerp,
-			Dimension: "weight", Interval: dur(t, "1m"),
-			OpeningCeiling: 1680, RoutineCeiling: 2160, Capacity: 2400},
-		LimitConfig{Name: "orders_1m", Scope: "family", Product: ids.ProductLinearPerp,
-			Dimension: "orders", Interval: dur(t, "1m"),
-			OpeningCeiling: 840, RoutineCeiling: 1080, Capacity: 1200},
-	)
-	// And the Portfolio-Margin attestation, which is the ONE §4.1 check with no
-	// read path anywhere: without a pinned document this boot refuses by name
-	// (ReasonUnattested), so this line is what makes the clean answer below a
-	// statement about the account rather than about a missing file.
-	cfg.PortfolioMarginAttestation = pinnedPortfolioMarginAttestation(t, cfg.Account, "key", "secret")
+	// the gate to be answerable at all — record §73k F14. That is now a config
+	// RULE rather than a fixture habit (record §73n F20), which is why spotOnly
+	// carries the endpoint and this test only has to point it at the fake.
+	// routeTo also pins the Portfolio-Margin attestation, the ONE §4.1 check
+	// with no read path anywhere: without a pinned document this boot refuses by
+	// name (ReasonUnattested), so the clean answer below is a statement about
+	// the account rather than about a missing file.
+	routeTo(t, &cfg, srv)
 	r := newRunnerFor(t, cfg, func(string) error { return nil })
 
 	rep, err := r.run(t)
@@ -1661,6 +1623,221 @@ func TestBootOnAFlatAccountRefusesEveryConfiguredSymbol(t *testing.T) {
 		if !found {
 			t.Errorf("no failure names %s:\n%s", want, rep.AccountPosture)
 		}
+	}
+}
+
+// TestPostureRefusesWhenNoVenueClientWasBuilt holds the typed-nil interlock
+// (record §73n).
+//
+// A nil *venue.OrderClient handed to the ACL's constructor arrives as a NON-nil
+// interface value, so the `client == nil` check there cannot see it and the
+// first read dereferences nil — a PANIC in the phase whose job is refusing to
+// trade. Unreachable through Sequence, because every startOMS failure sets
+// r.halted; asserted anyway, because "unreachable" was the whole defence and it
+// rested on one boolean set two phases earlier. Deleting the guard turns this
+// test from a failure into a panic, which is a kill either way.
+func TestPostureRefusesWhenNoVenueClientWasBuilt(t *testing.T) {
+	t.Parallel()
+
+	var r Runner
+	if _, err := r.assertPosture(); !errors.Is(err, ErrVenueClientMissing) {
+		t.Errorf("assertPosture() with no venue client = %v, want ErrVenueClientMissing", err)
+	}
+}
+
+// dropFamily removes a family's endpoint AND its limits, which is the shape an
+// operator who trades only the other side actually writes.
+//
+// Both halves are needed to reach F20's refusal: a limit naming a family with no
+// endpoint is already refused by the profile check, which would answer first and
+// make this fixture a statement about a different rule.
+func dropFamily(cfg *Config, f ids.ProductCategory) {
+	var endpoints []EndpointConfig
+	for _, e := range cfg.Venue.Endpoints {
+		if e.Product != f {
+			endpoints = append(endpoints, e)
+		}
+	}
+	cfg.Venue.Endpoints = endpoints
+	var limits []LimitConfig
+	for _, l := range cfg.Venue.Limits {
+		if l.Scope != "family" || l.Product != f {
+			limits = append(limits, l)
+		}
+	}
+	cfg.Venue.Limits = limits
+}
+
+// keepFamily returns the instrument rows NOT on the dropped family.
+func keepFamily(in []InstrumentConfig, drop ids.ProductCategory) []InstrumentConfig {
+	var kept []InstrumentConfig
+	for _, row := range in {
+		if row.Product != drop {
+			kept = append(kept, row)
+		}
+	}
+	return kept
+}
+
+// bybitPostureConfig is a two-family Bybit deployment.
+//
+// It exists for F20's Bybit half: this file's other fixtures are all Binance, so
+// nothing here could have asked what a Bybit document's posture read rides —
+// which is how "Bybit is not symmetric, answerable regardless" survived
+// unchallenged. Both families are declared because §4.1's read needs both.
+func bybitPostureConfig(t *testing.T, journal string) Config {
+	t.Helper()
+	cfg := validConfig(t, journal)
+	cfg.Venue.Venue = ids.Venue("bybit")
+	cfg.Venue.Dialect = DialectBybit
+	cfg.Venue.Endpoints = []EndpointConfig{
+		{Product: ids.ProductSpot, Scheme: "https", Host: "api.bybit.com"},
+		{Product: ids.ProductLinearPerp, Scheme: "https", Host: "api.bybit.com"},
+	}
+	cfg.Instruments = []InstrumentConfig{
+		{Venue: "bybit", Product: ids.ProductSpot, Symbol: "BTCUSDT", Base: "BTC", Quote: "USDT"},
+		{Venue: "bybit", Product: ids.ProductLinearPerp, Contract: ids.ContractLinear,
+			Symbol: "BTCUSDT", Base: "BTC", Quote: "USDT", Leverage: 5},
+	}
+	cfg.PositionScopes = []ScopeConfig{
+		{Venue: "bybit", Product: ids.ProductLinearPerp, Settle: "USDT"},
+	}
+	cfg.Resolution.AssumedReach = []ReachConfig{
+		{Venue: "bybit", Product: ids.ProductSpot, Reach: dur(t, "72h")},
+	}
+	// Bybit UTA's rule table has no Portfolio-Margin row, so a pin here is
+	// refused as a document nothing consumes.
+	cfg.PortfolioMarginAttestation = nil
+	cfg.SpotBaseline = nil
+	return cfg
+}
+
+// TestBootOnAHedgeModeAccountLatchesAndStillNamesEveryOtherCheck is F19 at the
+// composition, and it is the fixture neither layer's own suite could hold
+// (record §73n).
+//
+// The account is in HEDGE mode — a §4.1 violation — so `positionRisk` answers
+// with a LONG row and a SHORT row for one symbol (Profiles §9, verbatim). The
+// codec used to refuse that whole read, which meant:
+//
+//   - the violation reported as OutcomeFailed — "the posture could not be
+//     established, a retry may lift it" — for an account no retry will change;
+//   - the three probes already decoded were DISCARDED, including the account-wide
+//     dualSidePosition answer that names the same violation directly.
+//
+// Both halves are asserted here. The same account also breaks §7.5's join
+// (positions_binance refuses a hedge row by name, ErrPositionModeNotOneWay),
+// which is a DIFFERENT gate — this test is about the posture gate speaking
+// first and speaking correctly.
+func TestBootOnAHedgeModeAccountLatchesAndStillNamesEveryOtherCheck(t *testing.T) {
+	t.Setenv(testKeyVar, "key")
+	t.Setenv(testSecretVar, "secret")
+
+	bodies := rosterPostureBodies(secondBootPin)
+	bodies["/fapi/v1/positionSide/dual"] = `{"dualSidePosition":true}`
+	bodies["/fapi/v3/positionRisk"] = `[` +
+		`{"symbol":"BTCUSDT","positionSide":"LONG","positionAmt":"0","isAutoAddMargin":"false"},` +
+		`{"symbol":"BTCUSDT","positionSide":"SHORT","positionAmt":"0","isAutoAddMargin":"false"},` +
+		`{"symbol":"ETHUSDT","positionSide":"BOTH","positionAmt":"0","isAutoAddMargin":"false"}]`
+	srv := rosterPostureServer(t, bodies)
+	defer srv.Close()
+
+	cfg := perpRoster(t, filepath.Join(t.TempDir(), "journal.db"))
+	routeTo(t, &cfg, srv)
+	r := newRunnerFor(t, cfg, func(string) error { return nil })
+
+	rep, err := r.run(t)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// 1. It LATCHES. OutcomeFailed here would be the defect: §7.5's own
+	// distinction is that incompleteness invites a retry, and this account's
+	// posture is not incomplete — it was read.
+	if o, declared := r.checklist.Outcome(boot.GateAccountPosture); !declared || o != boot.OutcomeNeedsOperator {
+		t.Fatalf("GateAccountPosture = %s (declared %v), want OutcomeNeedsOperator:\n%s",
+			o, declared, rep.AccountPosture)
+	}
+	if rep.PostureCause != nil {
+		t.Errorf("PostureCause = %v, want nil — the posture WAS established, and found wrong", rep.PostureCause)
+	}
+	if got := rep.ExitClass(); got != ExitOperator {
+		t.Errorf("ExitClass() = %s, want ExitOperator; latched = %v", got, rep.Latched)
+	}
+
+	// 2. Every other check still ran. Nine rules over this roster plus the one
+	// duplicated key is 10 — the exact count is the instrument, because a read
+	// that died at the fourth probe would report a verdict of zero.
+	if rep.AccountPosture.Evaluated != 10 {
+		t.Errorf("evaluated %d checks, want 10 (nine rules + one duplicate key):\n%s",
+			rep.AccountPosture.Evaluated, rep.AccountPosture)
+	}
+
+	// 3. Both failures are named, and they are DIFFERENT failures: the
+	// account-wide mode from probe 2, and the per-symbol ambiguity from probe 4.
+	// Asserting only one of them would pass on a verdict that lost the other.
+	var mode, ambiguous bool
+	for _, f := range rep.AccountPosture.Failures {
+		switch {
+		case f.Setting == riskdomain.SettingPositionMode && f.Scope == riskdomain.ScopeAccount:
+			mode = f.Reason == riskdomain.ReasonMismatch && f.Observed == "true"
+		case f.Setting == riskdomain.SettingAutoAddMargin && f.Subject == "BTCUSDT":
+			ambiguous = f.Reason == riskdomain.ReasonAmbiguous
+		}
+	}
+	if !mode {
+		t.Errorf("no account-wide SettingPositionMode mismatch naming the venue's word:\n%s", rep.AccountPosture)
+	}
+	if !ambiguous {
+		t.Errorf("no ReasonAmbiguous on BTCUSDT's auto-add-margin — the two hedge rows must reach the domain:\n%s",
+			rep.AccountPosture)
+	}
+}
+
+// TestConfigRefusesADeploymentThatRoutesNoPostureFamily is F20 (record §73n).
+//
+// A posture probe is routed by product family, so a family with no endpoint
+// makes §4.1's gate unanswerable on every boot of that document — §5.2's
+// "a value that makes the permitted region unreachable is refused at startup",
+// reached through an omission. Both venues, both directions: the check is
+// derived from the codec's own steps rather than from a list, so neither venue
+// is a special case.
+func TestConfigRefusesADeploymentThatRoutesNoPostureFamily(t *testing.T) {
+	t.Parallel()
+
+	journal := filepath.Join(t.TempDir(), "journal.db")
+
+	// Binance: all four probes are on the futures family (record §73k F14).
+	spot := spotOnly(t, journal)
+	dropFamily(&spot, ids.ProductLinearPerp)
+	if err := spot.Validate(); !errors.Is(err, ErrFamilyUnrouted) {
+		t.Errorf("a spot-only Binance document routing no futures family validated with %v, want ErrFamilyUnrouted", err)
+	}
+	// The positive control: the same document WITH the endpoint validates, or the
+	// check above would be a predicate that objects to everything.
+	if err := spotOnly(t, journal).Validate(); err != nil {
+		t.Errorf("the same document declaring the futures endpoint must validate: %v", err)
+	}
+
+	// Bybit is the case §73k F14 called "not symmetric — answerable regardless",
+	// which was true of the exchange and false of this routing: TWO of its four
+	// probes ride spot and two ride linear-perp, so a deployment short of either
+	// family cannot issue them.
+	for _, drop := range []ids.ProductCategory{ids.ProductSpot, ids.ProductLinearPerp} {
+		cfg := bybitPostureConfig(t, journal)
+		cfg.Instruments = keepFamily(cfg.Instruments, drop)
+		if drop == ids.ProductLinearPerp {
+			cfg.PositionScopes = nil
+		} else {
+			cfg.Resolution.AssumedReach, cfg.SpotSettle = nil, config.Duration{}
+		}
+		dropFamily(&cfg, drop)
+		if err := cfg.Validate(); !errors.Is(err, ErrFamilyUnrouted) {
+			t.Errorf("a Bybit document routing no %s family validated with %v, want ErrFamilyUnrouted", drop, err)
+		}
+	}
+	if err := bybitPostureConfig(t, journal).Validate(); err != nil {
+		t.Errorf("the two-family Bybit document must validate: %v", err)
 	}
 }
 

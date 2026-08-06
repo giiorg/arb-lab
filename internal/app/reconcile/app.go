@@ -642,6 +642,15 @@ func (r *Runner) startPosture(context.Context) (boot.StopFunc, error) {
 // the posture can fail to be ESTABLISHED returns through one path, rather than
 // each one having to remember which gate outcome it owes.
 func (r *Runner) assertPosture() (riskdomain.Verdict, error) {
+	if r.venueClient == nil {
+		// The typed-nil trap, closed where the concrete type is still visible:
+		// a nil *venue.OrderClient handed to NewAccountPosture arrives as a
+		// NON-nil interface holding a nil pointer, so that constructor's own
+		// nil check cannot see it and the first read PANICS. Unreachable while
+		// every startOMS failure sets r.halted — which means the whole defence
+		// was one boolean, in the phase whose job is refusing to trade.
+		return riskdomain.Verdict{}, ErrVenueClientMissing
+	}
 	attested := riskdomain.AttestationUnstated
 	if pin := r.cfg.PortfolioMarginAttestation; pin != nil {
 		// A pinned document that will not load is a wiring defect and not a

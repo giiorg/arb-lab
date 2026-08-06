@@ -305,6 +305,18 @@ func decodeBybitPostureWallet(probe PostureProbe, resp transport.Response) ([]Po
 // also the case this codec cannot verify without a credential: whether Bybit
 // returns a row for a configured-but-never-traded symbol is unknown here, and
 // the conservative handling is correct under both answers.
+//
+// # A symbol answered TWICE is reported, not refused (record §73n F19)
+//
+// In HEDGE mode Bybit returns two rows per symbol, one per positionIdx — and
+// hedge mode is a §4.1 posture VIOLATION, so the duplicate is evidence rather
+// than a wire fault. Refusing it here converted a posture READ AND FOUND WRONG
+// into one that could not be read at all, which §7.5 treats as retryable
+// incompleteness; on Bybit no other probe names the position mode, so the one
+// signal there is went out through the arm that says "nothing is known to be
+// wrong". Both rows now travel and risk/domain reports ReasonAmbiguous — a
+// latching per-symbol failure beside every other check. The original argument
+// was against FOLDING two rows into one answer, which passing both does not do.
 func decodeBybitPositionPosture(probe PostureProbe, resp transport.Response) ([]PostureObservation, error) {
 	var wire bybitPositionPostureWire
 	if err := json.Unmarshal(resp.Body, &wire); err != nil {
@@ -312,24 +324,12 @@ func decodeBybitPositionPosture(probe PostureProbe, resp transport.Response) ([]
 	}
 
 	out := make([]PostureObservation, 0, len(wire.Result.List)*3)
-	seen := make(map[string]struct{}, len(wire.Result.List))
 	for i, row := range wire.Result.List {
 		if row.Symbol == nil || *row.Symbol == "" {
 			return nil, fmt.Errorf("bybit position posture row %d carries no symbol: %w",
 				i, ErrPostureUnreadable)
 		}
 		symbol := *row.Symbol
-		if _, dup := seen[symbol]; dup {
-			// In HEDGE mode Bybit returns two rows per symbol, one per
-			// positionIdx — so a duplicate symbol is not merely unreadable,
-			// it is very likely the exact posture violation being hunted.
-			// Refused rather than folded, because folding would have to pick
-			// one row's positionIdx and either pick is a claim about a mode
-			// the account may not be in.
-			return nil, fmt.Errorf("bybit answers twice for %s (hedge mode returns one row per side): %w",
-				symbol, ErrPostureUnreadable)
-		}
-		seen[symbol] = struct{}{}
 
 		out = append(out,
 			postureObservation(probe, PosturePositionMode, PostureScopeSymbol, symbol,

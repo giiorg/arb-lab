@@ -3,6 +3,7 @@ package venue
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/giiorg/arb-lab/internal/engine/venue/transport"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
@@ -262,6 +263,23 @@ func binanceLeverageWord(v *int) *string {
 // is off" for a symbol with no row — so absence produces no observation at all,
 // and the roster coverage check in the domain is what turns a configured symbol
 // with no observation into a refusal (record §73b F4).
+//
+// # A symbol answered TWICE is reported, not refused (record §73n F19)
+//
+// Profiles §9 records the cause verbatim: "A hedge-mode account answers with a
+// `LONG` row and a `SHORT` row for one symbol." Hedge mode is a §4.1 posture
+// VIOLATION, so the duplicate is evidence rather than a wire fault — and this
+// codec refusing it converts a posture that was READ AND FOUND WRONG into one
+// that could not be read at all, which is the retryable arm of a distinction
+// §7.5 draws precisely so that a violation no retry can lift latches instead.
+// It also discards the three probes already decoded, including the account-wide
+// dualSidePosition answer that names the same violation directly.
+//
+// So both rows travel and the domain judges them: risk/domain keys observations
+// by (setting, scope, subject), sees two answers on one key, and reports
+// ReasonAmbiguous — a named per-symbol failure that latches, beside every other
+// check the read established. The codec's own argument was only ever against
+// FOLDING the two rows into one answer, which nothing here does.
 func decodeBinancePositionRiskPosture(probe PostureProbe, resp transport.Response) ([]PostureObservation, error) {
 	var rows []binancePositionRiskPostureWire
 	if err := json.Unmarshal(resp.Body, &rows); err != nil {
@@ -269,17 +287,12 @@ func decodeBinancePositionRiskPosture(probe PostureProbe, resp transport.Respons
 	}
 
 	out := make([]PostureObservation, 0, len(rows))
-	seen := make(map[string]struct{}, len(rows))
 	for i, row := range rows {
 		if row.Symbol == nil || *row.Symbol == "" {
 			return nil, fmt.Errorf("binance position risk row %d carries no symbol: %w",
 				i, ErrPostureUnreadable)
 		}
 		symbol := *row.Symbol
-		if _, dup := seen[symbol]; dup {
-			return nil, fmt.Errorf("binance answers twice for %s: %w", symbol, ErrPostureUnreadable)
-		}
-		seen[symbol] = struct{}{}
 
 		word, err := binanceAutoAddMarginWord(symbol, row)
 		if err != nil {
@@ -293,6 +306,12 @@ func decodeBinancePositionRiskPosture(probe PostureProbe, resp transport.Respons
 
 // binanceAutoAddMarginWord reconciles the two spellings, refusing a row that
 // states both and disagrees.
+//
+// The comparison folds case, because the domain's own word comparison does
+// (expectWord, "ON" and "OFF" differ under any folding) and a stricter test HERE
+// would refuse the whole read over two spellings of one agreeing answer — the
+// same misclassification F19 is about, one field down. What is refused is a real
+// disagreement, where picking a spelling silently picks an answer.
 func binanceAutoAddMarginWord(symbol string, row binancePositionRiskPostureWire) (*string, error) {
 	var fromString *string
 	if row.IsAutoAddMargin != nil {
@@ -312,7 +331,7 @@ func binanceAutoAddMarginWord(symbol string, row binancePositionRiskPostureWire)
 		return fromBool, nil
 	case fromBool == nil:
 		return fromString, nil
-	case *fromString != *fromBool:
+	case !strings.EqualFold(*fromString, *fromBool):
 		return nil, fmt.Errorf("binance %s states auto-add-margin as both %q and %q: %w",
 			symbol, *fromString, *fromBool, ErrPostureUnreadable)
 	default:

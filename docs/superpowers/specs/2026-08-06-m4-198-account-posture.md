@@ -731,8 +731,16 @@ Binance, and it is a venue-shape fact rather than a design choice:
   has rows, so an empty one means the read was wrong-shaped), which a spot-only
   account's answer may well be.
 
-Bybit is not symmetric: `/v5/account/info` and `/v5/spot-margin-uta/status` are
-account-level and answerable regardless.
+~~Bybit is not symmetric: `/v5/account/info` and `/v5/spot-margin-uta/status` are
+account-level and answerable regardless.~~ **CORRECTED by §73n F20 (session
+114): that is true of the exchange and FALSE of this code.** The probes are
+routed by product *family* and the transport map holds one entry per configured
+endpoint, so `/v5/account/info` (linear-perp) and `/v5/spot-margin-uta/status`
+(spot) are answerable only to a deployment that declares the family each rides —
+and Bybit is therefore not merely symmetric with Binance but worse, because
+**either** one-sided deployment is short a family. The sentence above is the
+reason nobody looked for eighteen sessions' worth of habit: it read as
+reassurance.
 
 So a spot-only Binance deployment must still route the futures family for the
 gate to be answerable — which the clean-boot fixture now does, with a comment
@@ -976,6 +984,154 @@ this* in a place the next reader cannot miss.
 
 ---
 
+## §73n — What the slice-closing `code_diff` review found (session 114, item 10)
+
+The review read the whole slice diff (16e3f57..HEAD, ~8,000 lines of code) in a
+fresh context against the normative text it claims to implement. **NO-SHIP, two
+majors**, both folded here with six mutants. The shape both share is worth more
+than either instance: **a defect that exists only BETWEEN two layers, where each
+layer's own suite is green.** A package-scoped test cannot see one, and in F19's
+case the two layers' tests encode *contradictory premises about the same wire
+shape* and both pass.
+
+### F19 — a hedge-mode account reported as "could not be read", and the domain member built for it had no producer
+
+The two tests, before this session, side by side:
+
+- `risk/domain/posture_test.go` — `TestCheckRefusesTwoAnswersForOneKey`, comment:
+  *"Bybit returns one position row per SIDE in hedge mode, which is the posture
+  violation **this rule exists to catch**."* Builds the duplicate **by hand**.
+- `engine/venue/posture_test.go` — `TestBybitDecodePositionListRefusesDuplicateSymbol`,
+  which asserts the codec refuses **that exact wire shape** before it can reach
+  the domain.
+
+Both codecs refused duplicates per-probe and no two probes share a
+`(setting, scope, subject)` key, so **`ReasonAmbiguous` had no production
+producer at all** — a declared member nothing emits, with a fixture supplying
+its own input ([[declared-enum-member-nothing-emits]],
+[[fixture-that-states-its-fact-twice]]).
+
+**What actually happened**, traced end to end: decode error → `AccountPosture`
+returns `apperror.Precondition` and discards the whole report → `Assert` returns
+it → `startPosture` sets `postureCause` and reports **`OutcomeFailed`** →
+`ExitClass` maps that to **`ExitIncomplete`**, documented as *"nothing is known
+to be wrong"* and *"a retry may lift it"*. The account is in hedge mode. No
+retry lifts it.
+
+**Binance is the sharper case and it rests on this repo's own verified venue
+fact.** Profiles §9, verbatim: *"A hedge-mode account answers with a `LONG` row
+and a `SHORT` row for one symbol."* Probe order is multiAssets → positionDual →
+symbolConfig → positionRisk, so on a hedge-mode account holding a position,
+probe 2 has already decoded `dualSidePosition == true` — a clean, readable,
+**latching** `ReasonMismatch` — and probe 4's refusal throws probes 1–3 away.
+The operator gets exit code 2, `latched: none`, and **zero failed checks
+listed**, against §4.1's own *"the verdict names EVERY failed check"*. It needs
+an open position, so a cold boot is unaffected — but that is every restart of a
+deployment that has traded.
+
+**Why the codec's own argument did not cover what the codec did.** Its comment
+argues that *folding* is wrong: *"folding would have to pick one row's
+positionIdx and either pick is a claim about a mode the account may not be in."*
+That rules out folding, not passing both rows through. The code took a stronger
+action the argument does not support, and the stronger action lands in the wrong
+outcome class — [[a-narrowing-carries-an-argument]], one layer down from where
+F18 found it.
+
+**The fold.** The duplicate refusal is removed from the two **position
+enumerations** (`decodeBinancePositionRiskPosture`, `decodeBybitPositionPosture`)
+and stays in `symbolConfig` and the wallet, where a duplicate is a wrong-shaped
+answer rather than a documented venue behaviour. That split is the whole content
+of the change and it is where the mirror rule bites: same concern, both venues,
+both directions of travel.
+
+**Rejected:** keeping the codec refusal and re-classifying it in `startPosture`
+by sniffing the error. That is a second authority over what "read and wrong"
+means, in the layer furthest from the evidence, and it would still have
+discarded the probes already decoded.
+
+### F20 — the posture read's FAMILIES are a config requirement, and §73k F14's reassurance about Bybit was false of this code
+
+A probe is routed by product family; `newOrderClient` builds one transport per
+**configured endpoint**. So a family with no endpoint makes the probe unissuable
+and the gate unanswerable on every boot of that document.
+
+§73k F14 recorded the Binance half and then said: *"Bybit is not symmetric:
+`/v5/account/info` and `/v5/spot-margin-uta/status` are account-level and
+answerable regardless."* True of Bybit. False of this routing:
+
+| Probe | Family |
+|---|---|
+| `/v5/account/info` | `ProductLinearPerp` |
+| `/v5/spot-margin-uta/status` | `ProductSpot` |
+| `/v5/account/wallet-balance` | `ProductSpot` |
+| `/v5/position/list` | `ProductLinearPerp` |
+
+So **both** one-sided Bybit deployments — F11's legitimate shapes — fail:
+spot-only cannot issue probe 1 (the very case F14's sentence is about), and
+perp-only cannot issue probes 2 and 3. A reassuring sentence is the one nobody
+re-derives ([[a-reassuring-claim-generalized-from-one-input]]), and the
+falsifier was a grep of `Family:` in the file the same slice wrote.
+
+**The fold.** `Config.validatePosture` derives the families from the codec's own
+`EncodePosture()` steps and refuses a missing endpoint **by name** —
+`orderCodecFor` is split out of `collaboratorsFor` so config validation can build
+the codec without a credential. Derived rather than listed, on
+`ConsumesAttestation`'s precedent: a list and a table are two statements of one
+fact.
+
+**Rejected:** letting an account-level probe fall back to any routed transport.
+It is unsafe for Binance, where the families are genuinely different hosts —
+a `/fapi/*` call would be issued against `api.binance.com`.
+
+**The fixture had to drop the family's LIMITS as well as its endpoint**, because
+a limit naming an unrouted family was already refused one check earlier — the
+one-violation-per-fixture problem in its isolating form. And the repo's own
+`spotOnly` helper *was* the defective document: it trimmed the endpoint list to
+`[:1]`, so every test built on it exercised a deployment whose posture gate could
+never conclude, while three tests appended the futures endpoint back by hand.
+
+### Three minors, folded
+
+1. **`arblab --help` said "produces four"** of §7.5's gates while its own report
+   line printed 5, and its phase list never mentioned the posture — user-facing.
+   Two stale in-code counts (`cmd/arblab/reconcile.go`, `app/exercise/app.go`)
+   with it.
+2. **The typed-nil trap.** A nil `*venue.OrderClient` reaches
+   `NewAccountPosture` as a **non-nil interface holding a nil pointer**, so its
+   `client == nil` check cannot see it and the first read panics — in the phase
+   whose job is refusing to trade. Unreachable while every `startOMS` failure
+   sets `r.halted`, which means the defence was one boolean set two phases
+   earlier. Now `ErrVenueClientMissing`, named at the root that still knows the
+   concrete type, with a test that makes it mutable.
+3. **`Failure.Subject`'s documented invariant** (*"empty exactly when Scope is
+   ScopeAccount"*) is broken by `Check` itself on the empty-enumeration failure,
+   and `Failure.Validate` does not check the pair. The comment was wrong, not the
+   code.
+
+### The review's one wrong line of attack, recorded so nobody re-runs it
+
+I expected `indexObservations`'s ambiguity failure to fire on symbols **outside**
+the configured roster, contradicting §4.1's *"observations for symbols not on the
+configured roster are ignored rather than failed"*. It cannot — because the
+codecs refuse duplicates first, which is F19 arriving from the other side.
+
+### The campaign — 6 mutants, all caught
+
+| # | Mutation | Verdict |
+|---|---|---|
+| M42 | the posture-family check never fires | caught (1) |
+| M43 | only the FIRST probe's family is required | caught (1) |
+| M44 | the two auto-add-margin spellings compare case-SENSITIVELY again | caught (1) |
+| M45 | `positionRisk` keeps only the first row (the fold the comment forbids) | caught (4) |
+| M46 | `position/list` keeps only the first row | caught (2) |
+| M47 | the typed-nil venue-client interlock never fires | caught (1) |
+
+Two `NOBUILD!!` first, and both were **bad seds** rather than compiler-enforced
+claims: each removed the last use of an import, so the harness printed
+`imported and not used`. That is the re-aim signal
+([[nobuild-verdict-read-the-compiler-error]]); re-aimed at the loop bound and at
+a fold that keeps `strings` used, both caught.
+
 ## §73h — Work items
 
 1. ~~`engine/venue` posture codecs, both venues + roster rows + weights.~~ **DONE** (session 109)
@@ -1004,7 +1160,10 @@ this* in a place the next reader cannot miss.
    name: the `leverage` pin and the attestation pin both landed in code in
    session 111 and had no schema entry. The reading pass beside the (zero) OWED
    grep produced **F18** (§73m).
-10. Final fresh `code_diff` review.
+10. ~~Final fresh `code_diff` review.~~ **DONE** (session 114) — NO-SHIP with
+    two majors, both folded, plus three minors; six mutants, all caught; docs to
+    v0.9.52. Record **§73n**. Both majors were cross-layer, and F20 falsified a
+    sentence §73k F14 had recorded as reassurance.
 11. **OPERATOR RULING OWED — §73j F9's unreachable-gate consequence**, now with
     §73k F14 beside it (a spot-only Binance deployment cannot answer §4.1 at
     all). Choose between strict / per-setting default reliance / a distinct boot

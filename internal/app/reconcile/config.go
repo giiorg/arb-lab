@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/giiorg/arb-lab/internal/engine/venue"
@@ -243,6 +244,50 @@ func (d Dialect) Validate() error {
 // An unknown dialect is an error and never a default, on ErrDialectUnknown's
 // standing argument: a default table would judge an account model nobody
 // selected.
+// postureFamilies is which product families §4.1's posture read rides on this
+// dialect, derived from the codec's own encoded steps.
+//
+// # Why this is a CONFIG question at all (record §73n F20)
+//
+// A posture probe is routed by product family, and the transport map holds one
+// entry per CONFIGURED endpoint — so a family this deployment declares no
+// endpoint for makes the probe unissuable and §4.1's gate permanently
+// unanswerable. That is §5.2's own "a value that makes the permitted region
+// unreachable is refused at startup, by name", reached through an omission
+// rather than through a value.
+//
+// It bites in both directions and on both venues, which is why it is derived
+// rather than listed: all four Binance probes ride the futures family, so a
+// deployment trading only spot must still declare a futures endpoint (record
+// §73k F14); and on Bybit TWO probes ride spot while two ride linear-perp, so
+// either one-sided deployment is short one. §73k F14's note that Bybit is "not
+// symmetric — answerable regardless" was true of the exchange and false of this
+// routing, which is exactly the reassurance that stopped anybody looking.
+func (d Dialect) postureFamilies(v ids.Venue) ([]ids.ProductCategory, error) {
+	codec, err := orderCodecFor(d, v)
+	if err != nil {
+		return nil, err
+	}
+	posture, ok := codec.(venue.AccountPostureCodec)
+	if !ok {
+		// §4.1 makes the posture a precondition of trading, so a dialect whose
+		// codec cannot answer it is not one this system may be configured for.
+		return nil, fmt.Errorf("dialect %q has no account posture surface: %w",
+			string(d), ErrDialectUnknown)
+	}
+	steps, err := posture.EncodePosture()
+	if err != nil {
+		return nil, err
+	}
+	var families []ids.ProductCategory
+	for _, s := range steps {
+		if !slices.Contains(families, s.Call.Family) {
+			families = append(families, s.Call.Family)
+		}
+	}
+	return families, nil
+}
+
 func (d Dialect) PostureDialect() (riskdomain.Dialect, error) {
 	switch d {
 	case DialectBinance:
@@ -620,6 +665,28 @@ func (c Config) validatePosture() error {
 	// pair can disagree about a document neither of them changed.
 	if _, err := c.PostureRequirement(riskdomain.AttestationUnstated); err != nil {
 		return fmt.Errorf("§4.1 posture requirement: %w", err)
+	}
+	// Every family the posture read RIDES must have an endpoint, or the gate is
+	// unanswerable on every boot of this document (record §73n F20). It is
+	// checked here rather than discovered at the probe, because a config-time
+	// refusal names the line to add while an unrouted probe at boot arrives as
+	// "the posture could not be established" — the retryable arm, for a
+	// deployment no retry will ever change. The instrument→endpoint rule above
+	// cannot see this: these families are the POSTURE's, and it reads two of
+	// them on a deployment that trades neither.
+	families, err := c.Venue.Dialect.postureFamilies(c.Venue.Venue)
+	if err != nil {
+		return err
+	}
+	routed := make(map[ids.ProductCategory]struct{}, len(c.Venue.Endpoints))
+	for _, e := range c.Venue.Endpoints {
+		routed[e.Product] = struct{}{}
+	}
+	for _, f := range families {
+		if _, ok := routed[f]; !ok {
+			return fmt.Errorf("§4.1's posture read rides %s and no endpoint serves it: %w",
+				f, ErrFamilyUnrouted)
+		}
 	}
 	if c.PortfolioMarginAttestation == nil {
 		return nil

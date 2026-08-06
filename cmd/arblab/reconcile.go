@@ -85,7 +85,7 @@ func reconcileRun(args []string, stdout, stderr io.Writer) int {
 //
 // Posture is printed FIRST and labelled with why it is what it is, because it is
 // the number a reader will reach for as the verdict and it is not one: this
-// binary declares all eight of §7.5's gates and produces four of them, so
+// binary declares all eight of §7.5's gates and produces five of them, so
 // reconcile-only is the honest answer on a completely clean account.
 func writeReconcileReport(w io.Writer, r appreconcile.Report) {
 	writeReconcileVerdict(w, r)

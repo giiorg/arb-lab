@@ -10,12 +10,14 @@
 // and only if that verdict is ExitClean, plan and execute the configured
 // package through oms.Module's own use cases. §59d records the decision this
 // package is built on: the gate is the VERDICT, not the posture, because this
-// deployment's posture is PostureReconcileOnly on every boot while five of
+// deployment's posture is PostureReconcileOnly on every boot while four of
 // §7.5's gates have no producer — a driver gated on PostureTrading could never
 // run, waiting on contexts sequenced after the evidence it exists to produce.
 // The regime is stated plainly: this binary trades testnet-class targets under
-// a posture naming five unverified preconditions, which is §12's sub-$1K carve-
-// out, and the same gate tightens by itself as producers land.
+// a posture naming four unverified preconditions, which is §12's sub-$1K carve-
+// out, and the same gate tightens by itself as producers land — §4.1's account
+// posture is the first that HAS (task #198), which is why this count moved and
+// why a refused posture now reaches the verdict this package gates on.
 //
 // # Execution is NOT a boot phase
 //

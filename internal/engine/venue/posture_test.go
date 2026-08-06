@@ -2,6 +2,7 @@ package venue_test
 
 import (
 	"errors"
+	"sort"
 	"testing"
 
 	"github.com/giiorg/arb-lab/internal/engine/venue"
@@ -256,6 +257,60 @@ func TestBinanceDecodePositionRiskAllowsEmptyAndRefusesContradiction(t *testing.
 	}
 }
 
+// TestBinanceDecodePositionRiskReportsBothSidesOfAHedgedSymbol is F19's Binance
+// half, and the mirror of the Bybit test below (record §73n).
+//
+// Profiles §9 records the cause verbatim: "A hedge-mode account answers with a
+// LONG row and a SHORT row for one symbol." Hedge mode is a §4.1 violation, so
+// refusing the read here discarded the three probes already decoded — including
+// the account-wide dualSidePosition answer that names the same violation — and
+// reported the whole posture as unestablishable rather than as refused.
+func TestBinanceDecodePositionRiskReportsBothSidesOfAHedgedSymbol(t *testing.T) {
+	body := `[
+		{"symbol":"BTCUSDT","positionSide":"LONG","isAutoAddMargin":"false"},
+		{"symbol":"BTCUSDT","positionSide":"SHORT","isAutoAddMargin":"true"}
+	]`
+	obs, err := binanceCodec(t).DecodePostureStep(venue.PostureProbePositionRisk,
+		transport.Response{Body: []byte(body)})
+	if err != nil {
+		t.Fatalf("DecodePostureStep: %v", err)
+	}
+	if len(obs) != 2 {
+		t.Fatalf("produced %d observations, want 2 (one per hedge row)", len(obs))
+	}
+	// The DISAGREEING answers both survive. Keeping either one would answer
+	// §4.1's auto-add-margin question for this symbol from a row picked here.
+	var words []string
+	for _, o := range obs {
+		if o.Subject != "BTCUSDT" || o.Setting != venue.PostureAutoAddMargin {
+			t.Fatalf("observation %+v, want BTCUSDT auto-add-margin", o)
+		}
+		words = append(words, o.Value)
+	}
+	sort.Strings(words)
+	if len(words) != 2 || words[0] != "false" || words[1] != "true" {
+		t.Fatalf("auto-add-margin words = %v, want both rows' answers", words)
+	}
+}
+
+// TestBinanceAutoAddMarginFoldsCaseAcrossTheTwoSpellings.
+//
+// The two spellings agreeing in different CASE is one answer, not a
+// contradiction — the domain's own comparison folds case, and refusing here
+// would lose the whole read over a spelling. The contradiction test above is the
+// negative control that this fold does not admit a real disagreement.
+func TestBinanceAutoAddMarginFoldsCaseAcrossTheTwoSpellings(t *testing.T) {
+	body := `[{"symbol":"BTCUSDT","isAutoAddMargin":"FALSE","autoAddMargin":false}]`
+	obs, err := binanceCodec(t).DecodePostureStep(venue.PostureProbePositionRisk,
+		transport.Response{Body: []byte(body)})
+	if err != nil {
+		t.Fatalf("DecodePostureStep: %v", err)
+	}
+	if len(obs) != 1 || obs[0].Value != "FALSE" {
+		t.Fatalf("observations = %+v, want one carrying the venue's own word verbatim", obs)
+	}
+}
+
 // TestBinanceRefusesBybitProbes covers the grouped case in the decode switch.
 //
 // Without this the arm is a branch nothing executes — and §3.6 rule 10's whole
@@ -389,21 +444,40 @@ func TestBybitDecodePositionListReadsEverySymbol(t *testing.T) {
 	}
 }
 
-// TestBybitDecodePositionListRefusesDuplicateSymbol.
+// TestBybitDecodePositionListReportsBothSidesOfAHedgedSymbol is F19's Bybit
+// half (record §73n).
 //
-// A duplicate symbol on this endpoint is very likely the posture violation
-// being hunted: hedge mode returns one row per side. Folding it would have to
-// pick a row's positionIdx, and either pick asserts a mode the account may not
-// be in.
-func TestBybitDecodePositionListRefusesDuplicateSymbol(t *testing.T) {
+// A duplicate symbol on this endpoint is the posture violation being hunted:
+// hedge mode returns one row per side. This codec used to REFUSE the whole read
+// for it, which turned a posture read-and-found-wrong into one that could not be
+// read — the retryable arm, for an account no retry will change, and on Bybit
+// nothing else names the position mode. Both rows now travel, and risk/domain's
+// ReasonAmbiguous is what judges them. Folding is still not done: neither row's
+// positionIdx is picked, they are both reported.
+func TestBybitDecodePositionListReportsBothSidesOfAHedgedSymbol(t *testing.T) {
 	body := `{"result":{"list":[
 		{"symbol":"BTCUSDT","positionIdx":1,"leverage":"3","autoAddMargin":0},
 		{"symbol":"BTCUSDT","positionIdx":2,"leverage":"3","autoAddMargin":0}
 	]}}`
-	_, err := bybitCodec(t).DecodePostureStep(venue.PostureProbePositionList,
+	obs, err := bybitCodec(t).DecodePostureStep(venue.PostureProbePositionList,
 		transport.Response{Body: []byte(body)})
-	if !errors.Is(err, venue.ErrPostureUnreadable) {
-		t.Errorf("duplicate symbol error = %v, want ErrPostureUnreadable", err)
+	if err != nil {
+		t.Fatalf("DecodePostureStep: %v", err)
+	}
+	if len(obs) != 6 {
+		t.Fatalf("produced %d observations, want 6 (three settings × two hedge rows)", len(obs))
+	}
+	// The two positionIdx answers must BOTH survive: keeping one is the fold
+	// this refuses to do, and it is the fold that would pick a mode.
+	var sides []string
+	for _, o := range obs {
+		if o.Setting == venue.PosturePositionMode {
+			sides = append(sides, o.Value)
+		}
+	}
+	sort.Strings(sides)
+	if len(sides) != 2 || sides[0] != "1" || sides[1] != "2" {
+		t.Fatalf("position modes = %v, want both hedge sides 1 and 2", sides)
 	}
 }
 

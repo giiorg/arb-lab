@@ -98,14 +98,33 @@ type collaborators struct {
 	envelope transport.EnvelopeReader
 }
 
-// collaboratorsFor builds the dialect's four pieces over one credential.
-func collaboratorsFor(d Dialect, v ids.Venue, cred transport.Credential) (collaborators, error) {
+// orderCodecFor builds the dialect's codec, which is the ONE of the four pieces
+// that needs no credential.
+//
+// Split out so config validation can ask the codec what a posture read RIDES
+// without holding a secret (see Config.validatePosture). Deriving the answer
+// from the codec's own encoded steps rather than restating it as a per-dialect
+// list follows Dialect.ConsumesAttestation' precedent one context over: a list
+// and a table are two statements of one fact, and they disagree the moment
+// either moves.
+func orderCodecFor(d Dialect, v ids.Venue) (venue.OrderCodec, error) {
 	switch d {
 	case DialectBinance:
-		codec, err := venue.NewBinanceOrderCodec(v)
-		if err != nil {
-			return collaborators{}, err
-		}
+		return venue.NewBinanceOrderCodec(v)
+	case DialectBybit:
+		return venue.NewBybitOrderCodec(v)
+	}
+	return nil, fmt.Errorf("dialect %q: %w", string(d), ErrDialectUnknown)
+}
+
+// collaboratorsFor builds the dialect's four pieces over one credential.
+func collaboratorsFor(d Dialect, v ids.Venue, cred transport.Credential) (collaborators, error) {
+	codec, err := orderCodecFor(d, v)
+	if err != nil {
+		return collaborators{}, err
+	}
+	switch d {
+	case DialectBinance:
 		signer, err := transport.NewBinanceSigner(v, cred)
 		if err != nil {
 			return collaborators{}, err
@@ -117,10 +136,6 @@ func collaboratorsFor(d Dialect, v ids.Venue, cred transport.Credential) (collab
 			envelope: transport.BinanceEnvelope{},
 		}, nil
 	case DialectBybit:
-		codec, err := venue.NewBybitOrderCodec(v)
-		if err != nil {
-			return collaborators{}, err
-		}
 		signer, err := transport.NewBybitSigner(v, cred)
 		if err != nil {
 			return collaborators{}, err

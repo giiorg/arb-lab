@@ -96,13 +96,15 @@ governed derivation door — it refuses until step 4 slice C lands the
 freeze.
 
 reconcile run performs §7.5's reconcile-only boot once: journal replayed,
-venue joined, every absence put to §5.3's stable-not-found rule, net-delta
-invariant asserted. Exit codes: 0 nothing needs a human, 1 an operator
-alert — a LATCHED gate (§7.5; a retry will not lift it) or a venue IP ban
-(§7.6's 418/10018; a retry ESCALATES it), 2 the reconciliation could
-not finish. The reported POSTURE is not the verdict — this binary declares
-all eight of §7.5's gates and produces four, so reconcile-only is the
-honest answer on a clean account.
+venue joined, §4.1's account and margin-mode posture asserted, every
+absence put to §5.3's stable-not-found rule, net-delta invariant asserted.
+Exit codes: 0 nothing needs a human, 1 an operator alert — a LATCHED gate
+(§7.5; a retry will not lift it, and a posture read and found wrong is one:
+this engine never repairs a posture) or a venue IP ban (§7.6's 418/10018; a
+retry ESCALATES it), 2 the reconciliation could not finish. The reported
+POSTURE is not the verdict — this binary declares all eight of §7.5's gates
+and produces five, so reconcile-only is the honest answer on a clean
+account.
 
 exercise run is §9's synthetic spot↔perp cycle driver: one reconcile-only
 boot to conclusion, and on a clean verdict one parallel marketable-IOC

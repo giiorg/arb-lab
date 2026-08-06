@@ -1,6 +1,69 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-06, session 113): **#198 ITEM 9 LANDS — DOCS GO TO v0.9.51. §4.1 GAINS EIGHT NORMATIVE PARAGRAPHS, §6.3/§5.2/§7.5/§12 ITEM 4 THEIR ANNOTATIONS, PROFILES §2 A ⚠ BLOCK OF THREE MARKED UNKNOWNS, ADR §3 A SEVENTEEN-ROW DATED BLOCK. THE READING PASS FOUND ONE THING (F18). OWED GREP ZERO, `make ci` GREEN BOTH MODULES.**
+## Status (2026-08-06, session 114): **#198 ITEM 10 LANDS — THE FINAL `code_diff` REVIEW RETURNED NO-SHIP WITH TWO MAJORS, BOTH FOLDED. DOCS v0.9.52, SIX MUTANTS ALL CAUGHT, `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO. ONLY ITEM 11 (#199's OPERATOR RULING) REMAINS.**
+
+**Read `docs/superpowers/specs/2026-08-06-m4-198-account-posture.md` §73n
+first** — it carries both majors, the three minors, the rejected alternatives,
+the review's one wrong line of attack, and the mutant table.
+
+**BOTH MAJORS ARE THE SAME SHAPE, AND IT IS THE ONE A PACKAGE SUITE CANNOT
+SEE: a defect that exists only BETWEEN two layers whose own tests are green.**
+That is the argument for this ritual, arriving in its cleanest form yet — in
+F19's case the two layers' tests encode *contradictory premises about the same
+wire shape* and both pass.
+
+**F19 — a hedge-mode account was reported as "could not be read".** Both venue
+codecs refused a symbol answered twice, which is hedge mode's documented wire
+shape (Profiles §9, verbatim, for Binance V3) and therefore a §4.1 **violation**.
+So a posture read and found WRONG travelled through the arm meaning *could not be
+read* — `OutcomeFailed` → `ExitIncomplete`, *"nothing is known to be wrong, a
+retry may lift it"* — for an account no retry will change, **discarding every
+probe already decoded**, including Binance's account-wide `dualSidePosition`
+answer that names the same violation directly. Meanwhile `risk/domain` had
+carried `ReasonAmbiguous` for exactly this since the rules landed, with a fixture
+whose comment calls it *"the posture violation this rule exists to catch"* — and
+**no production path could reach it**. Folded: the codecs report both rows for
+the two POSITION enumerations, the rules judge them, and folding two rows into
+one answer — all the original argument actually ruled out — is still forbidden.
+
+**F20 — §4.1's probes ride product FAMILIES, and §73k F14's reassurance about
+Bybit was false of this code.** A family with no configured endpoint makes its
+probe unissuable and the gate unanswerable for ever. F14 recorded the Binance
+half and added *"Bybit is not symmetric — answerable regardless"*: true of the
+exchange, false of the routing, because two of Bybit's four probes ride spot and
+two ride linear-perp, so **either** one-sided Bybit deployment is short a family.
+**A claim that reads as reassurance is the one nobody re-derives** — the
+falsifier was a grep of `Family:` in the file the same slice wrote. Folded as a
+startup refusal naming the family, derived from the codec's own encoded steps.
+`§73k F14`'s sentence is struck and corrected **in place**.
+
+**THE FIXTURE WAS THE DEFECT'S OWN WITNESS.** This repo's `spotOnly` helper
+trimmed the endpoint list to `[:1]`, so every test built on it exercised a
+deployment whose posture gate could never conclude, while three tests appended
+the futures endpoint back by hand. The new rule refused it on the first run.
+
+**Three minors folded too:** `arblab --help` said the reconcile binary *"produces
+four"* of §7.5's gates while its own output printed 5 (and never mentioned the
+posture phase); a nil `*venue.OrderClient` would have reached the ACL as a
+**non-nil interface** and panicked, the entire defence being one `r.halted`
+boolean set two phases earlier (now `ErrVenueClientMissing`, with a test);
+`Failure.Subject`'s documented invariant was broken by `Check` itself.
+
+**WHAT REMAINS ON #198 — item 11 only**, which is task #199's operator ruling
+(F9 + F14 + F18) and nothing downstream is blocked by it. F20 narrowed F14: a
+spot-only Binance deployment is no longer silently unpassable but a **named
+startup refusal**, so what is left open there is whether requiring the futures
+family is the right answer, not whether the failure is diagnosable.
+
+**Everything below the venue codecs is still fixture-tested and has never met a
+real account** (§73f). Unchanged: three standing operator decisions, credentials
+deferred, capture **PID 8495**, never rebuild over `bin/arblab`, `make ci` runs
+`-race` AND the ka staleness gate (needs node), cap `TLC_WORKERS` at 4,
+docs/i18n parity is `bun test`.
+
+---
+
+## Status (2026-08-06, session 113 — HISTORICAL): **#198 ITEM 9 LANDS — DOCS GO TO v0.9.51. §4.1 GAINS EIGHT NORMATIVE PARAGRAPHS, §6.3/§5.2/§7.5/§12 ITEM 4 THEIR ANNOTATIONS, PROFILES §2 A ⚠ BLOCK OF THREE MARKED UNKNOWNS, ADR §3 A SEVENTEEN-ROW DATED BLOCK. THE READING PASS FOUND ONE THING (F18). OWED GREP ZERO, `make ci` GREEN BOTH MODULES.**
 
 **Read `docs/superpowers/specs/2026-08-06-m4-198-account-posture.md` §73m
 first** — it lists every edit taken, carries F18, and records the one §73f claim

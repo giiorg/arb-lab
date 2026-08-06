@@ -115,8 +115,11 @@ func (r FailureReason) String() string {
 
 // Failure is one check that did not pass.
 type Failure struct {
-	// Setting, Scope and Subject identify the check. Subject is empty exactly
-	// when Scope is ScopeAccount.
+	// Setting, Scope and Subject identify the check. Subject is empty for an
+	// account-wide check, and for the ONE per-scope failure that is about the
+	// enumeration itself rather than about a member of it: an asset-scoped rule
+	// whose read enumerated no coins at all names no coin, because there is none
+	// to name. Everything else at ScopeSymbol or ScopeAsset carries its subject.
 	Setting Setting
 	Scope   Scope
 	Subject string

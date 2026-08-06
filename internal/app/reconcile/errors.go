@@ -32,6 +32,16 @@ var (
 	// for. See Dialect for why one name selects four of them.
 	ErrDialectUnknown = errors.New("reconcile: unknown venue dialect")
 
+	// ErrVenueClientMissing reports a phase asked to read the venue on a boot
+	// whose venue client was never built (record §73n).
+	//
+	// It exists because the nil is invisible where it would otherwise be caught:
+	// a nil *venue.OrderClient satisfies a consumer-declared interface as a
+	// NON-nil value holding a nil pointer, so the adapter's own nil check passes
+	// it through to a dereference. Named here, at the composition root that
+	// knows the concrete type, rather than defended for a second time downstream.
+	ErrVenueClientMissing = errors.New("reconcile: no venue client was built for this boot")
+
 	// ErrVenueMismatch reports an instrument or a scope naming a venue other than
 	// the configured one.
 	//
