@@ -1,7 +1,7 @@
 # Design record §73 — M4 slice A (task #198): the §4.1 account posture, and the gate that has been declared since slice G2 with nothing to produce it
 
-**Date:** 2026-08-06 · **Session:** 109 · **Docs:** v0.9.50 (spec edits owed at
-slice close) · **Task:** #198
+**Date:** 2026-08-06 · **Sessions:** 109–113 · **Docs:** v0.9.51 (spec edits
+LANDED, session 113 — §73m) · **Task:** #198
 
 **Reads:** core §4 (the `AccountPostureSource` port declaration), core §4.1 (the
 safety premise), core §6 step 3 (the pre-trade guard), core §7.5 (the boot
@@ -893,6 +893,89 @@ displaced, and no gate in this repo can see it.
 
 ---
 
+## §73m — What the spec-edit pass found (session 113, item 9)
+
+Item 9 is the slice's normative close: the deviations and additions this slice
+took land in the spec set, so external review can tell deliberate change from
+drift. The `SPEC EDIT OWED` grep is **zero and has been all slice** — nothing in
+this slice was taken as a marked deviation — which means the grep could not have
+been the gate here, and the **reading pass beside it** was the whole instrument.
+It found one thing, and it is the kind only a reading pass can find.
+
+### The edits taken
+
+| Where | What |
+|---|---|
+| core §4.1 | Eight normative paragraphs: asserted-never-repaired (§73c-3); roster-scoped coverage (F4); the operator-declared leverage pin (F3); the PM attestation **with its limit stated in place** (§73c-1 + F10); whitelist enums and silence-is-not-a-zero (F5 + F2); the valid no-derivatives deployment and the carried roster fact (F11); the every-failure verdict and the refusal of a verdict that evaluated nothing (§73d + §73j); and the two open unpassable-gate cases (F9, F14, F18) |
+| core §6.3 | The TTL is an additional upper bound, never a way to skip the read (§73c-2); and the pre-trade caller lands with the trading loop (F6) |
+| core §5.2 | The `leverage` pin and `portfolio_margin_attestation`, each refused where nothing would read it; the dialect → account-model mapping and why it is not circular |
+| core §7.5 | The gate has a producer, where the phase sits, that it does not halt the sequence, and — the sharpening — that its two refusing outcomes sit on **opposite sides of this section's own latching rule** |
+| core §12 item 4 | Slice A's landing annotation, including what it deliberately does **not** do and that it has never met a real account |
+| Profiles §2, §4, §9 | The ⚠ block: PM's absent read path, F18's version question, and Bybit's unestablished never-traded-symbol row. **No verified fact added** — §73c-1's rule holds |
+| ADR §3 | The dated block, seventeen rows |
+
+### F18 — The auto-add-margin probe is aimed at the version this repo's own notes say does not publish the field
+
+**Found by reading the two documents against each other, which nothing else in
+the pipeline does.**
+
+`posture_binance.go` issues `GET /fapi/v3/positionRisk` and decodes
+`isAutoAddMargin` (string) or `autoAddMargin` (bool). Two facts already in
+`venue-profiles` disagree with that aim:
+
+- **Profiles §9's dated V3 read** transcribes twenty row fields verbatim —
+  `symbol`, `positionSide`, `positionAmt`, … `updateTime` — and **neither
+  spelling of auto-add-margin is among them**.
+- **Profiles §2's own citation** for the setting is the **Position-Information-V2**
+  page, with an unverified parenthetical *"(or v3)"*.
+
+Neither document is wrong on its own. §9 was written for §7.5's net-delta join
+and §2's row for §4.1's posture, and nobody had read one against the other.
+
+**The mechanism is the one worth carrying, and this record has named it before
+under a different heading.** §9 states *"the version is a safety decision, not a
+preference"* and argues it: on V2 a missing row means the symbol does not exist
+on the family, on V3 it means the account is flat there, and §7.5 needs *flat* to
+be a **conclusion**. That argument is entirely correct **for the question §7.5
+asks**. §4.1 asks the opposite question — *what is this CONFIGURED symbol's
+setting* — and inherited the choice, where V3's silence is precisely the
+ambiguity F9 is about, and V2's row-for-every-symbol enumeration answers
+directly. [[a-narrowing-carries-an-argument]]: the reason a thing was narrowed
+away is load-bearing and unverified, and the next consumer re-uses the choice
+without re-deriving its scope. It is also
+[[composing-breaks-the-premises-of-earlier-proofs]] outside a model checker — an
+inherited property that is out of scope rather than wrong.
+
+**Why no test could see it, in both readings.** If V3 publishes the field, the
+gate works as designed. If it does not, the observation decodes as *unstated* and
+every configured symbol refuses — which is **the same shape as F9**, arriving
+from a second cause, and equally invisible because the codec has never met a real
+account (§73f) and every fixture states the field because the fixture author
+believed it was there. [[fixture-that-states-its-fact-twice]] one turn out: the
+fixture cannot falsify a claim about **what the venue sends**, only about what
+this code does with what it is handed.
+
+**Disposition — marked, not guessed, and not fixed here.** Settling it needs a
+read of the two endpoint pages, which is #180's standing blocker (the SPA + WAF),
+or one credentialed call (#171). So Profiles §2 and §9 gain the marks, and
+**#199 gains a fourth candidate** beside the three §73j F9 wrote out: *read the
+per-symbol posture settings from the version that enumerates every symbol.* It is
+the only candidate that needs neither an operator bootstrap per symbol nor
+reliance on a recorded default — and it is not free, since V2's weight is a
+verified 10 against V3's unsettled charge of 20, and holding two versions of one
+endpoint is its own claim to maintain.
+
+### One thing checked and found sound
+
+§73f says *"nothing entered into `venue-profiles` §2's verified table on the
+strength of an attestation or a recollection"*, and the ⚠ block was checked
+against it before landing: it records **absences and open questions**, names the
+blocker for each, and adds no venue value. A marked unknown is the opposite of
+the thing that rule forbids — it is how this document says *we did not verify
+this* in a place the next reader cannot miss.
+
+---
+
 ## §73h — Work items
 
 1. ~~`engine/venue` posture codecs, both venues + roster rows + weights.~~ **DONE** (session 109)
@@ -915,10 +998,17 @@ displaced, and no gate in this repo can see it.
    checked by nothing) and F17. Four new fixtures, six mutants, plus two
    hand-applied rung reorderings that each fail exactly one test. The ≥15-mutant
    half was discharged across sessions 110 (21) and 111 (15).
-9. Spec edits → v0.9.51: §4.1/§6.3/§7.5 annotations, Profiles §2's marked
-   unknown read path, §12 item 4's slice annotation, ADR §3's dated block.
+9. ~~Spec edits → v0.9.51: §4.1/§6.3/§7.5 annotations, Profiles §2's marked
+   unknown read path, §12 item 4's slice annotation, ADR §3's dated block.~~
+   **DONE** (session 113) — plus **§5.2**, which the item's own list did not
+   name: the `leverage` pin and the attestation pin both landed in code in
+   session 111 and had no schema entry. The reading pass beside the (zero) OWED
+   grep produced **F18** (§73m).
 10. Final fresh `code_diff` review.
 11. **OPERATOR RULING OWED — §73j F9's unreachable-gate consequence**, now with
     §73k F14 beside it (a spot-only Binance deployment cannot answer §4.1 at
     all). Choose between strict / per-setting default reliance / a distinct boot
-    outcome. Nothing else in the slice is blocked by it.
+    outcome / **§73m F18's fourth candidate — read the per-symbol settings from
+    the endpoint version that enumerates every symbol** (which needs one page
+    read or one credentialed call to confirm the field is published there).
+    Nothing else in the slice is blocked by it.

@@ -1,6 +1,59 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-06, session 112): **#198 ITEM 8 LANDS — the collapse checklist run at the layers it was never applied to. THREE FINDINGS (F15–F17), FOUR NEW FIXTURES, SIX MUTANTS ALL CAUGHT, `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO. Docs still v0.9.50 — item 9's spec edits are next.**
+## Status (2026-08-06, session 113): **#198 ITEM 9 LANDS — DOCS GO TO v0.9.51. §4.1 GAINS EIGHT NORMATIVE PARAGRAPHS, §6.3/§5.2/§7.5/§12 ITEM 4 THEIR ANNOTATIONS, PROFILES §2 A ⚠ BLOCK OF THREE MARKED UNKNOWNS, ADR §3 A SEVENTEEN-ROW DATED BLOCK. THE READING PASS FOUND ONE THING (F18). OWED GREP ZERO, `make ci` GREEN BOTH MODULES.**
+
+**Read `docs/superpowers/specs/2026-08-06-m4-198-account-posture.md` §73m
+first** — it lists every edit taken, carries F18, and records the one §73f claim
+that was re-checked before landing.
+
+**THE SESSION'S FINDING — F18, and only a reading pass could produce it.**
+`posture_binance.go` reads `isAutoAddMargin` from **`GET /fapi/v3/positionRisk`**.
+Profiles §9's own dated, verbatim V3 transcription lists **twenty** row fields and
+**neither `isAutoAddMargin` nor `autoAddMargin` is among them**; Profiles §2 cites
+the **V2** page for the setting, with an unverified *"(or v3)"*. Neither document
+is wrong alone — §9 was written for §7.5's net-delta join, §2's row for §4.1's
+posture, and nobody had read one against the other. Underneath is a mechanism
+worth carrying: §9 argues the version choice as *"a safety decision, not a
+preference"* — **for the question §7.5 asks**, where a missing row must mean flat.
+§4.1 asks the opposite question and **inherited** the choice, where V3's silence
+is precisely the ambiguity. *A narrowing carries an argument whose scope the next
+consumer does not re-derive.*
+
+**IT IS MARKED, NOT GUESSED, AND NOT FIXED.** Both readings leave the gate
+**refusing** rather than passing, which is exactly why no fixture could see it and
+why nothing is urgent. Settling it needs one read of the two endpoint pages
+(#180's standing SPA+WAF blocker) or one credentialed call (#171). Profiles §2 and
+§9 carry the ⚠; **#199 gains it as a FOURTH candidate** — read the per-symbol
+settings from the version that enumerates every symbol — which is the only
+candidate needing neither an operator bootstrap per symbol nor reliance on a
+recorded default, and is not free (V2's verified weight 10 against V3's unsettled
+charged 20, plus two versions of one endpoint to maintain).
+
+**§5.2 WAS NOT ON ITEM 9'S OWN LIST AND NEEDED AN EDIT.** The `leverage` pin and
+`portfolio_margin_attestation` landed in code in session 111 with no schema entry
+in the spec; item 9's list was drafted in session 109, before either existed. Both
+are now in §5.2, each **refused where nothing would read them**.
+
+**THE SHARPENING IN §7.5 IS THE ONE TO READ.** That section said a posture check
+that failed *because the venue was unreachable* may pass on a retry — correct
+about the half it names, silent about the other. A posture **read and found
+wrong** now **LATCHES** in the text as well as in the code: §4.1 forbids this
+engine repairing a posture, so no retry can lift it, and a re-reportable refusal
+would be lifted by re-reading an account nobody changed.
+
+**STILL NOT DONE — items 10 and 11.** The final fresh `code_diff` review; and
+F9 + F14 + F18's operator ruling (task #199), which nothing downstream is blocked
+by.
+
+**Everything below the venue codecs is still fixture-tested and has never met a
+real account** (§73f). Unchanged: three standing operator decisions, credentials
+deferred, capture **PID 8495**, never rebuild over `bin/arblab`, `make ci` runs
+`-race` AND the ka staleness gate (needs node), cap `TLC_WORKERS` at 4,
+docs/i18n parity is `bun test`.
+
+---
+
+## Status (2026-08-06, session 112 — HISTORICAL): **#198 ITEM 8 LANDS — the collapse checklist run at the layers it was never applied to. THREE FINDINGS (F15–F17), FOUR NEW FIXTURES, SIX MUTANTS ALL CAUGHT, `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO. Docs still v0.9.50 — item 9's spec edits are next.**
 
 **Read `docs/superpowers/specs/2026-08-06-m4-198-account-posture.md` §73l
 first**, and note §73g grew two items (8 and 9) that are general rather than
