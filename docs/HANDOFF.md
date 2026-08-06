@@ -1,6 +1,133 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-05, session 108): **MILESTONE 3 IS RECORDED COMPLETE — §12's ROSTER IS HONEST AGAIN, AND THE CLOSURE PASS FOUND ONE CLAUSE LISTED WITH NO CODE ANYWHERE: `sizing-by-live-tier` IS REASSIGNED TO MILESTONE 4. DOCS AT v0.9.50, `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO. #180 GAINED A THIRD UNREAD CANDIDATE AND STAYS OPEN.**
+## Status (2026-08-06, session 109): **MILESTONE 4 IS OPEN. SLICE A (#198, §4.1's ACCOUNT POSTURE) IS MID-SLICE — THE VENUE CODECS AND THEIR 13 TESTS LAND, `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO. THREE OPERATOR RULINGS ARE RECORDED AND ARE THE SLICE'S SPINE. NO SPEC EDITS YET (docs stay v0.9.50).**
+
+**Read `docs/superpowers/specs/2026-08-06-m4-198-account-posture.md` (record
+§73) before touching any of this.** It carries the six pre-code findings, the
+three rulings with their rejected alternatives, and §73i's two
+implementation-time findings.
+
+**Why milestone 4 opens on the posture and not on sizing.** §12 item 4 states
+the ordering itself — *"the account/margin-mode verification above is what makes
+a tier reading mean anything"* — so a live leverage tier read under the wrong
+margin or position mode is a number computed against a different contract than
+the one that would be traded. #197 reassigned `sizing-by-live-tier` into this
+milestone; this slice builds its premise first.
+
+**The seam already existed and that is the point.** `platform/boot` has declared
+`GateAccountPosture` since slice G2, `app/reconcile`'s `declaredGates()` lists it
+in §7.5's eight-gate roster, and `Report.ExitClass` names it in the arm for
+gates *"with no producer anywhere"* — whose comment instructs exactly this
+slice: *"a gate added to §7.5's roster has to choose a side here, and choosing
+'not ours' by falling through is how a real refusal becomes invisible."* The
+slice's structural deliverable is to give that gate its first producer and move
+it across that switch. **Not done yet** — the move is work item 7.
+
+**THE THREE OPERATOR RULINGS (session 109), do not silently reopen:**
+
+1. **Portfolio Margin → operator attestation, default refuse.** Profiles §2's
+   Binance assert cell lists four checks each naming a `GET` and **"Portfolio-
+   Margin OFF" with no read path anywhere in either document** (§73b F1). It is
+   the one setting that folds spot into futures collateral — i.e. the single
+   account state that falsifies §4.1's whole premise — so it cannot be the check
+   that silently passes. No attestation → the gate refuses by name. The
+   attestation follows #179's baseline shape (inputs-not-conclusions, two-act
+   `{path,sha256}` pin, invalidated by events never time, absent → refuse) and
+   **does not become a venue fact**: nothing enters Profiles §2's verified table
+   on its strength. *Rejected: arguing the sibling checks imply it — PM is a
+   different account TYPE, not a setting inside the classic account.*
+2. **Pre-trade → a REST read before EVERY trade.** §6.3's *"fresh within a
+   max-age TTL **and** re-verified by the pre-trade REST read"* is read
+   conservatively: the TTL is an upper bound on any cached snapshot, never a way
+   to skip the read. §6.3's own sentence is the argument — position-mode changes
+   emit **no** venue event on either venue, so a flip inside a TTL window is
+   exactly what the re-verify exists to catch. Affordable structurally: carry
+   opens are hours apart. **Measured cost: Binance 4 calls / 80 weight, Bybit 4
+   unweighted requests, per read.**
+3. **Reads only — posture is asserted, never repaired.** No code path calls
+   Profiles §2's `POST` setters. Beyond the obvious (an account-wide
+   irreversible mutation inside an automated boot), the stronger ground: **a
+   posture the bot can repair is a posture whose violation stops being
+   evidence** — its value is that a wrong margin mode means something happened
+   we do not understand. *Rejected for now: an `arblab posture set` command — a
+   new credentialed WRITE path that cannot be tested against a venue while
+   credentials are deferred.*
+
+**WHAT LANDED (work item 1 of 10).** `internal/engine/venue/posture.go` (the
+vocabulary: `PostureProbe`, `PostureSetting`, `PostureScope`, `PosturePresence`,
+`PostureObservation`, `AccountPostureReport`, `AccountPostureCodec`, and
+`OrderClient.AccountPosture`), `posture_binance.go` (4 probes),
+`posture_bybit.go` (4 probes), two rows in `transport.bybitEndpointRegistry`
+(`account_info`, `spot_margin_status`), and `posture_test.go` — **13 tests, 4
+mutants all caught.**
+
+**The surface REPORTS, it does not JUDGE.** Nothing in `engine/venue` knows that
+ISOLATED is required or that `dualSidePosition` must be false. Those rules are
+`risk/domain`'s (work items 2–4, the context does not exist yet), stated once
+against an operator-declared pin — because a codec that encodes the requirement
+supplies both halves of its own check, which is §73b F3's vacuity.
+
+**THE TRAP THIS SLICE WAS BUILT AROUND (§73b F2), and it has a warning label
+already in the tree.** `balances_bybit.go:193` reads an **empty**
+`borrowAmount`/`spotBorrow` as *"the venue stated no borrow figure"* and lets
+the row PIN — correct there, and its own comment nominates this slice as the
+owner of the strict reading. Here the same absence must mean **cannot conclude →
+refuse**, because the claim being asserted *is* "borrow is off". So
+`bybitCoinBorrowed` is **deliberately not called** and the wallet is read a
+second time; reusing it would import the permissive arm into the one gate whose
+purpose is refusing borrow. Two folds over one record, opposite safe directions.
+
+**Every boolean wire field is a POINTER, and that is load-bearing rather than
+fastidious.** `false` is the PASSING value for `multiAssetsMargin`,
+`dualSidePosition`, `isAutoAddMargin` and spot hedging, so a plain `bool`
+decodes a renamed field, a wrong endpoint or a truncated body as *the posture is
+correct*. Mutant M2 (a missing bool reads as `false`) is killed by two tests.
+
+**Three more pre-code findings, all encoded:** the leverage pin is
+operator-declared config and an **absent** pin refuses — deriving it from the
+venue at first boot makes the check compare the venue against itself (§73b F3);
+Bybit's auto-add-margin check is **roster-scoped**, since a position-driven one
+checks zero symbols on a flat account, which is every cold boot (§73b F4); and
+`unifiedMarginStatus` is a **whitelist** {3,4,5,6}, so the unlisted `2` and any
+value the venue adds later refuse (§73b F5).
+
+**§73i's two implementation-time findings.** `CheckFold` validates profile ⊆
+registry and **never the reverse**, so the two new endpoints passed every check
+while no profile declares them — not silent at runtime (`Governor.Observe`
+returns `ErrLimitUnknown`, and its comment names this exact case), but it makes
+**work item 7a** real: declare `account_info` and `spot_margin_status` in every
+profile before the first posture read. And `go test -run Posture` selects only
+**4 of the 13** new tests, because the rest are named for the venue — the
+campaign at slice close runs against the package, never a name pattern.
+
+**WHAT IS NOT DONE — items 2–10 of §73h.** The `internal/risk` context
+(domain/application/ports/driven) does not exist; the Portfolio-Margin
+attestation document and its config pin do not exist; the leverage pin config
+field does not exist; `GateAccountPosture` still has no producer and still sits
+in `ExitClass`'s producerless arm; item 7a; the ≥15-mutant campaign; the spec
+edits to v0.9.51; the final `code_diff` review.
+
+**What this slice can never establish, stated rather than implied (§73f).**
+Credentials are deferred by operator ruling, so every codec here is
+fixture-tested and has **never met a real account**. A wire-shape error — a
+field name, a nesting level, an enum spelling — is invisible to every test in
+this slice and would surface as a refusal on the first credentialed boot. That
+direction is a **halt**, which is the acceptable one, but it is not "verified".
+Profiles §2 supplies the paths and the names `marginType`, `isAutoAddMargin`,
+`dualSidePosition`, `marginMode`, `unifiedMarginStatus`, `spotHedgingStatus`,
+`borrowAmount`, `spotBorrow`, `positionIdx`; **everything else on the wire
+structs is this codec's best reading and is marked as such at both call sites.**
+
+**Open work, unchanged otherwise:** #177, #184, #159, #152 and #158
+(clock-bound), #180 (three unread weight candidates, charged 20 = the max, safe
+to leave open). The three standing operator decisions are unchanged and
+credentials stay deferred. Capture **PID 8495**, never rebuild over
+`bin/arblab`, `make ci` runs `-race` AND the ka staleness gate (needs node), cap
+`TLC_WORKERS` at 4, docs/i18n parity is `bun test`.
+
+---
+
+## Status (2026-08-05, session 108 — HISTORICAL): **MILESTONE 3 IS RECORDED COMPLETE — §12's ROSTER IS HONEST AGAIN, AND THE CLOSURE PASS FOUND ONE CLAUSE LISTED WITH NO CODE ANYWHERE: `sizing-by-live-tier` IS REASSIGNED TO MILESTONE 4. DOCS AT v0.9.50, `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO. #180 GAINED A THIRD UNREAD CANDIDATE AND STAYS OPEN.**
 
 **Read `docs/superpowers/specs/2026-08-05-m3-197-milestone-closure-pass.md`
 (record §72) before reopening any of this.** ADR §3 has the dated block; §12's

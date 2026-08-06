@@ -775,6 +775,13 @@ const (
 	BybitExecutionListLimit = "execution_list"
 	BybitPositionListLimit  = "position_list"
 	BybitWalletBalanceLimit = "wallet_balance"
+
+	// The posture surface's two additional endpoints (task #198). They live
+	// here beside their siblings rather than in the venue package that
+	// encodes the calls, because bybitEndpointRegistry below is the roster
+	// #186's boot check reads and transport cannot import upward.
+	BybitAccountInfoLimit      = "account_info"
+	BybitSpotMarginStatusLimit = "spot_margin_status"
 )
 
 type bybitEndpointRow struct {
@@ -796,6 +803,11 @@ var bybitEndpointRegistry = [...]bybitEndpointRow{
 	// the wallet at boot, and `arblab baseline record` reads it twice more.
 	// Venue-published 50/s per UID (Profiles §4's dated 2026-08-05 block).
 	{Path: "/v5/account/wallet-balance", EndpointBudget: EndpointBudget{Name: BybitWalletBalanceLimit, Dimension: ratelimit.DimensionRequests}},
+	// The posture surface (task #198): §4.1's account settings are read at
+	// boot and again before every trade (§6.3's ruling, record §73c-2), so
+	// these two carry real, recurring traffic rather than a one-off boot read.
+	{Path: "/v5/account/info", EndpointBudget: EndpointBudget{Name: BybitAccountInfoLimit, Dimension: ratelimit.DimensionRequests}},
+	{Path: "/v5/spot-margin-uta/status", EndpointBudget: EndpointBudget{Name: BybitSpotMarginStatusLimit, Dimension: ratelimit.DimensionRequests}},
 }
 
 var bybitEndpoints = func() map[string]string {

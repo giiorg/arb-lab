@@ -284,6 +284,38 @@ var (
 	// (record §70b), and the live codec building its own words cannot miss,
 	// so a miss is a codec defect rather than a venue surprise.
 	ErrSpotBalanceWordSet = errors.New("venue: spot balance words do not match the venue's field set")
+
+	// ErrPostureProbeInvalid reports a PostureStep or PostureObservation whose
+	// probe is the zero value or out of range (task #198, record §73).
+	ErrPostureProbeInvalid = errors.New("venue: posture step names no valid probe")
+
+	// ErrPostureSettingInvalid reports a PostureObservation naming no setting.
+	ErrPostureSettingInvalid = errors.New("venue: posture observation names no valid setting")
+
+	// ErrPostureScopeInvalid reports a PostureObservation naming no scope.
+	ErrPostureScopeInvalid = errors.New("venue: posture observation names no valid scope")
+
+	// ErrPosturePresenceInvalid reports a PostureObservation that never stated
+	// how much the venue said. The zero value is refused rather than read as
+	// "stated", because a fixture built without thinking about presence would
+	// otherwise assert the strongest reading of a field nobody supplied.
+	ErrPosturePresenceInvalid = errors.New("venue: posture observation states no presence")
+
+	// ErrPostureUnreadable reports a posture answer that cannot be attributed:
+	// an observation whose scope and subject disagree, a value carried beside a
+	// presence that says there was none, an observation tagged with a probe
+	// that did not produce it, or a codec rendering no steps at all. The
+	// balance surface's ErrSpotBalancesUnreadable one surface over.
+	ErrPostureUnreadable = errors.New("venue: account posture answer is unreadable")
+
+	// ErrPostureUnsupported reports a venue codec with no posture surface.
+	//
+	// Separate from ErrPostureUnreadable because the two mean opposite things
+	// to an operator: unreadable is a venue that answered strangely, while
+	// unsupported is this system never having taught itself to ask — and §4.1
+	// makes the posture a precondition of trading at all, so a venue whose
+	// posture cannot be read is not a venue this system may trade on.
+	ErrPostureUnsupported = errors.New("venue: codec has no account posture surface")
 )
 
 // There is deliberately no sentinel here for "funding asked of a spot
