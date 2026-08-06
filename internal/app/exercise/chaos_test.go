@@ -24,6 +24,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/config"
 	"github.com/giiorg/arb-lab/internal/platform/observability"
+	"github.com/giiorg/arb-lab/internal/risk/infrastructure/attestation"
 )
 
 // # §9's process-kill-mid-IOC chaos case, end to end
@@ -76,6 +77,41 @@ type chaosVenue struct {
 	unexpected []string
 }
 
+// binancePostureBodies and servePosture mirror the in-package fixtures
+// (app_test.go) because this file is an EXTERNAL test package and cannot see
+// them. The duplication is one map and one function; sharing them would mean
+// exporting test helpers from the production package.
+//
+// The positionRisk row is the load-bearing one: §4.1's per-symbol coverage is
+// answered from the CONFIGURED roster, so a configured symbol the venue said
+// nothing about REFUSES. A flat account therefore refuses — the open operator
+// question recorded as §73j F9 and task #199 — and these fixtures take its
+// candidate 1 rather than answering it silently.
+var binancePostureBodies = map[string]string{
+	"/fapi/v1/multiAssetsMargin": `{"multiAssetsMargin":false}`,
+	"/fapi/v1/positionSide/dual": `{"dualSidePosition":false}`,
+	"/fapi/v1/symbolConfig":      `[{"symbol":"BTCUSDT","marginType":"ISOLATED","leverage":5}]`,
+	// ONE body serves two readers: §7.5's net-delta enumeration and §4.1's
+	// auto-add-margin probe both call /fapi/v3/positionRisk, so the row must
+	// satisfy BOTH decoders — positionSide/positionAmt for the first,
+	// isAutoAddMargin for the second. A fixture carrying only the posture
+	// fields breaks the invariant read, which is how this was found.
+	"/fapi/v3/positionRisk": `[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"0","isAutoAddMargin":"false"}]`,
+}
+
+func servePosture(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method != http.MethodGet {
+		return false
+	}
+	body, ok := binancePostureBodies[r.URL.Path]
+	if !ok {
+		return false
+	}
+	w.Header().Set("X-Mbx-Used-Weight-1m", "20")
+	fmt.Fprint(w, body)
+	return true
+}
+
 func newChaosVenue() *chaosVenue {
 	return &chaosVenue{
 		places:   make(map[string]int),
@@ -113,8 +149,7 @@ func (v *chaosVenue) handler(t *testing.T) http.Handler {
 		case r.Method == http.MethodGet && (r.URL.Path == "/api/v3/myTrades" || r.URL.Path == "/fapi/v1/userTrades"):
 			fmt.Fprint(w, `[]`)
 
-		case r.Method == http.MethodGet && r.URL.Path == "/fapi/v3/positionRisk":
-			fmt.Fprint(w, `[]`)
+		case servePosture(w, r):
 
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/account":
 			// Both runs' boots assert the spot leg against the pinned seq-0
@@ -152,6 +187,7 @@ func (v *chaosVenue) placeCounts() map[string]int {
 func chaosConfig(t *testing.T, dir, host string) string {
 	t.Helper()
 	baselinePath, baselineDigest := chaosBaseline(t, dir)
+	attestPath, attestDigest := chaosAttestation(t, dir)
 	doc := fmt.Sprintf(`{
  "oms": {
   "journal_path": %q,
@@ -202,6 +238,7 @@ func chaosConfig(t *testing.T, dir, host string) string {
     ]
   },
   "spot_baseline": {"path": %q, "sha256": %q},
+  "portfolio_margin_attestation": {"path": %q, "sha256": %q},
   "spot_settle": "2s",
   "watchdog_silence": "30s",
   "stop_budget": "2s"
@@ -217,7 +254,7 @@ func chaosConfig(t *testing.T, dir, host string) string {
   },
   "reference": {"path": %q, "max_age": "24h"}
 }`, filepath.Join(dir, "journal.db"), dir, host, host,
-		baselinePath, baselineDigest, chaosReference(t, dir))
+		baselinePath, baselineDigest, attestPath, attestDigest, chaosReference(t, dir))
 
 	path := filepath.Join(dir, "exercise.json")
 	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
@@ -566,4 +603,37 @@ func (s *syncBuffer) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return string(s.b)
+}
+
+// chaosAttestation writes the Portfolio-Margin attestation both runs' boots
+// consume (task #198 item 5). It is bound to the chaos credential and the
+// chaos account, so it is the SAME two-act pin a deployment uses — the
+// fingerprint check is not skipped for being a test.
+func chaosAttestation(t *testing.T, dir string) (string, string) {
+	t.Helper()
+	cred, err := transport.NewCredential("chaos-key", "chaos-secret")
+	if err != nil {
+		t.Fatalf("NewCredential: %v", err)
+	}
+	body, err := json.MarshalIndent(attestation.Document{
+		Kind:             attestation.Kind,
+		Version:          attestation.Version,
+		Venue:            "binance",
+		Account:          "chaos-sub",
+		CredentialSHA256: cred.Fingerprint(),
+		ObservedAt:       "2026-08-06T09:30:00Z",
+		Observer:         "gb",
+		Method:           "binance.com account page: Portfolio Margin shows not enrolled",
+		Observed:         attestation.ObservedOff,
+	}, "", "  ")
+	if err != nil {
+		t.Fatalf("marshalling the attestation: %v", err)
+	}
+	body = append(body, '\n')
+	path := filepath.Join(dir, "portfolio-margin.json")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatalf("write attestation: %v", err)
+	}
+	digest := sha256.Sum256(body)
+	return path, hex.EncodeToString(digest[:])
 }

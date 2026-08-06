@@ -3,6 +3,7 @@ package exercise
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 	"github.com/giiorg/arb-lab/internal/platform/observability"
 	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
+	"github.com/giiorg/arb-lab/internal/risk/infrastructure/attestation"
 )
 
 // binanceAccountBody and pinnedCleanBaseline are the reconcile root's clean
@@ -35,6 +37,78 @@ import (
 const binanceAccountBody = `{"balances":[` +
 	`{"asset":"BTC","free":"1.00000000","locked":"0.00000000"},` +
 	`{"asset":"USDT","free":"1000.00000000","locked":"0.00000000"}]}`
+
+// binancePostureBodies answers §4.1's four Binance probes for a CLEAN account
+// matching this package's fixture config (task #198 item 7).
+//
+// `symbolConfig` and `positionRisk` both carry a BTCUSDT row, and the second is
+// the one worth explaining: §4.1's per-symbol coverage is answered from the
+// CONFIGURED roster, so a configured symbol the venue said nothing about
+// refuses (ReasonUnobserved). `isAutoAddMargin` comes from positionRisk, which
+// enumerates POSITIONS — so a genuinely flat account refuses here, which is the
+// open operator question recorded as §73j F9 and task #199. These fixtures take
+// F9's candidate 1 (a position record exists per configured symbol) because a
+// fixture must not silently answer a question left to the operator.
+var binancePostureBodies = map[string]string{
+	"/fapi/v1/multiAssetsMargin": `{"multiAssetsMargin":false}`,
+	"/fapi/v1/positionSide/dual": `{"dualSidePosition":false}`,
+	"/fapi/v1/symbolConfig":      `[{"symbol":"BTCUSDT","marginType":"ISOLATED","leverage":5}]`,
+	// ONE body serves two readers: §7.5's net-delta enumeration and §4.1's
+	// auto-add-margin probe both call /fapi/v3/positionRisk, so the row must
+	// satisfy BOTH decoders — positionSide/positionAmt for the first,
+	// isAutoAddMargin for the second. A fixture carrying only the posture
+	// fields breaks the invariant read, which is how this was found.
+	"/fapi/v3/positionRisk": `[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"0","isAutoAddMargin":"false"}]`,
+}
+
+// servePosture answers a posture probe and reports whether it did, so each fake
+// venue in this package routes the four the same way. It replaces the bare
+// positionRisk arm every one of them carried: that arm returned `[]`, which
+// under §4.1's roster-scoped coverage is a REFUSAL rather than a flat account.
+func servePosture(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method != http.MethodGet {
+		return false
+	}
+	body, ok := binancePostureBodies[r.URL.Path]
+	if !ok {
+		return false
+	}
+	w.Header().Set("X-Mbx-Used-Weight-1m", "20")
+	fmt.Fprint(w, body)
+	return true
+}
+
+// pinnedPortfolioMarginAttestation writes the operator attestation §4.1's one
+// read-path-less check consumes, and returns the two-act pin over the bytes on
+// disk. Without it every boot in this package refuses by name.
+func pinnedPortfolioMarginAttestation(t *testing.T, account string) *reconcile.AttestationPinConfig {
+	t.Helper()
+	cred, err := transport.NewCredential("k", "s")
+	if err != nil {
+		t.Fatalf("NewCredential: %v", err)
+	}
+	body, err := json.MarshalIndent(attestation.Document{
+		Kind:             attestation.Kind,
+		Version:          attestation.Version,
+		Venue:            "binance",
+		Account:          account,
+		CredentialSHA256: cred.Fingerprint(),
+		ObservedAt:       "2026-08-06T09:30:00Z",
+		Observer:         "gb",
+		Method:           "binance.com account page: Portfolio Margin shows not enrolled",
+		Observed:         attestation.ObservedOff,
+	}, "", "  ")
+	if err != nil {
+		t.Fatalf("marshalling the attestation: %v", err)
+	}
+	body = append(body, '\n')
+	path := filepath.Join(t.TempDir(), "portfolio-margin.json")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatalf("writing the attestation: %v", err)
+	}
+	digest := sha256.Sum256(body)
+	return &reconcile.AttestationPinConfig{Path: path, SHA256: hex.EncodeToString(digest[:])}
+}
 
 func pinnedCleanBaseline(t *testing.T, account, apiKey, apiSecret string) *reconcile.BaselinePinConfig {
 	t.Helper()
@@ -150,6 +224,10 @@ func reconcileConfig(t *testing.T) reconcile.Config {
 	return reconcile.Config{
 		JournalPath: "/var/lib/arblab/journal.db",
 		Account:     "sub-1",
+		// §4.1's one check with no read path anywhere. Without it every boot
+		// in this package refuses by name, which would make the execute-half
+		// assertions below fail for a reason that has nothing to do with them.
+		PortfolioMarginAttestation: pinnedPortfolioMarginAttestation(t, "sub-1"),
 		Venue: reconcile.VenueConfig{
 			Venue:        ids.Venue("binance"),
 			Dialect:      reconcile.DialectBinance,
@@ -353,7 +431,12 @@ func cleanBoot() reconcile.Report {
 	return reconcile.Report{
 		Posture: boot.PostureReconcileOnly,
 		Blocking: []boot.Gate{
-			boot.GateAccountPosture, boot.GateDeactivationsResolved,
+			// The gates with no producer anywhere. GateAccountPosture LEFT
+			// this list in #198 item 7 — it has a producer now, so a blocking
+			// one is a real incompleteness rather than this deployment's
+			// known shape, and leaving it here would make every case below
+			// read ExitIncomplete for a reason none of them is about.
+			boot.GateDeactivationsResolved,
 			boot.GateMarginOpsResolved, boot.GateWriterAuthority,
 		},
 	}
@@ -543,8 +626,7 @@ func TestABanDuringDispatchIsSurfaced(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusTeapot)
 			fmt.Fprint(w, `{"code":-1003,"msg":"Way too much request weight used; IP banned."}`)
-		case r.Method == http.MethodGet && r.URL.Path == "/fapi/v3/positionRisk":
-			fmt.Fprint(w, `[]`)
+		case servePosture(w, r):
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/account":
 			// The boot's spot assertion reads the wallet the pinned baseline
 			// explains in full — a zero delta, so the boot stays clean and the

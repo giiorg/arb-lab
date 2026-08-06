@@ -12,13 +12,14 @@
 // already assigned the second — "it belongs in the composition root" — so this
 // package is a scheduled arrival rather than a new idea.
 //
-// # The checklist is declared HERE, over all EIGHT gates, and five have no
+// # The checklist is declared HERE, over all EIGHT gates, and four have no
 // # producer
 //
 // That is deliberate and it is the safe shape rather than the tidy one. §7.5's
-// roster spans contexts: the account posture is risk's and engine/venue's, the
-// takeover epoch is §7.4's, the deactivation and margin-op re-drives are the
-// emergency path's. A checklist declaring only the three this context can report
+// roster spans contexts: the takeover epoch is §7.4's, and the deactivation and
+// margin-op re-drives are the emergency path's. The account posture WAS on that
+// list and is not any more — task #198 gave it a producer here, which is what
+// the ExitClass comment naming the producerless arm asked for. A checklist declaring only the three this context can report
 // would produce a boot that checked three of eight preconditions and reported
 // PostureTrading — §7.5 argues that exact failure from the other side, about the
 // fold's seed, and a short roster reaches it through the roster instead of
@@ -39,6 +40,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/giiorg/arb-lab/internal/engine/venue"
 	"github.com/giiorg/arb-lab/internal/engine/venue/transport"
 	"github.com/giiorg/arb-lab/internal/oms"
 	"github.com/giiorg/arb-lab/internal/oms/application"
@@ -50,6 +52,10 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 	"github.com/giiorg/arb-lab/internal/platform/observability"
 	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
+	riskapp "github.com/giiorg/arb-lab/internal/risk/application"
+	riskdomain "github.com/giiorg/arb-lab/internal/risk/domain"
+	"github.com/giiorg/arb-lab/internal/risk/infrastructure/attestation"
+	riskdriven "github.com/giiorg/arb-lab/internal/risk/infrastructure/driven"
 )
 
 // Report is what one reconcile-only boot established, as an operator reads it.
@@ -69,6 +75,16 @@ type Report struct {
 
 	// Storage is #168's verdict on the journal's filesystem, nil when it holds.
 	Storage error
+
+	// AccountPosture is §4.1's verdict, carrying every failed check by name so
+	// an operator can act once rather than iteratively, and PostureCause is the
+	// error that stopped the posture being established at all.
+	//
+	// At most one is meaningful, and the zero Verdict is not a clean one: it
+	// evaluated no checks, so Satisfied() refuses it. Both are zero on a boot
+	// that halted before the posture phase.
+	AccountPosture riskdomain.Verdict
+	PostureCause   error
 
 	// RateLimit is the venue governor's state as this report was taken — §7.6's
 	// alert facts, read by ExitClass (Bans) and rendered for the operator. Zero
@@ -90,8 +106,8 @@ type Report struct {
 // producers live in contexts that do not exist yet. So the posture is
 // PostureReconcileOnly on a boot that found nothing at all and on a boot that
 // found a foreign order, and an exit code derived from it would answer the same
-// on both. Blocking() has the same problem one layer down: it names those five
-// on every run, so a real finding arrives as one row among six.
+// on both. Blocking() has the same problem one layer down: it names those four
+// on every run, so a real finding arrives as one row among five.
 //
 // What distinguishes the two is whether anything LATCHED — which is precisely
 // §7.5's own distinction between preconditions that clear themselves and ones
@@ -158,11 +174,19 @@ func (r Report) ExitClass() ExitClass {
 	for _, g := range r.Blocking {
 		switch g {
 		case boot.GateJournalDurable, boot.GateJournalReplayed,
-			boot.GateVenueJoined, boot.GateNetDeltaAsserted:
+			boot.GateVenueJoined, boot.GateNetDeltaAsserted,
+			// GateAccountPosture crossed from the arm below in #198 item 7,
+			// which is what that arm's comment instructed. It is blocking-but-
+			// not-latched only when the posture could not be ESTABLISHED — a
+			// venue that would not answer, a pinned attestation that would not
+			// load — and a retry may lift those. A posture that was read and
+			// found wrong latches instead (OutcomeNeedsOperator) and is
+			// answered above, because §73c-3 forbids this engine repairing one.
+			boot.GateAccountPosture:
 			return ExitIncomplete
-		case boot.GateUnspecified, boot.GateAccountPosture, boot.GateDeactivationsResolved,
+		case boot.GateUnspecified, boot.GateDeactivationsResolved,
 			boot.GateMarginOpsResolved, boot.GateWriterAuthority:
-			// The five with no producer anywhere, named rather than defaulted
+			// The four with no producer anywhere, named rather than defaulted
 			// (§3.6 rule 10): a gate added to §7.5's roster has to choose a side
 			// here, and choosing "not ours" by falling through is how a real
 			// refusal becomes invisible.
@@ -278,7 +302,8 @@ func NewRunner(snap config.Snapshot[Config], wall *clock.Wall,
 }
 
 // declaredGates is §7.5's full roster, which this root declares in full and
-// produces four of.
+// produces five of — the fifth is GateAccountPosture, which #198 item 7 gave
+// its first producer after five slices of being declared with none.
 //
 // A function rather than a literal at the one call site, because the SET is the
 // decision — declaring a short roster is the shape §7.5 argues against, and
@@ -329,6 +354,24 @@ type Runner struct {
 	// zero for the reconcile binary, for the map's own reason.
 	filterMaxAge time.Duration
 
+	// venueClient and fingerprint are what the posture phase needs from the
+	// oms phase's wiring: the surface §4.1's read rides, and the credential
+	// digest the attestation document is bound to. Held on the runner rather
+	// than passed, because boot.Phase's Start returns a closer and nothing
+	// else — the values are the root's business (see Runner's own comment).
+	// Nil and empty on a boot whose venue client was never built, which is
+	// exactly when the posture phase must not pretend to have read anything.
+	venueClient *venue.OrderClient
+	fingerprint string
+
+	// postureVerdict is §4.1's answer as this boot found it, and
+	// postureCause is the error that stopped it being established at all.
+	// Exactly one is meaningful: an error means no verdict, and the zero
+	// Verdict evaluated no checks, so asking it whether it is satisfied
+	// REFUSES rather than agreeing (risk/domain's ErrVerdictVacuous).
+	postureVerdict riskdomain.Verdict
+	postureCause   error
+
 	// governor is the venue's §7.6 budget, held here because the root is the
 	// alert deliverer ratelimit's Snapshot doc names: the transports spend
 	// against it, and BootReport reads it. Nil until the oms phase builds the
@@ -369,6 +412,13 @@ func (r *Runner) Sequence() boot.Sequence {
 			{Name: "observability", Kind: boot.KindObservability, Start: r.startObservability, StopBudget: budget},
 			{Name: "storage", Kind: boot.KindService, Start: r.startStorage, StopBudget: budget},
 			{Name: "oms", Kind: boot.KindService, Start: r.startOMS, StopBudget: budget},
+			// §4.1's account posture sits AFTER oms because it needs the venue
+			// client oms built, and BEFORE reconcile because §7.5 orders it that
+			// way: the posture is what makes every later reading mean anything
+			// (§12 item 4's own sentence). It reports its gate and never halts
+			// the sequence — a refused posture is a verdict an operator reads,
+			// not a wiring error.
+			{Name: "posture", Kind: boot.KindService, Start: r.startPosture, StopBudget: budget},
 			{Name: "reconcile", Kind: boot.KindReconcile, Start: r.startReconcile, StopBudget: budget},
 		},
 	}
@@ -477,6 +527,8 @@ func (r *Runner) startOMS(context.Context) (boot.StopFunc, error) {
 	}
 	r.governor = wiring.governor
 	r.spend = wiring.spend
+	r.venueClient = wiring.client
+	r.fingerprint = wiring.fingerprint
 	deps := oms.Deps{
 		JournalPath:       r.cfg.JournalPath,
 		VenueOrders:       wiring.client,
@@ -537,6 +589,96 @@ func (r *Runner) startOMS(context.Context) (boot.StopFunc, error) {
 // It is last, which boot.Sequence enforces — a phase after the one whose result
 // decides the posture would be running while the process is already reporting a
 // verdict about whether it may trade.
+// startPosture is §4.1's account and margin-mode verification at boot — the
+// first producer GateAccountPosture has had since slice G2 declared it (task
+// #198, record §73).
+//
+// # Three outcomes, and which is which is the whole design
+//
+//   - PASSED: every rule the account model requires was observed and satisfied.
+//   - NEEDS OPERATOR: the posture was read and does not satisfy §4.1. It latches,
+//     and it must: §73c-3 ruled that this engine never repairs a posture, both
+//     because an account-wide irreversible mutation inside an automated boot is
+//     the wrong default and because a posture the bot can repair is a posture
+//     whose violation stops being evidence. Nothing a retry does can lift it.
+//   - FAILED: the posture could not be ESTABLISHED — the venue did not answer,
+//     a pinned attestation would not load, the requirement could not be built.
+//     A retry may lift that, so it is incompleteness rather than an alert.
+//
+// The two are not interchangeable, and the direction that matters is that a read
+// which never answered must never decay into an account that was found clean.
+// risk/domain enforces the same thing one layer down: the zero Verdict evaluated
+// nothing, and Satisfied() refuses it rather than saying yes.
+//
+// # It does NOT halt the sequence
+//
+// A refused posture is a verdict, and the journal reconciliation that follows is
+// independent of it — an operator facing a wrong margin mode still wants to know
+// what the join found. Halting here would answer one question by suppressing
+// another. `r.halted` stays for the failures that make later phases meaningless,
+// which is the venue client and the journal.
+func (r *Runner) startPosture(context.Context) (boot.StopFunc, error) {
+	if r.halted {
+		return nil, nil
+	}
+	verdict, err := r.assertPosture()
+	if err != nil {
+		r.postureCause = err
+		return nil, r.checklist.Report(boot.GateAccountPosture, boot.OutcomeFailed)
+	}
+	r.postureVerdict = verdict
+	ok, err := verdict.Satisfied()
+	if err != nil {
+		// A verdict that evaluated nothing, arriving with no error beside it.
+		// Unreachable through Check, which evaluates at least the account-wide
+		// rules of any dialect it has a table for — and refused rather than
+		// read as clean, because "nothing was checked" is the one answer that
+		// must never be spelled the same way as "nothing was wrong".
+		r.postureCause = err
+		return nil, r.checklist.Report(boot.GateAccountPosture, boot.OutcomeFailed)
+	}
+	if !ok {
+		return nil, r.checklist.Report(boot.GateAccountPosture, boot.OutcomeNeedsOperator)
+	}
+	return nil, r.checklist.Report(boot.GateAccountPosture, boot.OutcomePassed)
+}
+
+// assertPosture builds §4.1's guard and runs it. Split out so that every way
+// the posture can fail to be ESTABLISHED returns through one path, rather than
+// each one having to remember which gate outcome it owes.
+func (r *Runner) assertPosture() (riskdomain.Verdict, error) {
+	attested := riskdomain.AttestationUnstated
+	if pin := r.cfg.PortfolioMarginAttestation; pin != nil {
+		// A pinned document that will not load is a wiring defect and not a
+		// gate refusal — #179's rule for the spot baseline, and the reason it
+		// must not decay into AttestationUnstated is that Unstated is a
+		// LEGITIMATE state with its own operator message ("attest this fact"),
+		// which is the wrong instruction for a document that exists.
+		loaded, err := attestation.Load(pin.Pin(), attestation.Bindings{
+			Venue:       r.cfg.Venue.Venue,
+			Account:     r.cfg.Account,
+			Fingerprint: r.fingerprint,
+		})
+		if err != nil {
+			return riskdomain.Verdict{}, err
+		}
+		attested = loaded
+	}
+	requirement, err := r.cfg.PostureRequirement(attested)
+	if err != nil {
+		return riskdomain.Verdict{}, err
+	}
+	source, err := riskdriven.NewAccountPosture(r.venueClient, r.cfg.Venue.Venue)
+	if err != nil {
+		return riskdomain.Verdict{}, err
+	}
+	guard, err := riskapp.NewPostureGuard(source, requirement)
+	if err != nil {
+		return riskdomain.Verdict{}, err
+	}
+	return guard.Assert()
+}
+
 func (r *Runner) startReconcile(context.Context) (boot.StopFunc, error) {
 	if r.halted {
 		return nil, nil
@@ -593,6 +735,8 @@ func (r *Runner) BootReport() Report {
 	rep := Report{
 		Reconciliation: r.reconciliation,
 		Storage:        r.storageErr,
+		AccountPosture: r.postureVerdict,
+		PostureCause:   r.postureCause,
 		RateLimit:      r.RateLimit(),
 	}
 	if r.checklist != nil {

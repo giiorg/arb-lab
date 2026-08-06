@@ -234,7 +234,7 @@ func TestReconcileReportGoldenNoMiss(t *testing.T) {
 			Cause:    errors.New("venue join stopped early"),
 		},
 	})
-	want := "posture:  PostureReconcileOnly (this binary reports 4 of §7.5's 8 gates; the rest have no producer yet)\n" +
+	want := "posture:  PostureReconcileOnly (this binary reports 5 of §7.5's 8 gates; the rest have no producer yet)\n" +
 		"verdict:  ExitOperator\n" +
 		"latched:  [GateNetDeltaAsserted]  <- operator clearance required; a retry will not lift these\n" +
 		"ratelimit: bybit order_realtime: 1 response(s) carried no usable budget reading this run (§7.6 fold-health — venue-side corrections were missed)\n" +
@@ -315,7 +315,7 @@ func TestReconcileReportGoldenSpotSections(t *testing.T) {
 			},
 		},
 	})
-	want := "posture:  PostureReconcileOnly (this binary reports 4 of §7.5's 8 gates; the rest have no producer yet)\n" +
+	want := "posture:  PostureReconcileOnly (this binary reports 5 of §7.5's 8 gates; the rest have no producer yet)\n" +
 		"verdict:  ExitOperator\n" +
 		"latched:  [GateNetDeltaAsserted]  <- operator clearance required; a retry will not lift these\n" +
 		"blocking: [GateAccountPosture]\n" +

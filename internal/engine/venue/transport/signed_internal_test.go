@@ -764,10 +764,57 @@ func TestNewSignedClientSkipsVenueScopedFoldNames(t *testing.T) {
 	}
 }
 
+// TestBybitEndpointRosterIsStatedByHand writes the registry out independently,
+// and it is the test #198 item 7a exists for.
+//
+// The roster-completeness check in NewSignedClient compares the profile's
+// declared endpoint budgets against `cfg.Limits.Endpoints()` — the registry. Its
+// positive control, `bybitTestProfile`, BUILDS its limits from that same
+// `Endpoints()` call. So the pair stays self-consistent under any registry edit:
+// two endpoints were added for the posture surface and the whole suite stayed
+// green, not because the reverse direction is unchecked (it is checked, twenty
+// lines below CheckFold's call site) but because the fixture agreed with
+// whatever the registry said ([[shared-constant-makes-its-own-check-vacuous]]).
+//
+// This states the required roster as LITERALS. An endpoint added to the registry
+// without a line here fails, which is what makes "every profile must declare
+// these" a claim somebody has to act on rather than one that satisfies itself.
+// The dimension is included because a wrong one is refused by the same check and
+// would otherwise be invisible to a names-only comparison.
+func TestBybitEndpointRosterIsStatedByHand(t *testing.T) {
+	t.Parallel()
+
+	want := map[string]ratelimit.Dimension{
+		"order_create":       ratelimit.DimensionOrders,
+		"order_realtime":     ratelimit.DimensionRequests,
+		"order_history":      ratelimit.DimensionRequests,
+		"execution_list":     ratelimit.DimensionRequests,
+		"position_list":      ratelimit.DimensionRequests,
+		"wallet_balance":     ratelimit.DimensionRequests,
+		"account_info":       ratelimit.DimensionRequests,
+		"spot_margin_status": ratelimit.DimensionRequests,
+	}
+
+	got := (BybitLimitReader{}).Endpoints()
+	if len(got) != len(want) {
+		t.Fatalf("registry has %d endpoints, this test names %d — every profile must declare all of them", len(got), len(want))
+	}
+	for _, e := range got {
+		d, listed := want[e.Name]
+		if !listed {
+			t.Errorf("registry declares %q, which no profile in this repo has been told to budget", e.Name)
+			continue
+		}
+		if d != e.Dimension {
+			t.Errorf("%q counts %s, this test requires %s", e.Name, e.Dimension, d)
+		}
+	}
+}
+
 func TestNewSignedClientRequiresBybitEndpointRoster(t *testing.T) {
 	t.Parallel()
 
-	t.Run("all five construct", func(t *testing.T) {
+	t.Run("the whole roster constructs", func(t *testing.T) {
 		t.Parallel()
 		gov := bybitTestGovernor(t)
 		if _, err := NewSignedClient(testSignedClientConfig(t, gov, BybitLimitReader{})); err != nil {
@@ -1037,6 +1084,8 @@ func TestLimitReadersDeriveEndpointNames(t *testing.T) {
 		{"/v5/execution/list", "execution_list"},
 		{"/v5/position/list", "position_list"},
 		{"/v5/account/wallet-balance", "wallet_balance"},
+		{"/v5/account/info", "account_info"},
+		{"/v5/spot-margin-uta/status", "spot_margin_status"},
 		{"/v5/order/unknown", ""},
 	}
 	for _, tc := range cases {

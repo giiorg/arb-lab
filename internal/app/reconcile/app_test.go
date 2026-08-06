@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -28,6 +29,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/observability"
 	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
 	riskdomain "github.com/giiorg/arb-lab/internal/risk/domain"
+	"github.com/giiorg/arb-lab/internal/risk/infrastructure/attestation"
 )
 
 // This file checks the composition root (slice G2, record §58).
@@ -809,9 +811,12 @@ func TestCheckJournalStorageOnAMissingDirectory(t *testing.T) {
 func TestExitClassIsNotThePosture(t *testing.T) {
 	t.Parallel()
 
-	// The five gates with no producer, which block on every run and mean nothing.
+	// The four gates with no producer, which block on every run and mean
+	// nothing. GateAccountPosture LEFT this list in #198 item 7: it now has a
+	// producer here, so a blocking one is a real incompleteness and the case
+	// below asserts exactly that.
 	structural := []boot.Gate{
-		boot.GateAccountPosture, boot.GateDeactivationsResolved,
+		boot.GateDeactivationsResolved,
 		boot.GateMarginOpsResolved, boot.GateWriterAuthority,
 	}
 	cases := []struct {
@@ -854,6 +859,23 @@ func TestExitClassIsNotThePosture(t *testing.T) {
 			rep: Report{Posture: boot.PostureReconcileOnly,
 				Blocking: append([]boot.Gate{boot.GateVenueJoined}, structural...)},
 			want: ExitIncomplete,
+		},
+		{
+			// The gate that crossed. Blocking-and-not-latched means the posture
+			// could not be ESTABLISHED — the venue did not answer, a pinned
+			// attestation would not load — which a retry may lift. A posture
+			// that was READ and found wrong latches and is answered above.
+			name: "incomplete: the posture gate alone",
+			rep: Report{Posture: boot.PostureReconcileOnly,
+				Blocking: append([]boot.Gate{boot.GateAccountPosture}, structural...)},
+			want: ExitIncomplete,
+		},
+		{
+			name: "operator: a posture that was read and found wrong",
+			rep: Report{Posture: boot.PostureReconcileOnly,
+				Blocking: append([]boot.Gate{boot.GateAccountPosture}, structural...),
+				Latched:  []boot.Gate{boot.GateAccountPosture}},
+			want: ExitOperator,
 		},
 		{
 			name: "incomplete beats nothing, and latched beats incomplete",
@@ -1035,16 +1057,258 @@ func testWall(t *testing.T, cfg Config) *clock.Wall {
 // could not exist: with no baseline the spot leg correctly held
 // GateNetDeltaAsserted at UnassertedBaselineUnrecorded, so "clean" was not a
 // reachable verdict for a spot deployment.
+// binancePostureBodies is §4.1's four Binance probes answered CLEANLY.
+//
+// The deployment this serves configures no derivative instrument, so the
+// per-symbol rules fold over an empty roster (RosterCoverageNoDerivatives) and
+// what has to pass is the account-wide half: multi-assets off, one-way position
+// mode, and the Portfolio-Margin attestation, which no endpoint here answers.
+//
+// # The two symbol-scoped bodies are NOT empty, and the asymmetry is a finding
+//
+// `symbolConfig` returns a row for BTCUSDT even though this deployment trades
+// no perpetual, because the VENUE's answer does not depend on our config — a
+// Binance account has a margin type and a leverage per futures symbol whether or
+// not anything here trades it, and §73j recorded that observations for symbols
+// off the configured roster are IGNORED rather than failed. `positionRisk`
+// stays empty because it enumerates POSITIONS and this account holds none.
+//
+// The distinction is load-bearing rather than cosmetic: the codec REFUSES an
+// empty symbolConfig array (a futures account always has rows, so an empty one
+// means the read was wrong-shaped) and accepts an empty positionRisk. Serving
+// `[]` for both is what this fixture did first, and the refusal it produced is
+// record §73k F14 — on Binance a spot-only deployment cannot answer §4.1 at all.
+var binancePostureBodies = map[string]string{
+	"/fapi/v1/multiAssetsMargin": `{"multiAssetsMargin":false}`,
+	"/fapi/v1/positionSide/dual": `{"dualSidePosition":false}`,
+	"/fapi/v1/symbolConfig":      `[{"symbol":"BTCUSDT","marginType":"ISOLATED","leverage":5}]`,
+	"/fapi/v3/positionRisk":      `[]`,
+}
+
+// pinnedPortfolioMarginAttestation writes an operator attestation recording
+// Portfolio Margin OFF and returns the two-act pin over the bytes on disk —
+// the same digest a `sha256sum` gives, which is how an operator produces it
+// (the package has no writer; see its doc).
+func pinnedPortfolioMarginAttestation(t *testing.T, account, key, secret string) *AttestationPinConfig {
+	t.Helper()
+	cred, err := transport.NewCredential(key, secret)
+	if err != nil {
+		t.Fatalf("NewCredential: %v", err)
+	}
+	body, err := json.MarshalIndent(attestation.Document{
+		Kind:             attestation.Kind,
+		Version:          attestation.Version,
+		Venue:            "binance",
+		Account:          account,
+		CredentialSHA256: cred.Fingerprint(),
+		ObservedAt:       "2026-08-06T09:30:00Z",
+		Observer:         "gb",
+		Method:           "binance.com account page: Portfolio Margin shows not enrolled",
+		Observed:         attestation.ObservedOff,
+	}, "", "  ")
+	if err != nil {
+		t.Fatalf("marshalling the attestation: %v", err)
+	}
+	body = append(body, '\n')
+	path := filepath.Join(t.TempDir(), "portfolio-margin.json")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatalf("writing the attestation: %v", err)
+	}
+	digest := sha256.Sum256(body)
+	return &AttestationPinConfig{Path: path, SHA256: hex.EncodeToString(digest[:])}
+}
+
+// TestAPostureThatWasReadAndFoundWrongLatches is the negative control for the
+// posture phase, and a mutation campaign is what asked for it: turning the
+// refusing outcome into OutcomePassed SURVIVED, because every boot in this file
+// served a CLEAN posture. A gate whose passing path is tested and whose refusing
+// path is not is a gate that has never been shown to refuse.
+//
+// The violation is multi-assets ON, and the choice matters twice over. It is an
+// ACCOUNT-WIDE rule, so it fires on a deployment with no derivative instrument —
+// the per-symbol half is empty here, and a fixture violating a per-symbol rule
+// would prove nothing about this deployment. And it is a rule Profiles §2 calls
+// mutually exclusive with Isolated, so the account really is untradeable.
+//
+// The outcome must be NEEDS OPERATOR rather than FAILED: §73c-3 ruled that this
+// engine never repairs a posture, so no retry can lift it. That distinction is
+// what the assertions below pin, because both spellings block and only one of
+// them tells an operator to go and look.
+func TestAPostureThatWasReadAndFoundWrongLatches(t *testing.T) {
+	t.Setenv(testKeyVar, "key")
+	t.Setenv(testSecretVar, "secret")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v3/account" {
+			w.Header().Set("X-Mbx-Used-Weight-1m", "20")
+			fmt.Fprint(w, binanceAccountBody)
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/fapi/v1/multiAssetsMargin" {
+			w.Header().Set("X-Mbx-Used-Weight-1m", "20")
+			fmt.Fprint(w, `{"multiAssetsMargin":true}`)
+			return
+		}
+		if body, ok := binancePostureBodies[r.URL.Path]; ok && r.Method == http.MethodGet {
+			w.Header().Set("X-Mbx-Used-Weight-1m", "20")
+			fmt.Fprint(w, body)
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"code":-1000,"msg":"unexpected path in posture fake"}`)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	cfg := spotOnly(t, filepath.Join(dir, "journal.db"))
+	cfg.Venue.Endpoints[0].Scheme = "http"
+	cfg.Venue.Endpoints[0].Host = strings.TrimPrefix(srv.URL, "http://")
+	cfg.SpotBaseline = pinnedCleanBaseline(t, cfg.Account, "key", "secret")
+	cfg.Venue.Endpoints = append(cfg.Venue.Endpoints, EndpointConfig{
+		Product: ids.ProductLinearPerp, Scheme: "http",
+		Host: strings.TrimPrefix(srv.URL, "http://"),
+	})
+	cfg.Venue.Limits = append(cfg.Venue.Limits,
+		LimitConfig{Name: "weight_1m", Scope: "family", Product: ids.ProductLinearPerp,
+			Dimension: "weight", Interval: dur(t, "1m"),
+			OpeningCeiling: 1680, RoutineCeiling: 2160, Capacity: 2400},
+		LimitConfig{Name: "orders_1m", Scope: "family", Product: ids.ProductLinearPerp,
+			Dimension: "orders", Interval: dur(t, "1m"),
+			OpeningCeiling: 840, RoutineCeiling: 1080, Capacity: 1200},
+	)
+	cfg.PortfolioMarginAttestation = pinnedPortfolioMarginAttestation(t, cfg.Account, "key", "secret")
+	r := newRunnerFor(t, cfg, func(string) error { return nil })
+
+	rep, err := r.run(t)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if o, declared := r.checklist.Outcome(boot.GateAccountPosture); !declared || o != boot.OutcomeNeedsOperator {
+		t.Fatalf("GateAccountPosture = %s (declared %v), want OutcomeNeedsOperator — no retry repairs a posture", o, declared)
+	}
+	if got := rep.ExitClass(); got != ExitOperator {
+		t.Errorf("ExitClass() = %s, want ExitOperator; latched = %v", got, rep.Latched)
+	}
+	// The verdict reaches the report and NAMES the setting, which is what an
+	// operator acts on. A latched gate with an empty verdict would be a refusal
+	// nobody can diagnose.
+	if rep.PostureCause != nil {
+		t.Errorf("PostureCause = %v, want nil — the posture WAS established, and it is wrong", rep.PostureCause)
+	}
+	var named bool
+	for _, f := range rep.AccountPosture.Failures {
+		if f.Setting == riskdomain.SettingMultiAssets && f.Reason == riskdomain.ReasonMismatch {
+			named = true
+			if f.Observed != "true" {
+				t.Errorf("the failure carries observed %q, want the venue's own word", f.Observed)
+			}
+		}
+	}
+	if !named {
+		t.Errorf("no SettingMultiAssets mismatch in the verdict:\n%s", rep.AccountPosture)
+	}
+	// And the checks that PASS still pass — otherwise a fixture that broke the
+	// whole read would produce the same latched gate for a different reason.
+	if n := len(rep.AccountPosture.Failures); n != 1 {
+		t.Errorf("%d failures, want exactly the one this fixture injects:\n%s", n, rep.AccountPosture)
+	}
+}
+
+// TestAPostureThatCouldNotBeReadIsIncompleteNotAnAlert is the other half of the
+// posture gate's two refusing paths, and it was also a surviving mutant: making
+// the unestablishable case report OutcomePassed changed nothing anywhere.
+//
+// The distinction it pins is the one the whole phase is built around. A posture
+// that was READ and found wrong latches — no retry repairs it. A posture that
+// could not be read at all is INCOMPLETE — a retry may well answer. Collapsing
+// them either way is a real cost: as an alert it sends a human to look at an
+// account nobody has read, and as incompleteness it invites the retry a genuine
+// violation will never satisfy.
+//
+// The verdict must stay the zero one, and asking it whether it is satisfied must
+// REFUSE rather than say no: "the read failed" and "nothing was wrong" are the
+// same zero value everywhere except through ErrVerdictVacuous.
+func TestAPostureThatCouldNotBeReadIsIncompleteNotAnAlert(t *testing.T) {
+	t.Setenv(testKeyVar, "key")
+	t.Setenv(testSecretVar, "secret")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v3/account" {
+			w.Header().Set("X-Mbx-Used-Weight-1m", "20")
+			fmt.Fprint(w, binanceAccountBody)
+			return
+		}
+		// Every posture probe refused. A 500 rather than a 400, so the failure
+		// is the venue not answering rather than this system asking wrongly.
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, `{"code":-1001,"msg":"internal error"}`)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	cfg := spotOnly(t, filepath.Join(dir, "journal.db"))
+	cfg.Venue.Endpoints[0].Scheme = "http"
+	cfg.Venue.Endpoints[0].Host = strings.TrimPrefix(srv.URL, "http://")
+	cfg.SpotBaseline = pinnedCleanBaseline(t, cfg.Account, "key", "secret")
+	cfg.Venue.Endpoints = append(cfg.Venue.Endpoints, EndpointConfig{
+		Product: ids.ProductLinearPerp, Scheme: "http",
+		Host: strings.TrimPrefix(srv.URL, "http://"),
+	})
+	cfg.Venue.Limits = append(cfg.Venue.Limits,
+		LimitConfig{Name: "weight_1m", Scope: "family", Product: ids.ProductLinearPerp,
+			Dimension: "weight", Interval: dur(t, "1m"),
+			OpeningCeiling: 1680, RoutineCeiling: 2160, Capacity: 2400},
+		LimitConfig{Name: "orders_1m", Scope: "family", Product: ids.ProductLinearPerp,
+			Dimension: "orders", Interval: dur(t, "1m"),
+			OpeningCeiling: 840, RoutineCeiling: 1080, Capacity: 1200},
+	)
+	cfg.PortfolioMarginAttestation = pinnedPortfolioMarginAttestation(t, cfg.Account, "key", "secret")
+	r := newRunnerFor(t, cfg, func(string) error { return nil })
+
+	rep, err := r.run(t)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if o, declared := r.checklist.Outcome(boot.GateAccountPosture); !declared || o != boot.OutcomeFailed {
+		t.Fatalf("GateAccountPosture = %s (declared %v), want OutcomeFailed — a retry may answer", o, declared)
+	}
+	for _, g := range rep.Latched {
+		if g == boot.GateAccountPosture {
+			t.Errorf("a posture that was never read must not latch: %v", rep.Latched)
+		}
+	}
+	if got := rep.ExitClass(); got != ExitIncomplete {
+		t.Errorf("ExitClass() = %s, want ExitIncomplete", got)
+	}
+	if rep.PostureCause == nil {
+		t.Error("PostureCause is nil — an unestablished posture must name why")
+	}
+	if n := len(rep.AccountPosture.Failures); n != 0 {
+		t.Errorf("%d failures on a posture that was never read", n)
+	}
+	// The interlock: a caller ignoring PostureCause and asking the verdict gets
+	// a REFUSAL, never a no and never a yes.
+	if ok, err := rep.AccountPosture.Satisfied(); ok || !errors.Is(err, riskdomain.ErrVerdictVacuous) {
+		t.Errorf("Satisfied() = %v, %v; want false and ErrVerdictVacuous", ok, err)
+	}
+}
+
 func TestBootRunsEveryPhaseAndReportsClean(t *testing.T) {
 	t.Setenv(testKeyVar, "key")
 	t.Setenv(testSecretVar, "secret")
 
-	var accountReads atomic.Int64
+	var accountReads, postureReads atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/api/v3/account" {
 			accountReads.Add(1)
 			w.Header().Set("X-Mbx-Used-Weight-1m", "20")
 			fmt.Fprint(w, binanceAccountBody)
+			return
+		}
+		if body, ok := binancePostureBodies[r.URL.Path]; ok && r.Method == http.MethodGet {
+			postureReads.Add(1)
+			w.Header().Set("X-Mbx-Used-Weight-1m", "20")
+			fmt.Fprint(w, body)
 			return
 		}
 		w.WriteHeader(http.StatusBadRequest)
@@ -1057,6 +1321,27 @@ func TestBootRunsEveryPhaseAndReportsClean(t *testing.T) {
 	cfg.Venue.Endpoints[0].Scheme = "http"
 	cfg.Venue.Endpoints[0].Host = strings.TrimPrefix(srv.URL, "http://")
 	cfg.SpotBaseline = pinnedCleanBaseline(t, cfg.Account, "key", "secret")
+	// §4.1's posture read (#198 item 7) lives on the FUTURES host, so a
+	// deployment that trades spot only still has to route the perp family for
+	// the gate to be answerable at all — see record §73k F14, which is what
+	// this line is evidence of rather than a fixture convenience.
+	cfg.Venue.Endpoints = append(cfg.Venue.Endpoints, EndpointConfig{
+		Product: ids.ProductLinearPerp, Scheme: "http",
+		Host: strings.TrimPrefix(srv.URL, "http://"),
+	})
+	cfg.Venue.Limits = append(cfg.Venue.Limits,
+		LimitConfig{Name: "weight_1m", Scope: "family", Product: ids.ProductLinearPerp,
+			Dimension: "weight", Interval: dur(t, "1m"),
+			OpeningCeiling: 1680, RoutineCeiling: 2160, Capacity: 2400},
+		LimitConfig{Name: "orders_1m", Scope: "family", Product: ids.ProductLinearPerp,
+			Dimension: "orders", Interval: dur(t, "1m"),
+			OpeningCeiling: 840, RoutineCeiling: 1080, Capacity: 1200},
+	)
+	// And the Portfolio-Margin attestation, which is the ONE §4.1 check with no
+	// read path anywhere: without a pinned document this boot refuses by name
+	// (ReasonUnattested), so this line is what makes the clean answer below a
+	// statement about the account rather than about a missing file.
+	cfg.PortfolioMarginAttestation = pinnedPortfolioMarginAttestation(t, cfg.Account, "key", "secret")
 	r := newRunnerFor(t, cfg, func(string) error { return nil })
 
 	rep, err := r.run(t)
@@ -1064,7 +1349,7 @@ func TestBootRunsEveryPhaseAndReportsClean(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	if rep.Posture != boot.PostureReconcileOnly {
-		t.Errorf("posture = %s, want PostureReconcileOnly — five gates have no producer", rep.Posture)
+		t.Errorf("posture = %s, want PostureReconcileOnly — four gates have no producer", rep.Posture)
 	}
 	if len(rep.Latched) != 0 {
 		t.Errorf("latched = %v, want none on a clean boot", rep.Latched)
@@ -1073,11 +1358,11 @@ func TestBootRunsEveryPhaseAndReportsClean(t *testing.T) {
 		t.Errorf("ExitClass() = %s, want ExitClean; blocking = %v, cause = %v",
 			got, rep.Blocking, rep.Reconciliation.Cause)
 	}
-	// The four gates this binary produces must all have concluded, which is what
+	// The FIVE gates this binary produces must all have concluded, which is what
 	// makes the ExitClean above a statement rather than an accident of the
-	// structural five.
+	// structural four.
 	for _, g := range []boot.Gate{boot.GateJournalDurable, boot.GateJournalReplayed,
-		boot.GateVenueJoined, boot.GateNetDeltaAsserted} {
+		boot.GateVenueJoined, boot.GateNetDeltaAsserted, boot.GateAccountPosture} {
 		o, declared := r.checklist.Outcome(g)
 		if !declared || o != boot.OutcomePassed {
 			t.Errorf("%s = %s (declared %v), want OutcomePassed", g, o, declared)
@@ -1104,6 +1389,21 @@ func TestBootRunsEveryPhaseAndReportsClean(t *testing.T) {
 	// skipped read cannot hide.
 	if got := accountReads.Load(); got != 1 {
 		t.Errorf("the venue saw %d account reads, want exactly 1", got)
+	}
+	// Four posture probes, the exact figure §73c-2 measured for a Binance read.
+	// An exact count because it is the one instrument that distinguishes "the
+	// posture was asserted" from "the verdict was satisfied for another reason"
+	// — a guard that read nothing produces a verdict that evaluated nothing,
+	// and Satisfied() would have refused it, but a guard that read THREE of
+	// four probes would not be visible in the outcome at all.
+	if got := postureReads.Load(); got != 4 {
+		t.Errorf("the venue saw %d posture probes, want exactly 4", got)
+	}
+	if ok, err := rep.AccountPosture.Satisfied(); !ok || err != nil {
+		t.Errorf("the report's verdict = %v, %v; want satisfied:\n%s", ok, err, rep.AccountPosture)
+	}
+	if rep.PostureCause != nil {
+		t.Errorf("PostureCause = %v, want nil on a boot whose posture was established", rep.PostureCause)
 	}
 }
 

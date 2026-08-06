@@ -181,8 +181,7 @@ func TestRunRefusesAnOffGridTradeBeforeAnythingIsSent(t *testing.T) {
 	var places int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/fapi/v3/positionRisk":
-			fmt.Fprint(w, `[]`)
+		case servePosture(w, r):
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/account":
 			// The boot's spot assertion, satisfied by the pinned baseline —
 			// the refusal under test must come from the PLANNER, not from a

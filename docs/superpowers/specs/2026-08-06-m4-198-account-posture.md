@@ -674,6 +674,93 @@ the part worth copying:
 Stated rather than implied: a second use case added INSIDE one of the five
 exempted packages still rides in free.
 
+### F13 — F7's mechanism was wrong, and the fixture is why the suite stayed green
+
+F7 recorded that `CheckFold` *"validates that every profile-declared limit
+exists in the registry, and never the reverse"*, and concluded that a registry
+endpoint no profile declares passes construction. **The conclusion is false.**
+`NewSignedClient` runs a complete-roster check twenty lines below `CheckFold`'s
+call site — *"the roster is venue-level, so every endpoint is required"* — and
+refuses a missing budget by name (`ErrEndpointBudgetMissing`). #185/#186 built
+it for exactly this.
+
+The symptom F7 observed was real; the mechanism was not. Adding two endpoints
+left the suite green because **`bybitTestProfile` derives its limits from
+`(BybitLimitReader{}).Endpoints()`** — the registry it is checked against. The
+pair stays self-consistent under any registry edit
+([[shared-constant-makes-its-own-check-vacuous]], applied to a positive
+control). Its subtest was still called *"all five construct"* while the registry
+held eight, which is the stale count nobody re-derived.
+
+The harm clause was wrong in the same direction and in the safe one: F7 said a
+missing budget means *"the first posture read's fold is refused by name"*, i.e.
+a runtime failure. It is a **construction** failure — the boot never starts.
+[[wrong-harm-on-a-correct-finding]].
+
+**Item 7a is therefore the roster stated by hand**
+(`TestBybitEndpointRosterIsStatedByHand`), names and dimensions as literals, so
+an endpoint added without a profile line fails a test instead of agreeing with
+itself. Two mutants confirm it bites: a wrong dimension and a deleted row.
+
+### F14 — On Binance, §4.1's posture is unreadable to a spot-only deployment
+
+F11 admitted the spot-only deployment. Wiring the gate found what that costs on
+Binance, and it is a venue-shape fact rather than a design choice:
+
+- all four Binance probes are `/fapi/*` — the **futures** host — so a deployment
+  that routes no perpetual family cannot issue them at all;
+- the `symbolConfig` codec **refuses an empty array** (a futures account always
+  has rows, so an empty one means the read was wrong-shaped), which a spot-only
+  account's answer may well be.
+
+Bybit is not symmetric: `/v5/account/info` and `/v5/spot-margin-uta/status` are
+account-level and answerable regardless.
+
+So a spot-only Binance deployment must still route the futures family for the
+gate to be answerable — which the clean-boot fixture now does, with a comment
+saying it is evidence rather than convenience. **Not resolved here**, because
+resolving it means deciding whether the classic-account posture is meaningful
+for an account with no futures leg, and that is the same operator question as
+F9. Listed beside it.
+
+### The campaign — 12 mutants on the wiring and config, 3 on the loader
+
+| # | Mutation | Verdict |
+|---|---|---|
+| M27 | `account_info` counts orders, not requests | caught (1) |
+| M28 | the posture account endpoint leaves the registry | caught (2) |
+| M29 | a clean posture reports as needing an operator | caught (1) |
+| M30 | a REFUSED posture reports as passed | **SURVIVED → fixed → caught (1)** |
+| M31 | a refused posture is incompleteness, not an alert | caught (1) |
+| M32 | an unestablishable posture reports as passed | **SURVIVED → fixed → caught (1)** |
+| M33 | a vacuous verdict reports as passed | **SURVIVED — unreachable, see below** |
+| M34 | a spot-only deployment claims to trade derivatives | caught (10) |
+| M35 | the spot leg joins the posture roster | caught (18) |
+| M36 | a leverage pin of ZERO validates | caught (1) |
+| M37 | the no-derivatives claim is never contradicted | caught (2) |
+| M38 | the unstated coverage zero validates | caught (2) |
+| M39 | an attested ON loads as OFF | caught (2) |
+| M40 | the pinned digest is never compared | caught (2) |
+| M41 | the credential binding never fires | caught (2) |
+
+**M30 and M32 are the session's finding, and they are one shape.** Every boot
+fixture in the repo served a CLEAN posture, so both refusing paths — read-and-
+wrong, and could-not-be-read — were reachable and unasserted. A gate whose
+passing path is tested and whose refusing paths are not has never been shown to
+refuse. Two tests now pin them, and pin the DISTINCTION: read-and-wrong latches
+(no retry repairs a posture, §73c-3), could-not-be-read does not.
+
+**M33 is the M20/M26 family again and is left in place.** The vacuous-verdict
+branch is unreachable through `assertPosture`: `Check` evaluates at least the
+account-wide rules of any dialect it has a table for, so `Satisfied()` never
+returns `ErrVerdictVacuous` on the nil-error path. Deleting it would send a
+vacuous verdict down the `!ok` arm and report **NeedsOperator** — an operator
+alert about an account nobody read. It is an interlock against a future `Check`
+that evaluates nothing, and it is recorded rather than deleted or faked.
+
+Two `NO-OP!!` first (the mutated text sat one line off) and one `ERROR` from a
+sed the harness would not parse.
+
 ### Two smaller decisions
 
 - **No `Write` in the attestation package.** #179 needed `arblab baseline
@@ -700,15 +787,17 @@ exempted packages still rides in free.
 5. ~~The Portfolio-Margin attestation document + its two-act config pin.~~ **DONE** (session 111)
 6. ~~The leverage pin config field (absent → refuse).~~ **DONE** (session 111) — plus
    `RosterCoverage`, which F11 forced.
-7. `app/reconcile` wiring; `GateAccountPosture` moves across `ExitClass`. The
-   import fence is already narrowed (F12), so this is no longer blocked.
-   - **7a.** Declare `account_info` and `spot_margin_status` in every rate-limit
-     profile (endpoint scope, `DimensionRequests`, 1s window) — §73i F7. Without
-     them the first posture read's fold is refused by name.
+7. ~~`app/reconcile` wiring; `GateAccountPosture` moves across `ExitClass`.~~
+   **DONE** (session 111) — a `posture` phase between oms and reconcile, the
+   gate across the switch, the verdict on the report and in the renderer.
+   - **7a.** ~~Declare `account_info` and `spot_margin_status` in every
+     rate-limit profile.~~ **DONE** (session 111), and F13 corrects F7: the
+     reverse check already existed, the fixture was the vacuous part.
 8. Collapse checklist (§73g) as fixtures, then a ≥15-mutant campaign.
 9. Spec edits → v0.9.51: §4.1/§6.3/§7.5 annotations, Profiles §2's marked
    unknown read path, §12 item 4's slice annotation, ADR §3's dated block.
 10. Final fresh `code_diff` review.
-11. **OPERATOR RULING OWED — §73j F9's unreachable-gate consequence.** Choose
-    between strict / per-setting default reliance / a distinct boot outcome.
-    Nothing else in the slice is blocked by it; (3) would land in item 7.
+11. **OPERATOR RULING OWED — §73j F9's unreachable-gate consequence**, now with
+    §73k F14 beside it (a spot-only Binance deployment cannot answer §4.1 at
+    all). Choose between strict / per-setting default reliance / a distinct boot
+    outcome. Nothing else in the slice is blocked by it.

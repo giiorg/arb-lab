@@ -97,7 +97,7 @@ func writeReconcileReport(w io.Writer, r appreconcile.Report) {
 // and what latched. Split from the diagnosis so the exercise renderer can
 // place the rate-limit section once, after its execute half.
 func writeReconcileVerdict(w io.Writer, r appreconcile.Report) {
-	fmt.Fprintf(w, "posture:  %s (this binary reports 4 of §7.5's 8 gates; the rest have no producer yet)\n", r.Posture)
+	fmt.Fprintf(w, "posture:  %s (this binary reports 5 of §7.5's 8 gates; the rest have no producer yet)\n", r.Posture)
 	fmt.Fprintf(w, "verdict:  %s\n", r.ExitClass())
 	if len(r.Latched) > 0 {
 		fmt.Fprintf(w, "latched:  %v  <- operator clearance required; a retry will not lift these\n", r.Latched)
@@ -110,6 +110,17 @@ func writeReconcileDiagnosis(w io.Writer, r appreconcile.Report) {
 	fmt.Fprintf(w, "blocking: %v\n", r.Blocking)
 	if r.Storage != nil {
 		fmt.Fprintf(w, "storage:  %v\n", r.Storage)
+	}
+	// §4.1's verdict, and the two halves are not interchangeable: a cause means
+	// the posture could not be ESTABLISHED (fix the wiring or retry), and a
+	// failure list means it was read and the ACCOUNT is wrong. Every failed
+	// check is printed rather than the first, so an operator acts once — a
+	// checker that named one violation per boot costs a round trip per check.
+	if r.PostureCause != nil {
+		fmt.Fprintf(w, "posture!: could not be established: %v\n", r.PostureCause)
+	}
+	for _, f := range r.AccountPosture.Failures {
+		fmt.Fprintf(w, "  posture %s\n", f)
 	}
 
 	rec := r.Reconciliation
