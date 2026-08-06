@@ -584,11 +584,6 @@ func (r *Runner) startOMS(context.Context) (boot.StopFunc, error) {
 	}, nil
 }
 
-// startReconcile is §7.5's phase: replay, join, resolve every absence, assert.
-//
-// It is last, which boot.Sequence enforces — a phase after the one whose result
-// decides the posture would be running while the process is already reporting a
-// verdict about whether it may trade.
 // startPosture is §4.1's account and margin-mode verification at boot — the
 // first producer GateAccountPosture has had since slice G2 declared it (task
 // #198, record §73).
@@ -679,6 +674,11 @@ func (r *Runner) assertPosture() (riskdomain.Verdict, error) {
 	return guard.Assert()
 }
 
+// startReconcile is §7.5's phase: replay, join, resolve every absence, assert.
+//
+// It is last, which boot.Sequence enforces — a phase after the one whose result
+// decides the posture would be running while the process is already reporting a
+// verdict about whether it may trade.
 func (r *Runner) startReconcile(context.Context) (boot.StopFunc, error) {
 	if r.halted {
 		return nil, nil

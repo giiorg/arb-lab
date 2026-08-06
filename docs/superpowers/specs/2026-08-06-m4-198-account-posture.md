@@ -367,6 +367,24 @@ parameters pinned to a value that collapses a distinction the code makes:
    exhaustiveness. A test asserts a blocking `GateAccountPosture` now yields
    `ExitIncomplete`, and it is mutated to confirm it bites.
 
+Items 1–7 were all honoured as their subjects landed (sessions 110–111). Items 8
+and 9 were added in session 112 by running the same checklist over the code items
+1–7 were never applied to, and they are the general lessons rather than this
+slice's specifics:
+
+8. **A checklist runs at ONE LAYER unless it is re-run.** Items 1–6 are about
+   `risk/domain` and were satisfied there; every end-to-end boot fixture
+   meanwhile carried an EMPTY roster, so the composed per-symbol chain had no
+   witness at all (§73l F15). Re-run the checklist at each layer that composes
+   the subject, and treat a *legal degenerate shape* — here F11's empty roster —
+   as the highest-risk fixture parameter there is, because nobody notices it is
+   degenerate.
+9. **One-violation-per-fixture hides a ladder's ORDER.** Where a checker halts on
+   the first failure and each fixture breaks exactly one rung, the ORDER of the
+   rungs is a separate claim no fixture can see. It needs a deliberate
+   two-violation fixture naming which answer must win, and asserting the
+   shallower one is not also reported (§73l F16).
+
 ---
 
 ## §73i — What the venue slice found once it was built (session 109)
@@ -778,6 +796,103 @@ sed the harness would not parse.
 
 ---
 
+## §73l — What running the checklist ONE LAYER OUT found (session 112, item 8)
+
+§73g was drafted in session 109 against `risk/domain`, and sessions 110–111
+honoured all seven of its items — in `risk/domain`, in the config unit tests, in
+the attestation package, each of which ran its own checklist as it landed. Item
+8's remaining work was therefore not "write the seven fixtures"; they exist. It
+was to run the same checklist over the code the seven items never saw.
+
+### F15 — Every end-to-end posture boot had an EMPTY roster
+
+The whole file of boot fixtures builds on `spotOnly`, whose deployment configures
+no derivative — so `RosterCoverageNoDerivatives` had every integration witness in
+the repo and **`RosterCoverageDerivatives`, the ordinary production shape, had
+none**. §4.1's per-symbol half was reachable at boot and asserted nowhere.
+
+This is the collapse checklist's cardinality dimension pinned to *zero* rather
+than to one, and the tell was the usual one: the fixture did not contain the
+thing under test. A roster of zero cannot show "every configured symbol"
+differing from "the first", cannot show a leverage pin travelling from config to
+a comparison, and cannot distinguish a per-symbol rule that ran from one that
+folded over nothing. The reason it happened is worth keeping: `spotOnly` was
+built for §70g's spot baseline, F11 then made its empty roster *legal*, and a
+legal degenerate shape is the one nobody notices is degenerate.
+
+**What this is NOT.** Every probe mutation below is also caught by its own layer's
+unit suite — the domain's, the ACL's, the codec's. So this is coverage of a
+**composition**, not the discovery of an unguarded defect, and the record should
+not be read as the second thing. What had no witness was the chain: an operator's
+`leverage` pin → `PostureRequirement` → the guard → the ACL → the venue codec → a
+rule comparison → the gate outcome. `Evaluated == 9` is the first assertion
+anywhere that measures the composed fold's arity end to end
+([[a-known-exact-count-is-an-instrument]]).
+
+Three fixtures close it, all in `app/reconcile`, all with TWO configured
+derivatives carrying DIFFERENT pins (5 and 3):
+
+| Fixture | Pins |
+|---|---|
+| `TestBootAssertsThePerSymbolPostureOfEveryConfiguredSymbol` | the positive control the file lacked: a non-empty roster whose per-symbol rules all pass, `Evaluated == 9` |
+| `TestBootRefusesWhenTheSECONDConfiguredSymbolViolatesItsOwnPin` | §73g items 1 **and** 5 at once — the violation is on the SECOND symbol, and the leverage the venue reports for it is the FIRST symbol's pin, so both wrong readings are excluded by one fixture |
+| `TestBootOnAFlatAccountRefusesEveryConfiguredSymbol` | **F9 as an executable claim** — see below |
+
+Six mutants, all caught: the per-symbol fold visiting only the first symbol; the
+rule comparing against the first roster pin; the ACL dropping the per-symbol
+subject; the codec pairing every symbol with row 0's leverage; a never-mentioned
+symbol reporting as a mismatch; and read-and-wrong reporting as retryable.
+
+### F9 now has a fixture instead of a paragraph
+
+`TestBootOnAFlatAccountRefusesEveryConfiguredSymbol` is §73j F9 executed rather
+than argued: two configured derivatives, `symbolConfig` answering for both (a
+futures account is configured whether or not it holds anything), `positionRisk`
+empty (it enumerates POSITIONS). Result: **exactly two failures, one per
+configured symbol, `SettingAutoAddMargin`/`ReasonUnobserved`** — the gate that
+must pass before the first position opens, refusing because no position exists.
+
+It asserts the **strict** reading, which is what is implemented, with a comment
+saying so: a fixture must not silently answer a question left to an operator.
+When #199 rules, this test changes with it, and its failure is the reminder that
+it must. A roster of one could not have told "every configured symbol refuses"
+from "a configured symbol refuses", which is the whole weight of F9.
+
+### F16 — The attestation ladder's ORDER was checked by nothing (a real gap)
+
+`Load`'s four rungs each carry a stated argument for *where they sit*: the digest
+runs before parsing because "diagnosing their content would describe a document
+the operator never pinned", and the credential runs before the labels because the
+label is mutable configuration. The package's own checklist item 3 says every
+fixture breaks exactly ONE rung — correct, and it is what demonstrates each rung
+can fire. It is also what made the order invisible: **swap rungs 1 and 2, or 3
+and 4, and all eighteen ladder cases still pass**, because in each of them only
+one member of the pair is broken.
+
+Demonstrated, not asserted: reordering 1↔2 by hand fails exactly one test in the
+package, and reordering 3↔4 fails exactly one — both of them the new
+`TestLoadReportsTheDEEPERRungWhenTwoAreBroken`, and nothing else.
+
+So the ordering needs the fixture the one-violation discipline forbids elsewhere:
+one that breaks BOTH members of a pair and names which answer must win — and
+which asserts the shallower error is **not** also reported, since a loader that
+joined both would tell an operator to fix two things when one is a consequence of
+the other. This is [[a-config-listing-two-claims-checks-only-the-shallower]] read
+the other way round, and it generalises: **wherever a one-violation-per-fixture
+rule is adopted, the ladder's order becomes a separate claim that needs its own
+two-violation fixture.**
+
+### F17 — A doc comment was absorbed by the phase inserted above it
+
+Item 7 inserted `startPosture` between `startOMS` and `startReconcile` and left
+`startReconcile`'s doc comment above it with no blank line, so Go attached the
+whole contiguous block to `startPosture` — whose godoc opened with "startReconcile
+is §7.5's phase" while `startReconcile` had none. Cosmetic, and worth naming for
+the mechanism: an inserted function silently *inherits* the comment of the one it
+displaced, and no gate in this repo can see it.
+
+---
+
 ## §73h — Work items
 
 1. ~~`engine/venue` posture codecs, both venues + roster rows + weights.~~ **DONE** (session 109)
@@ -793,7 +908,13 @@ sed the harness would not parse.
    - **7a.** ~~Declare `account_info` and `spot_margin_status` in every
      rate-limit profile.~~ **DONE** (session 111), and F13 corrects F7: the
      reverse check already existed, the fixture was the vacuous part.
-8. Collapse checklist (§73g) as fixtures, then a ≥15-mutant campaign.
+8. ~~Collapse checklist (§73g) as fixtures, then a ≥15-mutant campaign.~~
+   **DONE** (session 112). Items 1–7 already existed; what remained was running
+   the checklist at the layers it was never applied to, which found F15 (every
+   end-to-end boot had an empty roster), F16 (the attestation ladder's order was
+   checked by nothing) and F17. Four new fixtures, six mutants, plus two
+   hand-applied rung reorderings that each fail exactly one test. The ≥15-mutant
+   half was discharged across sessions 110 (21) and 111 (15).
 9. Spec edits → v0.9.51: §4.1/§6.3/§7.5 annotations, Profiles §2's marked
    unknown read path, §12 item 4's slice annotation, ADR §3's dated block.
 10. Final fresh `code_diff` review.

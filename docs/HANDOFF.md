@@ -1,6 +1,58 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-06, session 111): **`GateAccountPosture` HAS A PRODUCER. #198 items 5, 6, 7 and 7a LAND — the attestation document, the leverage pin, the boot wiring and the endpoint roster. 15 MUTANTS, TWO REAL GAPS FOUND AND FIXED, `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO.**
+## Status (2026-08-06, session 112): **#198 ITEM 8 LANDS — the collapse checklist run at the layers it was never applied to. THREE FINDINGS (F15–F17), FOUR NEW FIXTURES, SIX MUTANTS ALL CAUGHT, `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO. Docs still v0.9.50 — item 9's spec edits are next.**
+
+**Read `docs/superpowers/specs/2026-08-06-m4-198-account-posture.md` §73l
+first**, and note §73g grew two items (8 and 9) that are general rather than
+about this slice.
+
+**THE SESSION'S FINDING — a checklist runs at ONE LAYER unless it is re-run.**
+§73g's seven items were drafted against `risk/domain` and sessions 110–111
+honoured all seven, there. Item 8's remaining work was therefore not to write
+them but to run the same checklist over what they never saw — and **every
+end-to-end posture boot fixture in the repo carried an EMPTY roster** (F15).
+`RosterCoverageNoDerivatives` had every integration witness and
+`RosterCoverageDerivatives`, the ordinary production shape, had none, so §4.1's
+whole per-symbol half was reachable at boot and asserted nowhere. The reason is
+worth keeping: `spotOnly` was built for §70g, F11 then made its empty roster
+**legal**, and a legal degenerate shape is the one nobody notices is degenerate.
+
+**IT IS COVERAGE OF A COMPOSITION, NOT AN UNGUARDED DEFECT — do not re-read it
+as the second thing.** All six probe mutations are caught by their own layer's
+unit suite. What had no witness was the chain: an operator's `leverage` pin →
+`PostureRequirement` → the guard → the ACL → the venue codec → a rule comparison
+→ the gate outcome. `Evaluated == 9` is the first assertion anywhere measuring
+the composed fold's arity end to end.
+
+**F9 NOW HAS A FIXTURE INSTEAD OF A PARAGRAPH.**
+`TestBootOnAFlatAccountRefusesEveryConfiguredSymbol` executes §73j F9: two
+configured derivatives, `symbolConfig` answering for both, `positionRisk` empty —
+exactly two failures, one per symbol, `SettingAutoAddMargin`/`ReasonUnobserved`.
+It asserts the **strict** reading with a comment saying so, because a fixture
+must not silently answer a question left to an operator. **When #199 rules, that
+test changes with it, and its failure is the reminder that it must.**
+
+**F16 IS THE ONE REAL GAP.** The attestation loader's four rungs each carry a
+stated argument for where they sit, and **nothing checked the order**: swap rungs
+1↔2 or 3↔4 and all eighteen ladder cases still pass, because each breaks only one
+member of the pair. Demonstrated by hand-applying both reorderings — each fails
+exactly one test, the new two-violation one. The general lesson is now §73g item
+9: wherever one-violation-per-fixture is the discipline, the ladder's ORDER
+becomes a separate claim needing its own two-violation fixture.
+
+**STILL NOT DONE — items 9, 10, 11.** Spec edits to v0.9.51; the final fresh
+`code_diff` review; and F9 + F14's operator ruling (task #199), which nothing
+downstream is blocked by.
+
+**Everything below the venue codecs is still fixture-tested and has never met a
+real account** (§73f). Unchanged: three standing operator decisions, credentials
+deferred, capture **PID 8495**, never rebuild over `bin/arblab`, `make ci` runs
+`-race` AND the ka staleness gate (needs node), cap `TLC_WORKERS` at 4,
+docs/i18n parity is `bun test`.
+
+---
+
+## Status (2026-08-06, session 111 — HISTORICAL): **`GateAccountPosture` HAS A PRODUCER. #198 items 5, 6, 7 and 7a LAND — the attestation document, the leverage pin, the boot wiring and the endpoint roster. 15 MUTANTS, TWO REAL GAPS FOUND AND FIXED, `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO.**
 
 **Read `docs/superpowers/specs/2026-08-06-m4-198-account-posture.md` §73k
 first** — it carries this session's five findings (F10–F14) and the mutant table.

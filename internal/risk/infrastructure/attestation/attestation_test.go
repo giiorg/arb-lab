@@ -304,6 +304,81 @@ func TestLoadRefusalsNameTheirRung(t *testing.T) {
 	}
 }
 
+// TestLoadReportsTheDEEPERRungWhenTwoAreBroken is the inverse of checklist item
+// 3, and it exists because that item's own discipline hid a claim.
+//
+// Every case above breaks exactly ONE rung, which is what demonstrates that each
+// rung can fire. But Load's ORDER is a separate claim with its own stated
+// argument — the digest runs before parsing because "diagnosing their content
+// would describe a document the operator never pinned", and the credential runs
+// before the labels because the label is mutable configuration. A suite of
+// one-violation fixtures cannot see that order at all: swap rungs 1 and 2, or 3
+// and 4, and all eighteen cases still pass, because in each of them only one of
+// the pair is broken.
+//
+// So the ordering needs the fixture the discipline forbids elsewhere — one that
+// breaks BOTH members of a pair and names which answer must win
+// ([[a-config-listing-two-claims-checks-only-the-shallower]], read the other way
+// round).
+func TestLoadReportsTheDEEPERRungWhenTwoAreBroken(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		doc  func(*attestation.Document)
+		pin  func(*attestation.Pin)
+		bind func(*attestation.Bindings)
+		want error
+		over error
+	}{
+		{
+			// Rung 1 before rung 2. The bytes are not the pinned ones, so
+			// whatever they say about themselves describes a document nobody
+			// pinned — including the fact that they are malformed.
+			name: "a mis-digested document that is ALSO malformed",
+			doc:  func(d *attestation.Document) { d.Kind = "arblab-spot-baseline" },
+			pin:  func(p *attestation.Pin) { p.SHA256 = notTheDocumentsDigest },
+			want: attestation.ErrDigestMismatch,
+			over: attestation.ErrDocumentMalformed,
+		},
+		{
+			// Rung 3 before rung 4. The credential is the binding that cannot be
+			// edited in a config file, so it is the one to report when both the
+			// key and the label disagree.
+			name: "a document under another credential that ALSO names another venue",
+			doc:  func(d *attestation.Document) { d.Venue = "bybit" },
+			bind: func(b *attestation.Bindings) { b.Fingerprint = otherFingerprint },
+			want: attestation.ErrCredentialMismatch,
+			over: attestation.ErrVenueMismatch,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := valid()
+			if tc.doc != nil {
+				tc.doc(&doc)
+			}
+			pin := write(t, doc)
+			if tc.pin != nil {
+				tc.pin(&pin)
+			}
+			bind := bindings()
+			if tc.bind != nil {
+				tc.bind(&bind)
+			}
+
+			_, err := attestation.Load(pin, bind)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("error %v, want %v", err, tc.want)
+			}
+			// And NOT the shallower one. Asserting only the winner would be
+			// satisfied by a loader that joined both, which is the answer that
+			// tells an operator to fix two things when one of them is a
+			// consequence of the other.
+			if errors.Is(err, tc.over) {
+				t.Fatalf("error %v also reports %v — the deeper rung must answer alone", err, tc.over)
+			}
+		})
+	}
+}
+
 // TestDigestComparisonFoldsCase covers the one deliberate leniency: an operator
 // who pasted `sha256sum` output through something that upper-cased it has a
 // config that means the same thing. Hex differs only in case, so the fold can

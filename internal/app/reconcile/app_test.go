@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1404,6 +1405,262 @@ func TestBootRunsEveryPhaseAndReportsClean(t *testing.T) {
 	}
 	if rep.PostureCause != nil {
 		t.Errorf("PostureCause = %v, want nil on a boot whose posture was established", rep.PostureCause)
+	}
+}
+
+// --- §4.1's per-symbol half, end to end (#198 item 8) ------------------
+//
+// The collapse checklist arriving one layer out from §73g, which was written
+// against risk/domain and stopped there. Every end-to-end posture fixture above
+// uses spotOnly, whose roster is EMPTY — so RosterCoverageNoDerivatives had
+// every boot witness in this file and RosterCoverageDerivatives, the ordinary
+// production shape, had NONE. The consequence is the one the checklist exists to
+// find: the whole per-symbol chain — an operator's `leverage` pin, through
+// PostureRequirement, the guard, the ACL and the venue codec, to a rule
+// comparison — was reachable at boot and asserted nowhere, so a pin attached to
+// the wrong symbol was invisible to every test in this package.
+//
+// The tell was the usual one: the fixture did not contain the thing under test.
+// A roster of zero cannot show that "every configured symbol" differs from "the
+// first configured symbol", and cannot show a pin travelling at all
+// ([[fixture-count-of-one-collapses]], §73g item 1).
+
+const (
+	// DIFFERENT pins, so "this symbol's pin" and "the first symbol's pin" are
+	// different values. §73g item 5's collapse, at the boot layer.
+	firstBootPin  = 5
+	secondBootPin = 3
+)
+
+// perpRoster is a deployment that CONFIGURES two derivatives and no spot leg.
+//
+// Two so the roster claim cannot collapse; no spot leg so that §7.5's spot
+// assertion stays out of the way — this fixture is aimed at the posture gate,
+// and a boot refused by a different gate would prove nothing about it.
+func perpRoster(t *testing.T, journal string) Config {
+	t.Helper()
+	cfg := validConfig(t, journal)
+	cfg.Instruments = []InstrumentConfig{
+		{Venue: "binance", Product: ids.ProductLinearPerp, Contract: ids.ContractLinear,
+			Symbol: "BTCUSDT", Base: "BTC", Quote: "USDT", Leverage: firstBootPin},
+		{Venue: "binance", Product: ids.ProductLinearPerp, Contract: ids.ContractLinear,
+			Symbol: "ETHUSDT", Base: "ETH", Quote: "USDT", Leverage: secondBootPin},
+	}
+	// Both bounds are required exactly when a spot instrument exists, and
+	// refused when none does (record §70g), so they go with the spot row.
+	cfg.SpotSettle = config.Duration{}
+	cfg.Resolution.AssumedReach = nil
+	return cfg
+}
+
+// rosterPostureBodies answers §4.1's four Binance probes for perpRoster's
+// deployment.
+//
+// secondLeverage is the parameter under test in the negative case below; every
+// other field is clean. The position rows carry positionAmt "0" deliberately:
+// §7.5's net-delta invariant runs in the same boot, and a non-zero perp leg with
+// no spot leg behind it would latch a DIFFERENT gate.
+func rosterPostureBodies(secondLeverage int) map[string]string {
+	return map[string]string{
+		"/fapi/v1/multiAssetsMargin": `{"multiAssetsMargin":false}`,
+		"/fapi/v1/positionSide/dual": `{"dualSidePosition":false}`,
+		"/fapi/v1/symbolConfig": fmt.Sprintf(
+			`[{"symbol":"BTCUSDT","marginType":"ISOLATED","leverage":%d},`+
+				`{"symbol":"ETHUSDT","marginType":"ISOLATED","leverage":%d}]`,
+			firstBootPin, secondLeverage),
+		"/fapi/v3/positionRisk": `[` +
+			`{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"0","isAutoAddMargin":"false"},` +
+			`{"symbol":"ETHUSDT","positionSide":"BOTH","positionAmt":"0","isAutoAddMargin":"false"}]`,
+	}
+}
+
+// rosterPostureServer serves those bodies and refuses anything else, so a probe
+// asking a path this fixture did not anticipate fails loudly rather than
+// silently producing an absent observation.
+func rosterPostureServer(t *testing.T, bodies map[string]string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if body, ok := bodies[r.URL.Path]; ok && r.Method == http.MethodGet {
+			w.Header().Set("X-Mbx-Used-Weight-1m", "20")
+			fmt.Fprint(w, body)
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, `{"code":-1000,"msg":"unexpected %s in roster posture fake"}`, r.URL.Path)
+	}))
+}
+
+// routeTo points every family at the fake and pins the attestation, which is the
+// one §4.1 check no endpoint answers.
+func routeTo(t *testing.T, cfg *Config, srv *httptest.Server) {
+	t.Helper()
+	host := strings.TrimPrefix(srv.URL, "http://")
+	for i := range cfg.Venue.Endpoints {
+		cfg.Venue.Endpoints[i].Scheme = "http"
+		cfg.Venue.Endpoints[i].Host = host
+	}
+	cfg.PortfolioMarginAttestation = pinnedPortfolioMarginAttestation(t, cfg.Account, "key", "secret")
+}
+
+// TestBootAssertsThePerSymbolPostureOfEveryConfiguredSymbol is the positive
+// control this file did not have: a boot whose §4.1 roster is NON-empty and
+// whose per-symbol rules all pass.
+//
+// It is what makes the negative case below a statement about the rule rather
+// than about a fixture that could never pass — and on its own it is the first
+// evidence anywhere that a configured leverage pin reaches a comparison at all.
+func TestBootAssertsThePerSymbolPostureOfEveryConfiguredSymbol(t *testing.T) {
+	t.Setenv(testKeyVar, "key")
+	t.Setenv(testSecretVar, "secret")
+
+	srv := rosterPostureServer(t, rosterPostureBodies(secondBootPin))
+	defer srv.Close()
+
+	cfg := perpRoster(t, filepath.Join(t.TempDir(), "journal.db"))
+	routeTo(t, &cfg, srv)
+	r := newRunnerFor(t, cfg, func(string) error { return nil })
+
+	rep, err := r.run(t)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if o, declared := r.checklist.Outcome(boot.GateAccountPosture); !declared || o != boot.OutcomePassed {
+		t.Fatalf("GateAccountPosture = %s (declared %v), want OutcomePassed:\n%s",
+			o, declared, rep.AccountPosture)
+	}
+	// The exact count is the instrument: three account-wide rules plus three
+	// per-symbol rules over TWO symbols is 9, and it is predictable from the rule
+	// table. "Evaluated > 0" would be satisfied by a fold that visited one symbol
+	// — which is exactly the defect a roster of one cannot see.
+	if rep.AccountPosture.Evaluated != 9 {
+		t.Errorf("evaluated %d checks, want 9 (3 account + 3×2 symbol):\n%s",
+			rep.AccountPosture.Evaluated, rep.AccountPosture)
+	}
+	if ok, err := rep.AccountPosture.Satisfied(); !ok || err != nil {
+		t.Errorf("the report's verdict = %v, %v; want satisfied:\n%s", ok, err, rep.AccountPosture)
+	}
+}
+
+// TestBootRefusesWhenTheSECONDConfiguredSymbolViolatesItsOwnPin is §73g items 1
+// and 5 at the layer they were never run at.
+//
+// Two collapses are broken at once, and neither is visible from a roster of one:
+// the violation is on the SECOND symbol, so a fold that checked only the first
+// would report a clean posture; and the leverage the venue reports for it is
+// FIRST symbol's pin, so a comparison reading "the roster's first pin" instead
+// of "this symbol's pin" would find it satisfied. Both wrong readings pass every
+// other test in this package.
+func TestBootRefusesWhenTheSECONDConfiguredSymbolViolatesItsOwnPin(t *testing.T) {
+	t.Setenv(testKeyVar, "key")
+	t.Setenv(testSecretVar, "secret")
+
+	srv := rosterPostureServer(t, rosterPostureBodies(firstBootPin))
+	defer srv.Close()
+
+	cfg := perpRoster(t, filepath.Join(t.TempDir(), "journal.db"))
+	routeTo(t, &cfg, srv)
+	r := newRunnerFor(t, cfg, func(string) error { return nil })
+
+	rep, err := r.run(t)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// Read and found wrong, so it latches: §73c-3 forbids this engine repairing a
+	// posture, and no retry lifts a leverage the operator has to go and change.
+	if o, declared := r.checklist.Outcome(boot.GateAccountPosture); !declared || o != boot.OutcomeNeedsOperator {
+		t.Fatalf("GateAccountPosture = %s (declared %v), want OutcomeNeedsOperator", o, declared)
+	}
+	if rep.PostureCause != nil {
+		t.Errorf("PostureCause = %v, want nil — the posture WAS established", rep.PostureCause)
+	}
+	// Exactly one failure, naming the second symbol, its OWN pin as required and
+	// the venue's word as observed. Asserting only that something failed would be
+	// satisfied by a fixture that broke the whole read.
+	if n := len(rep.AccountPosture.Failures); n != 1 {
+		t.Fatalf("%d failures, want exactly the one this fixture injects:\n%s", n, rep.AccountPosture)
+	}
+	f := rep.AccountPosture.Failures[0]
+	if f.Setting != riskdomain.SettingLeverage || f.Subject != "ETHUSDT" {
+		t.Fatalf("failure = %s on %q, want SettingLeverage on ETHUSDT", f.Setting, f.Subject)
+	}
+	if f.Reason != riskdomain.ReasonMismatch {
+		t.Errorf("reason = %s, want %s", f.Reason, riskdomain.ReasonMismatch)
+	}
+	if f.Required != strconv.Itoa(secondBootPin) {
+		t.Errorf("required %q, want %q — the SECOND symbol's own pin, not the first's",
+			f.Required, strconv.Itoa(secondBootPin))
+	}
+	if f.Observed != strconv.Itoa(firstBootPin) {
+		t.Errorf("observed %q, want the venue's own word %q", f.Observed, strconv.Itoa(firstBootPin))
+	}
+}
+
+// TestBootOnAFlatAccountRefusesEveryConfiguredSymbol is record §73j F9 as an
+// EXECUTABLE claim rather than a paragraph, and it is the evidence task #199's
+// ruling needs.
+//
+// F9 is not a bug report, it is a consequence nobody had run: per-symbol
+// coverage is answered from the CONFIGURED roster (F4), and Binance's
+// auto-add-margin comes from positionRisk, which enumerates POSITIONS. So an
+// account holding none — every cold boot, and every deployment before its first
+// trade — refuses on isAutoAddMargin for every configured symbol, and §73c-2 puts
+// the same read before every trade. The gate that must pass before the first
+// position opens cannot pass until a position exists.
+//
+// The assertion is deliberately of the STRICT reading, which is what is
+// implemented: a fixture must not silently answer a question left to an operator
+// ([[a-known-exact-count-is-an-instrument]] — the count is what makes it
+// unambiguous which rule fired). When #199 rules, this test changes with it, and
+// its failure is the reminder that it must.
+func TestBootOnAFlatAccountRefusesEveryConfiguredSymbol(t *testing.T) {
+	t.Setenv(testKeyVar, "key")
+	t.Setenv(testSecretVar, "secret")
+
+	bodies := rosterPostureBodies(secondBootPin)
+	// A flat account: symbolConfig still answers for both symbols (a futures
+	// account is configured whether or not it holds anything), and positionRisk
+	// is empty because it enumerates positions. That asymmetry is the finding.
+	bodies["/fapi/v3/positionRisk"] = `[]`
+	srv := rosterPostureServer(t, bodies)
+	defer srv.Close()
+
+	cfg := perpRoster(t, filepath.Join(t.TempDir(), "journal.db"))
+	routeTo(t, &cfg, srv)
+	r := newRunnerFor(t, cfg, func(string) error { return nil })
+
+	rep, err := r.run(t)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if o, declared := r.checklist.Outcome(boot.GateAccountPosture); !declared || o != boot.OutcomeNeedsOperator {
+		t.Fatalf("GateAccountPosture = %s (declared %v), want OutcomeNeedsOperator", o, declared)
+	}
+	// Exactly two failures — one per configured symbol, and nothing else. A
+	// roster of one could not tell "every configured symbol refuses" from "a
+	// configured symbol refuses", which is the whole weight of F9.
+	if n := len(rep.AccountPosture.Failures); n != 2 {
+		t.Fatalf("%d failures, want one per configured symbol:\n%s", n, rep.AccountPosture)
+	}
+	for _, want := range []string{"BTCUSDT", "ETHUSDT"} {
+		var found bool
+		for _, f := range rep.AccountPosture.Failures {
+			if f.Subject != want {
+				continue
+			}
+			found = true
+			if f.Setting != riskdomain.SettingAutoAddMargin {
+				t.Errorf("%s failed on %s, want SettingAutoAddMargin", want, f.Setting)
+			}
+			// UNOBSERVED, not a mismatch: the venue said nothing about this
+			// symbol. The two spellings send an operator to different places —
+			// one to their account, one to their config.
+			if f.Reason != riskdomain.ReasonUnobserved {
+				t.Errorf("%s failed with %s, want %s", want, f.Reason, riskdomain.ReasonUnobserved)
+			}
+		}
+		if !found {
+			t.Errorf("no failure names %s:\n%s", want, rep.AccountPosture)
+		}
 	}
 }
 
