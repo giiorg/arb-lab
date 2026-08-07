@@ -3,6 +3,7 @@ package ports
 import (
 	"github.com/giiorg/arb-lab/internal/oms/domain"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
+	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
 
@@ -51,7 +52,7 @@ type JournalReplay interface {
 }
 
 // JournalVisitor is what a replay hands each record to — one method per record
-// kind, mirroring Journal's own three.
+// kind, mirroring Journal's four and GenerationJournal's six.
 //
 // # It is a visitor and not a record struct, for the reason Journal has three
 // # Append methods rather than one
@@ -63,11 +64,17 @@ type JournalReplay interface {
 // about a replayer that forgot a kind, and the record that went unhandled would
 // be silently absent from the rebuilt state rather than reported.
 //
-// With a method per kind the omission is a compile error, and a FOURTH record
-// kind added by a later slice breaks every visitor in the system at build time.
-// That is exhaustiveswitch's argument (a `default:` is where the new member
-// lands silently) expressed in the type system instead, which is available here
+// With a method per kind the omission is a compile error, and a NEW record kind
+// added by a later slice breaks every visitor in the system at build time. That
+// is exhaustiveswitch's argument (a `default:` is where the new member lands
+// silently) expressed in the type system instead, which is available here
 // because the set of kinds is the set of methods.
+//
+// The generation kinds are what collected on that claim. Six methods landed at
+// once and every visitor in the system had to answer for them — which is the
+// property being bought, because the alternative was a replay that walked past
+// SM §7's records and rebuilt a projection silently missing the only durable
+// evidence that a `PackageDelever` ladder was ever running.
 //
 // Every method takes the sequence, which the visitor needs for exactly one
 // thing: saying WHICH record it refused. A replay that fails on the ninth of
@@ -87,4 +94,53 @@ type JournalVisitor interface {
 
 	// State is one AppendState record: an order reaching a lifecycle state.
 	State(seq uint64, id ids.ClientOrderID, s domain.OrderState) error
+
+	// GenerationOpened is one AppendGenerationOpened record: SM §7's `Planned`,
+	// carrying everything fixed for the generation's lifetime.
+	//
+	// The reservation is here because it is the whole reason recovery cares.
+	// §7.5 rebuilds state before any venue call, and the state a live generation
+	// contributes is an entry in the SHARED reserved-reduction ledger — the
+	// subtrahend §6.7's determined branch sizes every compensating trade from. A
+	// replay that learned a generation existed and not which entry it holds
+	// could not re-Reserve it, and the ledger would be short by exactly the
+	// amount that keeps the branch honest.
+	GenerationOpened(seq uint64, id domain.GenerationID, group domain.HedgeGroup,
+		reservation domain.ReservationID, target fixedpoint.Quantity) error
+
+	// GenerationPerpSubmitted is one perp-leg submission: `PerpReduceInFlight`
+	// with the buy-to-reduce order's id.
+	GenerationPerpSubmitted(seq uint64, id domain.GenerationID, order ids.ClientOrderID) error
+
+	// GenerationAuthorized is one FLAG-3 record: `SpotReduceAuthorized` with the
+	// size it fixed, which MAY legally be zero.
+	GenerationAuthorized(seq uint64, id domain.GenerationID, size fixedpoint.Quantity) error
+
+	// GenerationSpotSubmitted is one reserved-spot-leg submission:
+	// `SpotReduceInFlight` with that order's id.
+	//
+	// A separate method from the perp one for the reason GenerationJournal gives
+	// for the separate append: the reserved SECOND leg is the one the
+	// supersession rows must quiesce to §6.7 finality first, so a visitor handed
+	// "a leg" without being told which could not decide whether that obligation
+	// binds on the generation it is rebuilding.
+	GenerationSpotSubmitted(seq uint64, id domain.GenerationID, order ids.ClientOrderID) error
+
+	// GenerationSuperseded is one ending, WITH the row that caused it.
+	//
+	// The path decides whether core §7.1's ladder may open a later generation
+	// (domain.SupersessionPath.ResumesLadder) and neither journal can re-derive
+	// it, so a replay that dropped it would hold an ended generation and no
+	// answer to the one question that follows one.
+	GenerationSuperseded(seq uint64, id domain.GenerationID, path domain.SupersessionPath) error
+
+	// Phase is one AppendGenerationPhase record: a generation reaching one of
+	// the five phases that carry nothing but themselves.
+	//
+	// Named Phase rather than GenerationPhase because the latter is the type it
+	// carries, and a method whose name is its parameter's type reads as a
+	// setter. The five it can name are the five the payload-carrying methods
+	// above do not own — see GenerationJournal.AppendGenerationPhase, which
+	// refuses the others at the write end so this one never sees them.
+	Phase(seq uint64, id domain.GenerationID, phase domain.GenerationPhase) error
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/giiorg/arb-lab/internal/oms/domain"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
+	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
 
@@ -91,11 +92,27 @@ const (
 // string, so a state whose text happened to encode as those sixteen bytes would
 // hash identically to an authorization of the same order. The tag is what
 // separates them, and it is now load-bearing rather than defensive.
+// The generation kinds make it load-bearing four more times, and this is the
+// first set where the collision is between two records of the SAME machine. A
+// perp-leg submission and a spot-leg submission are both "a generation id
+// followed by one length-prefixed client order id" — byte-identical shapes,
+// distinguished by nothing but the tag — and the port declares them as separate
+// methods precisely because the two are not interchangeable to any reader of
+// this log. Sharing a tag would undo that at the only layer where it is checked.
+// The superseded and phase records are the same shape again, so four of the six
+// generation kinds are separated by the tag alone.
 const (
 	kindTagPlanned    uint8 = 1
 	kindTagState      uint8 = 2
 	kindTagAuthorized uint8 = 3
 	kindTagAcked      uint8 = 4
+
+	kindTagGenerationOpened        uint8 = 5
+	kindTagGenerationPerpSubmitted uint8 = 6
+	kindTagGenerationAuthorized    uint8 = 7
+	kindTagGenerationSpotSubmitted uint8 = 8
+	kindTagGenerationSuperseded    uint8 = 9
+	kindTagGenerationPhase         uint8 = 10
 )
 
 // Kind names, as they appear in the kind column.
@@ -104,11 +121,33 @@ const (
 // a stored value: an integer encoding renumbers every existing row when a kind
 // is inserted, and the corruption reads as a planned record that became a state
 // record rather than as a crash.
+//
+// # The kind column is also the SUBJECT COLUMN'S NAMESPACE, and that is new
+//
+// Slice A's `client_id` column held one kind of thing, so the kind was purely
+// descriptive. The generation records share the chain (see journal.go's schema
+// comment) and their subject is a domain.GenerationID, which is a different id
+// space from ids.ClientOrderID with no shared namespace — the two could spell
+// the same string. So `subject` alone does not identify anything: a row is
+// "generation G" only as (kind ∈ the generation kinds, subject = G).
+//
+// Nothing in this package looks a record up BY subject, and that is deliberate
+// rather than incidental. A `WHERE subject = ?` with no kind predicate is the
+// query that silently matches the other id space, and the way to make it
+// unwritable is to have no method that takes a bare subject. The replay walks
+// every record in sequence order and branches on the kind it already has.
 const (
 	kindPlanned    = "planned"
 	kindState      = "state"
 	kindAuthorized = "authorized"
 	kindAcked      = "acked"
+
+	kindGenerationOpened        = "generation_opened"
+	kindGenerationPerpSubmitted = "generation_perp_submitted"
+	kindGenerationAuthorized    = "generation_authorized"
+	kindGenerationSpotSubmitted = "generation_spot_submitted"
+	kindGenerationSuperseded    = "generation_superseded"
+	kindGenerationPhase         = "generation_phase"
 )
 
 // genesisHash is the prev_hash of sequence 1.
@@ -198,6 +237,134 @@ func encodeAcked(id ids.ClientOrderID, venueOrderID string) []byte {
 	b = append(b, kindTagAcked)
 	b = appendString(b, string(id))
 	b = appendString(b, venueOrderID)
+	return b
+}
+
+// encodeGenerationOpened is the canonical preimage of an
+// AppendGenerationOpened record — SM §7's `Planned`.
+//
+// The hedge group is expanded into its three components rather than encoded
+// through its String(), and the difference is the one appendString exists for.
+// HedgeGroup.String() joins account, venue and symbol with '/', so an account
+// named "a/b" on symbol "C" and an account named "a" on venue "b" would produce
+// the same text — the concatenation collision, arriving through a formatter
+// written for an operator's eyes. Three prefixed fields have one spelling each.
+//
+// The reservation is in the preimage because it is in the record, and it is in
+// the record for the reason ports.GenerationJournal states: it is the handle the
+// shared ledger is keyed by, so a recovered generation that could not name its
+// own entry could not retire it, and an entry nobody retires subtracts from
+// every later sizing for the life of the process.
+func encodeGenerationOpened(
+	id domain.GenerationID,
+	group domain.HedgeGroup,
+	reservation domain.ReservationID,
+	target fixedpoint.Quantity,
+) []byte {
+	b := make([]byte, 0, 128)
+	b = append(b, kindTagGenerationOpened)
+	b = appendString(b, string(id))
+	b = appendString(b, group.Account)
+	b = appendString(b, string(group.Venue))
+	b = appendString(b, group.Symbol)
+	b = appendString(b, string(reservation))
+	b = appendString(b, string(target.Asset()))
+	b = appendInt64(b, target.Mantissa())
+	return b
+}
+
+// encodeGenerationPerpSubmitted is the canonical preimage of the perp-leg
+// submission — `PerpReduceInFlight` with the buy-to-reduce order's id.
+//
+// It is byte-identical in SHAPE to encodeGenerationSpotSubmitted below, and the
+// tag is the only thing that separates them. That is not a latent hazard: the
+// two carry the same TYPE of value about the same generation, so without the tag
+// a record saying "the perp leg is order X" and one saying "the spot leg is
+// order X" hash alike, and a replay could be handed either where the log stored
+// the other. domain.Generation.OwnLegs is FM-9's netting quantity and
+// GenerationPhase.ReservedLegLive decides whether the quiesce-first obligation
+// binds — both read WHICH leg, so a swapped pair is not a cosmetic error.
+func encodeGenerationPerpSubmitted(id domain.GenerationID, order ids.ClientOrderID) []byte {
+	b := make([]byte, 0, 64)
+	b = append(b, kindTagGenerationPerpSubmitted)
+	b = appendString(b, string(id))
+	b = appendString(b, string(order))
+	return b
+}
+
+// encodeGenerationAuthorized is the canonical preimage of FLAG-3's record — the
+// one SM §7 names in its own right, and the reason the generation port exists.
+//
+// The size is a quantity rather than a bare mantissa, so the asset tag rides
+// along. fixedpoint's whole seam is that a mantissa without its asset is a
+// number that means nothing, and here the consequence is sharper than usual: a
+// replay that rebuilt the authorized size against the wrong asset would produce
+// a spot cap in the wrong unit, and "no more spot than the CONFIRMED perp
+// reduction" is the never-net-short invariant sized from exactly this value.
+//
+// A ZERO size encodes as a legal, ordinary record, and that is required rather
+// than tolerated — a perp reduction that confirmed nothing authorizes no spot
+// sale and the generation completes. What must not be possible is a DROPPED size
+// producing the same bytes as a genuine zero, and that is why the port gives
+// this its own method: absence is unrepresentable because there is no record.
+func encodeGenerationAuthorized(id domain.GenerationID, size fixedpoint.Quantity) []byte {
+	b := make([]byte, 0, 64)
+	b = append(b, kindTagGenerationAuthorized)
+	b = appendString(b, string(id))
+	b = appendString(b, string(size.Asset()))
+	b = appendInt64(b, size.Mantissa())
+	return b
+}
+
+// encodeGenerationSpotSubmitted is the canonical preimage of the reserved spot
+// reduction's submission. See encodeGenerationPerpSubmitted for why the two are
+// separate kinds rather than one with a leg field.
+func encodeGenerationSpotSubmitted(id domain.GenerationID, order ids.ClientOrderID) []byte {
+	b := make([]byte, 0, 64)
+	b = append(b, kindTagGenerationSpotSubmitted)
+	b = appendString(b, string(id))
+	b = appendString(b, string(order))
+	return b
+}
+
+// encodeGenerationSuperseded is the canonical preimage of `Superseded` WITH the
+// row that ended the generation.
+//
+// The path is in the preimage because it is the field whose loss is not
+// symmetric. domain.SupersessionPath.ResumesLadder gives the three rows two
+// different answers about whether core §7.1's ladder may open a later
+// generation, and neither answer is re-derivable at boot: the external rows are
+// arbitrations no order event mentions, and the premise-lost row fires on a
+// quantity that leaves no trace at order scope. A path covered by the chain is a
+// path a replay can trust; one merely stored beside it is not.
+func encodeGenerationSuperseded(id domain.GenerationID, path domain.SupersessionPath) []byte {
+	b := make([]byte, 0, 64)
+	b = append(b, kindTagGenerationSuperseded)
+	b = appendString(b, string(id))
+	b = appendString(b, string(path))
+	return b
+}
+
+// encodeGenerationPhase is the canonical preimage of the five phases that carry
+// nothing but themselves.
+//
+// Structurally this is encodeState one machine over, and the same reasoning
+// applies to what is NOT here: the source phase. The log is append-only and
+// replayed in order, so the predecessor is already in it, and a replay finding
+// two records disagree about where a generation came from has no rule for which
+// wins.
+//
+// Adding these six kinds changes no existing preimage — encodePlanned and its
+// three siblings hash DOMAIN VALUES, not the column those values happen to be
+// stored in — so chainLabel keeps its /v1 across the subject-column migration
+// journal.go performs. Every record an older build wrote verifies unchanged, and
+// an older build reading a journal WITH generation records refuses at the kind
+// column (ErrJournalKindUnknown), which is the documented downgrade direction.
+func encodeGenerationPhase(id domain.GenerationID, phase domain.GenerationPhase) []byte {
+	b := make([]byte, 0, 64)
+	b = append(b, kindTagGenerationPhase)
+	b = appendString(b, string(id))
+	b = appendString(b, string(phase))
 	return b
 }
 

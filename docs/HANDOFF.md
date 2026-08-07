@@ -1,6 +1,74 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-07, sessions 117–118): **SM §7's `PackageDelever` GENERATION LADDER EXISTS. `FM-9` HAS A CONSUMER, `FM-8`'s OBLIGATION IS DISCHARGED, AND BUILDING IT SETTLED FOUR THINGS THE SPEC HAD NOT SAID. DOCS v0.9.55, THIRTEEN MUTANTS ALL CAUGHT, `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
+## Status (2026-08-07, session 119): **SM §7's GENERATION RECORDS ARE IN §5.1's CHAIN — `ports.GenerationJournal` HAS A STORE, AND §7.5's REPLAY RULE TURNED OUT NOT TO REACH A SECOND SCOPE. DOCS v0.9.56, 23 MUTANTS / 1 REAL SURVIVOR (FIXED), `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO.**
+
+**Read `docs/superpowers/specs/2026-08-07-m4-203-generation-journal-adapter.md`
+(§75) first** — the migration's two independent survival reasons, the outcome
+table with its four rejected members, the survivor and what it taught, and the
+seven rejected alternatives.
+
+**WHAT LANDED.** `internal/oms/infrastructure/driven/generationjournal.go` — the
+six `Append*` methods, `AppendGenerationPhase`'s payload refusal enumerated
+POSITIVELY so a new phase lands in neither list and `exhaustiveswitch` bites.
+`journalcodec.go` — six kind tags and six encoders; the tag is now load-bearing
+four more times, and the perp/spot pair is the first collision between two
+records of one machine. `journal.go` — `journal.client_id` → `journal.subject`,
+five detail tables, ten triggers, and `migrateSubjectColumn` with its two
+refusals. `journalreplay.go` — nine joins, six preimage arms, six dispatch arms.
+`ports.JournalVisitor` gained six methods, which broke every visitor in the
+system at build time; that is the property being bought.
+
+**THE HEADLINE: ONE CHAIN BUYS A FACT, AND THE TEST IS WHAT COLLECTS IT.**
+`TestTheAuthorizationRecordPrecedesTheSpotLegInOneChain` asserts FLAG-3's
+authorization sits below both the generation's spot submission and the spot
+order's own `planned` record. **Under two chains that test could not be written**
+— each verifies internally, neither positions the other — so the clause would
+have held exactly as long as the application layer kept it.
+
+**THE MIGRATION'S SCARIEST PART IS A NON-EVENT, AND CHECKING IT WAS THE WORK.**
+#203 warned that widening the shared column might change the RECORD. It does not:
+every encoder hashes DOMAIN VALUES, not columns, so the rename moves no byte of
+any preimage and `chainLabel` keeps `/v1`. That is now core §5.1 **ruling (c)**,
+and it is a fixture — a hand-built old-shape database, written with the oracle's
+own literal-spelled encoders, that still verifies after `Open` migrates it. The
+append-only triggers are untouched for a SEPARATE reason: they police row writes,
+and a column rename is neither.
+
+**§7.5 GAINED THE ANSWER ITS OWN REPLAY RULE DOES NOT GIVE.** That rule rebuilds
+state *through the write path the live system uses* — a statement about ORDERS. A
+generation's recovered state is a live entry in §6.7's **shared** ledger, which is
+process memory nothing yet reinstates. So a journal holding a generation with no
+ending record is **`Incomplete`**, never `Passed`: a ledger missing an entry reads
+as MORE room, and §6.7's determined branch would buy back exposure the
+generation's own perp leg already committed to — `FM-5` through recovery,
+invisible to every invariant computed from that ledger. **Liveness is decided by
+`GenerationPhase.IsActive`, never by a kind→phase table**, which would be a second
+home for §7's transition set.
+
+**THE ONE SURVIVOR WAS THE MIRROR RULE COLLECTING.** M14b — `replayGenerationOpening`
+stops validating the recovered hedge group — SURVIVED on a real gap: every check
+on the replay's side has a twin on the write path, so **no journal this adapter
+produces can reach any of them**, and every natural fixture is built by writing.
+The bypass fixture existed (`tamperColumn`, since slice F1) and its trigger list
+had not grown with the five new tables. Fixed; M14c caught.
+
+**WHAT IS NOT DONE, BOTH FILED.** Task **#204** — rebuild the aggregate and
+re-`Reserve` its ledger entry; it needs a place to put the generation AND a seam
+that re-enters the reservation **without** handing the replayer a `Classifier`
+(§75h refuses that composition). It also owes acting on `ResumesLadder`, which is
+validated at replay and not yet obeyed. **#204 is what unblocks wiring the
+`Deleverer`**, since the boot hold fires the day a root constructs one. Task
+**#184** — the delever legs' §2.4/§69 re-check, trigger already fired.
+
+**Unchanged:** §7.1's escalation *trigger* half is milestone 4's other workstream
+and untouched; three standing operator decisions ($20/$55 live test, #171's
+credential, §38f); credentials deferred; capture **PID 8495**; never rebuild over
+`bin/arblab`; `make ci` runs `-race` AND the ka staleness gate (needs node); cap
+`TLC_WORKERS` at 4; docs/i18n parity is `bun test`.
+
+---
+
+## Status (2026-08-07, sessions 117–118 — HISTORICAL): **SM §7's `PackageDelever` GENERATION LADDER EXISTS. `FM-9` HAS A CONSUMER, `FM-8`'s OBLIGATION IS DISCHARGED, AND BUILDING IT SETTLED FOUR THINGS THE SPEC HAD NOT SAID. DOCS v0.9.55, THIRTEEN MUTANTS ALL CAUGHT, `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
 
 **Read `docs/superpowers/specs/2026-08-07-m4-177-generation-ladder.md` (§74)
 first** — the four rulings with their failure directions, the seven rejected

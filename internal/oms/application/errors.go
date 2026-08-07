@@ -566,6 +566,33 @@ var (
 	// restart, which is what correctness needs.
 	ErrGenerationAlreadyLive = errors.New("oms: hedge group already has a live PackageDelever generation")
 
+	// ErrGenerationAlreadyOpened reports a REPLAY finding two opening records
+	// for one generation id.
+	//
+	// It is not ErrGenerationAlreadyLive arriving at boot, and collapsing the two
+	// would lose the distinction an operator acts on. That one is SM §7's entry
+	// gate refusing a second generation on a GROUP — a rule about the live set,
+	// which is exactly what a bounded attempt means. This one is a claim about
+	// the LOG: one identity, brought into existence twice, in an append-only
+	// store where the second record cannot be a correction of the first. Nothing
+	// this system can do produces it, so the realistic cause is two processes
+	// having written to one journal — the condition the single connection and
+	// BEGIN IMMEDIATE exist to prevent, evidenced after the fact.
+	ErrGenerationAlreadyOpened = errors.New("oms: journal opens one generation twice")
+
+	// ErrGenerationNotOpened reports a replayed generation record — a leg, an
+	// authorization, a supersession, a phase — naming a generation no opening
+	// record created.
+	//
+	// The generation-scope reading of "the log verifies and does not compose",
+	// and the realistic cause is head truncation rather than corruption: §7.5
+	// records that a chain "proves nothing about records that were never seen".
+	// Refused rather than skipped, because the permissive reading is silently
+	// wrong in one direction — a replay that carried on would report ZERO live
+	// generations for a package that has one, and the reserved-reduction entry
+	// the missing opening record names would be re-Reserved by nothing.
+	ErrGenerationNotOpened = errors.New("oms: journal record names a generation no opening record created")
+
 	// ErrGenerationLegWrongProduct reports a leg dispatched as the wrong half of
 	// the cash-and-carry — a spot order presented as the perp reduction, or the
 	// reverse.

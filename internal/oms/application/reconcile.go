@@ -223,7 +223,39 @@ func (r *Reconciler) Reconcile(c *boot.Checklist) (Reconciliation, error) {
 		return out, c.Report(boot.GateJournalReplayed, outcome)
 	}
 	out.Recovery = rec
-	if err := c.Report(boot.GateJournalReplayed, boot.OutcomePassed); err != nil {
+
+	// A generation the log opened and never ended is a replay that CONCLUDED and
+	// did not rebuild everything the log holds — boot.OutcomeIncomplete's own
+	// definition, and the outcome whose doc names this type as its home.
+	//
+	// # Why it is a refusal and not a note in the report
+	//
+	// The generation's entry in the reserved-reduction ledger died with the
+	// process, and nothing here re-Reserves it (Recovery.LiveGenerations says
+	// why). A ledger short by an entry reads as MORE room, so §6.7's determined
+	// branch would size a compensating trade against exposure the generation's
+	// own perp leg already committed to — FM-5's shape, reached through recovery,
+	// and invisible to every invariant because they are all computed FROM the
+	// ledger.
+	//
+	// # It is reported INSTEAD of OutcomePassed, and the sequence continues
+	//
+	// Instead, because a gate carries one outcome and passing is the one thing
+	// that must not be reachable while this holds. Continuing, because the join
+	// and the net-delta assertion are the operator's diagnosis and each reports
+	// on its OWN evidence — stopping here would leave two gates unreported and an
+	// operator with a refusal and no picture of the account behind it.
+	//
+	// Nothing can currently reach this: no composition root constructs a
+	// Deleverer, so no journal contains a generation record. That is the point of
+	// landing it now rather than with the rebuild — the refusal is already
+	// standing on the day the wiring lands, which is the direction that is right
+	// when somebody forgets.
+	replayOutcome := boot.OutcomePassed
+	if len(rec.LiveGenerations) > 0 {
+		replayOutcome = boot.OutcomeIncomplete
+	}
+	if err := c.Report(boot.GateJournalReplayed, replayOutcome); err != nil {
 		return out, err
 	}
 

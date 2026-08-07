@@ -340,6 +340,42 @@ func (p *prefixOrders) Authorized(uint64, ids.ClientOrderID, clock.ServerTime) e
 func (p *prefixOrders) Acked(uint64, ids.ClientOrderID, string) error                { return nil }
 func (p *prefixOrders) State(uint64, ids.ClientOrderID, domain.OrderState) error     { return nil }
 
+// The six SM §7 generation records are no-ops here, and the reason is the one
+// stated above rather than indifference: only PLANNED records mint an id, and a
+// generation mints none. Its two legs are ordinary orders that entered through
+// §6 step 5's planner — the Deleverer takes a reference and verifies it rather
+// than minting one — so both legs already have their own planned records in this
+// same prefix, and collecting them again from a generation record would count
+// one order twice in a document whose whole content is a per-asset total.
+//
+// This is the one visitor in the system for which the empty body is the right
+// answer. application.rebuild's is not, and the difference is what each walk is
+// FOR: that one rebuilds the state a process resumes on, so a record it ignores
+// is a fact the process resumes without. This one answers a narrower question —
+// which orders the journal held at a mark — and a generation is not one.
+func (p *prefixOrders) GenerationOpened(uint64, domain.GenerationID, domain.HedgeGroup,
+	domain.ReservationID, fixedpoint.Quantity) error {
+	return nil
+}
+
+func (p *prefixOrders) GenerationPerpSubmitted(uint64, domain.GenerationID, ids.ClientOrderID) error {
+	return nil
+}
+
+func (p *prefixOrders) GenerationAuthorized(uint64, domain.GenerationID, fixedpoint.Quantity) error {
+	return nil
+}
+
+func (p *prefixOrders) GenerationSpotSubmitted(uint64, domain.GenerationID, ids.ClientOrderID) error {
+	return nil
+}
+
+func (p *prefixOrders) GenerationSuperseded(uint64, domain.GenerationID, domain.SupersessionPath) error {
+	return nil
+}
+
+func (p *prefixOrders) Phase(uint64, domain.GenerationID, domain.GenerationPhase) error { return nil }
+
 // Encode renders the document exactly as Write persists it. Exported because
 // the record command must print the digest of the BYTES ON DISK for the
 // operator's config pin, and a second marshalling could disagree with the

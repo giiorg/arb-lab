@@ -8,6 +8,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/oms/application/ports"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
+	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
 
@@ -140,6 +141,36 @@ type Recovery struct {
 	// as a flat, DETERMINED group, and a determined group is the one where
 	// compensating trades are permitted.
 	Dispatched []ids.ClientOrderID
+
+	// Generations is how many distinct `PackageDelever` generations the journal
+	// opened, and LiveGenerations names the ones it never ended.
+	//
+	// # LiveGenerations is a REFUSAL, not a statistic, and this is why
+	//
+	// A generation that the log opened and did not end held an entry in the
+	// SHARED reserved-reduction ledger when the process died. That ledger is
+	// §6.7's `outstanding_reserved_reductions` — the subtrahend every
+	// compensating trade is sized from — and it lives in process memory, so a
+	// fresh process starts with it empty. This slice rebuilds the FACT and not
+	// the entry: nothing here re-Reserves, because doing so needs the
+	// Classifier the replayer deliberately does not hold, and rebuilding the
+	// aggregate needs a generation repository that does not exist yet.
+	//
+	// The failure direction is what makes the list a refusal. A ledger missing
+	// an entry reads as MORE room, not less: §2's determined branch sizes a
+	// compensating trade from a residual that is too large by exactly the
+	// generation's outstanding net intent, so it buys back the exposure that
+	// generation's own perp leg already committed to buy. That is FM-5's shape
+	// arriving through recovery rather than through a booking error, and it is
+	// silent — every invariant that would object is computed FROM the ledger.
+	//
+	// It is a list of IDs and not of rebuilt generations, which is the honest
+	// width for what this build can say. Reconciler turns a non-empty one into
+	// boot.OutcomeIncomplete, so the refusal is already standing on the day the
+	// Deleverer is wired into a composition root — the direction that is right
+	// when somebody forgets. Sorted for Unresolved's reason.
+	Generations     int
+	LiveGenerations []domain.GenerationID
 }
 
 // Rebuild replays the journal into the write repository.
@@ -167,7 +198,11 @@ type Recovery struct {
 // operator inspecting an empty store while the log says otherwise. Nothing may
 // trade on it — the posture is what enforces that, not the emptiness of a map.
 func (r *Replayer) Rebuild() (Recovery, error) {
-	rb := &rebuild{orders: r.orders}
+	rb := &rebuild{
+		orders: r.orders,
+		known:  make(map[domain.GenerationID]bool),
+		ended:  make(map[domain.GenerationID]bool),
+	}
 	if err := r.journal.Replay(rb); err != nil {
 		return Recovery{}, fmt.Errorf("rebuild from journal: %w", err)
 	}
@@ -194,6 +229,20 @@ type rebuild struct {
 	// refused. The report reads the state back out per order, which costs one
 	// Load each on a path that already does one per state record.
 	created []ids.ClientOrderID
+
+	// opened is every generation the journal brought into existence, in record
+	// order, and ended is the subset the log finished.
+	//
+	// TWO structures rather than one map to a liveness bool, because they answer
+	// different questions and the walk can only answer one of them monotonically.
+	// `opened` is an ordered set that never shrinks — it is what makes a record
+	// about an unknown generation reportable — while `ended` only ever gains
+	// members, so nothing can resurrect a finished generation by arriving late.
+	// A single map would make both of those properties a discipline this method
+	// set keeps rather than a shape it has.
+	opened []domain.GenerationID
+	known  map[domain.GenerationID]bool
+	ended  map[domain.GenerationID]bool
 
 	records    int
 	lastSeq    uint64
@@ -297,8 +346,151 @@ func (b *rebuild) State(seq uint64, id ids.ClientOrderID, s domain.OrderState) e
 	return nil
 }
 
-// seen records the walk's own arithmetic, in one place so the three visitor
-// methods cannot count differently.
+// GenerationOpened applies SM §7's `Planned` record.
+//
+// # What it does with the payload is NOTHING, and the absence is the honest
+// # width of what this build can rebuild
+//
+// The record carries a hedge group, a reservation and a per-leg target, and
+// every one of them is dropped here. That is not an oversight and it is not free
+// — it is the scope of this slice stated where a reader will look for it. Two
+// things would have to exist to use them: a generation repository to put the
+// rebuilt aggregate in, and the Classifier whose ledger the reservation must be
+// re-entered into. The replayer holds neither, and giving it a Classifier would
+// hand recovery the one capability ports.JournalReplay exists to withhold — the
+// ability to change the state it is reasoning about while it reasons.
+//
+// What is kept is the fact that a generation existed, which is what turns into
+// a boot refusal in report(). The payload is not lost: it is in the journal, in
+// the same chain, and the slice that rebuilds the aggregate reads it from there.
+//
+// A SECOND opening of the same id is refused, on ApplyPlanned's rule one machine
+// over: domain.Ledger.Register refuses a duplicate ClientOrderID at boot for the
+// same reason it refuses one at planning, and a log claiming one generation was
+// opened twice is a log that verifies and does not compose.
+func (b *rebuild) GenerationOpened(
+	seq uint64,
+	id domain.GenerationID,
+	_ domain.HedgeGroup,
+	_ domain.ReservationID,
+	_ fixedpoint.Quantity,
+) error {
+	b.seen(seq)
+	if b.known[id] {
+		return fmt.Errorf("journal record %d: replay opening of generation %q: %w",
+			seq, id, ErrGenerationAlreadyOpened)
+	}
+	b.known[id] = true
+	b.opened = append(b.opened, id)
+	return nil
+}
+
+// GenerationPerpSubmitted applies the perp leg's submission record.
+func (b *rebuild) GenerationPerpSubmitted(seq uint64, id domain.GenerationID, order ids.ClientOrderID) error {
+	b.seen(seq)
+	return b.knownGeneration(seq, id, fmt.Sprintf("perp leg %q", order))
+}
+
+// GenerationAuthorized applies FLAG-3's record.
+//
+// The size is dropped for GenerationOpened's reason, and the drop is sharper
+// here because this is the record SM §7 names in its own right. What survives is
+// the ordering, and the ordering is the property one chain was chosen to make
+// checkable: this record's sequence is lower than its spot leg's, in the same
+// walk, verified by the same chain. A later slice reading the log for the
+// authorized size finds that guarantee already established rather than assumed.
+func (b *rebuild) GenerationAuthorized(seq uint64, id domain.GenerationID, _ fixedpoint.Quantity) error {
+	b.seen(seq)
+	return b.knownGeneration(seq, id, "authorization")
+}
+
+// GenerationSpotSubmitted applies the reserved spot leg's submission record.
+func (b *rebuild) GenerationSpotSubmitted(seq uint64, id domain.GenerationID, order ids.ClientOrderID) error {
+	b.seen(seq)
+	return b.knownGeneration(seq, id, fmt.Sprintf("spot leg %q", order))
+}
+
+// GenerationSuperseded ENDS a generation.
+//
+// The path is validated and then dropped, and the split is worth stating because
+// the two halves have different owners. Validating is this walk's job — an
+// undeclared path is a value §7.5 cannot replay, and it would replay into a
+// generation whose one remaining question (may core §7.1's ladder open a later
+// generation) has no answer at all. ACTING on the answer is not: ResumesLadder
+// governs whether a package's ladder may run again, which is a rule about
+// something this build does not yet reinstate at boot.
+//
+// Recorded rather than absorbed, because it is a live gap rather than a design
+// choice: the external rows do NOT resume, so a recovered process that reopened
+// a generation after an `EmergencyClosePackage` supersession would be this
+// machine re-authorising itself against an arbitration that has just taken the
+// package away from it. Nothing can reach that today — no composition root
+// constructs a Deleverer — and the refusal report() produces is what holds the
+// line until the slice that does.
+func (b *rebuild) GenerationSuperseded(seq uint64, id domain.GenerationID, path domain.SupersessionPath) error {
+	b.seen(seq)
+	if err := b.knownGeneration(seq, id, fmt.Sprintf("supersession by %s", path)); err != nil {
+		return err
+	}
+	if err := path.Validate(); err != nil {
+		return fmt.Errorf("journal record %d: replay supersession of generation %q: %w", seq, id, err)
+	}
+	b.ended[id] = true
+	return nil
+}
+
+// Phase applies one of the five payload-free phase records, and is where a
+// generation is found to have ENDED without being superseded.
+//
+// # Liveness is decided by the DOMAIN's predicate, and that is the whole design
+//
+// The alternative was a table in this file mapping each record kind to the phase
+// it records — which the port states method by method, so a copy here would be a
+// second home for it, drifting the moment a kind's phase changed. There is none.
+// A generation is live unless the log records an ENDING, an ending is a phase
+// where domain.GenerationPhase.IsActive is false, and the three mid-ladder kinds
+// above do not participate in the question at all.
+//
+// That leaves exactly one claim to check rather than six: every non-active phase
+// must be reachable through this method or through GenerationSuperseded. It is,
+// by construction — AppendGenerationPhase owns `Complete` and `TerminalFlatten`
+// and refuses the rest, and `Superseded` has its own kind — and
+// TestEveryEndedGenerationPhaseIsReachableThroughAnEndingRecord is that claim as
+// a test rather than as this paragraph.
+func (b *rebuild) Phase(seq uint64, id domain.GenerationID, phase domain.GenerationPhase) error {
+	b.seen(seq)
+	if err := b.knownGeneration(seq, id, fmt.Sprintf("phase %s", phase)); err != nil {
+		return err
+	}
+	active, err := phase.IsActive()
+	if err != nil {
+		return fmt.Errorf("journal record %d: replay phase of generation %q: %w", seq, id, err)
+	}
+	if !active {
+		b.ended[id] = true
+	}
+	return nil
+}
+
+// knownGeneration refuses a record about a generation no opening record created.
+//
+// It is the generation-scope reading of the failure reconcile.go names as "the
+// log verifies and does not compose": a state record for an order that was never
+// planned. The realistic cause is not corruption but TRUNCATION at the head —
+// a journal whose earliest records were lost — and the direction matters. A
+// replay that shrugged and carried on would report zero live generations for a
+// package that has one, which is the permissive answer, and the entry the
+// missing opening record names would never be re-Reserved by anything.
+func (b *rebuild) knownGeneration(seq uint64, id domain.GenerationID, what string) error {
+	if !b.known[id] {
+		return fmt.Errorf("journal record %d: replay %s of generation %q: %w",
+			seq, what, id, ErrGenerationNotOpened)
+	}
+	return nil
+}
+
+// seen records the walk's own arithmetic, in one place so the visitor methods
+// cannot count differently.
 func (b *rebuild) seen(seq uint64) {
 	b.records++
 	b.lastSeq = seq
@@ -333,6 +525,19 @@ func (b *rebuild) report() (Recovery, error) {
 		LastSequence: b.lastSeq,
 		Orders:       len(b.created),
 		Duplicates:   b.duplicates,
+		Generations:  len(b.opened),
+	}
+
+	// Derived from the two sets rather than accumulated during the walk, on the
+	// unresolved set's rule and for the same reason: a generation that opened
+	// and then completed is not live, and a walk that appended ids as it saw
+	// them would have to remember to remove it. Expressing the property as the
+	// way the value is computed is what makes the intermediate records unable to
+	// contribute.
+	for _, id := range b.opened {
+		if !b.ended[id] {
+			rec.LiveGenerations = append(rec.LiveGenerations, id)
+		}
 	}
 	for _, id := range b.created {
 		current, err := b.orders.Load(id)
@@ -363,6 +568,7 @@ func (b *rebuild) report() (Recovery, error) {
 	}
 	sort.Slice(rec.Unresolved, func(i, j int) bool { return rec.Unresolved[i] < rec.Unresolved[j] })
 	sort.Slice(rec.Dispatched, func(i, j int) bool { return rec.Dispatched[i] < rec.Dispatched[j] })
+	sort.Slice(rec.LiveGenerations, func(i, j int) bool { return rec.LiveGenerations[i] < rec.LiveGenerations[j] })
 	return rec, nil
 }
 

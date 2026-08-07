@@ -885,7 +885,7 @@ func readJournal(t *testing.T, path string) []journalRow {
 	defer func() { _ = db.Close() }()
 
 	rows, err := db.Query(`
-		SELECT j.kind, j.client_id, coalesce(s.state, '')
+		SELECT j.kind, j.subject, coalesce(s.state, '')
 		FROM journal j LEFT JOIN journal_state s ON s.seq = j.seq
 		ORDER BY j.seq`)
 	if err != nil {

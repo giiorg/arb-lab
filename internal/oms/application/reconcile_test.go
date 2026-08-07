@@ -803,3 +803,94 @@ func TestRetryMayLiftNamesEveryReason(t *testing.T) {
 		t.Errorf(`UnprovedReason("").RetryMayLift() = %v/%v, want false and a refusal`, lifts, err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// SM §7: a generation the log opened and never ended
+// ---------------------------------------------------------------------------
+
+// TestReconcileALiveGenerationIsIncompleteNotPassed is the refusal that has to
+// be standing BEFORE the Deleverer is wired into a composition root.
+//
+// The replay concluded, the chain is intact, and this build did not rebuild
+// everything the log holds: the generation's entry in the shared
+// reserved-reduction ledger died with the process and nothing re-Reserves it.
+// The direction is what makes it a refusal rather than a note — a ledger short
+// by an entry reads as MORE room, so §6.7's determined branch would compensate
+// for exposure the generation's own perp leg already committed to.
+//
+// It asserts OutcomeIncomplete rather than "not Passed", because a negative
+// assertion is satisfied by every other outcome including the two that latch,
+// and the clearance rules differ: this one lifts on the next boot after the
+// rebuild lands, and NeedsOperator would not.
+func TestReconcileALiveGenerationIsIncompleteNotPassed(t *testing.T) {
+	t.Parallel()
+
+	sell := replayOrder(t, mintedID(t, 1))
+	script := replayScript(t, 1, sell, joinNow.Add(-time.Hour), domain.StateFilled)
+	script = append(script,
+		journalEntry{seq: uint64(len(script) + 1), kind: "generation_opened", gen: "GEN-LIVE",
+			group: testHedgeGroup("BTCUSDT"), res: "RES-1", qty: testTarget(t, "1")},
+		journalEntry{seq: uint64(len(script) + 2), kind: "generation_perp_submitted",
+			gen: "GEN-LIVE", id: sell.ClientOrderID},
+	)
+	f := newReconcileFixture(t, joinNow, script...)
+
+	c := bootChecklist(t)
+	got, err := f.reconciler.Reconcile(c)
+	if err != nil {
+		t.Fatalf("Reconcile = %v, want nil — a refusal is a report, not an error", err)
+	}
+	if o := outcomeOf(t, c, boot.GateJournalReplayed); o != boot.OutcomeIncomplete {
+		t.Errorf("GateJournalReplayed = %s, want OutcomeIncomplete", o)
+	}
+	if latched(t, c, boot.GateJournalReplayed) {
+		t.Error("a live generation latched — the next boot after the rebuild lands must lift it")
+	}
+	if len(got.Recovery.LiveGenerations) != 1 || got.Recovery.LiveGenerations[0] != "GEN-LIVE" {
+		t.Errorf("Recovery.LiveGenerations = %v, want [GEN-LIVE]", got.Recovery.LiveGenerations)
+	}
+
+	// The sequence CONTINUED. Each gate reports on its own evidence, and an
+	// operator holding a refusal with no picture of the account behind it is
+	// the failure this ordering avoids.
+	if o := outcomeOf(t, c, boot.GateVenueJoined); o == boot.OutcomeUnreported {
+		t.Error("GateVenueJoined = OutcomeUnreported — the join must still run and report")
+	}
+}
+
+// TestReconcileAnENDEDGenerationStillPasses is the positive control the test
+// above is worthless without: a gate that reported Incomplete whenever the log
+// mentioned a generation at all would pass every assertion there, and would
+// hold every boot after the first `PackageDelever` ladder ever ran to
+// completion — permanently, on a healthy account.
+func TestReconcileAnEndedGenerationStillPasses(t *testing.T) {
+	t.Parallel()
+
+	sell := replayOrder(t, mintedID(t, 1))
+	script := replayScript(t, 1, sell, joinNow.Add(-time.Hour), domain.StateFilled)
+	script = append(script,
+		journalEntry{seq: uint64(len(script) + 1), kind: "generation_opened", gen: "GEN-DONE",
+			group: testHedgeGroup("BTCUSDT"), res: "RES-1", qty: testTarget(t, "1")},
+		journalEntry{seq: uint64(len(script) + 2), kind: "generation_phase",
+			gen: "GEN-DONE", phase: domain.GenerationComplete},
+	)
+	f := newReconcileFixture(t, joinNow, script...)
+
+	c := bootChecklist(t)
+	got, err := f.reconciler.Reconcile(c)
+	if err != nil {
+		t.Fatalf("Reconcile = %v, want nil", err)
+	}
+	if o := outcomeOf(t, c, boot.GateJournalReplayed); o != boot.OutcomePassed {
+		t.Errorf("GateJournalReplayed = %s, want OutcomePassed", o)
+	}
+	// The fixture must actually CONTAIN a generation, or this control is a
+	// restatement of the clean-boot test and says nothing about the branch.
+	if got.Recovery.Generations != 1 {
+		t.Fatalf("Recovery.Generations = %d, want 1 — the control needs a generation to have ended",
+			got.Recovery.Generations)
+	}
+	if len(got.Recovery.LiveGenerations) != 0 {
+		t.Errorf("Recovery.LiveGenerations = %v, want none", got.Recovery.LiveGenerations)
+	}
+}

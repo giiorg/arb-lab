@@ -122,7 +122,7 @@ func testOrder(t *testing.T, clientID, venue, symbol string) domain.Order {
 type replayed struct {
 	seq      int64
 	kind     string
-	clientID string
+	subject  string
 	prevHash []byte
 	hash     []byte
 	preimage []byte
@@ -140,7 +140,7 @@ func oracleReplay(t *testing.T, path string) []replayed {
 	}
 	defer func() { _ = db.Close() }()
 
-	rows, err := db.Query(`SELECT seq, kind, client_id, prev_hash, hash FROM journal ORDER BY seq`)
+	rows, err := db.Query(`SELECT seq, kind, subject, prev_hash, hash FROM journal ORDER BY seq`)
 	if err != nil {
 		t.Fatalf("oracle select: %v", err)
 	}
@@ -149,7 +149,7 @@ func oracleReplay(t *testing.T, path string) []replayed {
 	var out []replayed
 	for rows.Next() {
 		var r replayed
-		if err := rows.Scan(&r.seq, &r.kind, &r.clientID, &r.prevHash, &r.hash); err != nil {
+		if err := rows.Scan(&r.seq, &r.kind, &r.subject, &r.prevHash, &r.hash); err != nil {
 			t.Fatalf("oracle scan: %v", err)
 		}
 		out = append(out, r)
@@ -189,7 +189,7 @@ func oraclePreimage(t *testing.T, db *sql.DB, r replayed) []byte {
 
 		var b []byte
 		b = append(b, 1) // kind tag, spelled as a literal
-		b = append(b, oracleStr(r.clientID)...)
+		b = append(b, oracleStr(r.subject)...)
 		b = append(b, oracleStr(venue)...)
 		b = append(b, oracleStr(product)...)
 		b = append(b, oracleStr(symbol)...)
@@ -213,7 +213,7 @@ func oraclePreimage(t *testing.T, db *sql.DB, r replayed) []byte {
 		}
 		var b []byte
 		b = append(b, 2) // kind tag, spelled as a literal
-		b = append(b, oracleStr(r.clientID)...)
+		b = append(b, oracleStr(r.subject)...)
 		b = append(b, oracleStr(state)...)
 		return b
 
@@ -226,7 +226,7 @@ func oraclePreimage(t *testing.T, db *sql.DB, r replayed) []byte {
 		}
 		var b []byte
 		b = append(b, 3) // kind tag, spelled as a literal
-		b = append(b, oracleStr(r.clientID)...)
+		b = append(b, oracleStr(r.subject)...)
 		b = append(b, oracleI64(instant)...)
 		b = append(b, oracleI64(uncertainty)...)
 		return b
@@ -239,8 +239,97 @@ func oraclePreimage(t *testing.T, db *sql.DB, r replayed) []byte {
 		}
 		var b []byte
 		b = append(b, 4) // kind tag, spelled as a literal
-		b = append(b, oracleStr(r.clientID)...)
+		b = append(b, oracleStr(r.subject)...)
 		b = append(b, oracleStr(venueOrderID)...)
+		return b
+
+	case "generation_opened":
+		var account, venue, symbol, reservation, targetAsset string
+		var targetMantissa int64
+		err := db.QueryRow(`SELECT account, venue, symbol, reservation, target_asset, target_mantissa
+			FROM journal_generation_opened WHERE seq = ?`, r.seq).
+			Scan(&account, &venue, &symbol, &reservation, &targetAsset, &targetMantissa)
+		if err != nil {
+			t.Fatalf("oracle generation opened detail at seq %d: %v", r.seq, err)
+		}
+		var b []byte
+		b = append(b, 5) // kind tag, spelled as a literal
+		b = append(b, oracleStr(r.subject)...)
+		b = append(b, oracleStr(account)...)
+		b = append(b, oracleStr(venue)...)
+		b = append(b, oracleStr(symbol)...)
+		b = append(b, oracleStr(reservation)...)
+		b = append(b, oracleStr(targetAsset)...)
+		b = append(b, oracleI64(targetMantissa)...)
+		return b
+
+	// The two leg kinds read the SAME detail table and produce byte strings
+	// differing in one leading byte. They are written out separately rather than
+	// folded into one arm with a computed tag, because a fold would make the
+	// oracle agree with a production swap of the two: the whole claim under test
+	// is that the tag distinguishes them, and an oracle that derived the tag from
+	// the kind the same way production does would have nothing to say about it.
+	case "generation_perp_submitted":
+		var clientID string
+		if err := db.QueryRow(`SELECT client_id FROM journal_generation_leg WHERE seq = ?`, r.seq).
+			Scan(&clientID); err != nil {
+			t.Fatalf("oracle generation perp leg at seq %d: %v", r.seq, err)
+		}
+		var b []byte
+		b = append(b, 6) // kind tag, spelled as a literal
+		b = append(b, oracleStr(r.subject)...)
+		b = append(b, oracleStr(clientID)...)
+		return b
+
+	case "generation_authorized":
+		var sizeAsset string
+		var sizeMantissa int64
+		if err := db.QueryRow(
+			`SELECT size_asset, size_mantissa FROM journal_generation_authorized WHERE seq = ?`, r.seq).
+			Scan(&sizeAsset, &sizeMantissa); err != nil {
+			t.Fatalf("oracle generation authorization at seq %d: %v", r.seq, err)
+		}
+		var b []byte
+		b = append(b, 7) // kind tag, spelled as a literal
+		b = append(b, oracleStr(r.subject)...)
+		b = append(b, oracleStr(sizeAsset)...)
+		b = append(b, oracleI64(sizeMantissa)...)
+		return b
+
+	case "generation_spot_submitted":
+		var clientID string
+		if err := db.QueryRow(`SELECT client_id FROM journal_generation_leg WHERE seq = ?`, r.seq).
+			Scan(&clientID); err != nil {
+			t.Fatalf("oracle generation spot leg at seq %d: %v", r.seq, err)
+		}
+		var b []byte
+		b = append(b, 8) // kind tag, spelled as a literal
+		b = append(b, oracleStr(r.subject)...)
+		b = append(b, oracleStr(clientID)...)
+		return b
+
+	case "generation_superseded":
+		var path string
+		if err := db.QueryRow(`SELECT path FROM journal_generation_superseded WHERE seq = ?`, r.seq).
+			Scan(&path); err != nil {
+			t.Fatalf("oracle generation supersession at seq %d: %v", r.seq, err)
+		}
+		var b []byte
+		b = append(b, 9) // kind tag, spelled as a literal
+		b = append(b, oracleStr(r.subject)...)
+		b = append(b, oracleStr(path)...)
+		return b
+
+	case "generation_phase":
+		var phase string
+		if err := db.QueryRow(`SELECT phase FROM journal_generation_phase WHERE seq = ?`, r.seq).
+			Scan(&phase); err != nil {
+			t.Fatalf("oracle generation phase at seq %d: %v", r.seq, err)
+		}
+		var b []byte
+		b = append(b, 10) // kind tag, spelled as a literal
+		b = append(b, oracleStr(r.subject)...)
+		b = append(b, oracleStr(phase)...)
 		return b
 	}
 
@@ -732,7 +821,7 @@ func TestJournalIsAppendOnly(t *testing.T) {
 		name string
 		stmt string
 	}{
-		{"update the chain row", `UPDATE journal SET client_id = 'x' WHERE seq = 1`},
+		{"update the chain row", `UPDATE journal SET subject = 'x' WHERE seq = 1`},
 		{"delete the chain row", `DELETE FROM journal WHERE seq = 1`},
 		{"update a planned detail", `UPDATE journal_planned SET symbol = 'x' WHERE seq = 1`},
 		{"delete a planned detail", `DELETE FROM journal_planned WHERE seq = 1`},
@@ -943,7 +1032,7 @@ func tamperClientID(t *testing.T, path string, seq int64, newID string) {
 	if _, err := db.Exec(`DROP TRIGGER journal_no_update`); err != nil {
 		t.Fatalf("tamper: drop trigger: %v", err)
 	}
-	res, err := db.Exec(`UPDATE journal SET client_id = ? WHERE seq = ?`, newID, seq)
+	res, err := db.Exec(`UPDATE journal SET subject = ? WHERE seq = ?`, newID, seq)
 	if err != nil {
 		t.Fatalf("tamper: update: %v", err)
 	}

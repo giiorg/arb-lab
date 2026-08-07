@@ -10,6 +10,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/oms/application/ports"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
+	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
 
@@ -44,6 +45,13 @@ type recordingVisitor struct {
 	states     []stateCall
 	acked      []ackCall
 	seqs       []uint64
+
+	// The generation half. genCalls holds one entry per SM §7 record IN ORDER,
+	// across all six kinds, which is what makes the "the authorization precedes
+	// the spot leg" claim assertable at all: a per-kind slice each would record
+	// the same six records and throw away the only fact one chain was chosen to
+	// preserve.
+	genCalls []genCall
 
 	// failAt, when positive, makes the visit of that sequence fail. It is how
 	// the "stops at the first refusal" claim is asserted rather than inferred.
@@ -104,6 +112,100 @@ func (v *recordingVisitor) Acked(seq uint64, id ids.ClientOrderID, venueOrderID 
 	}
 	v.acked = append(v.acked, ackCall{id: id, venueOrderID: venueOrderID})
 	return nil
+}
+
+// genCall is one generation record as the visitor received it.
+//
+// One struct across the six kinds rather than six typed slices, with `kind`
+// naming which method was called. That is the shape the ORDERING claims need —
+// see genCalls — and the fields it does not use per kind are the price of it.
+// They are safe here in a way ports.GenerationJournal refuses in its API,
+// because a test fixture's unread field is inspected by an assertion that knows
+// the kind, while a port's unread field is read by a replay that does not.
+type genCall struct {
+	kind        string
+	seq         uint64
+	id          domain.GenerationID
+	group       domain.HedgeGroup
+	reservation domain.ReservationID
+	target      fixedpoint.Quantity
+	order       ids.ClientOrderID
+	size        fixedpoint.Quantity
+	path        domain.SupersessionPath
+	phase       domain.GenerationPhase
+}
+
+func (v *recordingVisitor) GenerationOpened(seq uint64, id domain.GenerationID, group domain.HedgeGroup,
+	reservation domain.ReservationID, target fixedpoint.Quantity) error {
+	if err := v.note(seq); err != nil {
+		return err
+	}
+	v.genCalls = append(v.genCalls, genCall{
+		kind: kindGenerationOpened, seq: seq, id: id,
+		group: group, reservation: reservation, target: target,
+	})
+	return nil
+}
+
+func (v *recordingVisitor) GenerationPerpSubmitted(seq uint64, id domain.GenerationID, order ids.ClientOrderID) error {
+	if err := v.note(seq); err != nil {
+		return err
+	}
+	v.genCalls = append(v.genCalls, genCall{kind: kindGenerationPerpSubmitted, seq: seq, id: id, order: order})
+	return nil
+}
+
+func (v *recordingVisitor) GenerationAuthorized(seq uint64, id domain.GenerationID, size fixedpoint.Quantity) error {
+	if err := v.note(seq); err != nil {
+		return err
+	}
+	v.genCalls = append(v.genCalls, genCall{kind: kindGenerationAuthorized, seq: seq, id: id, size: size})
+	return nil
+}
+
+func (v *recordingVisitor) GenerationSpotSubmitted(seq uint64, id domain.GenerationID, order ids.ClientOrderID) error {
+	if err := v.note(seq); err != nil {
+		return err
+	}
+	v.genCalls = append(v.genCalls, genCall{kind: kindGenerationSpotSubmitted, seq: seq, id: id, order: order})
+	return nil
+}
+
+func (v *recordingVisitor) GenerationSuperseded(seq uint64, id domain.GenerationID, path domain.SupersessionPath) error {
+	if err := v.note(seq); err != nil {
+		return err
+	}
+	v.genCalls = append(v.genCalls, genCall{kind: kindGenerationSuperseded, seq: seq, id: id, path: path})
+	return nil
+}
+
+func (v *recordingVisitor) Phase(seq uint64, id domain.GenerationID, phase domain.GenerationPhase) error {
+	if err := v.note(seq); err != nil {
+		return err
+	}
+	v.genCalls = append(v.genCalls, genCall{kind: kindGenerationPhase, seq: seq, id: id, phase: phase})
+	return nil
+}
+
+// gen returns the single recorded call of a kind, failing if there is not
+// exactly one.
+//
+// Exactly one rather than "the first", on the repo's own selection-fixture rule:
+// a helper that returned the first match would make a fixture writing two
+// records of a kind pass an assertion about either of them, and the perp/spot
+// pair is precisely where that would hide a swap.
+func (v *recordingVisitor) gen(t *testing.T, kind string) genCall {
+	t.Helper()
+	var found []genCall
+	for _, c := range v.genCalls {
+		if c.kind == kind {
+			found = append(found, c)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("recorded %d %s calls, want exactly 1", len(found), kind)
+	}
+	return found[0]
 }
 
 // writeThreeKinds appends one record of each kind and returns what was written,
@@ -597,6 +699,9 @@ func tamperColumn(t *testing.T, path, stmt string, args ...any) {
 	for _, trigger := range []string{
 		"journal_no_update", "journal_planned_no_update",
 		"journal_state_no_update", "journal_authorized_no_update",
+		"journal_generation_opened_no_update", "journal_generation_leg_no_update",
+		"journal_generation_authorized_no_update", "journal_generation_superseded_no_update",
+		"journal_generation_phase_no_update",
 	} {
 		if _, err := db.Exec(`DROP TRIGGER IF EXISTS ` + trigger); err != nil {
 			t.Fatalf("tamper: drop %s: %v", trigger, err)

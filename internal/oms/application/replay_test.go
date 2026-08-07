@@ -10,6 +10,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/oms/application/ports"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
+	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
 
@@ -44,6 +45,17 @@ type journalEntry struct {
 	at           clock.ServerTime
 	state        domain.OrderState
 	venueOrderID string
+
+	// The SM §7 generation half. The payload fields are here so that a fixture
+	// can prove they REACH the visitor unchanged; the visitor drops them, and
+	// that drop is the scope of the current slice rather than a property to
+	// assert. What is asserted is the liveness the ids and phases decide.
+	gen   domain.GenerationID
+	group domain.HedgeGroup
+	res   domain.ReservationID
+	qty   fixedpoint.Quantity
+	path  domain.SupersessionPath
+	phase domain.GenerationPhase
 }
 
 // fakeReplay is ports.JournalReplay over a scripted log.
@@ -82,6 +94,18 @@ func (f *fakeReplay) Replay(v ports.JournalVisitor) error {
 			err = v.State(e.seq, e.id, e.state)
 		case "acked":
 			err = v.Acked(e.seq, e.id, e.venueOrderID)
+		case "generation_opened":
+			err = v.GenerationOpened(e.seq, e.gen, e.group, e.res, e.qty)
+		case "generation_perp_submitted":
+			err = v.GenerationPerpSubmitted(e.seq, e.gen, e.id)
+		case "generation_authorized":
+			err = v.GenerationAuthorized(e.seq, e.gen, e.qty)
+		case "generation_spot_submitted":
+			err = v.GenerationSpotSubmitted(e.seq, e.gen, e.id)
+		case "generation_superseded":
+			err = v.GenerationSuperseded(e.seq, e.gen, e.path)
+		case "generation_phase":
+			err = v.Phase(e.seq, e.gen, e.phase)
 		default:
 			return fmt.Errorf("fake replay: entry %d has kind %q", e.seq, e.kind)
 		}
@@ -662,5 +686,271 @@ func TestRebuildRefusesAnAckForAnOrderNeverPlanned(t *testing.T) {
 	)
 	if _, err := r.Rebuild(); !errors.Is(err, ports.ErrOrderUnknown) {
 		t.Fatalf("Rebuild = %v, want ErrOrderUnknown", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SM §7's generations
+// ---------------------------------------------------------------------------
+
+// The generation half's own collapse checklist, on the dimensions the four
+// above do not reach:
+//
+//  5. GENERATION COUNT. Every liveness claim holds TWO generations, one live
+//     and one ended. With one, "the live ones" and "all of them" are the same
+//     list, and with two both-live or both-ended the filter is a constant.
+//  6. THE ENDING KIND. `Complete` arrives through Phase and `Superseded`
+//     through its own method, so a fixture using one leaves the other's arm
+//     dead. The two-generation fixture uses one of each.
+//  7. RECORD POSITION, again. The opening of the SECOND generation sits after
+//     the first generation's mid-ladder records, so a walk that keyed liveness
+//     off the last record it saw would disagree.
+
+func testHedgeGroup(symbol string) domain.HedgeGroup {
+	return domain.HedgeGroup{Account: "main", Venue: "binance", Symbol: symbol}
+}
+
+func testTarget(t *testing.T, decimal string) fixedpoint.Quantity {
+	t.Helper()
+	q, err := fixedpoint.ParseQuantity("BTC", decimal)
+	if err != nil {
+		t.Fatalf("ParseQuantity(%s): %v", decimal, err)
+	}
+	return q
+}
+
+// TestRebuildReportsTheGenerationsTheLogNEVERENDED is the boot refusal's
+// evidence, and the fixture is what makes it a claim rather than a tautology.
+//
+// GEN-A runs the full ladder and COMPLETES; GEN-B opens, submits its perp leg
+// and stops — a crash mid-ladder, which is the state FLAG-3's durability exists
+// for. A replay that reported both, or neither, or "the last one", passes
+// nothing here.
+func TestRebuildReportsTheGenerationsTheLogNeverEnded(t *testing.T) {
+	t.Parallel()
+
+	perp := replayOrder(t, "PERP-A")
+	r, _, _ := newReplayer(t,
+		journalEntry{seq: 1, kind: "planned", order: perp},
+		journalEntry{seq: 2, kind: "generation_opened", gen: "GEN-A",
+			group: testHedgeGroup("BTCUSDT"), res: "RES-A", qty: testTarget(t, "1")},
+		journalEntry{seq: 3, kind: "generation_perp_submitted", gen: "GEN-A", id: perp.ClientOrderID},
+		journalEntry{seq: 4, kind: "generation_authorized", gen: "GEN-A", qty: testTarget(t, "0.5")},
+		journalEntry{seq: 5, kind: "generation_phase", gen: "GEN-A", phase: domain.GenerationComplete},
+		journalEntry{seq: 6, kind: "generation_opened", gen: "GEN-B",
+			group: testHedgeGroup("ETHUSDT"), res: "RES-B", qty: testTarget(t, "2")},
+		journalEntry{seq: 7, kind: "generation_perp_submitted", gen: "GEN-B", id: perp.ClientOrderID},
+	)
+
+	rec, err := r.Rebuild()
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	if rec.Generations != 2 {
+		t.Errorf("Generations = %d, want 2", rec.Generations)
+	}
+	// Asserted as the exact list rather than as a length or a containment: a
+	// length is satisfied by the wrong generation, and a containment check
+	// throws away the variation the fixture was built to carry.
+	want := []domain.GenerationID{"GEN-B"}
+	if len(rec.LiveGenerations) != len(want) {
+		t.Fatalf("LiveGenerations = %v, want %v", rec.LiveGenerations, want)
+	}
+	for i := range want {
+		if rec.LiveGenerations[i] != want[i] {
+			t.Errorf("LiveGenerations[%d] = %q, want %q", i, rec.LiveGenerations[i], want[i])
+		}
+	}
+}
+
+// TestASupersededGenerationIsNotLive covers the OTHER ending kind, which travels
+// its own visitor method to the same conclusion.
+//
+// Its mirror — the ended-by-Complete case — is above, and both are needed: a
+// suite holding one of them passes against a rebuild that only handles that one,
+// and the arm it does not handle is the one that leaves a phantom entry standing
+// in the ledger.
+func TestASupersededGenerationIsNotLive(t *testing.T) {
+	t.Parallel()
+
+	for _, path := range []domain.SupersessionPath{
+		domain.SupersededByEmergencyClose,
+		domain.SupersededByFenceReadyLost,
+		domain.SupersededByPremiseLost,
+	} {
+		t.Run(path.String(), func(t *testing.T) {
+			t.Parallel()
+			r, _, _ := newReplayer(t,
+				journalEntry{seq: 1, kind: "generation_opened", gen: "GEN-A",
+					group: testHedgeGroup("BTCUSDT"), res: "RES-A", qty: testTarget(t, "1")},
+				journalEntry{seq: 2, kind: "generation_superseded", gen: "GEN-A", path: path},
+			)
+			rec, err := r.Rebuild()
+			if err != nil {
+				t.Fatalf("Rebuild: %v", err)
+			}
+			if len(rec.LiveGenerations) != 0 {
+				t.Errorf("LiveGenerations = %v after a %s supersession, want none",
+					rec.LiveGenerations, path)
+			}
+			if rec.Generations != 1 {
+				t.Errorf("Generations = %d, want 1", rec.Generations)
+			}
+		})
+	}
+}
+
+// TestAnUnendedGenerationIsLiveAtEveryMidLadderPhase is the positive control the
+// two tests above need: they show that endings END, and without this one a
+// rebuild that reported nothing live under any circumstances would pass both.
+//
+// It runs every phase AppendGenerationPhase can record and that IsActive calls
+// live, because those are the arms where "no ending seen" has to keep meaning
+// live — and `HeldPerp`/`HeldSpot` are the parks, which is exactly where a crash
+// leaves a generation holding a ledger entry and an alert.
+func TestAnUnendedGenerationIsLiveAtEveryMidLadderPhase(t *testing.T) {
+	t.Parallel()
+
+	for _, phase := range []domain.GenerationPhase{
+		domain.GenerationPerpReduceFinal,
+		domain.GenerationHeldPerp,
+		domain.GenerationHeldSpot,
+	} {
+		t.Run(phase.String(), func(t *testing.T) {
+			t.Parallel()
+			active, err := phase.IsActive()
+			if err != nil {
+				t.Fatalf("%s.IsActive: %v", phase, err)
+			}
+			if !active {
+				t.Fatalf("fixture phase %s is not active; this test asserts the LIVE arm", phase)
+			}
+
+			r, _, _ := newReplayer(t,
+				journalEntry{seq: 1, kind: "generation_opened", gen: "GEN-A",
+					group: testHedgeGroup("BTCUSDT"), res: "RES-A", qty: testTarget(t, "1")},
+				journalEntry{seq: 2, kind: "generation_phase", gen: "GEN-A", phase: phase},
+			)
+			rec, err := r.Rebuild()
+			if err != nil {
+				t.Fatalf("Rebuild: %v", err)
+			}
+			if len(rec.LiveGenerations) != 1 || rec.LiveGenerations[0] != "GEN-A" {
+				t.Errorf("LiveGenerations = %v at %s, want [GEN-A]", rec.LiveGenerations, phase)
+			}
+		})
+	}
+}
+
+// TestRebuildRefusesAGenerationRecordWithNoOpening is the generation-scope
+// reading of "the log verifies and does not compose", and it is checked on
+// EVERY dependent kind rather than one.
+//
+// One case would demonstrate the rule and hide the ladder: five methods call
+// knownGeneration, and a fixture exercising one leaves four able to lose the
+// call with the suite green. The realistic cause is head truncation, and the
+// direction is what makes it a refusal — a walk that carried on would report
+// zero live generations for a package that has one.
+func TestRebuildRefusesAGenerationRecordWithNoOpening(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		entry journalEntry
+	}{
+		{"perp leg", journalEntry{seq: 1, kind: "generation_perp_submitted", gen: "GHOST", id: "ORDER-1"}},
+		{"authorization", journalEntry{seq: 1, kind: "generation_authorized", gen: "GHOST",
+			qty: testTarget(t, "1")}},
+		{"spot leg", journalEntry{seq: 1, kind: "generation_spot_submitted", gen: "GHOST", id: "ORDER-1"}},
+		{"supersession", journalEntry{seq: 1, kind: "generation_superseded", gen: "GHOST",
+			path: domain.SupersededByPremiseLost}},
+		{"phase", journalEntry{seq: 1, kind: "generation_phase", gen: "GHOST",
+			phase: domain.GenerationComplete}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			r, _, _ := newReplayer(t, tc.entry)
+			if _, err := r.Rebuild(); !errors.Is(err, application.ErrGenerationNotOpened) {
+				t.Fatalf("Rebuild = %v, want ErrGenerationNotOpened", err)
+			}
+		})
+	}
+
+	// The positive control: the same record kinds compose when the opening is
+	// there. Without it, a rebuild refusing every generation record passes
+	// every case above.
+	t.Run("positive control", func(t *testing.T) {
+		t.Parallel()
+		r, _, _ := newReplayer(t,
+			journalEntry{seq: 1, kind: "generation_opened", gen: "GHOST",
+				group: testHedgeGroup("BTCUSDT"), res: "RES-A", qty: testTarget(t, "1")},
+			journalEntry{seq: 2, kind: "generation_perp_submitted", gen: "GHOST", id: "ORDER-1"},
+			journalEntry{seq: 3, kind: "generation_authorized", gen: "GHOST", qty: testTarget(t, "1")},
+			journalEntry{seq: 4, kind: "generation_spot_submitted", gen: "GHOST", id: "ORDER-2"},
+			journalEntry{seq: 5, kind: "generation_phase", gen: "GHOST", phase: domain.GenerationComplete},
+		)
+		if _, err := r.Rebuild(); err != nil {
+			t.Fatalf("Rebuild: %v", err)
+		}
+	})
+}
+
+// TestRebuildRefusesASecondOpeningOfOneGeneration is the append-only store's own
+// impossibility, reported rather than absorbed: one identity brought into
+// existence twice, where the second record cannot be a correction of the first.
+func TestRebuildRefusesASecondOpeningOfOneGeneration(t *testing.T) {
+	t.Parallel()
+
+	r, _, _ := newReplayer(t,
+		journalEntry{seq: 1, kind: "generation_opened", gen: "GEN-A",
+			group: testHedgeGroup("BTCUSDT"), res: "RES-A", qty: testTarget(t, "1")},
+		journalEntry{seq: 2, kind: "generation_opened", gen: "GEN-B",
+			group: testHedgeGroup("ETHUSDT"), res: "RES-B", qty: testTarget(t, "2")},
+		journalEntry{seq: 3, kind: "generation_opened", gen: "GEN-A",
+			group: testHedgeGroup("BTCUSDT"), res: "RES-C", qty: testTarget(t, "3")},
+	)
+	if _, err := r.Rebuild(); !errors.Is(err, application.ErrGenerationAlreadyOpened) {
+		t.Fatalf("Rebuild = %v, want ErrGenerationAlreadyOpened", err)
+	}
+}
+
+// TestRebuildRefusesAnUndeclaredSupersessionPath is the replay's own
+// well-formedness line: an undeclared path replays into a generation whose one
+// remaining question — may core §7.1's ladder open a later generation — has no
+// answer at all, because ResumesLadder cannot answer it.
+func TestRebuildRefusesAnUndeclaredSupersessionPath(t *testing.T) {
+	t.Parallel()
+
+	r, _, _ := newReplayer(t,
+		journalEntry{seq: 1, kind: "generation_opened", gen: "GEN-A",
+			group: testHedgeGroup("BTCUSDT"), res: "RES-A", qty: testTarget(t, "1")},
+		journalEntry{seq: 2, kind: "generation_superseded", gen: "GEN-A", path: "operator_said_so"},
+	)
+	if _, err := r.Rebuild(); !errors.Is(err, domain.ErrSupersessionPathUnknown) {
+		t.Fatalf("Rebuild = %v, want ErrSupersessionPathUnknown", err)
+	}
+}
+
+// TestAJournalWithNoGenerationsReportsNone is the whole feature's negative
+// control, and it is the case every existing boot takes: no composition root
+// constructs a Deleverer, so every journal in the field holds order records
+// only. If this failed, the refusal in Reconciler would fire on every boot.
+func TestAJournalWithNoGenerationsReportsNone(t *testing.T) {
+	t.Parallel()
+
+	first, second := mintedID(t, 0), mintedID(t, 1)
+	r, _, _ := newReplayer(t,
+		journalEntry{seq: 1, kind: "planned", order: replayOrder(t, first)},
+		journalEntry{seq: 2, kind: "planned", order: replayOrder(t, second)},
+		journalEntry{seq: 3, kind: "authorized", id: first, at: replayAnchor(t, 3)},
+		journalEntry{seq: 4, kind: "state", id: first, state: domain.StateSubmitted},
+	)
+	rec, err := r.Rebuild()
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	if rec.Generations != 0 || len(rec.LiveGenerations) != 0 {
+		t.Errorf("Generations = %d, LiveGenerations = %v; want 0 and none",
+			rec.Generations, rec.LiveGenerations)
 	}
 }

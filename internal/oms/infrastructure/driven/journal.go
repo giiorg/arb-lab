@@ -125,7 +125,8 @@ type SQLiteJournal struct {
 // schema is the journal's DDL, applied on every Open (each statement is IF NOT
 // EXISTS, so an existing file is left alone).
 //
-// # Three tables rather than one, and the reason is ports.Journal's own
+// # A detail table per PAYLOAD rather than one wide one, and the reason is
+// # ports.Journal's own
 //
 // The port declares two methods rather than one Append(Record) because a single
 // record type would need "an optional field, whose zero value is then a legal
@@ -139,6 +140,18 @@ type SQLiteJournal struct {
 // per-kind nullability. It is expressible and it was refused because it states
 // the field list twice — once in the columns, once in the CHECK — and the copy
 // that drifts is always the one that is not the definition.
+//
+// The generation kinds follow the same rule and produce ONE exception, which is
+// the case that shows what the rule is actually about. `journal_generation_leg`
+// serves two kinds — the perp submission and the spot submission — because their
+// column is the same column: a client order id, meaning a client order id, in
+// both. Every other pair of same-shaped kinds got its own table because the
+// shared shape carried DIFFERENT meanings (a state name and a venue order id are
+// both one TEXT), and a column whose meaning depends on the kind is the thing
+// being avoided. What was refused here is the near-miss: a `leg` discriminator
+// column beside the id. That is a second spelling of a fact the kind column
+// already states, with no rule for a replay that finds the two disagree —
+// encodeAuthorized's own argument for leaving the state out of its preimage.
 //
 // # Append-only is enforced by the database, not by this package's method set
 //
@@ -156,11 +169,39 @@ type SQLiteJournal struct {
 // form is lossless and identical across the dialects D2 names, and the asset
 // tag needs its own column because no single column can carry a number and a
 // tag without becoming text.
+//
+// # ONE chain over a widened SUBJECT column, and the alternative was cheaper
+//
+// The generation records (ports.GenerationJournal, SM §7) do not key by an
+// order. A generation's subject is a domain.GenerationID — "each generation is a
+// bounded attempt", so the identity outlives either leg — and the two legs are
+// two ClientOrderIDs of which neither is the generation. The cheap shape is a
+// second store with its own chain and no migration; it was refused on one
+// sentence, and the sentence is FLAG-3's.
+//
+// The invariant a replay most wants to check is that a generation's
+// AUTHORIZATION record precedes its spot order's own journaled intent. Two
+// chains have no order between them: each verifies internally and neither says
+// anything about the other's position, so under two stores that clause stops
+// being a fact anything can check and becomes a discipline the application layer
+// keeps. One chain makes the sequence itself the evidence.
+//
+// So the column is named for what it holds — a subject — and the KIND column is
+// its namespace. That split is load-bearing rather than tidy: the two id spaces
+// share no namespace, so `subject` alone identifies nothing and a lookup by it
+// could match the other space. journalcodec.go states the consequence for
+// queries; the short version is that this package has no method taking a bare
+// subject, so the unsafe query is not writable rather than merely discouraged.
+//
+// Migrating an APPEND-ONLY store is the cost, and migrateSubjectColumn below is
+// where it is paid. What it does not cost is the chain: renaming a column
+// changes no preimage, because every encoder hashes domain values rather than
+// columns — see encodeGenerationPhase's closing note.
 const schema = `
 CREATE TABLE IF NOT EXISTS journal (
 	seq       INTEGER PRIMARY KEY,
 	kind      TEXT NOT NULL,
-	client_id TEXT NOT NULL,
+	subject   TEXT NOT NULL,
 	prev_hash BLOB NOT NULL,
 	hash      BLOB NOT NULL
 ) STRICT;
@@ -198,6 +239,37 @@ CREATE TABLE IF NOT EXISTS journal_acked (
 	venue_order_id TEXT NOT NULL
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS journal_generation_opened (
+	seq             INTEGER PRIMARY KEY REFERENCES journal(seq),
+	account         TEXT NOT NULL,
+	venue           TEXT NOT NULL,
+	symbol          TEXT NOT NULL,
+	reservation     TEXT NOT NULL,
+	target_asset    TEXT NOT NULL,
+	target_mantissa INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS journal_generation_leg (
+	seq       INTEGER PRIMARY KEY REFERENCES journal(seq),
+	client_id TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS journal_generation_authorized (
+	seq           INTEGER PRIMARY KEY REFERENCES journal(seq),
+	size_asset    TEXT NOT NULL,
+	size_mantissa INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS journal_generation_superseded (
+	seq  INTEGER PRIMARY KEY REFERENCES journal(seq),
+	path TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS journal_generation_phase (
+	seq   INTEGER PRIMARY KEY REFERENCES journal(seq),
+	phase TEXT NOT NULL
+) STRICT;
+
 CREATE TRIGGER IF NOT EXISTS journal_no_update BEFORE UPDATE ON journal
 	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS journal_no_delete BEFORE DELETE ON journal
@@ -217,6 +289,26 @@ CREATE TRIGGER IF NOT EXISTS journal_authorized_no_delete BEFORE DELETE ON journ
 CREATE TRIGGER IF NOT EXISTS journal_acked_no_update BEFORE UPDATE ON journal_acked
 	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS journal_acked_no_delete BEFORE DELETE ON journal_acked
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_generation_opened_no_update BEFORE UPDATE ON journal_generation_opened
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_generation_opened_no_delete BEFORE DELETE ON journal_generation_opened
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_generation_leg_no_update BEFORE UPDATE ON journal_generation_leg
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_generation_leg_no_delete BEFORE DELETE ON journal_generation_leg
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_generation_authorized_no_update BEFORE UPDATE ON journal_generation_authorized
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_generation_authorized_no_delete BEFORE DELETE ON journal_generation_authorized
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_generation_superseded_no_update BEFORE UPDATE ON journal_generation_superseded
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_generation_superseded_no_delete BEFORE DELETE ON journal_generation_superseded
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_generation_phase_no_update BEFORE UPDATE ON journal_generation_phase
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_generation_phase_no_delete BEFORE DELETE ON journal_generation_phase
 	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
 `
 
@@ -263,10 +355,99 @@ func OpenSQLiteJournal(path string) (*SQLiteJournal, error) {
 	if err := j.verifyPragmas(); err != nil {
 		return nil, errors.Join(fmt.Errorf("oms journal: %q: %w", path, err), db.Close())
 	}
+	// BEFORE the DDL, because the DDL is the reason a migration is needed at
+	// all: every statement in it is IF NOT EXISTS, so an existing journal table
+	// is left exactly as it was found and a schema change would silently not
+	// happen. Run first, the rename brings the table up to the shape the DDL
+	// would have created, and the DDL is then a no-op on it.
+	if err := j.migrateSubjectColumn(); err != nil {
+		return nil, errors.Join(fmt.Errorf("oms journal: migrate %q: %w", path, err), db.Close())
+	}
 	if _, err := db.Exec(schema); err != nil {
 		return nil, errors.Join(fmt.Errorf("oms journal: schema %q: %w", path, err), db.Close())
 	}
 	return j, nil
+}
+
+// migrateSubjectColumn renames `journal.client_id` to `journal.subject` on a
+// database written before the generation records shared this chain.
+//
+// # Migrating an append-only store is not a contradiction, and the distinction
+// # is what the triggers are actually for
+//
+// The triggers fire BEFORE UPDATE and BEFORE DELETE on rows. `ALTER TABLE …
+// RENAME COLUMN` is neither: no row is written, no row is removed, and every
+// stored value survives byte-for-byte under a new name. That is the whole reason
+// this migration is expressible — the append-only rule is about the HISTORY, and
+// renaming the column the history is recorded in changes no history.
+//
+// The chain is untouched for a second and independent reason, and it is worth
+// separating from the first: even a migration that DID rewrite rows would not
+// invalidate a hash here, because no encoder hashes a column. They hash domain
+// values (see encodeGenerationPhase's closing note), so chainLabel keeps its /v1
+// and a journal written by the previous build verifies unchanged after this
+// runs. TestAJournalWrittenBeforeTheSubjectRenameStillVerifies is that claim.
+//
+// # Every shape but the two expected ones is REFUSED, including the empty one
+//
+// The check is over what the table HAS rather than over a version number, and a
+// version row was the rejected alternative: it is a second statement of the
+// schema's shape, and the copy that drifts is the one that is not the
+// definition — the same argument the CHECK constraint lost on. Reading the
+// columns asks the database what it is instead of asking it what it was told.
+//
+// A `journal` table with NEITHER column is refused rather than left to fail at
+// the first query. It cannot be produced by any build of this system, so the
+// realistic cause is a path pointing at somebody else's database — and the
+// failure that follows from proceeding is an opaque SQL error at the first
+// append, on the path §6 step 6 must not be surprised on. Both columns at once
+// is refused for the sharper reason: there is no rule for which one the records
+// were keyed by, and picking either would silently re-key a chain.
+func (j *SQLiteJournal) migrateSubjectColumn() error {
+	rows, err := j.db.Query(`PRAGMA table_info(journal)`)
+	if err != nil {
+		return fmt.Errorf("read journal columns: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var hasSubject, hasClientID, tableExists bool
+	for rows.Next() {
+		var cid int
+		var name, declType string
+		var notNull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &declType, &notNull, &dflt, &pk); err != nil {
+			return fmt.Errorf("read journal columns: %w", err)
+		}
+		tableExists = true
+		switch name {
+		case "subject":
+			hasSubject = true
+		case "client_id":
+			hasClientID = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read journal columns: %w", err)
+	}
+
+	switch {
+	case !tableExists:
+		// No journal table. A first boot, and the DDL below is about to create
+		// it already carrying the subject column.
+		return nil
+	case hasSubject && hasClientID:
+		return fmt.Errorf("journal has both a subject and a client_id column: %w", ErrJournalSchemaUnknown)
+	case hasSubject:
+		return nil
+	case hasClientID:
+		if _, err := j.db.Exec(`ALTER TABLE journal RENAME COLUMN client_id TO subject`); err != nil {
+			return fmt.Errorf("rename client_id to subject: %w", err)
+		}
+		return nil
+	}
+	return fmt.Errorf("journal has neither a subject nor a client_id column: %w", ErrJournalSchemaUnknown)
 }
 
 // journalDSN builds the connection string.
@@ -487,7 +668,13 @@ func (j *SQLiteJournal) AppendState(id ids.ClientOrderID, state domain.OrderStat
 // one whose last commit failed after the field was updated. Re-reading costs an
 // indexed single-row lookup on the primary key, against an fsync in the same
 // transaction — it is not measurable next to what it is protecting.
-func (j *SQLiteJournal) appendRecord(kind, clientID string, body []byte, detail func(*sql.Tx, int64) error) error {
+//
+// The subject is a plain string here rather than a typed id, and that is
+// forced rather than lax: the column's whole point is that it holds two
+// different id spaces discriminated by the kind, so no single type could name
+// it. Every caller converts at the call site, where the kind and the id space
+// are named on the same line and cannot be paired wrongly.
+func (j *SQLiteJournal) appendRecord(kind, subject string, body []byte, detail func(*sql.Tx, int64) error) error {
 	tx, err := j.db.Begin()
 	if err != nil {
 		return fmt.Errorf("oms journal: begin: %w", err)
@@ -501,8 +688,8 @@ func (j *SQLiteJournal) appendRecord(kind, clientID string, body []byte, detail 
 
 	hash := chainHash(uint64(seq), prev, body)
 	if _, err := tx.Exec(
-		`INSERT INTO journal (seq, kind, client_id, prev_hash, hash) VALUES (?,?,?,?,?)`,
-		seq, kind, clientID, prev[:], hash[:]); err != nil {
+		`INSERT INTO journal (seq, kind, subject, prev_hash, hash) VALUES (?,?,?,?,?)`,
+		seq, kind, subject, prev[:], hash[:]); err != nil {
 		return fmt.Errorf("oms journal: insert %s record at seq %d: %w", kind, seq, err)
 	}
 	if err := detail(tx, seq); err != nil {

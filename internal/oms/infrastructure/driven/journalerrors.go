@@ -116,15 +116,58 @@ var (
 	// side, at no price, in no state — every field legal, nothing true.
 	ErrJournalDetailMissing = errors.New("oms journal: record has no detail row for its kind")
 
-	// ErrJournalClientIDUnset reports an AppendState with no order to attach
-	// the state to.
+	// ErrJournalClientIDUnset reports a record with no order to attach its
+	// subject to — an AppendState, an AppendAcked, or either generation leg
+	// submission.
 	//
 	// domain.Order.Validate already refuses an empty ClientOrderID on the
-	// planned path, so this covers the method that takes the id on its own.
+	// planned path, so this covers the methods that take the id on its own.
 	// A state record naming no order is unreplayable in the quietest possible
 	// way: §7.5 joins journal records to venue truth BY client id, so the
 	// record is silently absent from the join rather than reported.
-	ErrJournalClientIDUnset = errors.New("oms journal: state record has no client order id")
+	//
+	// The generation legs share it because it is the same claim about the same
+	// value — and their stake is the one FM-9 names: a generation recovered
+	// without a leg id computes domain.Generation.OwnLegs over a set that still
+	// contains its own reduction, so the standing trigger fires on the
+	// generation's own machinery.
+	ErrJournalClientIDUnset = errors.New("oms journal: record has no client order id")
+
+	// ErrJournalGenerationIDUnset reports a generation record with no subject.
+	//
+	// It is a SEPARATE sentinel from the client-id one and not a shared
+	// "identifier unset", because the two name different id spaces sharing one
+	// column — see journalcodec.go on the kind column being that column's
+	// namespace. An operator reading "no client order id" on a generation record
+	// would go looking for an order, and the whole point of the subject column's
+	// design is that a generation is not one.
+	ErrJournalGenerationIDUnset = errors.New("oms journal: generation record has no generation id")
+
+	// ErrJournalReservationUnset reports an opening record that could not name
+	// the ledger entry its generation reserved.
+	//
+	// Refused rather than defaulted, and the consequence is the one
+	// ports.GenerationJournal states: the reservation is the handle the shared
+	// reserved-reduction ledger is keyed by, so a recovered generation that
+	// cannot name its own entry can neither amend it, retire it, nor tell it
+	// from a sibling's. An entry nobody retires subtracts from every later
+	// sizing for the life of the process — silently, and in the direction that
+	// under-sizes every subsequent trade.
+	ErrJournalReservationUnset = errors.New("oms journal: generation opening record has no reservation id")
+
+	// ErrJournalSchemaUnknown reports a `journal` table this build cannot place:
+	// one carrying neither the subject column nor the client_id column it is
+	// migrated from, or — impossibly, and therefore all the more worth naming —
+	// carrying both.
+	//
+	// Refused at Open rather than left to fail at the first append. No build of
+	// this system produces either shape, so the realistic cause is a path
+	// pointing at somebody else's database, and the failure from proceeding is
+	// an opaque SQL error on §6 step 6's send path. The both-columns case gets
+	// the same refusal for a sharper reason than tidiness: there is no rule for
+	// which column the existing records were keyed by, and choosing either would
+	// silently re-key a chain that verifies perfectly afterwards.
+	ErrJournalSchemaUnknown = errors.New("oms journal: database is not a journal this build can migrate")
 
 	// ErrJournalVenueOrderIDUnset reports an AppendAcked with no id to record.
 	//
