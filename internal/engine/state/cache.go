@@ -62,6 +62,40 @@ func (e FundingEntry) DataAge(serverNow time.Time) (time.Duration, error) {
 	return e.Observation.Watermark.DataAge(serverNow)
 }
 
+// MarkEntry is one instrument's latest mark — §3.4's third data class, and the
+// input §7.1's liq-distance trigger is a function of.
+//
+// It has NO GapDetected and NO SeqAvailable, which is not this cache economising
+// on FundingEntry's shape: ports.MarkSnapshot carries neither, because neither
+// venue supplies a sequence at this class's granularity. Adding them here would
+// mint a gap verdict the producer never computed.
+type MarkEntry struct {
+	// Observation is the accepted reading, already validated by marketdata.
+	Observation domain.MarkObservation
+
+	// Trigger is the AcceptOrdinal of the raw input this reading came from, or
+	// zero when a silence timer derived it from no input at all.
+	Trigger ports.AcceptOrdinal
+}
+
+// Watermark is the reading's provenance, which is what every age is measured
+// from.
+func (e MarkEntry) Watermark() domain.Watermark { return e.Observation.Watermark }
+
+// Age is how long since this process took delivery, at the instant now — the
+// transport-liveness question §7.1's stale-mark ladder reads.
+func (e MarkEntry) Age(now time.Time) (time.Duration, error) {
+	return e.Observation.Watermark.Age(now)
+}
+
+// DataAge is how old the venue's own view was, against that venue's server
+// time. Separate from Age for domain.Watermark.DataAge's reason, and the
+// separation earns its keep here: a venue whose mark has frozen keeps
+// delivering on schedule, so Age alone reports a healthy feed throughout.
+func (e MarkEntry) DataAge(serverNow time.Time) (time.Duration, error) {
+	return e.Observation.Watermark.DataAge(serverNow)
+}
+
 // BookEntry is one instrument's latest reconstructed book. Same shape and same
 // missing field as FundingEntry, for the same reason.
 type BookEntry struct {
@@ -121,6 +155,7 @@ type Cache struct {
 	// package doc.
 	mu      sync.RWMutex
 	funding map[ids.VenueInstrument]FundingEntry
+	marks   map[ids.VenueInstrument]MarkEntry
 	books   map[ids.VenueInstrument]BookEntry
 }
 
@@ -134,6 +169,7 @@ type Cache struct {
 func NewCache() *Cache {
 	return &Cache{
 		funding: make(map[ids.VenueInstrument]FundingEntry),
+		marks:   make(map[ids.VenueInstrument]MarkEntry),
 		books:   make(map[ids.VenueInstrument]BookEntry),
 	}
 }
@@ -201,6 +237,39 @@ func (c *Cache) PutFunding(s ports.FundingSnapshot) error {
 	return nil
 }
 
+// PutMark stores a published mark snapshot as the latest value for its
+// instrument. Same refusals as PutFunding, and see it for each one's reason.
+//
+// The regression refusal is the one that matters most for this class, and its
+// argument sharpens here rather than merely carrying over: because every age is
+// measured from RecvTime, storing an earlier reading makes the cache report a
+// mark that is STALER than it was a moment ago on a feed that just delivered —
+// and for this class that walk down the freshness ladder is what fires §5.2's
+// mark_blind_action. A de-lever triggered by an out-of-order cache write would
+// be indistinguishable, from every log this system keeps, from one triggered by
+// a genuinely dead feed.
+func (c *Cache) PutMark(s ports.MarkSnapshot) error {
+	if err := s.Observation.Validate(); err != nil {
+		return fmt.Errorf("state: mark observation: %w", err)
+	}
+
+	key := s.Observation.Instrument
+	entry := MarkEntry{Observation: s.Observation, Trigger: s.Trigger}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.marks == nil {
+		c.marks = make(map[ids.VenueInstrument]MarkEntry)
+	}
+	if held, ok := c.marks[key]; ok {
+		if err := notBefore(held.Watermark(), entry.Watermark(), key); err != nil {
+			return err
+		}
+	}
+	c.marks[key] = entry
+	return nil
+}
+
 // PutBook stores a reconstructed book as the latest value for its instrument.
 // Same refusals as PutFunding, and see it for each one's reason.
 func (c *Cache) PutBook(v ports.BookView) error {
@@ -257,6 +326,22 @@ func (c *Cache) Funding(vi ids.VenueInstrument) (FundingEntry, bool) {
 	return e, ok
 }
 
+// Mark returns the latest mark for an instrument, and whether there is one.
+//
+// Same bool, same reason as Funding — and the absence is load-bearing for this
+// class rather than merely ordinary. domain.FreshnessUnknown is what a consumer
+// must reach for here, and it sits BELOW FreshnessBlind on purpose: "never
+// observed" and "observed and aged out" are different diagnoses, and returning
+// a zero MarkEntry instead of (zero, false) would hand §7.1's trigger a mark of
+// zero — a valid-looking denominator — for every instrument nothing has yet
+// reported.
+func (c *Cache) Mark(vi ids.VenueInstrument) (MarkEntry, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	e, ok := c.marks[vi]
+	return e, ok
+}
+
 // Book returns the latest reconstructed book for an instrument, and whether
 // there is one. Same bool, same reason as Funding.
 func (c *Cache) Book(vi ids.VenueInstrument) (BookEntry, bool) {
@@ -309,8 +394,13 @@ func (c *Cache) BookSkew(vis ...ids.VenueInstrument) (time.Duration, error) {
 // For diagnostics and for the observability lane, never for a trade decision:
 // a count says nothing about whether any of it is fresh, and §3.4's whole
 // freshness apparatus exists because those are different questions.
-func (c *Cache) Len() (funding, books int) {
+// The mark joins the tuple rather than getting its own method, and widening it
+// is a compile error at every call site by design: a Len that reported two of
+// the three classes would answer "how much does the cache hold" with a number
+// that silently excludes one, and the excluded one is the class whose absence
+// §7.1 escalates on.
+func (c *Cache) Len() (funding, marks, books int) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return len(c.funding), len(c.books)
+	return len(c.funding), len(c.marks), len(c.books)
 }

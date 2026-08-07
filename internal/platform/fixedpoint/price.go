@@ -83,6 +83,23 @@ func (p Price) Cmp(o Price) (int, error) {
 	return cmpMantissa(p.p, o.p), nil
 }
 
+// Sign reports -1, 0 or 1.
+//
+// Money.Sign's twin on the price axis, and fallible for Money.Sign's reason: 0
+// is a legitimate answer, so an infallible Sign could not distinguish "this
+// price is genuinely zero" from "nobody ever populated this field".
+//
+// It exists because the positivity checks this package makes internally — see
+// OnTick's tick.p <= 0 — are unreachable from outside it, and a caller holding a
+// price that must be strictly positive has no other way to say so. The first
+// such caller is venue.Mark, whose value §7.1's liq distance DIVIDES BY.
+func (p Price) Sign() (int, error) {
+	if err := p.Validate(); err != nil {
+		return 0, fmt.Errorf("price sign: %w", err)
+	}
+	return signMantissa(p.p), nil
+}
+
 // OnTick reports whether p sits on tick's price grid — is an exact whole
 // multiple of it. Quantity.OnStep's twin for the price axis: the same
 // predicate-not-rounding contract, stated there.

@@ -1,6 +1,85 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-07, session 121): **SM §7's LADDER RE-VERIFIES §2.4's GRID AND §69's ROW DATE, PER LEG — AND #184's OWN FIRST OPTION WAS REFUTED BY A RULE ONE FILE AWAY. DOCS v0.9.58, 14 MUTANTS ALL CAUGHT, `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
+## Status (2026-08-08, session 122): **THE MARK IS §3.4's THIRD DATA CLASS, END TO END — §7.1's LIQ TRIGGER HAD NO INPUT IN THE SYSTEM AT ALL. DOCS v0.9.59, 16 MUTANTS / 1 REAL SURVIVOR (FIXED), `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO.**
+
+**Read `docs/superpowers/specs/2026-08-08-m4-207-mark-data-class.md` (§78) first**
+— the two independent reasons the mark is its own class, the stateless-decoder
+correction, the `p`/`P` finding, the two gates that moved the read port, and the
+correction to #207's own description.
+
+**THE SURVEY IS THE HEADLINE.** `Deleverer.Open` is built, journaled, reinstated
+at boot and filter-conformed, and **nothing calls it**. Core §7.1's chain is what
+should — liq breach → top-up → `PackageDelever` — and every link is unbuilt:
+no liq-distance code, no `MarginOp` (`boot.GateMarginOpsResolved` is one of the
+four gates `reconcile/app.go` names as *"no producer anywhere"*), no
+`AccountSource.MarginStatus`, and **no code anywhere decoded a mark price**.
+`venue.BinanceMarkPrice` reads `e/E/s/r/T` and says so: *"the funding-relevant
+half"*.
+
+**WHAT LANDED.** `venue.Mark` + `DecodeBinanceMark` + `DecodeBybitMark` (both
+stateless, both taking the assets a price needs); `marketdata/domain.MarkObservation`;
+`ports.MarkSnapshot` / `MarkPublisher` / `MarkBudgets`; `application.MarkIngest`
+with its **own** silence timer; `engine/state`'s third map (`MarkEntry`,
+`PutMark`, `Mark`, and `Len` widened to three); `oms/application/ports.MarkRiskReader`
++ `MarkReading`; `oms/infrastructure/markstate.Reader`. Plus `fixedpoint.Price.Sign()`,
+`Money.Sign`'s twin, which had no caller until a mark needed screening.
+
+**THE MARK IS A CLASS, NOT A FIELD — AND THE SECOND REASON WAS NOT IN THE SPEC.**
+On both venues the mark rides funding's frame. §5.2 settles it once (one struct
+is one `Budget`, so the mark would inherit funding's tolerance). The reason that
+would not have been guessed is Bybit's: `BybitTickerState` emits *only* on
+funding news, deliberately discarding the ~10/s churn deltas — which ARE the
+mark's news. A folded mark refreshes about once a minute, which is §7.1's own
+*"MUST NOT be account-event-only"* defect reached through a different event.
+
+**THE `p`/`P` FINDING, AND IT IS THIS PACKAGE'S SECOND.** `encoding/json` falls
+back to CASE-INSENSITIVE matching for an undeclared key, so Binance's `P`
+(estimated settle) landed in the `json:"p"` mark field and **key order decided
+it**. The wrong value is a dollar off, validates, and computes. `binanceFuturesDepthWire`
+already declares `U` for this exact reason (session 52) — and that note sat on
+the struct that had the defect, so it said nothing to the next single-letter
+wire written two files away. §4 now states the rule for the **seam**; both
+comments cross-reference; the fixture asserts **both key orders**.
+
+**TWO GATES MOVED THE READ PORT AND THE SECOND IMPROVED IT.** `singlewriter`
+refused `engine/state` naming an `oms` port — rule 6 closes the package, so
+§40b's read-seam pattern (*"or the engine subsystem that holds the data"*) **does
+not transfer to `oms`**. `app/reconcile`'s import fence then refused
+`oms/infrastructure/driven` (its graph reaches `marketdata` via `engine/state`),
+and finally refused `marketdata.Watermark` on the port itself. Being forced off
+the watermark is what produced the good shape: the port **returns AGES and takes
+the instants**, so "the age is derived at the READ" is a property of the
+signature, and the two-clock arithmetic stays single-sourced where it is tested.
+
+**THE CAMPAIGN.** 16 mutants, all caught. One real **SURVIVED**: `Len` reporting
+the funding count as the mark count — every fixture had them equal or the mark
+discarded, and the test's own comment already said *"ASYMMETRIC counts on
+purpose"*. Now `(1, 3, 2)`. Two `NOBUILD!!` were bad seds ("declared and not
+used") re-aimed as transpositions.
+
+**WHAT IS NOT DONE, AND #207's DESCRIPTION WAS WRONG ABOUT IT.** Part 2 is the
+ACCOUNT half. #207 filed it as *"un-narrow `binancePositionWire` for
+`liquidationPrice`/`isolatedMargin`/`maintMargin`"*; §4 line 331 already declares
+`AccountSource.MarginStatus(VenueInstrument) (MarginStatus, error)` as its own
+port, so part 2 is **implementing a declared port**, and the position codec's
+narrowing **stands** — §7.5's net-delta invariant genuinely should not acquire a
+second source for those numbers. On Binance it reads the same endpoint, which
+makes it the same two-codecs-over-one-answer shape this slice built for the mark.
+Then B2 (liq distance + §5.2's policy), B3 (`MarginOp`, first producer for
+`GateMarginOpsResolved`), B4 (the escalation that calls `Open`).
+
+**The adapter is deliberately NOT wired into `oms.Module`** — it has no consumer
+until B2, and a root wiring it today drags `engine/state` into every OMS binary.
+The deferral names its trigger: **the first `MarkRiskReader` consumer.**
+
+**Unchanged:** three standing operator decisions ($20/$55 live test, #171's
+credential, §38f); credentials deferred; capture **PID 8495**; never rebuild over
+`bin/arblab`; `make ci` runs `-race` AND the ka staleness gate (needs node); cap
+`TLC_WORKERS` at 4; docs/i18n parity is `bun test`.
+
+---
+
+## Status (2026-08-07, session 121 — HISTORICAL): **SM §7's LADDER RE-VERIFIES §2.4's GRID AND §69's ROW DATE, PER LEG — AND #184's OWN FIRST OPTION WAS REFUTED BY A RULE ONE FILE AWAY. DOCS v0.9.58, 14 MUTANTS ALL CAUGHT, `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
 
 **Read `docs/superpowers/specs/2026-08-07-m4-184-ladder-filter-conformance.md`
 (§77) first** — the refutation that decided the design, the policy/check split,

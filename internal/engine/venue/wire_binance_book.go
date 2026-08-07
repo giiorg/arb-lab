@@ -65,6 +65,11 @@ type binanceFuturesDepthWire struct {
 	// FinalID and whichever key came LAST in the byte stream would win —
 	// the u-vs-U claim held by the venue's key order rather than by the
 	// type (found by a survived mutation, session 52). Nothing reads it.
+	//
+	// It recurred [M4 #207]: binanceMarkWire's `p` collided with the frame's
+	// `P` in a decoder written two files away, because this note is attached
+	// to the struct that had the defect rather than to the seam. The rule for
+	// the seam is stated there.
 	FirstID uint64 `json:"U"`
 
 	FinalID uint64      `json:"u"`

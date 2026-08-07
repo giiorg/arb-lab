@@ -44,6 +44,23 @@ var (
 	// would be silently absorbed into the number milestone 2's gate reads.
 	ErrFundingOnSpot = errors.New("marketdata: spot instrument has no funding")
 
+	// ErrMarkOnSpot reports a mark observation naming a spot instrument.
+	//
+	// Not ErrFundingOnSpot's case reused. A spot instrument has no funding at
+	// all, so the wrong reading there is a zero; it DOES have a price, so a
+	// decoder pointed at a spot ticker finds a plausible last trade to put in
+	// the mark field. §7.1 would then compute a liq distance for a leg nothing
+	// liquidates, from a price nothing liquidates on.
+	ErrMarkOnSpot = errors.New("marketdata: spot instrument has no mark price")
+
+	// ErrMarkNotPositive reports a mark at or below zero.
+	//
+	// fixedpoint.Price permits negative values by design, so this is a
+	// consumer's screen rather than a type rule: §7.1's liq distance DIVIDES BY
+	// the mark, so zero is a division by zero reached mid-incident and a
+	// negative silently inverts the headroom the trigger reads.
+	ErrMarkNotPositive = errors.New("marketdata: mark price is not positive")
+
 	// ErrClampInverted reports a cap below its floor. Not merely nonsense: the
 	// forecast clamps later settlements to this band (§2.4), and clamping to an
 	// inverted band either pins every estimate to one end or, depending on which

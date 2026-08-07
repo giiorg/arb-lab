@@ -88,6 +88,29 @@ func fundingAt(t *testing.T, vi ids.VenueInstrument, d time.Duration) ports.Fund
 	}
 }
 
+// markAt builds a published mark snapshot delivered d after base.
+//
+// The price is 64000.5 and the Trigger is 53 — both distinct from every value
+// fundingAt uses, so a Put that stored the wrong class's payload could not agree
+// by coincidence.
+func markAt(t *testing.T, vi ids.VenueInstrument, d time.Duration) ports.MarkSnapshot {
+	t.Helper()
+	p, err := fixedpoint.ParsePrice("BTC", "USDT", "64000.5")
+	if err != nil {
+		t.Fatalf("ParsePrice: %v", err)
+	}
+	return ports.MarkSnapshot{
+		Observation: domain.MarkObservation{
+			Instrument: vi,
+			Price:      p,
+			Watermark:  at(d),
+		},
+		Transport: domain.FreshnessFresh,
+		Data:      domain.FreshnessFresh,
+		Trigger:   ports.AcceptOrdinal(53),
+	}
+}
+
 // bookAt builds a published book view delivered d after base. seq is stated
 // because BookSnapshot.Validate refuses a zero one — §3.4's "a book admitted at
 // position zero is not a wrong book" rule.
@@ -266,9 +289,27 @@ func TestPutRefusesRegression(t *testing.T) {
 				assertRegression(t, err, tc.wantRefusal)
 			})
 
-			// The mirror. A refusal written once and applied on one of two write
-			// paths is this repo's Send/Receive lesson: when a rule earns a
-			// check, its symmetric case gets the same check immediately.
+			// The mirror, now THREE ways. A refusal written once and applied on
+			// one of the write paths is this repo's Send/Receive lesson: when a
+			// rule earns a check, its symmetric case gets the same check
+			// immediately — and the mark arrived as a third write path (§3.4's
+			// third data class), so it joins here rather than getting its own
+			// half-checked copy.
+			//
+			// It is the arm where the refusal costs most: a mark stored out of
+			// order makes the cache report a mark STALER than it was a moment
+			// ago on a live feed, and §5.2's mark_blind_action fires on exactly
+			// that walk down the ladder. The resulting de-lever is
+			// indistinguishable in every log from one caused by a dead feed.
+			t.Run("mark", func(t *testing.T) {
+				c := state.NewCache()
+				if err := c.PutMark(markAt(t, perp(), 0)); err != nil {
+					t.Fatalf("first put: %v", err)
+				}
+				err := c.PutMark(markAt(t, perp(), tc.second))
+				assertRegression(t, err, tc.wantRefusal)
+			})
+
 			t.Run("book", func(t *testing.T) {
 				c := state.NewCache()
 				if err := c.PutBook(bookAt(t, perp(), 0, 7)); err != nil {
@@ -356,8 +397,8 @@ func TestPutRefusesInvalidPayload(t *testing.T) {
 		t.Error("PutBook accepted a book with no venue sequence")
 	}
 
-	if f, b := fresh.Len(); f != 0 || b != 0 {
-		t.Errorf("Len() = (%d, %d), want (0, 0) — a refused put must store nothing", f, b)
+	if f, m, b := fresh.Len(); f != 0 || m != 0 || b != 0 {
+		t.Errorf("Len() = (%d, %d, %d), want (0, 0, 0) — a refused put must store nothing", f, m, b)
 	}
 }
 
@@ -431,14 +472,39 @@ func TestBookSkewOfOneLegIsUndefined(t *testing.T) {
 }
 
 // TestLenCountsClassesSeparately uses ASYMMETRIC counts on purpose: with the
-// same number in each class, a Len that returned its two values in the wrong
-// order would be indistinguishable from a correct one.
+// same number in any two classes, a Len that returned those values in the wrong
+// order — or read one class's map for another's — would be indistinguishable
+// from a correct one.
+//
+// The MARK arm was added with §3.4's third data class and is what made the
+// asymmetry a three-way requirement rather than a two-way one. It was found by
+// a survived mutation: every fixture here had funding == 1 and, at first, the
+// mark count discarded or equal, so `len(c.funding)` substituted for
+// `len(c.marks)` passed the whole suite. Three counts, all distinct, all
+// non-zero.
 func TestLenCountsClassesSeparately(t *testing.T) {
 	t.Parallel()
+
+	// A second and third perp, because a mark on a SPOT instrument is refused
+	// (§7.1 reads the perp's mark) — so the mark arm cannot reuse spot() the
+	// way the book arm does.
+	eth := ids.VenueInstrument{
+		Venue: ids.Venue("binance"), Product: ids.ProductLinearPerp,
+		Symbol: "ETHUSDT", Contract: ids.ContractLinear,
+	}
+	sol := ids.VenueInstrument{
+		Venue: ids.Venue("binance"), Product: ids.ProductLinearPerp,
+		Symbol: "SOLUSDT", Contract: ids.ContractLinear,
+	}
 
 	c := state.NewCache()
 	if err := c.PutFunding(fundingAt(t, perp(), 0)); err != nil {
 		t.Fatalf("PutFunding: %v", err)
+	}
+	for _, vi := range []ids.VenueInstrument{perp(), eth, sol} {
+		if err := c.PutMark(markAt(t, vi, 0)); err != nil {
+			t.Fatalf("PutMark(%s): %v", vi, err)
+		}
 	}
 	if err := c.PutBook(bookAt(t, perp(), 0, 7)); err != nil {
 		t.Fatalf("PutBook(perp): %v", err)
@@ -447,9 +513,9 @@ func TestLenCountsClassesSeparately(t *testing.T) {
 		t.Fatalf("PutBook(spot): %v", err)
 	}
 
-	funding, books := c.Len()
-	if funding != 1 || books != 2 {
-		t.Errorf("Len() = (%d, %d), want (1, 2)", funding, books)
+	funding, marks, books := c.Len()
+	if funding != 1 || marks != 3 || books != 2 {
+		t.Errorf("Len() = (%d, %d, %d), want (1, 3, 2)", funding, marks, books)
 	}
 }
 
@@ -471,7 +537,7 @@ func TestZeroValueCacheIsUsable(t *testing.T) {
 	if err := c.PutBook(bookAt(t, perp(), 0, 7)); err != nil {
 		t.Fatalf("PutBook on a zero-value cache: %v", err)
 	}
-	if f, b := c.Len(); f != 1 || b != 1 {
+	if f, _, b := c.Len(); f != 1 || b != 1 {
 		t.Errorf("Len() = (%d, %d), want (1, 1)", f, b)
 	}
 }

@@ -60,6 +60,16 @@ var (
 	// book stays plausible and drifts.
 	ErrChangeQuantityNegative = errors.New("venue: level change quantity is negative")
 
+	// ErrMarkNotPositive reports a mark price at or below zero.
+	//
+	// Separate from the wire family above because it is a VENUE-BUSINESS
+	// refusal, not a wire one: the bytes decoded fine and fixedpoint.Price
+	// permits a negative value by design. What refuses it is Mark.Validate,
+	// where §7.1's consumer is known — the mark is the denominator of a liq
+	// distance, so zero divides by zero and a negative flips the sign of the
+	// headroom the trigger reads.
+	ErrMarkNotPositive = errors.New("venue: mark price is not positive")
+
 	// ErrWireUndecodable, ErrWireForeign and ErrWireIncomplete are the wire
 	// decoders' three refusal families, split by where they send the reader.
 	//

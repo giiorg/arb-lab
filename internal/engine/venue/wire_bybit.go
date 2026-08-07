@@ -11,6 +11,12 @@ import (
 
 // This file decodes Bybit's funding wire: the v5 `tickers.<sym>` topic.
 //
+// The same topic also carries §3.4's MARK class, and it is decoded by
+// wire_bybit_mark.go rather than here — the emission rule below is the opposite
+// of the one the mark needs, and the mark has no state to accumulate. That file
+// states the argument; the pointer is here so a reader adding a ticker field
+// finds it before folding a second class into this accumulator.
+//
 // # The ticker is a DELTA stream, so the decoder is a state machine
 //
 // Full state arrives once, on the post-subscribe `type:"snapshot"` message;
