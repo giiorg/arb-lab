@@ -1,6 +1,83 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-07, session 119): **SM §7's GENERATION RECORDS ARE IN §5.1's CHAIN — `ports.GenerationJournal` HAS A STORE, AND §7.5's REPLAY RULE TURNED OUT NOT TO REACH A SECOND SCOPE. DOCS v0.9.56, 23 MUTANTS / 1 REAL SURVIVOR (FIXED), `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO.**
+## Status (2026-08-07, session 120): **THE LIVE GENERATION IS REINSTATED AT §7.5 BOOT — SM §7's LADDER HAS ITS ENTRY BACK IN §6.7's SHARED LEDGER, AND THE GATE IT NEEDED COULD NOT BE THE REPLAY'S. DOCS v0.9.57, 29 MUTANTS / 3 REAL SURVIVORS (ALL CLOSED), `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
+
+**Read `docs/superpowers/specs/2026-08-07-m4-204-generation-reinstatement.md`
+(§76) first** — the quantity that decided the slice's shape, the seam that
+answers §75h without weakening it, the three findings, and the eight rejected
+alternatives.
+
+**WHAT LANDED.** `internal/oms/application/reinstate.go` — `GenerationLadder`
+(three whole acts of the ladder, each atomic over the aggregate AND its ledger
+entry) and `Reinstater`, which drives SM §7's own transitions through the
+recorded phases. `domain.RestoreGeneration` + `RestorePerpSubmission` +
+`RestoreSpotAuthorization` — `OpenGeneration` and its two premise-guarded steps
+with the premise removed and **nothing else**, sharing their payload closures
+with the live ones. `Deleverer.Restore` (track → reserve → amend → install,
+releasing on any failure) and `Deleverer.BarLadder`, with the bar read by `Open`
+**before** the live check and written by `supersede`.
+`boot.GateGenerationsReinstated` + `Reconciler.reinstateGenerations`.
+`ports.OrderLookup` — the read half of the write repository, cut off on
+`Journal`/`JournalReplay`'s argument. `oms.Module.Delever` is the **Deleverer's
+first composition root**.
+
+**THE HEADLINE: THE NUMBER RECOVERY NEEDS IS IN NO JOURNAL, AND THAT DECIDED
+EVERYTHING.** A generation's entry carries its CONFIRMED PERP REDUCTION.
+`ports.Journal` has no `AppendFill`; the generation journal has no fill record;
+the replay leaves every cumulative at **zero**. The number reaches this process
+only from the VENUE, so the rebuild runs after the join and after §5.3's absence
+resolution — a different phase from the replay, which is why #203's refusal
+**moved** to a gate of its own rather than lifting in place. Rebuilding earlier
+is not merely early: an authorized generation would be rebuilt against a
+confirmed perp reduction of zero and refused by its own never-net-short cap.
+
+**`RecordPerpFill`'s COMMENT SAID THE OPPOSITE, IN BOTH HALVES.** It justified
+storing no fill record by saying the quantity was "durable at order scope" and
+rebuilt by "§7.5's replay". Neither is true, and `replay.go` says so in as many
+words one file away — two comments contradicting each other for two slices,
+because nothing had needed the number. The conclusion survives on a different
+premise (the join re-derives it) and that premise is what pins the phase's
+position. Corrected in place.
+
+**THE SEAM ANSWERS §75h WITHOUT WEAKENING IT.** The way through is a different
+SUBJECT, not a narrower `Classifier`: what recovery needs is "make the ladder
+true again", and the ladder is the one object required to keep the generation and
+its entry in step. So `Reinstater` holds `GenerationLadder` + `ports.OrderLookup`
+and can reach no ledger, no journal and no placer; the `Replayer` still holds no
+`Classifier`. **The reserve is inside `Restore`**, because a reinstatement that
+left the caller to reserve would move §7's "exactly backed at every instant" into
+a second place — the shape FM-6 came out of.
+
+**TWO MORE FINDINGS.** `Classifier.Track` had **zero non-test callers**, so no
+hedge group was ever registered — the reinstatement is the first thing that
+tracks, with the asset from the generation's own target. And
+`TestOpenAdmitsANextGenerationOnceTheFirstHasEnded` had been asserting the
+**opposite** of `ResumesLadder`: it quotes §7.1's *"Complete → the ladder
+continues"* and ended its generation with an `EmergencyClosePackage`
+supersession. The ending KIND was a collapsed dimension for as long as nothing
+acted on the path.
+
+**THE THREE SURVIVORS.** The bar's first-writer-wins rule; the replay's bar
+derivation, which had **no test at all**; and last-writer-wins, whose fixture had
+to be SCRIPTED because the log it needs is one this build can no longer write. A
+fourth mutant SURVIVED and was **equivalent** — its claim lives in
+`RestoreGeneration`'s SIGNATURE, and adding the parameter reports `NOBUILD!!`,
+which is this repo's kill-by-compiler verdict.
+
+**WHAT IS NOT DONE.** Triggering the ladder from core §7.1's liq-distance
+escalation — milestone 4's other workstream; nothing calls `Open`. Task **#184**,
+the delever legs' §2.4/§69 re-check, trigger already fired. And the `Track` gap
+one layer out: every hedge group that never had a generation is still untracked,
+so §6.7's ledger does not exist for it.
+
+**Unchanged:** three standing operator decisions ($20/$55 live test, #171's
+credential, §38f); credentials deferred; capture **PID 8495**; never rebuild over
+`bin/arblab`; `make ci` runs `-race` AND the ka staleness gate (needs node); cap
+`TLC_WORKERS` at 4; docs/i18n parity is `bun test`.
+
+---
+
+## Status (2026-08-07, session 119 — HISTORICAL): **SM §7's GENERATION RECORDS ARE IN §5.1's CHAIN — `ports.GenerationJournal` HAS A STORE, AND §7.5's REPLAY RULE TURNED OUT NOT TO REACH A SECOND SCOPE. DOCS v0.9.56, 23 MUTANTS / 1 REAL SURVIVOR (FIXED), `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO.**
 
 **Read `docs/superpowers/specs/2026-08-07-m4-203-generation-journal-adapter.md`
 (§75) first** — the migration's two independent survival reasons, the outcome

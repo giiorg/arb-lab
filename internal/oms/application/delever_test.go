@@ -276,6 +276,33 @@ func (f *deleverFixture) open(target string) *domain.Generation {
 	return g
 }
 
+// completeWithNoSpotSale drives the generation to `Complete` the shortest way
+// SM §7 admits: the perp leg submitted, confirmed with nothing executed, and a
+// spot authorization of ZERO — §7's own honest extreme, "sells no more spot than
+// the confirmed perp reduction" where the confirmed reduction is nothing.
+//
+// It exists so a test whose subject is what happens AFTER an ending can reach an
+// ending that is not a supersession. Before the ladder bar, any ending would do
+// and the supersession was the cheapest to write; the two are not
+// interchangeable now, and a helper is what stops the next fixture reaching for
+// the cheap one again.
+func (f *deleverFixture) completeWithNoSpotSale() {
+	f.t.Helper()
+	perp := f.add(perpLeg(f.t, 20, "1"))
+	if _, err := f.deleverer.SubmitPerpReduction(hedgeGroup(), ref(perp)); err != nil {
+		f.t.Fatalf("SubmitPerpReduction: %v", err)
+	}
+	if err := f.deleverer.ConfirmPerpReduction(hedgeGroup()); err != nil {
+		f.t.Fatalf("ConfirmPerpReduction: %v", err)
+	}
+	if err := f.deleverer.AuthorizeSpotReduction(hedgeGroup(), qty(f.t, "0")); err != nil {
+		f.t.Fatalf("AuthorizeSpotReduction(0): %v", err)
+	}
+	if _, err := f.deleverer.SubmitSpotReduction(hedgeGroup(), application.DispatchRef{}); err != nil {
+		f.t.Fatalf("SubmitSpotReduction(zero): %v", err)
+	}
+}
+
 // residual is the group's ordinary §6.7 residual — what every OTHER client of
 // the classifier sees, which is the quantity the ledger arithmetic is about.
 func (f *deleverFixture) residual() string {
@@ -746,16 +773,62 @@ func TestOpenRefusesASecondLiveGenerationOnTheSameGroup(t *testing.T) {
 //
 // Without it, a Deleverer that refused every second Open would score full marks
 // on the two tests above while disabling the mechanism §7 exists to run.
+//
+// # The ENDING KIND was a collapsed dimension, and #204 is what separated it
+//
+// This test used to end the first generation with an `EmergencyClosePackage`
+// supersession, which was indistinguishable from any other ending for as long as
+// nothing acted on SupersessionPath.ResumesLadder — the sentence it quotes is
+// about `Complete`, and the fixture reached for whichever ending was cheapest to
+// write. It is not indistinguishable now: an external arbitration CLOSES the
+// ladder, so that fixture was asserting the opposite of what its own doc claims.
+// The ladder-closing case is the test below.
 func TestOpenAdmitsANextGenerationOnceTheFirstHasEnded(t *testing.T) {
 	t.Parallel()
 
 	f := newDeleverer(t, neutralPackage(t)...)
 	f.open("1")
-	if err := f.deleverer.Supersede(hedgeGroup(), domain.SupersededByEmergencyClose); err != nil {
-		t.Fatalf("Supersede: %v", err)
-	}
+	f.completeWithNoSpotSale()
 	if _, err := f.deleverer.Open("gen-2", hedgeGroup(), "pkg-2", qty(t, "1")); err != nil {
 		t.Fatalf("Open after the first generation ended: %v", err)
+	}
+}
+
+// TestOpenRefusesTheNextGenerationAfterAnEXTERNALSupersession is the mirror, and
+// it is SM §7's ladder-resumption invariant on the LIVE path.
+//
+// The rule has two homes only in the sense that it fires in two situations — a
+// process that saw the arbitration, and a process that reads it back off the log
+// at §7.5 boot — and it is one predicate (`ResumesLadder`) consulted from one
+// place (`Deleverer.BarLadder`). A version that held only across a restart would
+// be a system that refuses what it has forgotten and permits what it remembers.
+//
+// Both external rows, because the answer is a property of the PATH: a bar keyed
+// off "a supersession happened" passes with one of them present and is wrong
+// about the third.
+func TestOpenRefusesTheNextGenerationAfterAnExternalSupersession(t *testing.T) {
+	t.Parallel()
+
+	for _, path := range []domain.SupersessionPath{
+		domain.SupersededByEmergencyClose,
+		domain.SupersededByFenceReadyLost,
+	} {
+		t.Run(path.String(), func(t *testing.T) {
+			t.Parallel()
+			f := newDeleverer(t, neutralPackage(t)...)
+			f.open("1")
+			if err := f.deleverer.Supersede(hedgeGroup(), path); err != nil {
+				t.Fatalf("Supersede: %v", err)
+			}
+			_, err := f.deleverer.Open("gen-2", hedgeGroup(), "pkg-2", qty(t, "1"))
+			if !errors.Is(err, application.ErrGenerationLadderBarred) {
+				t.Fatalf("Open after %s = %v, want ErrGenerationLadderBarred", path, err)
+			}
+			// The refusal is read BEFORE the reserve, so a barred Open leaves the
+			// shared ledger exactly as it found it. A refusal that reserved first
+			// would leave an entry behind for a generation that does not exist.
+			f.assertReserved("0")
+		})
 	}
 }
 

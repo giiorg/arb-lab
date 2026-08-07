@@ -62,6 +62,30 @@ const (
 	// operator clearance", they "are not auto-corrected").
 	GateVenueJoined
 
+	// GateGenerationsReinstated is §7.5's rebuild at GENERATION scope: every
+	// `PackageDelever` generation the journal opened and never ended, back in
+	// SM §7's ladder with its entry back in §6.7's shared reserved-reduction
+	// ledger, and every ladder a supersession closed still closed.
+	//
+	// [SPEC EDIT LANDED — v0.9.57] §7.5's roster did not have it, and it is a
+	// gate rather than a condition folded into GateJournalReplayed for this
+	// section's own rule that a gate is reported about its OWN evidence.
+	// GateJournalDurable made that argument about the filesystem beneath the
+	// records; this one makes it about a body of evidence the replay does not
+	// have YET. The entry a generation must re-Reserve carries its confirmed perp
+	// reduction, which is in no journal — there is no fill record at either scope
+	// — so it can only be read from the venue, after the join and after §5.3's
+	// absence resolution. Two gates because there are two phases, and the second
+	// cannot run where the first does.
+	//
+	// The direction of its failure is the one GateJournalReplayed reported as
+	// OutcomeIncomplete until this gate existed: a ledger missing an entry reads
+	// as MORE room, so §6.7's determined branch sizes a compensating trade from a
+	// residual too large by exactly the generation's outstanding net intent —
+	// FM-5's shape through recovery, invisible to every invariant computed FROM
+	// that ledger.
+	GateGenerationsReinstated
+
 	// GateNetDeltaAsserted is §7.5's net-delta invariant, asserted before
 	// trading resumes.
 	GateNetDeltaAsserted
@@ -121,6 +145,8 @@ func (g Gate) String() string {
 		return "GateJournalReplayed"
 	case GateVenueJoined:
 		return "GateVenueJoined"
+	case GateGenerationsReinstated:
+		return "GateGenerationsReinstated"
 	case GateNetDeltaAsserted:
 		return "GateNetDeltaAsserted"
 	case GateAccountPosture:

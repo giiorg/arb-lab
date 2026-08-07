@@ -41,10 +41,11 @@ import (
 // Dispatcher's, Resolver's and Joiner's argument, unchanged; and the Checklist's
 // own doc makes the same claim about the sequencer that writes it.
 type Reconciler struct {
-	replay  *Replayer
-	join    *Joiner
-	resolve *Resolver
-	look    SecondLook
+	replay    *Replayer
+	join      *Joiner
+	resolve   *Resolver
+	reinstate *Reinstater
+	look      SecondLook
 }
 
 // SecondLook is the spot delta's stability bracket (task #179, record §70c):
@@ -89,7 +90,16 @@ func (l SecondLook) validate() error {
 // The second look MAY be left unwired — a derivatives-only deployment has no
 // spot delta to bracket — but a boot that then MEETS a spot delta fails by
 // name rather than latching on one look: see Reconcile.
-func NewReconciler(replay *Replayer, join *Joiner, resolve *Resolver, look SecondLook) (*Reconciler, error) {
+//
+// The REINSTATEMENT may likewise be left unwired, on exactly that pattern and
+// for exactly its reason. A deployment whose escalation ladder never runs has no
+// generation to rebuild, and requiring the phase would make every such boot
+// declare a collaborator it has no use for. What it must not do is PASS: a boot
+// that meets a live generation with no reinstatement wired fails by name
+// (ErrGenerationRestoreMissing), because reporting the gate satisfied would
+// report §7.5's ledger rebuilt over a ledger nothing touched — which is the
+// FM-5-shaped hole the gate exists to hold.
+func NewReconciler(replay *Replayer, join *Joiner, resolve *Resolver, reinstate *Reinstater, look SecondLook) (*Reconciler, error) {
 	if replay == nil {
 		return nil, ErrReplayerMissing
 	}
@@ -102,7 +112,7 @@ func NewReconciler(replay *Replayer, join *Joiner, resolve *Resolver, look Secon
 	if err := look.validate(); err != nil {
 		return nil, err
 	}
-	return &Reconciler{replay: replay, join: join, resolve: resolve, look: look}, nil
+	return &Reconciler{replay: replay, join: join, resolve: resolve, reinstate: reinstate, look: look}, nil
 }
 
 // UnprovedOrder is one order §5.3's rule could not conclude about, and the gate
@@ -127,6 +137,13 @@ type Reconciliation struct {
 	// which is a real and common outcome, not an error. See ORDER.
 	Join      Join
 	Assertion Assertion
+
+	// Reinstatement is the generation rebuild's report, zero when the phase did
+	// not run. It is separate from Recovery because the two answer about
+	// different evidence: Recovery says what the LOG held, and this says what was
+	// put back — which for a generation whose premise dissolved during the outage
+	// are different things, since the reassessment may have superseded it.
+	Reinstatement Reinstatement
 
 	// Resolved is how many of Join.Absent §5.3's rule concluded about, and
 	// Unproved names the ones it could not, with the gate that refused.
@@ -224,38 +241,23 @@ func (r *Reconciler) Reconcile(c *boot.Checklist) (Reconciliation, error) {
 	}
 	out.Recovery = rec
 
-	// A generation the log opened and never ended is a replay that CONCLUDED and
-	// did not rebuild everything the log holds — boot.OutcomeIncomplete's own
-	// definition, and the outcome whose doc names this type as its home.
+	// A live generation no longer holds THIS gate, and the move is a gate
+	// split rather than a weakening.
 	//
-	// # Why it is a refusal and not a note in the report
+	// Slice #203 reported OutcomeIncomplete here whenever the log held a
+	// generation it never ended, because nothing re-Reserved its ledger entry and
+	// a ledger missing an entry reads as MORE room. Nothing about that direction
+	// has changed; what changed is that the reinstatement exists and CANNOT run
+	// here — the entry carries the confirmed perp reduction, which lives in no
+	// journal and is read from the venue two phases down. So the refusal moved to
+	// the gate whose evidence it actually is (boot.GateGenerationsReinstated),
+	// and the posture is held identically in the meantime because the roster's
+	// fold is over the REQUIRED gates: an unreported one refuses exactly as a
+	// failed one does.
 	//
-	// The generation's entry in the reserved-reduction ledger died with the
-	// process, and nothing here re-Reserves it (Recovery.LiveGenerations says
-	// why). A ledger short by an entry reads as MORE room, so §6.7's determined
-	// branch would size a compensating trade against exposure the generation's
-	// own perp leg already committed to — FM-5's shape, reached through recovery,
-	// and invisible to every invariant because they are all computed FROM the
-	// ledger.
-	//
-	// # It is reported INSTEAD of OutcomePassed, and the sequence continues
-	//
-	// Instead, because a gate carries one outcome and passing is the one thing
-	// that must not be reachable while this holds. Continuing, because the join
-	// and the net-delta assertion are the operator's diagnosis and each reports
-	// on its OWN evidence — stopping here would leave two gates unreported and an
-	// operator with a refusal and no picture of the account behind it.
-	//
-	// Nothing can currently reach this: no composition root constructs a
-	// Deleverer, so no journal contains a generation record. That is the point of
-	// landing it now rather than with the rebuild — the refusal is already
-	// standing on the day the wiring lands, which is the direction that is right
-	// when somebody forgets.
-	replayOutcome := boot.OutcomePassed
-	if len(rec.LiveGenerations) > 0 {
-		replayOutcome = boot.OutcomeIncomplete
-	}
-	if err := c.Report(boot.GateJournalReplayed, replayOutcome); err != nil {
+	// The replay's own evidence is the records, and it rebuilt everything the
+	// records can rebuild.
+	if err := c.Report(boot.GateJournalReplayed, boot.OutcomePassed); err != nil {
 		return out, err
 	}
 
@@ -290,12 +292,24 @@ func (r *Reconciler) Reconcile(c *boot.Checklist) (Reconciliation, error) {
 	}
 
 	if joinOutcome != boot.OutcomePassed {
-		// The assertion does not run over a rebuild that did not conclude, and the
-		// gate stays UNREPORTED rather than being failed. Unreported is the honest
-		// value — the check never ran — and it is not the permissive reading: the
-		// fold is over the REQUIRED gates, so an unreported one holds the posture
-		// at reconcile-only exactly as a failure would.
+		// Neither the assertion nor the generation rebuild runs over a join that
+		// did not conclude, and both gates stay UNREPORTED rather than being
+		// failed. Unreported is the honest value — the check never ran — and it is
+		// not the permissive reading: the fold is over the REQUIRED gates, so an
+		// unreported one holds the posture at reconcile-only exactly as a failure
+		// would.
+		//
+		// The reinstatement is held for a sharper reason than the assertion is. It
+		// sizes each generation's ledger entry from its perp leg's executed
+		// quantity, and an unconcluded join is precisely the state in which that
+		// quantity is knowably SHORT — so a rebuild here would re-enter entries
+		// that understate what the generations committed, and understating the
+		// subtrahend is the direction that reads as more room to trade.
 		return out, nil
+	}
+
+	if err := r.reinstateGenerations(rec, c, &out); err != nil {
+		return out, err
 	}
 
 	if err := c.Report(boot.GateNetDeltaAsserted, boot.OutcomePending); err != nil {
@@ -440,6 +454,73 @@ func spotDeltasEqual(a, b Assertion) bool {
 		}
 	}
 	return true
+}
+
+// reinstateGenerations is §7.5's rebuild at generation scope, reported into
+// GateGenerationsReinstated.
+//
+// # It runs here and could not run anywhere earlier
+//
+// A generation's ledger entry carries its OUTSTANDING NET INTENT, which before
+// the authorization is the confirmed perp reduction — a quantity that exists in
+// no journal at either scope and reaches this process only through the venue.
+// The replay leaves every cumulative at zero, the join fills them in, and §5.3's
+// resolution is what sweeps the orders the join declined to. So this is the
+// first point in the sequence at which the number is a fact, and rebuilding
+// earlier does not merely guess: a generation whose log holds an authorization of
+// s would be rebuilt against a confirmed perp reduction of zero and refused by
+// its own never-net-short cap.
+//
+// # An error return means the REPORT could not be filed, and nothing else
+//
+// Reconcile's own rule. A reinstatement that fails is a verdict — the gate
+// carries it and the sequence continues to the assertion, because each gate
+// reports on its own evidence and an operator holding a refusal wants the
+// picture of the account behind it. What comes back as an error here is the
+// checklist refusing the report.
+//
+// # The three outcomes, and why the empty case is PASSED rather than unreported
+//
+// A journal with no live generation and no closed ladder has nothing to
+// reinstate, and the gate PASSES on that evidence rather than staying silent.
+// Unreported would hold every deployment that never delevers below trading for
+// ever, which is the permanent-block shape §7.5's own Unasserted ruling was
+// taken to avoid — and it would be reporting "the check did not run" about a
+// check that ran and found nothing to do.
+//
+// A wired reinstatement that concludes with an OWED supersession — the premise
+// dissolved while the reserved second leg was still out — is Incomplete rather
+// than Passed. The ledger is correct and nothing failed, but the ladder is
+// carrying an obligation nothing at boot can discharge: all three of §7's rows
+// quiesce that leg to §6.7 finality FIRST, and finality is the venue's to give.
+// Incomplete is that cell exactly — it ran, it concluded, and it left work a
+// further attempt may finish.
+func (r *Reconciler) reinstateGenerations(rec Recovery, c *boot.Checklist, out *Reconciliation) error {
+	if r.reinstate == nil {
+		if len(rec.LiveGenerations) == 0 && len(rec.BarredLadders) == 0 {
+			// Nothing to reinstate, so an unwired phase is not a wiring defect —
+			// it is a deployment whose ladder never ran. SecondLook's rule: the
+			// bracket is optional and its ABSENCE is only a failure on the boot
+			// that meets the condition it exists for.
+			return c.Report(boot.GateGenerationsReinstated, boot.OutcomePassed)
+		}
+		out.Cause = ErrGenerationRestoreMissing
+		return c.Report(boot.GateGenerationsReinstated, boot.OutcomeFailed)
+	}
+
+	if err := c.Report(boot.GateGenerationsReinstated, boot.OutcomePending); err != nil {
+		return err
+	}
+	reinstated, err := r.reinstate.Reinstate(rec)
+	out.Reinstatement = reinstated
+	if err != nil {
+		out.Cause = err
+		return c.Report(boot.GateGenerationsReinstated, boot.OutcomeFailed)
+	}
+	if reinstated.AwaitingQuiesce > 0 {
+		return c.Report(boot.GateGenerationsReinstated, boot.OutcomeIncomplete)
+	}
+	return c.Report(boot.GateGenerationsReinstated, boot.OutcomePassed)
 }
 
 // resolveAbsences runs §5.3's rule over the orders the venue's order surface did

@@ -575,3 +575,166 @@ func TestAPerpFillMayNotOvershootTheGenerationsTarget(t *testing.T) {
 		t.Fatalf("zero fill = %v, want ErrGenerationFillNotPositive", err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// §7.5's rehydration: the premise is the ONE guard the restore path drops
+// ---------------------------------------------------------------------------
+
+// TestRestoreAndOpenDifferOnTheirPremiseAndOnNothingElse is the pair, and it is
+// a pair on purpose.
+//
+// Asserted one at a time, "Restore admits a dissolved premise" passes against a
+// build where NEITHER entry point checks it — which would delete FM-8's entry
+// precondition from the system while looking like a recovery feature. The two
+// halves in one test are what make the difference the claim.
+//
+// Every dissolution shape is used, because Premise.Intact is a conjunction
+// (`residual == 0 AND class == Determined`) and a table breaking both conjuncts
+// at once cannot tell a check on the number from a check on the verdict.
+func TestRestoreAndOpenDifferOnTheirPremiseAndOnNothingElse(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		premise domain.Premise
+	}{
+		{"a nonzero residual", domain.Premise{Residual: genQty(t, "0.25"), Class: domain.ClassificationDetermined}},
+		{"a residual whose sign is not fixed", domain.Premise{Residual: genQty(t, "0"), Class: domain.ClassificationAmbiguous}},
+		{"a deadline-exceeded package", domain.Premise{Residual: genQty(t, "0"), Class: domain.ClassificationDeadlineExceededAmbiguous}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := domain.OpenGeneration("gen-1", generationGroup(), "pkg-1", genQty(t, "1"), tc.premise); !errors.Is(err, domain.ErrGenerationPremiseNotIntact) {
+				t.Errorf("OpenGeneration under %s = %v, want ErrGenerationPremiseNotIntact", tc.name, err)
+			}
+			g, err := domain.RestoreGeneration("gen-1", generationGroup(), "pkg-1", genQty(t, "1"))
+			if err != nil {
+				t.Fatalf("RestoreGeneration under %s = %v, want it admitted — refusing leaves the ledger entry out", tc.name, err)
+			}
+			if g.Phase() != domain.GenerationPlanned {
+				t.Errorf("RestoreGeneration().Phase = %s, want %s", g.Phase(), domain.GenerationPlanned)
+			}
+		})
+	}
+}
+
+// TestRestoreGenerationStillChecksTheRECORD is the other side: dropping the
+// premise must not have dropped the shape checks with it.
+//
+// Those are claims about the stored record rather than about the world — an id,
+// a group, a reservation, a positive target — and a log failing one is a log
+// that verifies and does not compose. They are shared with OpenGeneration
+// through one constructor precisely so a rehydrated generation cannot be laxer
+// about itself than a fresh one.
+func TestRestoreGenerationStillChecksTheRecord(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name        string
+		id          domain.GenerationID
+		group       domain.HedgeGroup
+		reservation domain.ReservationID
+		target      string
+		want        error
+	}{
+		{"no id", "", generationGroup(), "pkg-1", "1", domain.ErrGenerationIDUnset},
+		{"no reservation", "gen-1", generationGroup(), "", "1", domain.ErrReservationUnset},
+		{"a zero target", "gen-1", generationGroup(), "pkg-1", "0", domain.ErrGenerationTargetNotPositive},
+		{"a negative target", "gen-1", generationGroup(), "pkg-1", "-1", domain.ErrGenerationTargetNotPositive},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := domain.RestoreGeneration(tc.id, tc.group, tc.reservation, genQty(t, tc.target))
+			if !errors.Is(err, tc.want) {
+				t.Errorf("RestoreGeneration with %s = %v, want %v", tc.name, err, tc.want)
+			}
+		})
+	}
+	// The group, separately: an invalid one has its own family of errors and the
+	// table above would have to name one of them.
+	if _, err := domain.RestoreGeneration("gen-1", domain.HedgeGroup{}, "pkg-1", genQty(t, "1")); err == nil {
+		t.Error("RestoreGeneration with an unset hedge group = nil, want a refusal")
+	}
+}
+
+// TestTheRestoreStepsKeepTheirOWNChecks is what stops "drops the premise" from
+// becoming "drops the guards".
+//
+// Each restore step is its live twin with the premise removed and nothing else,
+// so both keep SM §7's edge set and both keep their payload rule. The spot one
+// is the sharper case: CheckSpotSize is §7's never-net-short cap, and at
+// recovery the confirmed perp reduction it compares against comes from the venue
+// while the size comes from the log — so this refusal is the only thing standing
+// between a contradiction between two authorities and an entry claiming a sale
+// nothing backs.
+func TestTheRestoreStepsKeepTheirOwnChecks(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the perp submission refuses an unidentified leg", func(t *testing.T) {
+		t.Parallel()
+		g := restored(t)
+		if err := g.RestorePerpSubmission(""); !errors.Is(err, domain.ErrGenerationLegUnidentified) {
+			t.Errorf("RestorePerpSubmission(\"\") = %v, want ErrGenerationLegUnidentified", err)
+		}
+	})
+
+	t.Run("the perp submission keeps the edge set", func(t *testing.T) {
+		t.Parallel()
+		g := restored(t)
+		if err := g.RestorePerpSubmission("leg-1"); err != nil {
+			t.Fatalf("RestorePerpSubmission: %v", err)
+		}
+		if err := g.RestorePerpSubmission("leg-2"); !errors.Is(err, domain.ErrGenerationNoOp) {
+			t.Errorf("a second RestorePerpSubmission = %v, want ErrGenerationNoOp", err)
+		}
+	})
+
+	t.Run("the authorization keeps the never-net-short cap", func(t *testing.T) {
+		t.Parallel()
+		g := restored(t)
+		if err := g.RestorePerpSubmission("leg-1"); err != nil {
+			t.Fatalf("RestorePerpSubmission: %v", err)
+		}
+		if err := g.RecordPerpFill(genQty(t, "0.3")); err != nil {
+			t.Fatalf("RecordPerpFill: %v", err)
+		}
+		if err := g.ConfirmPerpReduction(); err != nil {
+			t.Fatalf("ConfirmPerpReduction: %v", err)
+		}
+		// 0.5 authorized against 0.3 confirmed: the log and the venue disagree,
+		// and admitting it puts an entry into the shared ledger claiming a sale
+		// this generation could never back.
+		if err := g.RestoreSpotAuthorization(genQty(t, "0.5")); !errors.Is(err, domain.ErrGenerationSpotExceedsConfirmedPerp) {
+			t.Errorf("RestoreSpotAuthorization(0.5) over 0.3 confirmed = %v, want ErrGenerationSpotExceedsConfirmedPerp", err)
+		}
+		// The positive control: 0.25 is under the cap and is admitted, so the
+		// refusal above is the CAP biting rather than the method refusing
+		// everything.
+		if err := g.RestoreSpotAuthorization(genQty(t, "0.25")); err != nil {
+			t.Fatalf("RestoreSpotAuthorization(0.25) over 0.3 confirmed = %v, want it admitted", err)
+		}
+		if got := g.Authorized().Decimal(); got != genQty(t, "0.25").Decimal() {
+			t.Errorf("Authorized() = %s, want 0.25", got)
+		}
+	})
+
+	t.Run("the authorization keeps the edge set", func(t *testing.T) {
+		t.Parallel()
+		// Straight from `Planned`, which is not an edge: the perp leg was never
+		// submitted, so a spot sale would be authorized against a perp reduction
+		// that does not exist.
+		g := restored(t)
+		if err := g.RestoreSpotAuthorization(genQty(t, "0")); !errors.Is(err, domain.ErrGenerationTransitionForbidden) {
+			t.Errorf("RestoreSpotAuthorization from Planned = %v, want ErrGenerationTransitionForbidden", err)
+		}
+	})
+}
+
+func restored(t *testing.T) *domain.Generation {
+	t.Helper()
+	g, err := domain.RestoreGeneration("gen-1", generationGroup(), "pkg-1", genQty(t, "1"))
+	if err != nil {
+		t.Fatalf("RestoreGeneration: %v", err)
+	}
+	return g
+}

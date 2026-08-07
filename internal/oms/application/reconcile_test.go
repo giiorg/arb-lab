@@ -54,6 +54,12 @@ type reconcileFixture struct {
 	positions *fakePositions
 	resolver  *fakeResolver
 	journal   *fakeJournal
+	ladder    *fakeLadder
+
+	// resolveUseCase is the §5.3 phase itself, held so a test can rebuild the
+	// Reconciler around it — the fixture's `resolver` above is the venue DOUBLE
+	// the phase reads, which is a different object and not interchangeable.
+	resolveUseCase *application.Resolver
 }
 
 func newReconcileFixture(t *testing.T, now time.Time, entries ...journalEntry) *reconcileFixture {
@@ -85,21 +91,30 @@ func newReconcileFixture(t *testing.T, now time.Time, entries ...journalEntry) *
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
-	r, err := application.NewReconciler(replayer, joiner, resolver, application.SecondLook{})
+	ladder := newFakeLadder()
+	reinstater, err := application.NewReinstater(ladder, orders)
+	if err != nil {
+		t.Fatalf("NewReinstater: %v", err)
+	}
+	r, err := application.NewReconciler(replayer, joiner, resolver, reinstater, application.SecondLook{})
 	if err != nil {
 		t.Fatalf("NewReconciler: %v", err)
 	}
 	return &reconcileFixture{
 		reconciler: r, replayer: replayer, joiner: joiner, orders: orders, replay: replay,
 		joinVenue: joinVenue, positions: positions, resolver: resolveVenue, journal: journal,
+		ladder: ladder, resolveUseCase: resolver,
 	}
 }
 
-// bootChecklist is §7.5's three OMS gates. All three, always — see checklist
-// item 1.
+// bootChecklist is §7.5's FOUR OMS gates. All four, always — see checklist
+// item 1: a fixture declaring only the gates a case happens to exercise cannot
+// tell a gate that passed from a gate nobody reported, which is the one
+// distinction the posture fold is built on.
 func bootChecklist(t *testing.T) *boot.Checklist {
 	t.Helper()
-	c, err := boot.NewChecklist(boot.GateJournalReplayed, boot.GateVenueJoined, boot.GateNetDeltaAsserted)
+	c, err := boot.NewChecklist(boot.GateJournalReplayed, boot.GateVenueJoined,
+		boot.GateGenerationsReinstated, boot.GateNetDeltaAsserted)
 	if err != nil {
 		t.Fatalf("NewChecklist: %v", err)
 	}
@@ -733,10 +748,10 @@ func TestReconcilerRefusesAMissingPhase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewReplayer: %v", err)
 	}
-	if _, err := application.NewReconciler(nil, nil, nil, application.SecondLook{}); !errors.Is(err, application.ErrReplayerMissing) {
+	if _, err := application.NewReconciler(nil, nil, nil, nil, application.SecondLook{}); !errors.Is(err, application.ErrReplayerMissing) {
 		t.Errorf("NewReconciler(nil,...) = %v, want ErrReplayerMissing", err)
 	}
-	if _, err := application.NewReconciler(replayer, nil, nil, application.SecondLook{}); !errors.Is(err, application.ErrJoinerMissing) {
+	if _, err := application.NewReconciler(replayer, nil, nil, nil, application.SecondLook{}); !errors.Is(err, application.ErrJoinerMissing) {
 		t.Errorf("NewReconciler(replayer, nil, nil) = %v, want ErrJoinerMissing", err)
 	}
 }
@@ -808,21 +823,22 @@ func TestRetryMayLiftNamesEveryReason(t *testing.T) {
 // SM §7: a generation the log opened and never ended
 // ---------------------------------------------------------------------------
 
-// TestReconcileALiveGenerationIsIncompleteNotPassed is the refusal that has to
-// be standing BEFORE the Deleverer is wired into a composition root.
+// TestALiveGenerationIsReinstatedOnItsOwnGate is the gate SPLIT, and it is what
+// #204 turned slice #203's standing refusal into.
 //
-// The replay concluded, the chain is intact, and this build did not rebuild
-// everything the log holds: the generation's entry in the shared
-// reserved-reduction ledger died with the process and nothing re-Reserves it.
-// The direction is what makes it a refusal rather than a note — a ledger short
-// by an entry reads as MORE room, so §6.7's determined branch would compensate
-// for exposure the generation's own perp leg already committed to.
+// #203 reported OutcomeIncomplete on GateJournalReplayed whenever the log held a
+// generation it never ended, because nothing re-Reserved its entry. The
+// direction has not changed — a ledger short by an entry reads as MORE room, and
+// §6.7's determined branch would compensate for exposure the generation's own
+// perp leg already committed to. What changed is WHERE the evidence is: the
+// entry carries the confirmed perp reduction, which is in no journal and is read
+// from the venue two phases later. So the replay's gate reports on the records
+// (Passed) and the reinstatement's reports on the rebuild.
 //
-// It asserts OutcomeIncomplete rather than "not Passed", because a negative
-// assertion is satisfied by every other outcome including the two that latch,
-// and the clearance rules differ: this one lifts on the next boot after the
-// rebuild lands, and NeedsOperator would not.
-func TestReconcileALiveGenerationIsIncompleteNotPassed(t *testing.T) {
+// The pair is asserted TOGETHER rather than one at a time, because that is the
+// claim: a version that passed the replay's gate and never declared the second
+// would have moved a refusal into nowhere.
+func TestALiveGenerationIsReinstatedOnItsOwnGate(t *testing.T) {
 	t.Parallel()
 
 	sell := replayOrder(t, mintedID(t, 1))
@@ -834,27 +850,55 @@ func TestReconcileALiveGenerationIsIncompleteNotPassed(t *testing.T) {
 			gen: "GEN-LIVE", id: sell.ClientOrderID},
 	)
 	f := newReconcileFixture(t, joinNow, script...)
+	// The join must CONCLUDE, or the reinstatement never runs and this test
+	// passes on an unreported gate — which is the vacuous reading of every
+	// assertion below it. §7.5's ordering is what makes that a real precondition
+	// rather than fixture bookkeeping: the generation's entry is sized from its
+	// perp leg's executed quantity, and an unconcluded join is exactly the state
+	// in which that quantity is knowably short.
+	f.joinVenue.status[sell.ClientOrderID] = present("V-1", "0.5", t)
+	f.joinVenue.sweeps[perp()] = ports.ExecutionSweep{
+		Executions: []ports.VenueExecution{execution(t, "E-1", sell.ClientOrderID, "V-1", "0.5")},
+	}
+	f.positions.reports[perpScopeFor()] = ports.PositionReport{
+		Positions: []ports.VenuePosition{{Instrument: perp(), Net: signed(t, "-0.5")}},
+	}
 
 	c := bootChecklist(t)
 	got, err := f.reconciler.Reconcile(c)
 	if err != nil {
 		t.Fatalf("Reconcile = %v, want nil — a refusal is a report, not an error", err)
 	}
-	if o := outcomeOf(t, c, boot.GateJournalReplayed); o != boot.OutcomeIncomplete {
-		t.Errorf("GateJournalReplayed = %s, want OutcomeIncomplete", o)
+	if o := outcomeOf(t, c, boot.GateVenueJoined); o != boot.OutcomePassed {
+		t.Fatalf("GateVenueJoined = %s, want OutcomePassed — the reinstatement never runs otherwise", o)
 	}
-	if latched(t, c, boot.GateJournalReplayed) {
-		t.Error("a live generation latched — the next boot after the rebuild lands must lift it")
+	if o := outcomeOf(t, c, boot.GateJournalReplayed); o != boot.OutcomePassed {
+		t.Errorf("GateJournalReplayed = %s, want OutcomePassed — the records replayed", o)
 	}
-	if len(got.Recovery.LiveGenerations) != 1 || got.Recovery.LiveGenerations[0] != "GEN-LIVE" {
-		t.Errorf("Recovery.LiveGenerations = %v, want [GEN-LIVE]", got.Recovery.LiveGenerations)
+	if o := outcomeOf(t, c, boot.GateGenerationsReinstated); o != boot.OutcomePassed {
+		t.Errorf("GateGenerationsReinstated = %s, want OutcomePassed", o)
+	}
+	if latched(t, c, boot.GateGenerationsReinstated) {
+		t.Error("the reinstatement latched — nothing here needs operator clearance")
+	}
+	if len(got.Recovery.LiveGenerations) != 1 || got.Recovery.LiveGenerations[0].ID != "GEN-LIVE" {
+		t.Errorf("Recovery.LiveGenerations = %v, want [GEN-LIVE]", liveGenerationIDs(got.Recovery))
+	}
+	// The generation reached the LADDER, which is the thing the gate reports
+	// about. A gate that passed having reinstated nothing is exactly the shape
+	// this whole phase exists to make impossible.
+	if len(f.ladder.restored) != 1 || f.ladder.restored[0] != "GEN-LIVE" {
+		t.Errorf("ladder restored %v, want [GEN-LIVE]", f.ladder.restored)
+	}
+	if len(got.Reinstatement.Restored) != 1 {
+		t.Errorf("Reinstatement.Restored = %v, want one entry", got.Reinstatement.Restored)
 	}
 
-	// The sequence CONTINUED. Each gate reports on its own evidence, and an
-	// operator holding a refusal with no picture of the account behind it is
-	// the failure this ordering avoids.
-	if o := outcomeOf(t, c, boot.GateVenueJoined); o == boot.OutcomeUnreported {
-		t.Error("GateVenueJoined = OutcomeUnreported — the join must still run and report")
+	// The sequence CONTINUED past the reinstatement. Each gate reports on its
+	// own evidence, and an operator holding a refusal with no picture of the
+	// account behind it is the failure this ordering avoids.
+	if o := outcomeOf(t, c, boot.GateNetDeltaAsserted); o == boot.OutcomeUnreported {
+		t.Error("GateNetDeltaAsserted = OutcomeUnreported — the assertion must still run and report")
 	}
 }
 
@@ -891,6 +935,170 @@ func TestReconcileAnEndedGenerationStillPasses(t *testing.T) {
 			got.Recovery.Generations)
 	}
 	if len(got.Recovery.LiveGenerations) != 0 {
-		t.Errorf("Recovery.LiveGenerations = %v, want none", got.Recovery.LiveGenerations)
+		t.Errorf("Recovery.LiveGenerations = %v, want none", liveGenerationIDs(got.Recovery))
 	}
+}
+
+// TestAnUnwiredReinstatementFailsByNameOverALiveGeneration is
+// ErrSecondLookUnwired's shape one gate over.
+//
+// The phase is optional because a deployment whose escalation ladder never runs
+// has nothing to reinstate — requiring it would make every such boot declare a
+// collaborator it has no use for. What it must not do is PASS on the one boot
+// that meets the condition it exists for, because passing would report §7.5's
+// ledger rebuilt over a ledger nothing touched.
+//
+// It is asserted as OutcomeFailed AND on the named cause, because "not Passed"
+// is satisfied by Incomplete — which does not latch and which an operator reads
+// as "wait" rather than "this binary is missing a phase".
+func TestAnUnwiredReinstatementFailsByNameOverALiveGeneration(t *testing.T) {
+	t.Parallel()
+
+	sell := replayOrder(t, mintedID(t, 1))
+	script := replayScript(t, 1, sell, joinNow.Add(-time.Hour), domain.StateFilled)
+	script = append(script,
+		journalEntry{seq: uint64(len(script) + 1), kind: "generation_opened", gen: "GEN-LIVE",
+			group: testHedgeGroup("BTCUSDT"), res: "RES-1", qty: testTarget(t, "1")},
+	)
+	f := newReconcileFixture(t, joinNow, script...)
+	f.unwireReinstatement(t)
+	concludingJoin(t, f, sell)
+
+	c := bootChecklist(t)
+	got, err := f.reconciler.Reconcile(c)
+	if err != nil {
+		t.Fatalf("Reconcile = %v, want nil — a refusal is a report, not an error", err)
+	}
+	if o := outcomeOf(t, c, boot.GateGenerationsReinstated); o != boot.OutcomeFailed {
+		t.Errorf("GateGenerationsReinstated = %s, want OutcomeFailed", o)
+	}
+	if !errors.Is(got.Cause, application.ErrGenerationRestoreMissing) {
+		t.Errorf("Cause = %v, want ErrGenerationRestoreMissing", got.Cause)
+	}
+}
+
+// TestAnUnwiredReinstatementPassesOverAJournalWithNoGeneration is the positive
+// control the test above is worthless without.
+//
+// Without it, a Reconciler that failed the gate whenever the phase was unwired
+// would score full marks there — and would hold every derivatives-only
+// deployment below trading for ever, on a healthy account with an intact log.
+// That is the permanent-block failure §7.5's own Unasserted ruling was taken to
+// avoid.
+func TestAnUnwiredReinstatementPassesOverAJournalWithNoGeneration(t *testing.T) {
+	t.Parallel()
+
+	sell := replayOrder(t, mintedID(t, 1))
+	f := newReconcileFixture(t, joinNow, replayScript(t, 1, sell, joinNow.Add(-time.Hour), domain.StateFilled)...)
+	f.unwireReinstatement(t)
+	concludingJoin(t, f, sell)
+
+	c := bootChecklist(t)
+	if _, err := f.reconciler.Reconcile(c); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if o := outcomeOf(t, c, boot.GateGenerationsReinstated); o != boot.OutcomePassed {
+		t.Errorf("GateGenerationsReinstated = %s, want OutcomePassed", o)
+	}
+}
+
+// TestAnOwedSupersessionHoldsTheGateAtIncomplete is the third outcome, and it is
+// the one that is neither a failure nor a pass.
+//
+// The premise dissolved while the generation's reserved SECOND leg was still out
+// at the venue, so all three of §7's supersession rows require that leg to reach
+// §6.7 finality FIRST — and finality is the venue's to give, not the boot's. The
+// ledger is correct and nothing failed; what is outstanding is an obligation
+// nothing at boot can discharge. Incomplete is that cell exactly: it ran, it
+// concluded, and it left work a further attempt may finish.
+func TestAnOwedSupersessionHoldsTheGateAtIncomplete(t *testing.T) {
+	t.Parallel()
+
+	sell := replayOrder(t, mintedID(t, 1))
+	script := replayScript(t, 1, sell, joinNow.Add(-time.Hour), domain.StateFilled)
+	script = append(script,
+		journalEntry{seq: uint64(len(script) + 1), kind: "generation_opened", gen: "GEN-LIVE",
+			group: testHedgeGroup("BTCUSDT"), res: "RES-1", qty: testTarget(t, "1")},
+	)
+	f := newReconcileFixture(t, joinNow, script...)
+	f.ladder.quiesce = true
+	concludingJoin(t, f, sell)
+
+	c := bootChecklist(t)
+	got, err := f.reconciler.Reconcile(c)
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if o := outcomeOf(t, c, boot.GateGenerationsReinstated); o != boot.OutcomeIncomplete {
+		t.Errorf("GateGenerationsReinstated = %s, want OutcomeIncomplete", o)
+	}
+	if latched(t, c, boot.GateGenerationsReinstated) {
+		t.Error("an owed supersession latched — the venue's own finality lifts it, not an operator")
+	}
+	if got.Reinstatement.AwaitingQuiesce != 1 {
+		t.Errorf("AwaitingQuiesce = %d, want 1", got.Reinstatement.AwaitingQuiesce)
+	}
+}
+
+// TestAFailedReinstatementIsAVerdictAndTheSequenceContinues is §7.5's
+// each-gate-on-its-own-evidence rule applied to the new phase.
+//
+// A reinstatement that could not rebuild is a refusal, not an error, and
+// stopping there would leave the net-delta assertion unreported — an operator
+// holding a refusal with no picture of the account behind it.
+func TestAFailedReinstatementIsAVerdictAndTheSequenceContinues(t *testing.T) {
+	t.Parallel()
+
+	sell := replayOrder(t, mintedID(t, 1))
+	script := replayScript(t, 1, sell, joinNow.Add(-time.Hour), domain.StateFilled)
+	script = append(script,
+		journalEntry{seq: uint64(len(script) + 1), kind: "generation_opened", gen: "GEN-LIVE",
+			group: testHedgeGroup("BTCUSDT"), res: "RES-1", qty: testTarget(t, "1")},
+	)
+	f := newReconcileFixture(t, joinNow, script...)
+	f.ladder.failRestore = errors.New("ledger unavailable")
+	concludingJoin(t, f, sell)
+
+	c := bootChecklist(t)
+	got, err := f.reconciler.Reconcile(c)
+	if err != nil {
+		t.Fatalf("Reconcile = %v, want nil — a refusal is a report, not an error", err)
+	}
+	if o := outcomeOf(t, c, boot.GateGenerationsReinstated); o != boot.OutcomeFailed {
+		t.Errorf("GateGenerationsReinstated = %s, want OutcomeFailed", o)
+	}
+	if got.Cause == nil {
+		t.Error("Cause = nil, want the restore error")
+	}
+	if o := outcomeOf(t, c, boot.GateNetDeltaAsserted); o == boot.OutcomeUnreported {
+		t.Error("GateNetDeltaAsserted = OutcomeUnreported — the sequence must continue past a refusal")
+	}
+}
+
+// concludingJoin gives a fixture the venue answers that make GateVenueJoined
+// pass, which the reinstatement's gate is downstream of.
+//
+// It is a helper rather than four copies because the precondition is easy to
+// forget and its absence is SILENT: without it the gate is Unreported and every
+// assertion about the reinstatement's outcome passes vacuously.
+func concludingJoin(t *testing.T, f *reconcileFixture, order domain.Order) {
+	t.Helper()
+	f.joinVenue.status[order.ClientOrderID] = present("V-1", "0.5", t)
+	f.joinVenue.sweeps[perp()] = ports.ExecutionSweep{
+		Executions: []ports.VenueExecution{execution(t, "E-1", order.ClientOrderID, "V-1", "0.5")},
+	}
+	f.positions.reports[perpScopeFor()] = ports.PositionReport{
+		Positions: []ports.VenuePosition{{Instrument: perp(), Net: signed(t, "-0.5")}},
+	}
+}
+
+// unwireReinstatement rebuilds the fixture's Reconciler with NO reinstatement,
+// which is the optional-phase shape NewReconciler admits.
+func (f *reconcileFixture) unwireReinstatement(t *testing.T) {
+	t.Helper()
+	r, err := application.NewReconciler(f.replayer, f.joiner, f.resolveUseCase, nil, application.SecondLook{})
+	if err != nil {
+		t.Fatalf("NewReconciler: %v", err)
+	}
+	f.reconciler = r
 }

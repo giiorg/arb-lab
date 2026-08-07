@@ -753,12 +753,13 @@ func TestRebuildReportsTheGenerationsTheLogNeverEnded(t *testing.T) {
 	// length is satisfied by the wrong generation, and a containment check
 	// throws away the variation the fixture was built to carry.
 	want := []domain.GenerationID{"GEN-B"}
-	if len(rec.LiveGenerations) != len(want) {
-		t.Fatalf("LiveGenerations = %v, want %v", rec.LiveGenerations, want)
+	got := liveGenerationIDs(rec)
+	if len(got) != len(want) {
+		t.Fatalf("LiveGenerations = %v, want %v", got, want)
 	}
 	for i := range want {
-		if rec.LiveGenerations[i] != want[i] {
-			t.Errorf("LiveGenerations[%d] = %q, want %q", i, rec.LiveGenerations[i], want[i])
+		if got[i] != want[i] {
+			t.Errorf("LiveGenerations[%d] = %q, want %q", i, got[i], want[i])
 		}
 	}
 }
@@ -791,7 +792,7 @@ func TestASupersededGenerationIsNotLive(t *testing.T) {
 			}
 			if len(rec.LiveGenerations) != 0 {
 				t.Errorf("LiveGenerations = %v after a %s supersession, want none",
-					rec.LiveGenerations, path)
+					liveGenerationIDs(rec), path)
 			}
 			if rec.Generations != 1 {
 				t.Errorf("Generations = %d, want 1", rec.Generations)
@@ -835,8 +836,8 @@ func TestAnUnendedGenerationIsLiveAtEveryMidLadderPhase(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Rebuild: %v", err)
 			}
-			if len(rec.LiveGenerations) != 1 || rec.LiveGenerations[0] != "GEN-A" {
-				t.Errorf("LiveGenerations = %v at %s, want [GEN-A]", rec.LiveGenerations, phase)
+			if len(rec.LiveGenerations) != 1 || rec.LiveGenerations[0].ID != "GEN-A" {
+				t.Errorf("LiveGenerations = %v at %s, want [GEN-A]", liveGenerationIDs(rec), phase)
 			}
 		})
 	}
@@ -951,6 +952,217 @@ func TestAJournalWithNoGenerationsReportsNone(t *testing.T) {
 	}
 	if rec.Generations != 0 || len(rec.LiveGenerations) != 0 {
 		t.Errorf("Generations = %d, LiveGenerations = %v; want 0 and none",
-			rec.Generations, rec.LiveGenerations)
+			rec.Generations, liveGenerationIDs(rec))
+	}
+}
+
+// liveGenerationIDs projects a Recovery's live generations to their ids, so the
+// assertions above stay about the SET the replay reported while the value it
+// reports grew payloads.
+//
+// It is a projection in the TEST rather than an accessor on Recovery, and
+// deliberately: an accessor would be a second way to read the field, and the
+// tests that care about the payloads have to read them off the struct anyway.
+func liveGenerationIDs(rec application.Recovery) []domain.GenerationID {
+	ids := make([]domain.GenerationID, 0, len(rec.LiveGenerations))
+	for _, g := range rec.LiveGenerations {
+		ids = append(ids, g.ID)
+	}
+	return ids
+}
+
+// TestTheReplayBarsTheLadderOnlyForThePathsThatDoNotResume is
+// SupersessionPath.ResumesLadder read off the LOG, and it is one test over all
+// three paths rather than one per path for a reason the mutation campaign made
+// concrete.
+//
+// The rule is a property of the PATH, so it has a true set and a false set and
+// each is only meaningful against the other. A version that barred on EVERY
+// supersession passes any fixture using only the external rows; a version that
+// barred on NONE passes any fixture using only the premise-lost row; and
+// inverting the predicate outright — which is what mutant M11 did — passes both
+// of those suites. Running the three together is what leaves no such build
+// standing.
+//
+// The failure directions differ, which is why neither half is optional. Losing
+// an external bar lets core §7.1's ladder open a generation against an
+// arbitration that has taken the package away from it. Adding a premise-lost bar
+// disables the one mechanism that reduces leverage on a neutral package for the
+// rest of the process's life, at exactly the moment it is needed.
+func TestTheReplayBarsTheLadderOnlyForThePathsThatDoNotResume(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		path domain.SupersessionPath
+		bars bool
+	}{
+		{domain.SupersededByEmergencyClose, true},
+		{domain.SupersededByFenceReadyLost, true},
+		{domain.SupersededByPremiseLost, false},
+	} {
+		t.Run(tc.path.String(), func(t *testing.T) {
+			t.Parallel()
+			group := testHedgeGroup("BTCUSDT")
+			r, _, _ := newReplayer(t,
+				journalEntry{seq: 1, kind: "generation_opened", gen: "GEN-A",
+					group: group, res: "RES-A", qty: testTarget(t, "1")},
+				journalEntry{seq: 2, kind: "generation_superseded", gen: "GEN-A", path: tc.path},
+			)
+			rec, err := r.Rebuild()
+			if err != nil {
+				t.Fatalf("Rebuild: %v", err)
+			}
+			if !tc.bars {
+				if len(rec.BarredLadders) != 0 {
+					t.Fatalf("BarredLadders = %v after a %s supersession, want none", rec.BarredLadders, tc.path)
+				}
+				return
+			}
+			if len(rec.BarredLadders) != 1 {
+				t.Fatalf("BarredLadders = %v after a %s supersession, want one", rec.BarredLadders, tc.path)
+			}
+			// The GROUP comes from the generation's OPENING record, not from the
+			// supersession record, which names only the generation. A bar keyed on
+			// anything else could not be derived at all.
+			if got := rec.BarredLadders[0]; got.Group != group || got.Path != tc.path {
+				t.Errorf("BarredLadders[0] = %+v, want {%s %s}", got, group, tc.path)
+			}
+		})
+	}
+}
+
+// TestABarSurvivesAGenerationThatEndedNormallyOnAnotherGroup is the second
+// dimension the test above cannot carry: the bar is per hedge GROUP.
+//
+// With one group, "bars this group" and "bars every group" are the same
+// observable — and the second would stop a package deleveraging because an
+// unrelated package's kill switch fired.
+func TestABarSurvivesAGenerationThatEndedNormallyOnAnotherGroup(t *testing.T) {
+	t.Parallel()
+
+	barred, open := testHedgeGroup("BTCUSDT"), testHedgeGroup("ETHUSDT")
+	r, _, _ := newReplayer(t,
+		journalEntry{seq: 1, kind: "generation_opened", gen: "GEN-A",
+			group: barred, res: "RES-A", qty: testTarget(t, "1")},
+		journalEntry{seq: 2, kind: "generation_superseded", gen: "GEN-A",
+			path: domain.SupersededByEmergencyClose},
+		journalEntry{seq: 3, kind: "generation_opened", gen: "GEN-B",
+			group: open, res: "RES-B", qty: testTarget(t, "2")},
+		journalEntry{seq: 4, kind: "generation_phase", gen: "GEN-B", phase: domain.GenerationComplete},
+	)
+	rec, err := r.Rebuild()
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	if len(rec.BarredLadders) != 1 || rec.BarredLadders[0].Group != barred {
+		t.Fatalf("BarredLadders = %v, want only %s", rec.BarredLadders, barred)
+	}
+}
+
+// TestTheReplayCarriesEveryOpeningPayloadIntoTheRecovery is what #203's dropped
+// payloads became, and it is asserted field by field.
+//
+// Every one of these reached the visitor and was discarded for a slice, on the
+// ground that an unread field is worse than a named gap. Reinstater is the
+// reader, so each is now load-bearing: the reservation is the ledger KEY, the
+// target is both the perp leg's size and the asset the group is tracked under,
+// the leg ids are FM-9's netting set, and the authorized size is what the entry
+// carries from FLAG-3's record onward.
+func TestTheReplayCarriesEveryOpeningPayloadIntoTheRecovery(t *testing.T) {
+	t.Parallel()
+
+	group := testHedgeGroup("BTCUSDT")
+	perpID, spotID := mintedID(t, 3), mintedID(t, 4)
+	r, _, _ := newReplayer(t,
+		journalEntry{seq: 1, kind: "generation_opened", gen: "GEN-A",
+			group: group, res: "RES-A", qty: testTarget(t, "1.5")},
+		journalEntry{seq: 2, kind: "generation_perp_submitted", gen: "GEN-A", id: perpID},
+		journalEntry{seq: 3, kind: "generation_phase", gen: "GEN-A", phase: domain.GenerationPerpReduceFinal},
+		journalEntry{seq: 4, kind: "generation_authorized", gen: "GEN-A", qty: testTarget(t, "0.75")},
+		journalEntry{seq: 5, kind: "generation_spot_submitted", gen: "GEN-A", id: spotID},
+	)
+	rec, err := r.Rebuild()
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	if len(rec.LiveGenerations) != 1 {
+		t.Fatalf("LiveGenerations = %v, want one", liveGenerationIDs(rec))
+	}
+	got := rec.LiveGenerations[0]
+	if got.ID != "GEN-A" || got.Group != group || got.Reservation != "RES-A" {
+		t.Errorf("identity = {%s %s %s}, want {GEN-A %s RES-A}", got.ID, got.Group, got.Reservation, group)
+	}
+	if got.Target.Decimal() != testTarget(t, "1.5").Decimal() {
+		t.Errorf("Target = %s, want 1.5", got.Target)
+	}
+	// 0.75 against a target of 1.5: the two are different numbers, so a rebuild
+	// that read the authorization off the opening record fails here.
+	if got.Authorized.Decimal() != testTarget(t, "0.75").Decimal() {
+		t.Errorf("Authorized = %s, want 0.75", got.Authorized)
+	}
+	// The two legs are DIFFERENT ids, so a rebuild that assigned one record's
+	// order to both fields fails — which is the shape the shared detail table
+	// makes possible and the kind tag is what prevents.
+	if got.PerpOrder != perpID || got.SpotOrder != spotID {
+		t.Errorf("legs = {%s %s}, want {%s %s}", got.PerpOrder, got.SpotOrder, perpID, spotID)
+	}
+	// And the SEQUENCE, in record order. A rebuild carrying the final phase alone
+	// would satisfy every assertion above while losing the transitions §7.5's own
+	// replay rule requires to be re-checked.
+	want := []domain.GenerationPhase{
+		domain.GenerationPerpReduceInFlight,
+		domain.GenerationPerpReduceFinal,
+		domain.GenerationSpotReduceAuthorized,
+		domain.GenerationSpotReduceInFlight,
+	}
+	if len(got.Steps) != len(want) {
+		t.Fatalf("Steps = %v, want %v", got.Steps, want)
+	}
+	for i := range want {
+		if got.Steps[i] != want[i] {
+			t.Errorf("Steps[%d] = %s, want %s", i, got.Steps[i], want[i])
+		}
+	}
+}
+
+// TestTheFIRSTArbitrationToCloseALadderIsTheOneReported is
+// domain.Generation.Supersede's first-writer-wins rule at group scope, and the
+// mutation campaign is what asked for it.
+//
+// Both paths bar, so the SET of barred groups is identical either way and only
+// the reported PATH differs — which is exactly the kind of claim a suite
+// asserting "the ladder is barred" cannot see. What it decides is what an
+// operator is told: "this package will not delever again" is a different
+// conversation depending on whether the kill switch or the fence arbitration
+// said so, and there is no other record of it once the generations are gone.
+//
+// The log is one this build can no longer write — the first bar refuses every
+// later Open — which is why the fixture is scripted rather than driven. A rule
+// about which of two facts survives is not testable from a world that can only
+// produce one.
+func TestTheFirstArbitrationToCloseALadderIsTheOneReported(t *testing.T) {
+	t.Parallel()
+
+	group := testHedgeGroup("BTCUSDT")
+	r, _, _ := newReplayer(t,
+		journalEntry{seq: 1, kind: "generation_opened", gen: "GEN-A",
+			group: group, res: "RES-A", qty: testTarget(t, "1")},
+		journalEntry{seq: 2, kind: "generation_superseded", gen: "GEN-A",
+			path: domain.SupersededByEmergencyClose},
+		journalEntry{seq: 3, kind: "generation_opened", gen: "GEN-B",
+			group: group, res: "RES-B", qty: testTarget(t, "1")},
+		journalEntry{seq: 4, kind: "generation_superseded", gen: "GEN-B",
+			path: domain.SupersededByFenceReadyLost},
+	)
+	rec, err := r.Rebuild()
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	if len(rec.BarredLadders) != 1 {
+		t.Fatalf("BarredLadders = %v, want one — the bar is per GROUP", rec.BarredLadders)
+	}
+	if got := rec.BarredLadders[0].Path; got != domain.SupersededByEmergencyClose {
+		t.Errorf("BarredLadders[0].Path = %s, want the FIRST arbitration (%s)",
+			got, domain.SupersededByEmergencyClose)
 	}
 }

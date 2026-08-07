@@ -143,34 +143,113 @@ type Recovery struct {
 	Dispatched []ids.ClientOrderID
 
 	// Generations is how many distinct `PackageDelever` generations the journal
-	// opened, and LiveGenerations names the ones it never ended.
+	// opened, and LiveGenerations carries the ones it never ended.
 	//
-	// # LiveGenerations is a REFUSAL, not a statistic, and this is why
+	// # LiveGenerations is what a REINSTATEMENT is built from, and this is why
 	//
 	// A generation that the log opened and did not end held an entry in the
 	// SHARED reserved-reduction ledger when the process died. That ledger is
 	// §6.7's `outstanding_reserved_reductions` — the subtrahend every
 	// compensating trade is sized from — and it lives in process memory, so a
-	// fresh process starts with it empty. This slice rebuilds the FACT and not
-	// the entry: nothing here re-Reserves, because doing so needs the
-	// Classifier the replayer deliberately does not hold, and rebuilding the
-	// aggregate needs a generation repository that does not exist yet.
+	// fresh process starts with it empty.
 	//
-	// The failure direction is what makes the list a refusal. A ledger missing
-	// an entry reads as MORE room, not less: §2's determined branch sizes a
-	// compensating trade from a residual that is too large by exactly the
+	// The failure direction is why the entry cannot simply be left out. A ledger
+	// missing an entry reads as MORE room, not less: §2's determined branch sizes
+	// a compensating trade from a residual that is too large by exactly the
 	// generation's outstanding net intent, so it buys back the exposure that
 	// generation's own perp leg already committed to buy. That is FM-5's shape
 	// arriving through recovery rather than through a booking error, and it is
 	// silent — every invariant that would object is computed FROM the ledger.
 	//
-	// It is a list of IDs and not of rebuilt generations, which is the honest
-	// width for what this build can say. Reconciler turns a non-empty one into
-	// boot.OutcomeIncomplete, so the refusal is already standing on the day the
-	// Deleverer is wired into a composition root — the direction that is right
-	// when somebody forgets. Sorted for Unresolved's reason.
+	// # It carries the PAYLOADS now, and #203's reason for not carrying them has
+	// # expired
+	//
+	// Slice #203 made this a list of bare IDs and said why: an unread field is a
+	// worse defect than a named gap. Reinstater is the reader, so the gap closes
+	// and the fields land. What this use case still does NOT do is re-`Reserve`
+	// anything — that needs the Classifier the replayer deliberately does not
+	// hold, and the decomposition that keeps it out is the whole of §75h: the
+	// walk that decides what the records MEAN holds no mutator, and a separate
+	// use case performs the reinstatement from the values it produced.
+	//
+	// Sorted by id, for Unresolved's reason.
 	Generations     int
-	LiveGenerations []domain.GenerationID
+	LiveGenerations []GenerationRecovery
+
+	// BarredLadders names the hedge groups whose escalation ladder a
+	// supersession CLOSED — SM §7's "a supersession ends the GENERATION; whether
+	// it ends the LADDER is a property of the PATH", read off the log.
+	//
+	// It is derived from the ENDED generations, which is the half of the record
+	// stream LiveGenerations throws away, and it is the reason the two lists are
+	// not one filtered list: an ended generation contributes nothing to the
+	// ledger and exactly one thing to recovery, and that thing is this.
+	//
+	// The failure direction is the mirror of LiveGenerations'. A bar that is lost
+	// across a restart lets core §7.1's ladder open a generation against an
+	// `EmergencyClosePackage` or `FenceReadyLost` arbitration that has taken the
+	// package away from it — this machine re-authorising itself against a
+	// foundation decision, which is the one thing SupersessionPath.ResumesLadder
+	// exists to answer. Sorted by group.
+	BarredLadders []LadderBar
+}
+
+// GenerationRecovery is one `PackageDelever` generation exactly as the journal
+// recorded it — the values SM §7's ladder fixed, plus the ordered phases it
+// reached.
+//
+// # It is the RECORD and not a rebuilt aggregate, and the split is the seam
+//
+// Rebuilding needs two things this walk must not have: the shared ledger, and
+// the venue's executed quantities (there is no perp-fill record — see
+// Deleverer.RecordPerpFill, whose stated reason for not writing one was wrong in
+// both halves and true in the conclusion). So the walk produces a VALUE and
+// Reinstater consumes it, which is how the replayer stays without a Classifier
+// while the reinstatement still happens (§75h).
+//
+// Every field is what one record kind carried, so a field's absence is a record
+// the log does not hold rather than a payload this type dropped.
+type GenerationRecovery struct {
+	// ID, Group, Reservation and Target are the opening record's payload —
+	// everything SM §7 fixes for the generation's lifetime.
+	ID          domain.GenerationID
+	Group       domain.HedgeGroup
+	Reservation domain.ReservationID
+	Target      fixedpoint.Quantity
+
+	// PerpOrder and SpotOrder are the two submission records' ids, empty until
+	// the log holds the submission. They are what the reinstated aggregate's
+	// OwnLegs must contain — FM-9's netting set — and the perp one is also the
+	// key the confirmed perp reduction is read back under.
+	PerpOrder ids.ClientOrderID
+	SpotOrder ids.ClientOrderID
+
+	// Authorized is FLAG-3's fixed spot size. It is the zero VALUE of
+	// fixedpoint.Quantity — untagged and failing its first operation — until an
+	// authorization record is seen, which is deliberate and is not the same as a
+	// zero quantity: an authorized size of zero is LEGAL (a perp reduction that
+	// confirmed nothing), so a valid zero and no authorization at all must not be
+	// the same value. Steps is what tells them apart.
+	Authorized fixedpoint.Quantity
+
+	// Steps is every phase the log recorded AFTER `Planned`, in record order.
+	//
+	// The whole sequence rather than the final phase, because replaying it is
+	// what re-checks SM §7's edge set on every recorded transition — the
+	// generation-scope reading of §7.5's "a log recording an impossible history
+	// is refused rather than installed". A final phase alone would be reinstated
+	// by whichever path the rebuilder chose, and the log's own claim about which
+	// transitions happened would go unchecked.
+	Steps []domain.GenerationPhase
+}
+
+// LadderBar is one hedge group whose ladder a supersession closed, with the row
+// that closed it. The path is carried because it is what an operator is shown:
+// "this package will not delever again" is a different conversation depending on
+// whether the kill switch or the fence arbitration said so.
+type LadderBar struct {
+	Group domain.HedgeGroup
+	Path  domain.SupersessionPath
 }
 
 // Rebuild replays the journal into the write repository.
@@ -200,8 +279,9 @@ type Recovery struct {
 func (r *Replayer) Rebuild() (Recovery, error) {
 	rb := &rebuild{
 		orders: r.orders,
-		known:  make(map[domain.GenerationID]bool),
+		known:  make(map[domain.GenerationID]*GenerationRecovery),
 		ended:  make(map[domain.GenerationID]bool),
+		barred: make(map[domain.HedgeGroup]domain.SupersessionPath),
 	}
 	if err := r.journal.Replay(rb); err != nil {
 		return Recovery{}, fmt.Errorf("rebuild from journal: %w", err)
@@ -240,9 +320,24 @@ type rebuild struct {
 	// members, so nothing can resurrect a finished generation by arriving late.
 	// A single map would make both of those properties a discipline this method
 	// set keeps rather than a shape it has.
+	//
+	// `known` maps each opened id to the record being accumulated for it. It
+	// carries a POINTER because the later records amend the same value — a map of
+	// values would silently accumulate into copies, which is the shape where the
+	// authorization is recorded and the reinstatement is handed a generation that
+	// never authorized anything.
 	opened []domain.GenerationID
-	known  map[domain.GenerationID]bool
+	known  map[domain.GenerationID]*GenerationRecovery
 	ended  map[domain.GenerationID]bool
+
+	// barred is the group→path fold behind Recovery.BarredLadders, written only
+	// where SupersessionPath.ResumesLadder answers false.
+	//
+	// FIRST writer wins, which is domain.Generation.Supersede's own rule one
+	// scope out: the path an operator is shown must be the arbitration that
+	// closed the ladder, not whichever one arrived last against a package that
+	// was already closed to it.
+	barred map[domain.HedgeGroup]domain.SupersessionPath
 
 	records    int
 	lastSeq    uint64
@@ -348,21 +443,14 @@ func (b *rebuild) State(seq uint64, id ids.ClientOrderID, s domain.OrderState) e
 
 // GenerationOpened applies SM §7's `Planned` record.
 //
-// # What it does with the payload is NOTHING, and the absence is the honest
-// # width of what this build can rebuild
+// # The payload is KEPT now, and #203's reason for dropping it has expired
 //
-// The record carries a hedge group, a reservation and a per-leg target, and
-// every one of them is dropped here. That is not an oversight and it is not free
-// — it is the scope of this slice stated where a reader will look for it. Two
-// things would have to exist to use them: a generation repository to put the
-// rebuilt aggregate in, and the Classifier whose ledger the reservation must be
-// re-entered into. The replayer holds neither, and giving it a Classifier would
-// hand recovery the one capability ports.JournalReplay exists to withhold — the
-// ability to change the state it is reasoning about while it reasons.
-//
-// What is kept is the fact that a generation existed, which is what turns into
-// a boot refusal in report(). The payload is not lost: it is in the journal, in
-// the same chain, and the slice that rebuilds the aggregate reads it from there.
+// The record carries a hedge group, a reservation and a per-leg target, and slice
+// #203 dropped all three because nothing could use them: the aggregate needed a
+// home and the reservation needed the Classifier this type must not hold. The
+// second constraint has not moved and is not worked around — what changed is that
+// Reinstater exists to consume these values one phase later, so the walk carries
+// them as DATA and performs nothing.
 //
 // A SECOND opening of the same id is refused, on ApplyPlanned's rule one machine
 // over: domain.Ledger.Register refuses a duplicate ClientOrderID at boot for the
@@ -371,16 +459,21 @@ func (b *rebuild) State(seq uint64, id ids.ClientOrderID, s domain.OrderState) e
 func (b *rebuild) GenerationOpened(
 	seq uint64,
 	id domain.GenerationID,
-	_ domain.HedgeGroup,
-	_ domain.ReservationID,
-	_ fixedpoint.Quantity,
+	group domain.HedgeGroup,
+	reservation domain.ReservationID,
+	target fixedpoint.Quantity,
 ) error {
 	b.seen(seq)
-	if b.known[id] {
+	if _, ok := b.known[id]; ok {
 		return fmt.Errorf("journal record %d: replay opening of generation %q: %w",
 			seq, id, ErrGenerationAlreadyOpened)
 	}
-	b.known[id] = true
+	b.known[id] = &GenerationRecovery{
+		ID:          id,
+		Group:       group,
+		Reservation: reservation,
+		Target:      target,
+	}
 	b.opened = append(b.opened, id)
 	return nil
 }
@@ -388,52 +481,76 @@ func (b *rebuild) GenerationOpened(
 // GenerationPerpSubmitted applies the perp leg's submission record.
 func (b *rebuild) GenerationPerpSubmitted(seq uint64, id domain.GenerationID, order ids.ClientOrderID) error {
 	b.seen(seq)
-	return b.knownGeneration(seq, id, fmt.Sprintf("perp leg %q", order))
+	rec, err := b.knownGeneration(seq, id, fmt.Sprintf("perp leg %q", order))
+	if err != nil {
+		return err
+	}
+	rec.PerpOrder = order
+	rec.Steps = append(rec.Steps, domain.GenerationPerpReduceInFlight)
+	return nil
 }
 
 // GenerationAuthorized applies FLAG-3's record.
 //
-// The size is dropped for GenerationOpened's reason, and the drop is sharper
-// here because this is the record SM §7 names in its own right. What survives is
-// the ordering, and the ordering is the property one chain was chosen to make
-// checkable: this record's sequence is lower than its spot leg's, in the same
-// walk, verified by the same chain. A later slice reading the log for the
-// authorized size finds that guarantee already established rather than assumed.
-func (b *rebuild) GenerationAuthorized(seq uint64, id domain.GenerationID, _ fixedpoint.Quantity) error {
+// The size is kept, and what one chain bought is still what makes it trustworthy:
+// this record's sequence is lower than its spot leg's, in the same walk, verified
+// by the same chain, so the reinstatement reads an authorization it knows
+// preceded the order it authorized rather than assuming it.
+func (b *rebuild) GenerationAuthorized(seq uint64, id domain.GenerationID, size fixedpoint.Quantity) error {
 	b.seen(seq)
-	return b.knownGeneration(seq, id, "authorization")
+	rec, err := b.knownGeneration(seq, id, "authorization")
+	if err != nil {
+		return err
+	}
+	rec.Authorized = size
+	rec.Steps = append(rec.Steps, domain.GenerationSpotReduceAuthorized)
+	return nil
 }
 
 // GenerationSpotSubmitted applies the reserved spot leg's submission record.
 func (b *rebuild) GenerationSpotSubmitted(seq uint64, id domain.GenerationID, order ids.ClientOrderID) error {
 	b.seen(seq)
-	return b.knownGeneration(seq, id, fmt.Sprintf("spot leg %q", order))
+	rec, err := b.knownGeneration(seq, id, fmt.Sprintf("spot leg %q", order))
+	if err != nil {
+		return err
+	}
+	rec.SpotOrder = order
+	rec.Steps = append(rec.Steps, domain.GenerationSpotReduceInFlight)
+	return nil
 }
 
-// GenerationSuperseded ENDS a generation.
+// GenerationSuperseded ENDS a generation, and is where the LADDER's fate is
+// decided as well as the generation's.
 //
-// The path is validated and then dropped, and the split is worth stating because
-// the two halves have different owners. Validating is this walk's job — an
-// undeclared path is a value §7.5 cannot replay, and it would replay into a
-// generation whose one remaining question (may core §7.1's ladder open a later
-// generation) has no answer at all. ACTING on the answer is not: ResumesLadder
-// governs whether a package's ladder may run again, which is a rule about
-// something this build does not yet reinstate at boot.
+// The path is validated for the reason it always was — an undeclared path is a
+// value §7.5 cannot replay — and it is now ACTED on, which is the half slice
+// #203 named as a gap and left open. `SupersessionPath.ResumesLadder` is SM §7's
+// own invariant ("a supersession ends the GENERATION; whether it ends the LADDER
+// is a property of the PATH"), the two external rows answer false, and a bar
+// lost across a restart is this machine re-authorising itself against an
+// arbitration that has just taken the package away from it.
 //
-// Recorded rather than absorbed, because it is a live gap rather than a design
-// choice: the external rows do NOT resume, so a recovered process that reopened
-// a generation after an `EmergencyClosePackage` supersession would be this
-// machine re-authorising itself against an arbitration that has just taken the
-// package away from it. Nothing can reach that today — no composition root
-// constructs a Deleverer — and the refusal report() produces is what holds the
-// line until the slice that does.
+// The bar is recorded against the group from the generation's OWN opening
+// record, which is why it can only be derived here and not from the supersession
+// record alone: SM §7's gate is per hedge group, and the supersession names the
+// generation.
 func (b *rebuild) GenerationSuperseded(seq uint64, id domain.GenerationID, path domain.SupersessionPath) error {
 	b.seen(seq)
-	if err := b.knownGeneration(seq, id, fmt.Sprintf("supersession by %s", path)); err != nil {
+	rec, err := b.knownGeneration(seq, id, fmt.Sprintf("supersession by %s", path))
+	if err != nil {
 		return err
 	}
 	if err := path.Validate(); err != nil {
 		return fmt.Errorf("journal record %d: replay supersession of generation %q: %w", seq, id, err)
+	}
+	resumes, err := path.ResumesLadder()
+	if err != nil {
+		return fmt.Errorf("journal record %d: replay supersession of generation %q: %w", seq, id, err)
+	}
+	if !resumes {
+		if _, already := b.barred[rec.Group]; !already {
+			b.barred[rec.Group] = path
+		}
 	}
 	b.ended[id] = true
 	return nil
@@ -459,13 +576,15 @@ func (b *rebuild) GenerationSuperseded(seq uint64, id domain.GenerationID, path 
 // a test rather than as this paragraph.
 func (b *rebuild) Phase(seq uint64, id domain.GenerationID, phase domain.GenerationPhase) error {
 	b.seen(seq)
-	if err := b.knownGeneration(seq, id, fmt.Sprintf("phase %s", phase)); err != nil {
+	rec, err := b.knownGeneration(seq, id, fmt.Sprintf("phase %s", phase))
+	if err != nil {
 		return err
 	}
 	active, err := phase.IsActive()
 	if err != nil {
 		return fmt.Errorf("journal record %d: replay phase of generation %q: %w", seq, id, err)
 	}
+	rec.Steps = append(rec.Steps, phase)
 	if !active {
 		b.ended[id] = true
 	}
@@ -481,12 +600,13 @@ func (b *rebuild) Phase(seq uint64, id domain.GenerationID, phase domain.Generat
 // replay that shrugged and carried on would report zero live generations for a
 // package that has one, which is the permissive answer, and the entry the
 // missing opening record names would never be re-Reserved by anything.
-func (b *rebuild) knownGeneration(seq uint64, id domain.GenerationID, what string) error {
-	if !b.known[id] {
-		return fmt.Errorf("journal record %d: replay %s of generation %q: %w",
+func (b *rebuild) knownGeneration(seq uint64, id domain.GenerationID, what string) (*GenerationRecovery, error) {
+	rec, ok := b.known[id]
+	if !ok {
+		return nil, fmt.Errorf("journal record %d: replay %s of generation %q: %w",
 			seq, what, id, ErrGenerationNotOpened)
 	}
-	return nil
+	return rec, nil
 }
 
 // seen records the walk's own arithmetic, in one place so the visitor methods
@@ -536,8 +656,14 @@ func (b *rebuild) report() (Recovery, error) {
 	// contribute.
 	for _, id := range b.opened {
 		if !b.ended[id] {
-			rec.LiveGenerations = append(rec.LiveGenerations, id)
+			rec.LiveGenerations = append(rec.LiveGenerations, *b.known[id])
 		}
+	}
+	// The bars are read off the map rather than accumulated in order, so they are
+	// sorted below for Unresolved's reason: a boot report that names its causes in
+	// map order is one an operator learns to distrust.
+	for group, path := range b.barred {
+		rec.BarredLadders = append(rec.BarredLadders, LadderBar{Group: group, Path: path})
 	}
 	for _, id := range b.created {
 		current, err := b.orders.Load(id)
@@ -568,7 +694,10 @@ func (b *rebuild) report() (Recovery, error) {
 	}
 	sort.Slice(rec.Unresolved, func(i, j int) bool { return rec.Unresolved[i] < rec.Unresolved[j] })
 	sort.Slice(rec.Dispatched, func(i, j int) bool { return rec.Dispatched[i] < rec.Dispatched[j] })
-	sort.Slice(rec.LiveGenerations, func(i, j int) bool { return rec.LiveGenerations[i] < rec.LiveGenerations[j] })
+	sort.Slice(rec.LiveGenerations, func(i, j int) bool { return rec.LiveGenerations[i].ID < rec.LiveGenerations[j].ID })
+	sort.Slice(rec.BarredLadders, func(i, j int) bool {
+		return rec.BarredLadders[i].Group.String() < rec.BarredLadders[j].Group.String()
+	})
 	return rec, nil
 }
 

@@ -626,4 +626,77 @@ var (
 	// show — a generation cancelled on nobody's evidence, at the moment its perp
 	// short is nearing liquidation.
 	ErrPremiseLossNotExternal = errors.New("oms: the premise-lost supersession is discharged, never asserted")
+
+	// ErrGenerationMissing reports Deleverer.Restore handed a nil aggregate.
+	//
+	// A refusal rather than a no-op, because the caller is §7.5's reinstatement
+	// and its whole contract is that a generation the log left live ends up in
+	// the ladder WITH its ledger entry. A nil silently ignored is a boot that
+	// reported the reinstatement done over a generation nobody reinstated — and
+	// the ledger is then short by exactly the entry that keeps §6.7's determined
+	// branch honest.
+	ErrGenerationMissing = errors.New("oms: restore needs a generation")
+
+	// ErrGenerationLadderBarred reports core §7.1's escalation ladder refused on
+	// a hedge group whose generation ended on a path that does not resume it —
+	// SM §7's "a supersession ends the GENERATION; whether it ends the LADDER is
+	// a property of the PATH".
+	//
+	// The two paths that set it are `EmergencyClosePackage` and the
+	// `FenceReadyLost` arbitration: in both, the foundation has taken the package
+	// away from the leverage-reduction ladder, and a generation opening
+	// afterwards is this machine re-authorising itself against a decision that
+	// just fired. It carries the PATH in its message, because which arbitration
+	// closed the ladder is the operator's first question and there is no other
+	// record of it once the generation is gone.
+	//
+	// It is also what Deleverer.Restore reports for a log holding a live
+	// generation on a barred group, which is a different claim in the same
+	// sentinel: that is a history this build cannot produce, and the shared
+	// sentinel is right because the operator's action is the same — the package
+	// is closed to the ladder, and something believes otherwise.
+	ErrGenerationLadderBarred = errors.New("oms: hedge group's PackageDelever ladder was closed by a supersession")
+
+	// ErrGenerationLadderResumes reports Deleverer.BarLadder offered a path core
+	// §7.1's ladder DOES resume from — the premise-lost row.
+	//
+	// A refusal rather than a silent no-op, and the direction is why: barring the
+	// ladder on a premise loss would disable the one mechanism that reduces
+	// leverage on a neutral package for the rest of the process's life, at exactly
+	// the moment it is needed. SupersessionPath.ResumesLadder calls that the
+	// unsafe direction outright, so a caller reaching here has confused the two
+	// classes and must be told rather than obeyed.
+	ErrGenerationLadderResumes = errors.New("oms: this supersession path resumes the ladder and cannot bar it")
+
+	// ErrGenerationRestoreMissing reports a Reconciler wired with no
+	// reinstatement over a journal that holds a live generation.
+	//
+	// It is ErrSecondLookUnwired's shape one gate over, and for the identical
+	// reason: a deployment that never delevers legitimately has nothing to
+	// reinstate, so the phase is optional — but an unwired phase meeting the one
+	// condition it exists for must FAIL BY NAME rather than pass. Passing would
+	// report §7.5's reinstatement gate satisfied on a boot that left a generation's
+	// entry out of the shared ledger, which is the FM-5 hole this whole gate is.
+	ErrGenerationRestoreMissing = errors.New("oms: journal holds a live generation and no reinstatement is wired")
+
+	// ErrGenerationStepUnreachable reports a recorded generation phase the
+	// reinstatement cannot replay.
+	//
+	// Two disjoint causes, deliberately one sentinel because both mean the same
+	// thing about the log — a step sequence no live process could have written:
+	// `Planned`, which is the seed rather than a step and can only appear as a
+	// journal record if a phase record restated the opening; and the three ENDED
+	// phases, which cannot appear in a LIVE generation's step list at all, since
+	// the walk that produced it puts an ended generation in neither list.
+	ErrGenerationStepUnreachable = errors.New("oms: generation step cannot be replayed at boot")
+
+	// ErrGenerationLadderMissing reports a Reinstater constructed without the
+	// ladder seam it exists to reach.
+	//
+	// Refused at construction rather than tolerated as a report-only mode, on
+	// ErrClassifierMissing's argument: the call that would discover it is the one
+	// re-entering a generation's reservation into the shared ledger, and a
+	// reinstatement that reported success having reached no ladder is a boot that
+	// cleared its gate over a ledger it never touched.
+	ErrGenerationLadderMissing = errors.New("oms: reinstatement needs the PackageDelever ladder")
 )

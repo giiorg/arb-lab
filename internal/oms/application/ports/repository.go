@@ -198,6 +198,30 @@ type OrderRecord struct {
 // gate is positional rather than per-type for exactly this reason: a
 // TradeWriteRepository added to this package next year is policed the moment it
 // is declared, by nobody remembering to police it.
+// OrderLookup reads one order's current record by id.
+//
+// # It is a port of its own so that a reader cannot write, which is the split
+// # this package already makes twice
+//
+// ports.Journal / ports.JournalReplay and ports.OrderPlacer / ports.OrderResolver
+// are both one capability cut in half so the dangerous composition is
+// unexpressible. This is the same cut on the projection, and it has a first
+// consumer with a specific reason to want it: §7.5's generation reinstatement
+// needs the confirmed perp reduction, which is one order's executed quantity,
+// and it must not be able to apply a state, a fill or an ack while it is
+// rebuilding a generation from records it is simultaneously deciding the meaning
+// of.
+//
+// Load returns the current record. It is a read on a WRITE repository as well —
+// the read half of read-modify-write, which is what an OCC version is for — so
+// OrderWriteRepository embeds this rather than declaring it a second time. It is
+// not a projection: §5.1 gives those to audit and reconcile, "projections over
+// the journal, never co-owners", and a context wanting to observe orders gets a
+// projection, not this.
+type OrderLookup interface {
+	Load(ids.ClientOrderID) (OrderRecord, error)
+}
+
 type OrderWriteRepository interface {
 	// ApplyPlanned creates the record for a newly planned order, at
 	// StatePlanned with Version 1.
@@ -226,16 +250,11 @@ type OrderWriteRepository interface {
 	// this repo's unreachable-sentinel shape; the check therefore has to be
 	// genuinely here, and an implementation that skipped it would remove it
 	// from the system rather than move it.
-	ApplyPlanned(domain.Order) (OrderRecord, error)
+	// OrderLookup is the read half of read-modify-write, embedded rather than
+	// restated so the two ports cannot declare one method twice.
+	OrderLookup
 
-	// Load returns the current record.
-	//
-	// It is a read on a WRITE repository and belongs here: it is the read half
-	// of read-modify-write, which is what an OCC version is for. It is not a
-	// projection — §5.1 gives those to audit and reconcile, "projections over
-	// the journal, never co-owners" — and a context wanting to observe orders
-	// gets a projection, not this.
-	Load(ids.ClientOrderID) (OrderRecord, error)
+	ApplyPlanned(domain.Order) (OrderRecord, error)
 
 	// ApplyAuthorized moves the order to StateDispatchAuthorized AND records the
 	// instant §5.3's stable-not-found rule measures its two bounds from.

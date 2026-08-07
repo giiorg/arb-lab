@@ -241,6 +241,65 @@ func OpenGeneration(
 	target fixedpoint.Quantity,
 	premise Premise,
 ) (*Generation, error) {
+	g, err := newGeneration(id, group, reservation, target)
+	if err != nil {
+		return nil, err
+	}
+	intact, err := premise.Intact()
+	if err != nil {
+		return nil, fmt.Errorf("generation %q premise: %w", id, err)
+	}
+	if !intact {
+		return nil, fmt.Errorf("generation %q: residual %s, %s: %w",
+			id, premise.Residual, premise.Class, ErrGenerationPremiseNotIntact)
+	}
+	return g, nil
+}
+
+// RestoreGeneration reinstates a generation at `Planned` from its durable
+// opening record — §7.5's rehydration entry point, and OpenGeneration WITHOUT
+// the premise.
+//
+// # The premise is absent because it is not a property of the generation
+//
+// Every other check OpenGeneration makes is about the RECORD — an id, a group,
+// a reservation, a positive target — and a stored value that fails one is a log
+// that verifies and does not compose. The premise is not: it is §6.7's verdict
+// over the hedge group AT THE INSTANT OF THE DECISION, and the decision was
+// taken by a process that is gone. Re-asking it here would judge a generation
+// that EXISTS against a world that has moved, and the failure direction settles
+// it — a recovered generation refused for a dissolved premise is a generation
+// whose ledger entry is never re-`Reserve`d, which is precisely the FM-5-shaped
+// hole §7.5's refusal exists to hold. The premise still binds afterwards, and
+// with more force: it is FM-8's STANDING obligation, so the reinstating caller
+// reassesses immediately and the premise-lost row fires if it has dissolved.
+// Refusing to rebuild and discharging the supersession look alike from one step
+// away and are opposites — one leaves the exposure unaccounted, the other
+// accounts for it and then ends the attempt.
+//
+// This is the same division §7.5 already makes for orders. `ApplyPlanned` at
+// boot does not re-run the planner's admission checks — the filters, the
+// quantization, the freshness bound — because those judged a decision that was
+// taken; what replay re-checks is SM §1's edge set, which is a property of the
+// history. The generation's edge set is checked the same way, by the Restore*
+// steps below driving the SAME transition table the live ladder does.
+func RestoreGeneration(
+	id GenerationID,
+	group HedgeGroup,
+	reservation ReservationID,
+	target fixedpoint.Quantity,
+) (*Generation, error) {
+	return newGeneration(id, group, reservation, target)
+}
+
+// newGeneration is the shape checks both entry points make, in one place so a
+// rehydrated generation cannot be laxer about its own record than a fresh one.
+func newGeneration(
+	id GenerationID,
+	group HedgeGroup,
+	reservation ReservationID,
+	target fixedpoint.Quantity,
+) (*Generation, error) {
 	if id == "" {
 		return nil, ErrGenerationIDUnset
 	}
@@ -263,14 +322,6 @@ func OpenGeneration(
 		// leverage by zero, while blocking the next generation on §7's
 		// one-at-a-time gate for as long as it takes.
 		return nil, fmt.Errorf("generation %q target %s: %w", id, target, ErrGenerationTargetNotPositive)
-	}
-	intact, err := premise.Intact()
-	if err != nil {
-		return nil, fmt.Errorf("generation %q premise: %w", id, err)
-	}
-	if !intact {
-		return nil, fmt.Errorf("generation %q: residual %s, %s: %w",
-			id, premise.Residual, premise.Class, ErrGenerationPremiseNotIntact)
 	}
 
 	zero := fixedpoint.ZeroQuantity(target.Asset())
@@ -381,13 +432,29 @@ func (g *Generation) OutstandingIntent() (fixedpoint.Quantity, error) {
 // inside FM-8's standing obligation. See GenerationPhase.CommitsNewExposure for
 // which steps are and are not, and why each boundary was settled by a model run.
 func (g *Generation) SubmitPerpReduction(order ids.ClientOrderID, premise Premise) error {
-	return g.advance(GenerationPerpReduceInFlight, premise, func() error {
+	return g.advance(GenerationPerpReduceInFlight, premise, g.applyPerpSubmission(order))
+}
+
+// RestorePerpSubmission replays the perp-leg submission at §7.5 boot:
+// SubmitPerpReduction with the premise guard and nothing else removed.
+//
+// The payload rule is shared rather than restated (applyPerpSubmission) and the
+// edge check is `step2`'s, which is the same CanAdvanceGeneration the live step
+// reaches through `advance` — so the transition table and the leg-id rule each
+// keep exactly one home, and the only difference between the two entry points
+// is the one RestoreGeneration argues for.
+func (g *Generation) RestorePerpSubmission(order ids.ClientOrderID) error {
+	return g.step2(GenerationPerpReduceInFlight, g.applyPerpSubmission(order))
+}
+
+func (g *Generation) applyPerpSubmission(order ids.ClientOrderID) func() error {
+	return func() error {
 		if order == "" {
 			return fmt.Errorf("generation %q perp leg: %w", g.id, ErrGenerationLegUnidentified)
 		}
 		g.perpOrder = order
 		return nil
-	})
+	}
 }
 
 // RecordPerpFill raises the confirmed perp reduction by an executed quantity.
@@ -473,13 +540,34 @@ func (g *Generation) ConfirmPerpReduction() error {
 //     perp reduction that confirmed nothing authorizes no spot sale, the entry
 //     is retired, and the generation completes with nothing to submit.
 func (g *Generation) AuthorizeSpotReduction(size fixedpoint.Quantity, premise Premise) error {
-	return g.advance(GenerationSpotReduceAuthorized, premise, func() error {
+	return g.advance(GenerationSpotReduceAuthorized, premise, g.applySpotAuthorization(size))
+}
+
+// RestoreSpotAuthorization replays FLAG-3's record at §7.5 boot — the premise
+// guard removed, and the never-net-short cap emphatically NOT removed.
+//
+// The cap is what makes this the sharpest of the restore steps: `CheckSpotSize`
+// compares the recorded authorization against the CONFIRMED perp reduction, and
+// at recovery that confirmation is rebuilt from the venue rather than from the
+// log (there is no perp-fill record — see the caller). So a journal claiming an
+// authorization of s over a perp leg the venue says executed less than s is a
+// contradiction between two sources, and this refuses it rather than
+// reinstating a generation whose ledger entry claims a sale it could never
+// back. The direction is the safe one: the refusal holds the boot, where
+// admitting it would put a too-large entry into the shared ledger and understate
+// the group's residual for the life of the process.
+func (g *Generation) RestoreSpotAuthorization(size fixedpoint.Quantity) error {
+	return g.step2(GenerationSpotReduceAuthorized, g.applySpotAuthorization(size))
+}
+
+func (g *Generation) applySpotAuthorization(size fixedpoint.Quantity) func() error {
+	return func() error {
 		if err := g.CheckSpotSize(size); err != nil {
 			return err
 		}
 		g.authorized = size
 		return nil
-	})
+	}
 }
 
 // CheckSpotSize is §7's never-net-short cap as a question rather than an act:

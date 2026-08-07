@@ -59,6 +59,31 @@ type Deleverer struct {
 	dispatcher *Dispatcher
 	orders     ports.OrderWriteRepository
 	live       map[domain.HedgeGroup]*domain.Generation
+
+	// barred is SM §7's ladder-resumption invariant held as state: a group whose
+	// generation ended on a path SupersessionPath.ResumesLadder answers false for
+	// may not open another.
+	//
+	// # It is here rather than on the generation, because the generation is GONE
+	//
+	// A superseded generation is a value this map's key no longer points at —
+	// Open's own first act is to find no live generation and proceed — so a rule
+	// about what may happen AFTER it ended cannot be a property of it. Keyed by
+	// hedge group for the reason `live` is: §7's gate is about one package's
+	// ladder and two packages delever independently.
+	//
+	// It is MONOTONE and there is no unbar. Nothing here can lift it, and that is
+	// the ruling rather than an omission: the two paths that set it are the kill
+	// switch and the fence arbitration, in both of which the foundation has taken
+	// the package away from the leverage-reduction ladder. ResumesLadder states
+	// the cost of being wrong in that direction and accepts it — "a breach needs
+	// a fresh escalation to reach it — an alert" — where the cost the other way is
+	// this machine re-authorising itself against an arbitration that just fired.
+	//
+	// Nothing can CLEAR it by accident either, and the reason is arithmetic: once
+	// a group is barred no generation opens on it, so no later ending can arrive
+	// to overwrite the entry.
+	barred map[domain.HedgeGroup]domain.SupersessionPath
 }
 
 // NewDeleverer constructs the use case FROM the process's dispatcher, on
@@ -95,6 +120,7 @@ func NewDeleverer(d *Dispatcher, c *Classifier, j ports.GenerationJournal) (*Del
 		dispatcher: d,
 		orders:     d.orders,
 		live:       make(map[domain.HedgeGroup]*domain.Generation),
+		barred:     make(map[domain.HedgeGroup]domain.SupersessionPath),
 	}, nil
 }
 
@@ -143,6 +169,17 @@ func (d *Deleverer) Open(
 	reservation domain.ReservationID,
 	target fixedpoint.Quantity,
 ) (*domain.Generation, error) {
+	// The ladder bar is read BEFORE the live check and before the reserve, and
+	// the order is the rule rather than tidiness: a barred package must be
+	// refused whatever else is true of it, and every step below this one either
+	// mutates the shared ledger or reports about a generation. A barred group
+	// with no live generation is the ordinary shape — the arbitration ENDED the
+	// last one — so a bar read after the live check would be read only on the
+	// path where it can never fire.
+	if path, ok := d.barred[group]; ok {
+		return nil, fmt.Errorf("delever %s: ladder closed by %s: %w",
+			group, path, ErrGenerationLadderBarred)
+	}
 	if existing, ok := d.live[group]; ok {
 		active, err := existing.Phase().IsActive()
 		if err != nil {
@@ -198,6 +235,138 @@ func (d *Deleverer) openUnderReservation(
 		return nil, fmt.Errorf("delever %s: journal generation %q: %w", group, id, err)
 	}
 	return g, nil
+}
+
+// Restore reinstates a generation a previous process left live, re-entering its
+// entry in the SHARED reserved-reduction ledger — §7.5's rebuild at generation
+// scope, and the only way a generation enters this type without having been
+// Opened here.
+//
+// # The reserve is HERE and not in the caller, and that is the whole reason this
+// # method exists rather than an exported `live` map
+//
+// This type's stated job is that "the LEDGER stays in step with the ladder" —
+// §7's "exactly backed at every instant" is a claim about two objects and only
+// something holding both can keep it. A reinstatement that installed the
+// aggregate and left the caller to reserve would move that invariant into a
+// second place, which is precisely the shape FM-6 came out of: a rule whose
+// re-run is a discipline somebody keeps rather than a call that exists. So the
+// reserve and the amend are one act with the install, and every refusal below
+// the reserve releases the entry, on Open's rule and for its reason.
+//
+// It is also what answers task #204's harder half. The reservation must re-enter
+// a ledger that lives on the Classifier, and §7.5's replayer must not hold a
+// Classifier — "the ability to change the state it is reasoning about while it
+// reasons". The seam that satisfies both is this one: the replayer produces
+// VALUES, Reinstater turns them into an aggregate, and the capability to touch
+// the ledger stays where it already was.
+//
+// # The group is TRACKED here if nothing has tracked it, and the asset is the
+// # generation's own
+//
+// Classifier.Track fixes a group's base asset and must happen before any
+// reserve. At §7.5 boot nothing has run yet, so the ledger for this group does
+// not exist — and the durable evidence of what its base asset is happens to be
+// in hand: the generation's target, which is the same quantity
+// domain.OpenGeneration seeds every one of its own zeros from. Taking it from
+// there is what stops the ledger and the aggregate disagreeing about the asset,
+// which is a disagreement that surfaces as a quantity error from inside a fold
+// rather than as a refusal naming the group.
+//
+// An already-tracked group is LEFT ALONE rather than re-tracked, because Track
+// installs a fresh ledger: re-tracking a group that holds entries would discard
+// them, which is the FM-5 shape with the bookkeeping done in the other
+// direction.
+//
+// # Three refusals, and each is a different claim about the log
+//
+//   - an ENDED generation. This map holds what the ladder may still act on, and
+//     an ended generation has no entry to re-Reserve — retire already released
+//     it — so reinstating one would put a second, backing-less entry into the
+//     shared ledger for as long as the process lives.
+//   - a group this call has already restored. At boot the map starts empty, so a
+//     collision is not the ordinary "the last generation finished" case Open
+//     tolerates; it is one log claiming two live generations on one package,
+//     which SM §7's gate forbids and PremiseFor's netting cannot survive.
+//   - a BARRED group. A live generation on a package whose ladder an arbitration
+//     closed is a history this build cannot produce — Open refuses it — so a log
+//     holding both is a log that verifies and does not compose. Unreachable
+//     today and standing the day it is not.
+func (d *Deleverer) Restore(g *domain.Generation) error {
+	if g == nil {
+		return ErrGenerationMissing
+	}
+	group := g.Group()
+	active, err := g.Phase().IsActive()
+	if err != nil {
+		return fmt.Errorf("delever %s: restore %q: %w", group, g.ID(), err)
+	}
+	if !active {
+		return fmt.Errorf("delever %s: restore %q at %s: %w",
+			group, g.ID(), g.Phase(), domain.ErrGenerationNotActive)
+	}
+	if existing, ok := d.live[group]; ok {
+		return fmt.Errorf("delever %s: restore %q, generation %q already restored: %w",
+			group, g.ID(), existing.ID(), ErrGenerationAlreadyLive)
+	}
+	if path, ok := d.barred[group]; ok {
+		return fmt.Errorf("delever %s: restore %q, ladder closed by %s: %w",
+			group, g.ID(), path, ErrGenerationLadderBarred)
+	}
+
+	if !d.classifier.Tracked(group) {
+		if err := d.classifier.Track(group, g.Target().Asset()); err != nil {
+			return fmt.Errorf("delever %s: restore %q: %w", group, g.ID(), err)
+		}
+	}
+	if _, err := d.classifier.Reserve(group, g.Reservation(), domain.ProducerPackageDeleverSpot); err != nil {
+		return fmt.Errorf("delever %s: restore %q: reserve %q: %w", group, g.ID(), g.Reservation(), err)
+	}
+	if err := d.syncLedger(g); err != nil {
+		// Open's join, for Open's reason: the caller's problem is why the
+		// reinstatement failed, and a ledger this type could not tidy is a
+		// second fault that must not hide it.
+		if _, _, rerr := d.classifier.Release(group, g.Reservation()); rerr != nil {
+			return fmt.Errorf("%w (releasing %q also failed: %w)", err, g.Reservation(), rerr)
+		}
+		return err
+	}
+	d.live[group] = g
+	return nil
+}
+
+// BarLadder records that a generation on this group ended on a path core §7.1's
+// ladder does not resume from — SM §7's ladder-resumption invariant reinstated
+// at §7.5 boot.
+//
+// It takes the PATH rather than a bool for the reason domain.SupersessionPath
+// exists: whether the ladder resumes is a property of the path, so a caller
+// passing a resuming one is asking for something this rule does not do, and the
+// refusal below says which path it refused. A caller that had already reduced
+// the path to "does not resume" would have made that mistake unexpressible only
+// by making it unreportable.
+//
+// It is idempotent for a repeated (group, path) and refuses a CONTRADICTING
+// second path, on domain.Generation.Supersede's rule: the first arbitration is
+// what an operator is shown, and silently overwriting it would make the alert
+// name whichever row was replayed last.
+func (d *Deleverer) BarLadder(group domain.HedgeGroup, path domain.SupersessionPath) error {
+	if err := group.Validate(); err != nil {
+		return fmt.Errorf("delever: %w", err)
+	}
+	resumes, err := path.ResumesLadder()
+	if err != nil {
+		return fmt.Errorf("delever %s: %w", group, err)
+	}
+	if resumes {
+		return fmt.Errorf("delever %s: %s: %w", group, path, ErrGenerationLadderResumes)
+	}
+	if existing, ok := d.barred[group]; ok && existing != path {
+		return fmt.Errorf("delever %s: ladder already closed by %s, not %s: %w",
+			group, existing, path, ErrGenerationLadderBarred)
+	}
+	d.barred[group] = path
+	return nil
 }
 
 // SubmitPerpReduction dispatches the buy-to-reduce leg — SM §7's "reduces the
@@ -260,15 +429,26 @@ func (d *Deleverer) SubmitPerpReduction(group domain.HedgeGroup, ref DispatchRef
 // RecordPerpFill raises the confirmed perp reduction and amends the ledger entry
 // to match — §7's "amended as the perp reduction confirms".
 //
-// # It is the ONE ladder step with no generation record, and that is a claim
+// # It is the ONE ladder step with no generation record, and the reason is NOT
+// # the one this comment used to give
 //
 // Every other step here writes to the generation journal because the fact it
 // records exists nowhere else. This one does not, because the quantity IS the
-// perp order's own cumulative execution, which ports.Journal already made
-// durable at order scope and which §7.5's replay already rebuilds. A second
-// record of it would be two stores holding one number with no rule for a replay
-// that finds them disagreeing — and the disagreement would be about the exact
-// quantity §7's spot cap is sized from.
+// perp order's own cumulative execution — and the original justification went on
+// to say that quantity was "durable at order scope" and rebuilt by "§7.5's
+// replay". Both halves are false, and #204 found it by needing the number:
+// ports.Journal has no AppendFill, so no fill is journaled at order scope
+// either, and Replayer says in as many words that every record it rebuilds
+// carries a ZERO cumulative. The conclusion survives on a different premise —
+// §7.5's join rebuilds executed quantity from VENUE TRUTH, so the number is
+// recoverable without a second record of it — and the premise it survives on is
+// what fixes WHERE recovery can rebuild a generation: not at the replay, which
+// has no fills, but after the join and after §5.3's absence resolution. See
+// Reinstater.
+//
+// A second record would still be two stores holding one number with no rule for
+// a replay that finds them disagreeing — and the disagreement would be about the
+// exact quantity §7's spot cap is sized from.
 //
 // The amend is not optional and is why this method exists at all: §6.7 requires
 // re-classification on every change to outstanding_reserved_reductions, and SM
@@ -675,6 +855,27 @@ func (d *Deleverer) supersede(g *domain.Generation, path domain.SupersessionPath
 	if err := g.Supersede(path); err != nil {
 		return fmt.Errorf("delever %s: %w", g.Group(), err)
 	}
+
+	// The ladder bar is applied on the LIVE path as well as at boot, and that is
+	// the point of putting it here rather than in the reinstatement: SM §7's
+	// resumption invariant is one rule, and a version of it that only held over a
+	// restart would be a system that refuses what it has forgotten and permits
+	// what it remembers. BarLadder refuses a resuming path, so the predicate is
+	// asked once, in the place that owns it.
+	//
+	// It runs BEFORE the retire and after the aggregate has taken the
+	// supersession, because the two ends fail differently: a bar not applied
+	// leaves the ladder open against an arbitration, and a retire not performed
+	// leaves an entry subtracting for the life of the process. Ordering the
+	// weaker-failing one second is the same argument Open's release makes.
+	if resumes, err := path.ResumesLadder(); err != nil {
+		return fmt.Errorf("delever %s: %w", g.Group(), err)
+	} else if !resumes {
+		if err := d.BarLadder(g.Group(), path); err != nil {
+			return fmt.Errorf("delever %s: %w", g.Group(), err)
+		}
+	}
+
 	if !active {
 		return nil
 	}

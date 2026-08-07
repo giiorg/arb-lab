@@ -76,7 +76,12 @@ func newSpotReconcileFixture(t *testing.T, leg application.SpotLeg, wired bool, 
 			},
 		}
 	}
-	r, err := application.NewReconciler(replayer, joiner, resolver, look)
+	// No reinstatement: these fixtures journal no generation, which is the
+	// deployment shape the phase is optional FOR. The gate still reports —
+	// OutcomePassed over an empty log — so the spot bracket's assertions are made
+	// against a checklist that is complete rather than one missing a required
+	// gate.
+	r, err := application.NewReconciler(replayer, joiner, resolver, nil, look)
 	if err != nil {
 		t.Fatalf("NewReconciler: %v", err)
 	}

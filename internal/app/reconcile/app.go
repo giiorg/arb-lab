@@ -102,12 +102,18 @@ type Report struct {
 // # consumer is for
 //
 // Checklist.Posture reduces over the REQUIRED gates, which is the default-deny
-// mechanism §7.5 insists on — and this root correctly declares five gates whose
-// producers live in contexts that do not exist yet. So the posture is
-// PostureReconcileOnly on a boot that found nothing at all and on a boot that
-// found a foreign order, and an exit code derived from it would answer the same
-// on both. Blocking() has the same problem one layer down: it names those four
-// on every run, so a real finding arrives as one row among five.
+// mechanism §7.5 insists on — and this root correctly declares gates whose
+// producers live in contexts that do not exist yet (three of the nine, as of
+// #204: the deactivation re-drive, the MarginOp resolution and the writer
+// authority). So the posture is PostureReconcileOnly on a boot that found
+// nothing at all and on a boot that found a foreign order, and an exit code
+// derived from it would answer the same on both. Blocking() has the same problem
+// one layer down: it names those three on every run, so a real finding arrives
+// as one row among four.
+//
+// The count is stated as a count of the ARM below rather than in prose alone,
+// because it has already gone stale once — #198 item 7 gave GateAccountPosture a
+// producer and moved it across, and the sentence here kept saying five.
 //
 // What distinguishes the two is whether anything LATCHED — which is precisely
 // §7.5's own distinction between preconditions that clear themselves and ones
@@ -175,6 +181,13 @@ func (r Report) ExitClass() ExitClass {
 		switch g {
 		case boot.GateJournalDurable, boot.GateJournalReplayed,
 			boot.GateVenueJoined, boot.GateNetDeltaAsserted,
+			// GateGenerationsReinstated is produced from the day it was
+			// declared (#204), so it never spends time in the arm below. Its
+			// blocking-but-not-latched cases are both retry-liftable: a join
+			// that did not conclude, so the phase never ran, and a live
+			// generation whose owed supersession awaits its reserved leg's
+			// finality — which the venue gives, not an operator.
+			boot.GateGenerationsReinstated,
 			// GateAccountPosture crossed from the arm below in #198 item 7,
 			// which is what that arm's comment instructed. It is blocking-but-
 			// not-latched only when the posture could not be ESTABLISHED — a
@@ -302,8 +315,10 @@ func NewRunner(snap config.Snapshot[Config], wall *clock.Wall,
 }
 
 // declaredGates is §7.5's full roster, which this root declares in full and
-// produces five of — the fifth is GateAccountPosture, which #198 item 7 gave
-// its first producer after five slices of being declared with none.
+// produces six of — the fifth was GateAccountPosture, which #198 item 7 gave its
+// first producer after five slices of being declared with none, and the sixth is
+// GateGenerationsReinstated, which #204 declared and produced in one slice
+// because its producer was the point of the slice.
 //
 // A function rather than a literal at the one call site, because the SET is the
 // decision — declaring a short roster is the shape §7.5 argues against, and
@@ -315,6 +330,7 @@ func declaredGates() []boot.Gate {
 		boot.GateJournalDurable,
 		boot.GateJournalReplayed,
 		boot.GateVenueJoined,
+		boot.GateGenerationsReinstated,
 		boot.GateNetDeltaAsserted,
 		boot.GateAccountPosture,
 		boot.GateDeactivationsResolved,

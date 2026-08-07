@@ -412,6 +412,23 @@ type Module struct {
 	// GateNetDeltaAsserted, reduced to the weakest posture over both.
 	Join *application.Joiner
 
+	// Delever is SM §7's `PackageDelever` ladder — core §7.1's escalation when
+	// isolated-margin liq distance breaches and the top-up path fails.
+	//
+	// It is exposed with NO trigger behind it yet, and the asymmetry is stated
+	// rather than left to be discovered: §7.1's liq-distance escalation is
+	// milestone 4's other workstream, so nothing in this build calls Open. What
+	// this field's existence buys today is the RECOVERY half — Reconcile
+	// reinstates a generation a previous process left live, and it does that
+	// through this value.
+	//
+	// A root that drives the ladder must call Reconcile FIRST, and the ordering
+	// is the same one Recover states for the projection with one extra edge: the
+	// ledger entry of a generation the log left live is re-Reserved by the boot,
+	// so an Open before the boot would find §6.7's entry gate looking at a ledger
+	// that is short exactly one entry — and pass.
+	Delever *application.Deleverer
+
 	// Reconcile is §7.5's reconcile-only boot as ONE call, and it is what a
 	// composition root's boot.KindReconcile phase invokes.
 	//
@@ -636,11 +653,36 @@ func New(deps Deps) (*Module, error) {
 		return nil, errors.Join(fmt.Errorf("oms: joiner: %w", err), journal.Close())
 	}
 
-	// §7.5's three phases in the one order they are correct in. It holds the same
-	// three use cases the fields above expose, not copies: a reconcile that ran
-	// against a second replayer would rebuild a second projection and assert the
-	// invariant over neither of them.
-	reconciler, err := application.NewReconciler(replayer, joiner, resolver,
+	// SM §7's `PackageDelever` ladder, and the FIRST composition root to
+	// construct one (task #204). Nothing here TRIGGERS it — core §7.1's
+	// liq-distance escalation is milestone 4's other workstream and does not call
+	// Open — so what this wiring buys is the recovery half: the boot below can
+	// reinstate a generation a previous process left live, and the gate that
+	// refuses when it cannot is now reachable rather than standing unused.
+	//
+	// It takes the SAME classifier and the SAME dispatcher the fields above
+	// expose, on the reconciler's rule one type over: a ladder holding a private
+	// classifier would amend a private ledger, which is FM-5's failure with the
+	// bookkeeping done correctly.
+	deleverer, err := application.NewDeleverer(dispatcher, classifier, journal)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("oms: deleverer: %w", err), journal.Close())
+	}
+
+	// §7.5's generation-scope rebuild. It reaches the ladder through the
+	// interface and the projection through the READ port — see application's
+	// GenerationLadder for why the capability handed over is three whole acts of
+	// the ladder rather than a Classifier.
+	reinstater, err := application.NewReinstater(deleverer, orders)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("oms: reinstater: %w", err), journal.Close())
+	}
+
+	// §7.5's phases in the one order they are correct in. It holds the same use
+	// cases the fields above expose, not copies: a reconcile that ran against a
+	// second replayer would rebuild a second projection and assert the invariant
+	// over neither of them.
+	reconciler, err := application.NewReconciler(replayer, joiner, resolver, reinstater,
 		application.SecondLook{Wait: deps.SettleWait, Settle: deps.SpotSettle})
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("oms: reconciler: %w", err), journal.Close())
@@ -654,6 +696,7 @@ func New(deps Deps) (*Module, error) {
 		Classify:  classifier,
 		Recover:   replayer,
 		Join:      joiner,
+		Delever:   deleverer,
 		Reconcile: reconciler,
 		journal:   journal,
 		orders:    orders,

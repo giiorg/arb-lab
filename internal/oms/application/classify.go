@@ -169,6 +169,25 @@ func (c *Classifier) Track(group domain.HedgeGroup, base fixedpoint.Asset) error
 	return nil
 }
 
+// Tracked reports whether Track has fixed this group's base asset.
+//
+// It exists for §7.5's reinstatement and it is a READ, which is what makes it
+// safe to expose: Track's refusal of a second registration is deliberate — a
+// re-track installs a fresh ledger and discards whatever entries the group held
+// — so a caller that must not create a group twice needs to be able to ASK,
+// rather than to call Track and read meaning into the error it comes back with.
+// Reading an error as a state is how a genuine "this group was already
+// registered by something else" turns into a silent no-op.
+//
+// It answers false for an invalid group rather than refusing, because the
+// question it answers is "does the ledger for this key exist", and no invalid
+// key has one. A caller acting on the answer reaches Track or Reserve next, and
+// both validate.
+func (c *Classifier) Tracked(group domain.HedgeGroup) bool {
+	_, ok := c.groups[group]
+	return ok
+}
+
 // Verdict is one classification: §6.7's answer for one hedge group at one
 // instant.
 //

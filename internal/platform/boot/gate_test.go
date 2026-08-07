@@ -16,6 +16,7 @@ func allGates() []boot.Gate {
 		boot.GateJournalDurable,
 		boot.GateJournalReplayed,
 		boot.GateVenueJoined,
+		boot.GateGenerationsReinstated,
 		boot.GateNetDeltaAsserted,
 		boot.GateAccountPosture,
 		boot.GateDeactivationsResolved,
@@ -53,14 +54,14 @@ func TestGateValidateAndString(t *testing.T) {
 	// would follow maxGate wherever it went, and the check that the sentinel is
 	// refused would pass against any maxGate at all. The literal is what makes
 	// adding a member without updating this file a failing test.
-	if err := boot.Gate(9).Validate(); !errors.Is(err, boot.ErrGateInvalid) {
-		t.Errorf("Gate(9).Validate() = %v, want ErrGateInvalid", err)
+	if err := boot.Gate(10).Validate(); !errors.Is(err, boot.ErrGateInvalid) {
+		t.Errorf("Gate(10).Validate() = %v, want ErrGateInvalid", err)
 	}
 	// And the roster is the same length, so a member added to the enum and not to
 	// allGates() cannot hide behind a literal that happens to still be one past
 	// the end.
-	if len(allGates()) != 8 {
-		t.Errorf("allGates() has %d gates, want 8 — the roster and Gate(9) above must move together", len(allGates()))
+	if len(allGates()) != 9 {
+		t.Errorf("allGates() has %d gates, want 9 — the roster and Gate(10) above must move together", len(allGates()))
 	}
 	for _, g := range allGates() {
 		if err := g.Validate(); err != nil {
