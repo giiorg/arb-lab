@@ -1,6 +1,76 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-07, session 116): **#199 IS RULED AND SLICE A HAS NO OPEN QUESTIONS. `Scope` WAS DOING DUTY FOR A PROPERTY IT DOES NOT CARRY. DOCS v0.9.54, NINE MUTANTS ALL CAUGHT, `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO.**
+## Status (2026-08-07, sessions 117–118): **SM §7's `PackageDelever` GENERATION LADDER EXISTS. `FM-9` HAS A CONSUMER, `FM-8`'s OBLIGATION IS DISCHARGED, AND BUILDING IT SETTLED FOUR THINGS THE SPEC HAD NOT SAID. DOCS v0.9.55, THIRTEEN MUTANTS ALL CAUGHT, `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
+
+**Read `docs/superpowers/specs/2026-08-07-m4-177-generation-ladder.md` (§74)
+first** — the four rulings with their failure directions, the seven rejected
+alternatives, the two mutants that point opposite ways on one signal, and what
+this deliberately does NOT do.
+
+**WHAT LANDED.** `internal/oms/domain/{generation,generationphase}.go` — the
+ten-phase aggregate, SM §7's transition table, the never-net-short spot cap, and
+`CheckAdvance`/`CheckSpotSize`/`CheckSupersede` as *questions*, so a phase can be
+journaled before the aggregate carries it. `internal/oms/application/ports/generationjournal.go`
+— six methods, one per payload, so a phase carrying a target, a leg id, a size or
+a path is **not reachable** through the phase recorder at all.
+`internal/oms/application/delever.go` — the ladder, FLAG-3's durability, the
+ledger kept in step by construction, and `Reassess`, which is model (a)'s
+`P5`/`NC23` discharge. `Classifier.PremiseFor` computes `FM-9`'s netted quantity
+with the **same** fold and subtraction as the ordinary verdict, so the premise and
+the verdict cannot drift.
+
+**THE HEADLINE: FOUR RULINGS CAME OUT OF BUILDING THE MACHINE, NOT READING IT.**
+(1) **The quiesce obligation needs no cancel port.** Every order is a marketable
+IOC, so "quiesce the reserved second leg to §6.7 finality first" is *awaiting*
+finality — which is why no `Cancel` exists anywhere, and why the wait is bounded:
+every successor of the two phases it binds on is either the other one of them or
+an ending. (2) **The entry gate and the standing trigger want different
+thresholds on one counter.** `PremiseFor` refuses at >1 `PackageDelever` entry
+(the netting keys on producer); SM §7's entry rule is ==0. So `Open` **reserves
+before it asks**, which makes a stale sibling the second entry and turns the
+existing refusal into the gate — asked the other way round the sibling's entry is
+silently netted out, `FM-9` through the decomposition. (3) **Ending a generation
+RELEASES its entry; it does not amend it to zero.** Same final ledger, different
+act: what the entry carried at the ending is real exposure the generation put on
+and did not take back, and releasing is what lets §2 see it. Mutant M2 confirms
+the suite tells them apart. (4) **Ladder resumption is a property of the PATH** —
+premise-lost resumes, the two external arbitrations do not — which was the one
+`SPEC EDIT OWED` marker and is now SM §7's own invariant.
+
+**TWO FINDINGS BESIDE THEM.** `IssueFloor` booked the floor order's own exposure
+**change** where the ledger wants the **exposure removed** — the direction `FM-5`'s
+amount rule left open, and the wrong sign makes the determined branch sell 1.4
+against 0.6 of naked long. And `ambiguous-order-model.md`'s clause map asserted a
+reachability route (*"or via `Supersede`"*) that reaches `PdPlan`'s guard while
+permanently disabling the action, so the model is **silent** on ladder resumption
+rather than supporting either answer — corrected in place.
+
+**TWO MUTANTS, ONE SIGNAL, OPPOSITE VERDICTS.** M3 (collapse
+`premiseOrDischarge`'s three branches) **SURVIVED and the mutant was wrong** — the
+branches report, `CheckAdvance` enforces one layer down, and M3b (report the
+supersession, never perform it) is what negates the claim. M12 (delete
+`verifyLeg`'s hedge-group check) survived on a **real gap**: every fixture planted
+its legs on the group by construction. `exhaustiveswitch` bit on a **test fake**,
+catching the fake journal's phase switch on its first run.
+
+**WHAT IS NOT DONE, BOTH FILED.** Task **#203** — `ports.GenerationJournal` has
+only a test fake, so FLAG-3's durability is a contract nothing honours yet; the
+design fork is one chain over a widened subject column (migration needed) versus
+two chains, and one chain wins because it is the only shape in which *the
+authorization precedes the spot order* is a fact a replay can check. Task
+**#184** — its stated trigger has **fired**: the `Deleverer` is the single-order
+`Dispatch` path's first real caller, and its legs get no §2.4/§69 re-check.
+
+**Unchanged:** §7.1's escalation *trigger* half (liq-distance on the mark stream,
+`MarginGateway`, sizing-by-live-tier) is milestone 4's other workstream and
+untouched; three standing operator decisions ($20/$55 live test, #171's
+credential, §38f); credentials deferred; capture **PID 8495**; never rebuild over
+`bin/arblab`; `make ci` runs `-race` AND the ka staleness gate (needs node); cap
+`TLC_WORKERS` at 4; docs/i18n parity is `bun test`.
+
+---
+
+## Status (2026-08-07, session 116 — HISTORICAL): **#199 IS RULED AND SLICE A HAS NO OPEN QUESTIONS. `Scope` WAS DOING DUTY FOR A PROPERTY IT DOES NOT CARRY. DOCS v0.9.54, NINE MUTANTS ALL CAUGHT, `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO.**
 
 **Read `docs/superpowers/specs/2026-08-06-m4-198-account-posture.md` §73p
 first** — the fifteen-row subject table, the four rejected alternatives, the

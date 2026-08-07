@@ -183,4 +183,17 @@ var (
 	// is a policy with no carrier, and inheriting a reading is the mistake
 	// the field exists to make unwritable (§70i).
 	ErrAbsenceSemanticsInvalid = errors.New("oms: balance report states no absence semantics")
+
+	// ErrGenerationPhaseNeedsPayload reports a generation phase recorded through
+	// GenerationJournal.AppendGenerationPhase when that phase carries a payload
+	// of its own — `Planned` its target, `SpotReduceAuthorized` its size,
+	// `Superseded` its path.
+	//
+	// It is one sentinel for all three, on ErrAuthorizationNeedsAnchor's
+	// argument: the caller's action is identical in each case — call the method
+	// that carries the field — and nothing was written in any of them. What it
+	// protects differs per phase and is stated at each method; what they share is
+	// that the payload is UNRECOVERABLE once the phase is recorded without it,
+	// because none of the three is derivable from the order journal.
+	ErrGenerationPhaseNeedsPayload = errors.New("oms: this generation phase may not be recorded without its payload")
 )

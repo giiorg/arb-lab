@@ -301,6 +301,124 @@ var (
 	// whichever member the check happened to read.
 	ErrFilterAssetsDisagree = errors.New("oms: trading filter members disagree about the instrument's assets")
 
+	// ErrGenerationPhaseUnset and ErrGenerationPhaseUnknown report a
+	// GenerationPhase that is empty and one that is neither declared value.
+	//
+	// Separate for OrderState's reason, and the first is the worse one here too:
+	// SM §7's SpotReduceAuthorized is a DURABLE record, so a generation
+	// recovered at the zero phase is one the ladder cannot place — it knows
+	// neither whether the perp reduction confirmed nor whether a spot sale was
+	// authorized, which are the two facts the whole never-net-short sequencing
+	// rests on.
+	ErrGenerationPhaseUnset   = errors.New("oms: generation phase unset")
+	ErrGenerationPhaseUnknown = errors.New("oms: generation phase is not a declared value")
+
+	// ErrGenerationPhaseUnhandled reports a DECLARED phase that a partition or
+	// the transition table has no case for — the §3.6 rule 10 failure arriving
+	// at runtime. It denies, so an unhandled phase has no successors and the
+	// generation stops rather than moving anywhere.
+	ErrGenerationPhaseUnhandled = errors.New("oms: generation phase has no case")
+
+	// ErrGenerationNoOp and ErrGenerationTransitionForbidden report a
+	// self-transition and an edge SM §7's ladder does not have.
+	ErrGenerationNoOp                = errors.New("oms: generation phase transition to itself")
+	ErrGenerationTransitionForbidden = errors.New("oms: generation phase transition is not an SM §7 edge")
+
+	// ErrSupersessionPathUnset, ErrSupersessionPathUnknown and
+	// ErrSupersessionPathUnhandled report the same three conditions for the
+	// three rows that end a generation.
+	ErrSupersessionPathUnset     = errors.New("oms: supersession path unset")
+	ErrSupersessionPathUnknown   = errors.New("oms: supersession path is not a declared value")
+	ErrSupersessionPathUnhandled = errors.New("oms: supersession path has no case")
+
+	// ErrGenerationIDUnset reports a generation with no handle. The identity
+	// outlives every order on both legs, so an empty one collapses distinct
+	// bounded attempts into whichever the caller reached for last.
+	ErrGenerationIDUnset = errors.New("oms: generation id unset")
+
+	// ErrGenerationTargetNotPositive reports a generation opened for zero or
+	// less. Zero is the reading that would otherwise go through, and it is not
+	// merely useless: it runs the whole ladder, reduces leverage by nothing, and
+	// holds §7's one-generation-at-a-time gate closed while it does.
+	ErrGenerationTargetNotPositive = errors.New("oms: generation target is not positive")
+
+	// ErrGenerationPremiseNotIntact reports a generation opened over a package
+	// that is not still-neutral — SM §7's own entry precondition, which core
+	// §5.3 states as "reduce leverage on a STILL-NEUTRAL package".
+	ErrGenerationPremiseNotIntact = errors.New("oms: generation premise is not intact at entry")
+
+	// ErrGenerationPremiseDissolved reports a generation asked to take a step
+	// that commits new exposure while the premise it opened under has stopped
+	// holding — FM-8's standing obligation refusing.
+	//
+	// Distinct from ErrGenerationPremiseNotIntact, which is the same condition
+	// at entry. The two send a reader to different places: the first is a caller
+	// that escalated over a package it should not have, and this one is a
+	// package that moved UNDERNEATH a live generation, which is the situation
+	// whose only correct answer is to supersede and quiesce.
+	ErrGenerationPremiseDissolved = errors.New("oms: generation premise dissolved")
+
+	// ErrGenerationLegNotInFlight reports a fill recorded against a generation
+	// whose perp leg is not in flight.
+	ErrGenerationLegNotInFlight = errors.New("oms: generation leg is not in flight")
+
+	// ErrGenerationFillNotPositive reports a non-positive executed quantity. A
+	// zero fill is an event that moves nothing while amending the ledger entry,
+	// and a negative one is a sign convention error arriving as data.
+	ErrGenerationFillNotPositive = errors.New("oms: generation fill quantity is not positive")
+
+	// ErrGenerationPerpOvershootsTarget reports perp executions exceeding the
+	// generation's own per-leg target — a fill attributed to the wrong
+	// generation, or one counted twice. Admitting it would raise the reserved
+	// entry above anything the generation can sell back, understating the
+	// group's residual for as long as the entry lives.
+	ErrGenerationPerpOvershootsTarget = errors.New("oms: generation perp executions exceed its target")
+
+	// ErrGenerationSpotSizeNegative and ErrGenerationSpotExceedsConfirmedPerp
+	// report the two ways an authorization breaks §7's sequencing. The second is
+	// the one that matters: authorizing more spot than the CONFIRMED perp
+	// reduction makes the transient net-SHORT in the rally that triggered the
+	// generation, which is the direction the whole perp-first ordering exists to
+	// avoid.
+	ErrGenerationSpotSizeNegative         = errors.New("oms: generation spot authorization is negative")
+	ErrGenerationSpotExceedsConfirmedPerp = errors.New("oms: generation spot authorization exceeds the confirmed perp reduction")
+
+	// ErrGenerationSpotExceedsAuthorized reports the spot leg executing more
+	// than the durable authorization fixed — exposure the ladder never
+	// authorized, and the cap the never-net-short claim rests on.
+	ErrGenerationSpotExceedsAuthorized = errors.New("oms: generation spot execution exceeds its authorization")
+
+	// ErrGenerationNotActive reports the PREMISE-LOST row fired against a
+	// generation that has already reached §6.7 finality. There is nothing left
+	// to take further, so recording a premise loss there would attribute one to
+	// an attempt that had already stopped. The two external rows are deliberately
+	// NOT guarded on this — see Generation.Supersede.
+	ErrGenerationNotActive = errors.New("oms: generation is no longer active")
+
+	// ErrGenerationAlreadySuperseded reports a second supersession. The first
+	// path is the one an operator is shown, and overwriting it would name
+	// whichever arbitration arrived last.
+	ErrGenerationAlreadySuperseded = errors.New("oms: generation has already been superseded")
+
+	// ErrGenerationLegUnidentified reports a leg submitted without its
+	// ClientOrderID. The id is what makes the leg netted out of the premise, so
+	// an unnamed one leaves the generation's own order inside the quantity that
+	// decides whether the generation may continue — FM-9, arriving through the
+	// netting instead of through the trigger.
+	ErrGenerationLegUnidentified = errors.New("oms: generation leg carries no client order id")
+
+	// ErrGenerationLegNotSubmitted reports an order id supplied for a leg that
+	// was never sent — a zero-size spot authorization has nothing on the wire,
+	// and an id here would net an order the generation does not own out of its
+	// own premise.
+	ErrGenerationLegNotSubmitted = errors.New("oms: generation names a leg it did not submit")
+
+	// ErrGenerationLegNotQuiesced reports a supersession attempted while the
+	// reserved SECOND leg is still out at the venue. All three of SM §7's rows
+	// quiesce it to §6.7 finality FIRST; abandoning a generation without doing
+	// so strands the leg, which is the harm the rule exists for.
+	ErrGenerationLegNotQuiesced = errors.New("oms: generation reserved leg is not quiesced")
+
 	// ErrFilterObservedAtUnset reports a TradingFilters value with no
 	// observation instant. The age question is asked at every package
 	// admission (§69), and a zero instant would answer it in whichever

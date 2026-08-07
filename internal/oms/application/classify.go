@@ -6,6 +6,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/oms/application/ports"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
 	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
+	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
 
 // Classifier is §6.7 — "the SINGLE gate for EVERY compensating trade".
@@ -343,6 +344,74 @@ func (c *Classifier) Release(group domain.HedgeGroup, id domain.ReservationID) (
 	return released, verdict, nil
 }
 
+// PremiseFor is SM §7's entry test re-evaluated NET OF ONE GENERATION'S OWN
+// LEGS — the quantity FM-9 says the standing trigger must read, and the reason
+// domain.ReservedReductions.OutstandingFor exists.
+//
+// # What "net of its own legs" removes, and why it must be both sides
+//
+// Model (a): `PremiseResidual == (realized − PdOwnRealized) − (TrueReserved −
+// PdReserved)`. The generation's own orders come out of the minuend and its own
+// ledger entry comes out of the subtrahend, and the result is INVARIANT under
+// every step of the generation's own ladder — a perp fill raises the realized
+// delta and amends the entry by the same amount, an authorization moves the
+// intent and the transient together. That invariance is FM-5's fix restated as a
+// quantity, and it is the whole claim: the premise moves only when something
+// EXTERNAL moves it, which is what "the premise dissolved" means.
+//
+// Read RAW instead — "the §2 classifier leaves Determined for this hedge group",
+// which is what SM §7 said until v0.9.25 — and the trigger fires on the
+// generation's own first step, because its perp reduction is an exposure-changing
+// order on that group and §7 DEPENDS on it making the group ambiguous. Model
+// (a)'s control NC22 reaches that abort four states from Init with nothing
+// realized, nothing outstanding and no external event at all. A spurious abort is
+// not bookkeeping: §7's generations exist because the perp short is nearing
+// liquidation, so cancelling one cancels the mechanism that was reducing the
+// risk, and does it with a reserved leg out.
+//
+// # The one-generation precondition is CHECKED here rather than assumed
+//
+// The only handle the ledger offers on "this generation's own entry" is the
+// PRODUCER, so the netting is correct exactly while one PackageDelever entry
+// exists. SM §7 forbids a second — "each generation is a bounded attempt made
+// only after the prior generation reaches §6.7 finality" — and a rule stated in
+// another section and relied on here is a premise nobody re-derives. With two,
+// this would net a SIBLING's entry out too, and the premise a generation is
+// judged against would contain another generation's subject: FM-9 arriving one
+// layer out, through the decomposition rather than through the trigger.
+//
+// At `Planned` the leg set is empty and the entry is zero, so the netting is
+// vacuous and this returns the package's ordinary residual and verdict — which
+// is what makes the entry precondition and the standing trigger the same test.
+func (c *Classifier) PremiseFor(group domain.HedgeGroup, own []ids.ClientOrderID) (domain.Premise, error) {
+	ep, err := c.episodeFor(group)
+	if err != nil {
+		return domain.Premise{}, err
+	}
+	generations, err := ep.reserved.CountFor(domain.ProducerPackageDeleverSpot)
+	if err != nil {
+		return domain.Premise{}, fmt.Errorf("classifier: group %s: %w", group, err)
+	}
+	if generations > 1 {
+		return domain.Premise{}, fmt.Errorf("classifier: group %s holds %d PackageDelever reservations: %w",
+			group, generations, ErrPremiseNettingAmbiguous)
+	}
+
+	exclude := make(map[ids.ClientOrderID]struct{}, len(own))
+	for _, id := range own {
+		if id == "" {
+			return domain.Premise{}, fmt.Errorf("classifier: group %s: %w", group, ErrPremiseLegUnidentified)
+		}
+		exclude[id] = struct{}{}
+	}
+
+	verdict, err := c.evaluateExcluding(group, ep, exclude, true)
+	if err != nil {
+		return domain.Premise{}, err
+	}
+	return domain.Premise{Residual: verdict.Residual, Class: verdict.Class}, nil
+}
+
 // FloorAuthorization is a permitted IntervalFloorReduction: the one compensating
 // action §6.7 admits before finality.
 type FloorAuthorization struct {
@@ -423,10 +492,20 @@ func (c *Classifier) IssueFloor(group domain.HedgeGroup, id domain.ReservationID
 			group, current.Range, ErrFloorMagnitudeZero)
 	}
 
+	// The ledger carries the EXPOSURE this reduction removes, which is the
+	// negation of the change the order applies — see ReservedReductions.Amend,
+	// where the two readings and their sign are set out. Amending `change`
+	// itself is the defect that reading exists to name: the residual would then
+	// grow by the floor's own size, and the determined branch that fires when
+	// the intervals collapse would sell the floor's quantity a second time.
+	claimed, err := change.Neg()
+	if err != nil {
+		return FloorAuthorization{}, Verdict{}, fmt.Errorf("group %s floor exposure: %w", group, err)
+	}
 	if err := ep.reserved.Reserve(id, domain.ProducerIntervalFloor); err != nil {
 		return FloorAuthorization{}, Verdict{}, fmt.Errorf("classifier: group %s: %w", group, err)
 	}
-	if err := ep.reserved.Amend(id, change); err != nil {
+	if err := ep.reserved.Amend(id, claimed); err != nil {
 		return FloorAuthorization{}, Verdict{}, fmt.Errorf("classifier: group %s: %w", group, err)
 	}
 	ep.floorIssued = true
@@ -452,6 +531,24 @@ func (c *Classifier) episodeFor(group domain.HedgeGroup) (*episode, error) {
 // evaluate is the classification itself: the fold over the group's orders, the
 // subtraction, and §6.7's verdict rule.
 func (c *Classifier) evaluate(group domain.HedgeGroup, ep *episode) (Verdict, error) {
+	return c.evaluateExcluding(group, ep, nil, false)
+}
+
+// evaluateExcluding is the classification with a named set of orders and,
+// optionally, the PackageDelever producer's own ledger entry held OUT of both
+// sides of §6.7's subtraction.
+//
+// The ordinary verdict passes an empty set and false, so there is exactly one
+// fold and one subtraction in this package. That matters more than the code it
+// saves: a second copy of the arithmetic is where the premise and the verdict
+// would drift, and the whole of FM-9 is that the two must be the SAME test
+// asked about different subjects.
+func (c *Classifier) evaluateExcluding(
+	group domain.HedgeGroup,
+	ep *episode,
+	exclude map[ids.ClientOrderID]struct{},
+	netOwnReservation bool,
+) (Verdict, error) {
 	records, err := c.orders.OrdersIn(group)
 	if err != nil {
 		return Verdict{}, fmt.Errorf("classifier: group %s: %w", group, err)
@@ -460,6 +557,16 @@ func (c *Classifier) evaluate(group domain.HedgeGroup, ep *episode) (Verdict, er
 	realized := fixedpoint.ZeroQuantity(ep.asset)
 	movement := domain.NoPossibleDelta(ep.asset)
 	for _, rec := range records {
+		// Excluding a leg removes BOTH its realized quantity and its
+		// possible-delta interval, which is exactly model (a)'s
+		// `realized − PdOwnRealized` and `ReportedDetermined(orders, 0)` in one
+		// operation. Doing it here rather than by subtracting a separately
+		// tracked figure is what keeps the two agreeing: a generation's own
+		// tally of what its legs did and the projection's tally are different
+		// stores, and the projection is the one §7.5 rebuilds.
+		if _, skip := exclude[rec.Order.ClientOrderID]; skip {
+			continue
+		}
 		// The membership check is deliberately a SECOND one — the adapter that
 		// answered already filtered — and the reason it is not the "second copy
 		// of one rule" shape this repo has paid for is that the two checks are on
@@ -513,6 +620,16 @@ func (c *Classifier) evaluate(group domain.HedgeGroup, ep *episode) (Verdict, er
 	reserved, err := ep.reserved.Outstanding()
 	if err != nil {
 		return Verdict{}, fmt.Errorf("classifier: group %s: %w", group, err)
+	}
+	if netOwnReservation {
+		own, err := ep.reserved.OutstandingFor(domain.ProducerPackageDeleverSpot)
+		if err != nil {
+			return Verdict{}, fmt.Errorf("classifier: group %s: %w", group, err)
+		}
+		reserved, err = reserved.Sub(own)
+		if err != nil {
+			return Verdict{}, fmt.Errorf("classifier: group %s premise subtrahend: %w", group, err)
+		}
 	}
 	residual, err := realized.Sub(reserved)
 	if err != nil {

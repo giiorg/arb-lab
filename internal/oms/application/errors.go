@@ -522,4 +522,81 @@ var (
 	// must not mint a permanent operator incident, and silently latching would
 	// be exactly that (record §70c).
 	ErrSecondLookUnwired = errors.New("oms: a spot delta needs the second look and none is wired")
+
+	// ErrPremiseNettingAmbiguous reports a premise asked for on a group holding
+	// more than one PackageDelever reservation. The netting identifies "this
+	// generation's own entry" by its PRODUCER, so with two live generations it
+	// would remove a sibling's entry as well — and the premise would then
+	// contain another generation's subject, which is FM-9's own shape one layer
+	// out. SM §7 forbids the situation; this refuses to compute through it.
+	ErrPremiseNettingAmbiguous = errors.New("oms: hedge group holds more than one PackageDelever reservation")
+
+	// ErrPremiseLegUnidentified reports an empty client order id in a
+	// generation's own-leg set. An empty id matches no record, so the leg would
+	// silently stay INSIDE the quantity that decides whether the generation may
+	// continue.
+	ErrPremiseLegUnidentified = errors.New("oms: generation own-leg set contains an empty client order id")
+
+	// ErrClassifierMissing and ErrGenerationJournalMissing report a Deleverer
+	// wired without §6.7's gate or without the durable generation log.
+	//
+	// Refused at construction on NewDispatcher's argument: the call that would
+	// discover a nil generation journal is the one recording FLAG-3's
+	// authorization, and finding the log absent THERE means the crash-boundary
+	// record silently did not exist for a spot sale already being authorized. A
+	// nil classifier is worse still — the ledger every other §6.7 client sizes
+	// against would simply not be amended, which is FM-5 with the bookkeeping
+	// done correctly.
+	ErrClassifierMissing        = errors.New("oms: delever needs the §6.7 classifier")
+	ErrGenerationJournalMissing = errors.New("oms: delever needs the generation journal")
+
+	// ErrNoLiveGeneration reports a ladder step for a hedge group that has no
+	// generation. The steps are not idempotent — each one journals — so this is
+	// a refusal rather than a no-op.
+	ErrNoLiveGeneration = errors.New("oms: hedge group has no live PackageDelever generation")
+
+	// ErrGenerationAlreadyLive reports a second generation opened on a group
+	// whose previous one has not ended — SM §7's "each generation is a bounded
+	// attempt made only after the prior generation reaches §6.7 finality".
+	//
+	// It is the IN-PROCESS half of that gate. The other half is
+	// ErrPremiseNettingAmbiguous, which catches a sibling this process never
+	// created, and neither subsumes the other: this one names the generation and
+	// its phase, which is what an operator needs, and that one survives a
+	// restart, which is what correctness needs.
+	ErrGenerationAlreadyLive = errors.New("oms: hedge group already has a live PackageDelever generation")
+
+	// ErrGenerationLegWrongProduct reports a leg dispatched as the wrong half of
+	// the cash-and-carry — a spot order presented as the perp reduction, or the
+	// reverse.
+	//
+	// It is §7's perp-short-FIRST sequencing made checkable at the only place
+	// both facts are in hand. A spot order submitted as the perp leg sells spot
+	// before any perp reduction has confirmed, which drives the transient net
+	// SHORT in the rally the generation was opened for — the one direction the
+	// whole ordering exists to avoid — and nothing downstream objects, because
+	// the quantity is right and the group is right.
+	ErrGenerationLegWrongProduct = errors.New("oms: generation leg is on the wrong side of the package")
+
+	// ErrGenerationLegMissized reports a leg whose order quantity is not the
+	// size the generation requires — its target for the perp leg, its durable
+	// authorization for the spot one.
+	//
+	// EXACTLY, not "no more than", and the direction that looks safe is the one
+	// that is not: the ledger entry is amended from the generation's figure, so
+	// an order SMALLER than it overstates outstanding_reserved_reductions. §6.7's
+	// residual is `realized − reserved`, so an overstated subtrahend reads more
+	// SHORT than the package is, and the determined branch BUYS — adding exposure
+	// in the middle of reducing it.
+	ErrGenerationLegMissized = errors.New("oms: generation leg is not the size the generation requires")
+
+	// ErrPremiseLossNotExternal reports the premise-lost supersession offered to
+	// Deleverer.Supersede, which serves SM §7's two EXTERNAL rows.
+	//
+	// The third row is this machine's own standing obligation, discharged by
+	// Reassess from the netted quantity that decides it (FM-9). Admitting it as
+	// an argument would let a caller assert a premise loss the ledger does not
+	// show — a generation cancelled on nobody's evidence, at the moment its perp
+	// short is nearing liquidation.
+	ErrPremiseLossNotExternal = errors.New("oms: the premise-lost supersession is discharged, never asserted")
 )

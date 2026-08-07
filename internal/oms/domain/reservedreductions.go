@@ -169,10 +169,35 @@ func (r *ReservedReductions) Reserve(id ReservationID, producer ReductionProduce
 // spot sale of s it carries s — which is why an additive API would be wrong for
 // the second half of that ladder, not merely awkward.
 //
-// The quantity is SIGNED. A reserved reduction of a long position is negative
-// exposure change and one of a short is positive, and the classifier subtracts
-// whatever is here — the sign is the producer's statement about direction, not a
-// convention this type imposes.
+// # The quantity is signed as the EXPOSURE REMOVED, never as the order's own change
+//
+// This is the one thing §6.7's sentence does not say in so many words, and the
+// two readings differ by a sign on every entry. §6.7's residual is
+// `realized_delta − outstanding_reserved_reductions`, a SUBTRACTION, and its
+// stated purpose for the subtrahend is that an in-flight reduction is "not
+// re-read as fresh naked exposure". Both are only satisfied by the exposure
+// reading:
+//
+//   - a group realized net LONG 1.0 with an in-flight sale of 0.4 has an entry
+//     of +0.4, so the residual is 0.6 — what is still genuinely naked;
+//   - the ORDER's own exposure change is −0.4, and an entry of −0.4 gives a
+//     residual of 1.4, which is the realized exposure PLUS the reduction
+//     already working against it. That reading does not merely mis-report: the
+//     determined branch then sells 1.4 against 0.6 of naked long and lands the
+//     group SHORT — a naked leg minted by the rule that exists to prevent one.
+//
+// The same reading is what makes the other producer's arithmetic close.
+// §6.7 says a PackageDelever generation's entry "carries the confirmed perp
+// reduction not yet matched by that sale" — a buy-to-reduce of x is +x of
+// realized exposure, and an entry of +x nets it to zero, which is §7's
+// "the classifier subtracts the reservation and does not misread it as a naked
+// residual to re-hedge". Under the order-change reading the two producers would
+// need OPPOSITE signs from one sentence.
+//
+// Formal model (a) encodes the exposure reading for both — `Pend(ImplLo,
+// "floor", TRUE)` and `Pend(pdDone − pdSold, "pkgspot", FALSE)` — and it is the
+// authority here, because no invariant phrased over this ledger can see a sign
+// error in it (§46 §8e).
 //
 // Zero is legal and is not the same as released: a generation that has committed
 // nothing yet still holds its slot, which is what stops a second generation
@@ -249,6 +274,34 @@ func (r *ReservedReductions) OutstandingFor(producer ReductionProducer) (fixedpo
 		return fixedpoint.Quantity{}, err
 	}
 	return r.sum(func(e *reservationEntry) bool { return e.producer == producer })
+}
+
+// CountFor reports how many entries one producer holds.
+//
+// It exists for a precondition of FM-9's netting rather than for reporting, and
+// the precondition is easy to miss. The premise nets out "this generation's own
+// entry", and the only handle the sum offers is the PRODUCER — so the netting is
+// correct exactly while ONE PackageDelever entry exists. With two live
+// generations it would remove a SIBLING's entry as well, and the premise a
+// generation is judged against would then contain another generation's subject:
+// FM-9 one layer out, arriving through the decomposition rather than through the
+// trigger.
+//
+// SM §7 already forbids the situation — "each generation is a bounded attempt
+// made only after the prior generation reaches §6.7 finality" — which is exactly
+// why this is worth counting: a rule stated elsewhere and relied on here is a
+// premise nobody re-derives.
+func (r *ReservedReductions) CountFor(producer ReductionProducer) (int, error) {
+	if err := producer.Validate(); err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, entry := range r.entries {
+		if entry.producer == producer {
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (r *ReservedReductions) sum(include func(*reservationEntry) bool) (fixedpoint.Quantity, error) {

@@ -365,16 +365,71 @@ func TestIssueFloorReservesItsOwnGenerationAndIsIssuedOnce(t *testing.T) {
 
 	// The reservation is counted BEFORE the order is submitted, which is what
 	// stops the still-in-flight floor being re-read as fresh naked exposure.
-	if got := after.Reserved.Decimal(); got != qtyDecimal(t, "-0.4") {
-		t.Fatalf("reserved after IssueFloor = %s, want -0.4", after.Reserved)
+	//
+	// The ENTRY is +0.4 where the order's own change is −0.4, and the sign is
+	// the assertion rather than an incidental: the ledger carries the exposure
+	// the reduction REMOVES, so the subtraction in §6.7's
+	// `realized_delta − outstanding_reserved_reductions` shrinks the residual by
+	// the floor's size. Realized here is long 1.0, the floor is selling 0.4, so
+	// what is still genuinely naked is 0.6. The opposite sign gives 1.4 —
+	// arithmetic that reads the working order as MORE exposure — and that is
+	// what this repo shipped until the generation ladder came to reuse it.
+	if got := after.Reserved.Decimal(); got != qtyDecimal(t, "0.4") {
+		t.Fatalf("reserved after IssueFloor = %s, want 0.4 (the exposure removed, not the order's −0.4 change)", after.Reserved)
 	}
-	if got := after.Residual.Decimal(); got != qtyDecimal(t, "1.4") {
-		t.Fatalf("residual after IssueFloor = %s, want 1.4", after.Residual)
+	if got := after.Residual.Decimal(); got != qtyDecimal(t, "0.6") {
+		t.Fatalf("residual after IssueFloor = %s, want 0.6", after.Residual)
 	}
 
 	// FM-7's defence in depth: never twice in one episode.
 	if _, _, err := classifier.IssueFloor(hedgeGroup(), "floor-2"); !errors.Is(err, application.ErrFloorAlreadyIssued) {
 		t.Fatalf("second IssueFloor = %v, want ErrFloorAlreadyIssued", err)
+	}
+}
+
+// TestAnInFlightFloorIsNotSoldASecondTimeWhenTheIntervalsCollapse is the sign
+// convention's BITE, and the reason it is a separate test from the one above.
+//
+// A residual asserted at the moment the floor is issued is a number nobody
+// spends. §6.7's late-resolution row is where it becomes money: the intervals
+// collapse while the floor is STILL in flight, the group reports Determined, and
+// the determined branch sizes an ExposureReduction from the residual. With the
+// entry signed as the order's own change instead of the exposure it removes, the
+// group reads long 1.4 against 0.6 genuinely naked, sells 1.4, and lands at
+// −0.8 — a naked SHORT minted by reservation-aware sizing, which exists to
+// prevent exactly that. Every quantity in that sentence is computed FROM the
+// ledger, so no invariant over the residual can object (§46 §8e).
+func TestAnInFlightFloorIsNotSoldASecondTimeWhenTheIntervalsCollapse(t *testing.T) {
+	t.Parallel()
+
+	classifier, orders := newClassifier(t,
+		leg(t, 1, spot(), domain.SideBuy, "1.4", "1.4", domain.StateFilled),
+		leg(t, 2, perp(), domain.SideSell, "1", "0.4", domain.StatePartiallyFilled),
+	)
+	if _, err := classifier.DeadlineExceeded(hedgeGroup()); err != nil {
+		t.Fatalf("DeadlineExceeded: %v", err)
+	}
+	if _, _, err := classifier.IssueFloor(hedgeGroup(), "floor-1"); err != nil {
+		t.Fatalf("IssueFloor: %v", err)
+	}
+
+	// The perp leg reaches a venue-terminal state with its 0.4 reconciled, so
+	// every possible-delta interval has collapsed. The floor's own order has
+	// NOT resolved — its entry is still in the ledger, which is the whole
+	// window this test is about.
+	orders.records[1].State = domain.StateCanceled
+
+	verdict := classify(t, classifier)
+	if verdict.Class != domain.ClassificationDetermined {
+		t.Fatalf("class = %s, want determined once the intervals collapse", verdict.Class)
+	}
+	reduction, err := verdict.Reduction()
+	if err != nil {
+		t.Fatalf("Reduction: %v", err)
+	}
+	// Realized is long 1.0; the floor is already selling 0.4; 0.6 is naked.
+	if got := reduction.Decimal(); got != qtyDecimal(t, "-0.6") {
+		t.Fatalf("ExposureReduction = %s, want -0.6 (−1.4 double-sells the floor and lands the group short)", reduction)
 	}
 }
 
@@ -685,12 +740,14 @@ func TestResolvingAnEpisodeRearmsBothTheDeadlineAndTheFloor(t *testing.T) {
 	// The perp leg is confirmed canceled with its 0.4 executed. Every interval
 	// has collapsed, so the episode resolves.
 	orders.records[1] = leg(t, 2, perp(), domain.SideSell, "1", "0.4", domain.StateCanceled)
-	assertVerdict(t, classify(t, classifier), domain.ClassificationDetermined, "1.4")
+	// Realized is long 1.0 and floor-1's entry is still in the ledger holding
+	// the 0.4 it is selling, so the residual is what is genuinely naked: 0.6.
+	assertVerdict(t, classify(t, classifier), domain.ClassificationDetermined, "0.6")
 
 	// Incident two: a new counter-leg goes live. Nothing has timed out.
 	orders.records = append(orders.records,
 		leg(t, 3, perp(), domain.SideSell, "0.5", "0", domain.StateAcknowledged))
-	assertVerdict(t, classify(t, classifier), domain.ClassificationAmbiguous, "1.4")
+	assertVerdict(t, classify(t, classifier), domain.ClassificationAmbiguous, "0.6")
 
 	// And a floor asked for now is refused for the RIGHT reason — the branch,
 	// not the spent flag. Without this the row above would be equally satisfied
@@ -707,10 +764,17 @@ func TestResolvingAnEpisodeRearmsBothTheDeadlineAndTheFloor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second IssueFloor: %v", err)
 	}
-	// Residual 1.4 with 0.5 still able to sell gives [0.9, 1.4]; the near
-	// endpoint is 0.9. Asserted as a value rather than as "no error", because a
+	// Residual 0.6 with 0.5 still able to sell gives [0.1, 0.6]; the near
+	// endpoint is 0.1. Asserted as a value rather than as "no error", because a
 	// floor issued at the wrong magnitude is the failure the rule exists for.
-	if got := second.Change.Decimal(); got != qtyDecimal(t, "-0.9") {
-		t.Fatalf("second floor = %s, want -0.9", second.Change)
+	//
+	// The magnitude is SMALLER than the first floor's, and that is FM-7's
+	// mechanism visible in a number: the second floor is sized net of the
+	// first's still-outstanding reservation, which is what "reservation-aware
+	// sizing already prevents a second floor reaching the opposite sign" means.
+	// Signed as the order's own change, the ledger compounded instead — the
+	// second floor came out at 0.9, larger than the first.
+	if got := second.Change.Decimal(); got != qtyDecimal(t, "-0.1") {
+		t.Fatalf("second floor = %s, want -0.1", second.Change)
 	}
 }
