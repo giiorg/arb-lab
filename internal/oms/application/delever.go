@@ -5,6 +5,7 @@ import (
 
 	"github.com/giiorg/arb-lab/internal/oms/application/ports"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
+	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
@@ -58,7 +59,15 @@ type Deleverer struct {
 	classifier *Classifier
 	dispatcher *Dispatcher
 	orders     ports.OrderWriteRepository
-	live       map[domain.HedgeGroup]*domain.Generation
+
+	// filters and clk are the dispatcher's, and together they are this type's
+	// half of §2.4/§69 — the admission-time re-verification the Executor does
+	// per package and this one does per LEG. See verifyLeg for why the unit
+	// differs and why that is not a weakening.
+	filters filterPolicy
+	clk     clock.Clock
+
+	live map[domain.HedgeGroup]*domain.Generation
 
 	// barred is SM §7's ladder-resumption invariant held as state: a group whose
 	// generation ended on a path SupersessionPath.ResumesLadder answers false for
@@ -104,6 +113,13 @@ type Deleverer struct {
 // amends is the one they all size against. Handing it a private classifier would
 // give the generation a private ledger, which is FM-5's failure with the
 // bookkeeping done correctly.
+//
+// The FILTER POLICY is inherited for the authority's reason and not the
+// classifier's — it is the same object the Executor enforces, deliberately, so
+// that one process cannot hold two ideas of the venue's grid. A parameter here
+// would let a root wire this type the empty map, which is a legal construction
+// meaning "plans nothing" and which would refuse every delever leg with
+// ErrFiltersUnknown at the moment a package is nearing liquidation.
 func NewDeleverer(d *Dispatcher, c *Classifier, j ports.GenerationJournal) (*Deleverer, error) {
 	if d == nil {
 		return nil, ErrDispatcherMissing
@@ -119,6 +135,8 @@ func NewDeleverer(d *Dispatcher, c *Classifier, j ports.GenerationJournal) (*Del
 		classifier: c,
 		dispatcher: d,
 		orders:     d.orders,
+		filters:    d.filters,
+		clk:        d.clk,
 		live:       make(map[domain.HedgeGroup]*domain.Generation),
 		barred:     make(map[domain.HedgeGroup]domain.SupersessionPath),
 	}, nil
@@ -987,7 +1005,7 @@ const (
 // verifyLeg establishes that a planned order really is the leg the ladder is
 // about to submit, against the DURABLE record rather than the caller's word.
 //
-// # Four checks, and each one has a distinct harm
+// # Five checks, and each one has a distinct harm
 //
 //   - the version, which is Dispatch's own (id, version) contract read early, so
 //     a stale ref is refused before anything is journaled rather than after;
@@ -1004,12 +1022,52 @@ const (
 //     them, so an order smaller than what the entry claims overstates the
 //     reserved reduction — the residual then reads MORE short than the package
 //     is, and §2's determined branch BUYS, adding exposure while deleveraging.
+//   - §2.4's GRID and §69's row DATE, which is task #184 and is the check the
+//     Executor's preflight does for the package path. See below.
 //
 // The side is not checked, and its absence is deliberate rather than an
 // omission: the perp leg buys and the spot leg sells only for a cash-and-carry
 // held long-spot/short-perp, which is milestone 1's shape and not a property §7
 // states. What §7 does state is the product ordering and the size cap, and those
 // are what is here.
+//
+// # The admission unit is ONE LEG, and it is the ladder's own shape rather than
+// # a weakening of §62d
+//
+// The Executor stamps a single instant for a whole package because its legs go
+// out in one fan-out and refusing leg 2 after leg 1 was sent is the
+// asymmetric-rejection harm. This ladder has no such unit to stamp: §7 sequences
+// its two legs precisely because the spot cap is the CONFIRMED perp reduction,
+// which does not exist until the perp leg has finalised. Two legs separated by a
+// venue round trip and a finality wait cannot share an admission instant, and
+// pretending they could — stamping the perp leg's instant and reusing it for the
+// spot leg — would be a freshness claim about a row nobody re-read. So each leg
+// is its own admission, judged at its own instant, and that is also why the pair
+// could not simply be pushed down into Dispatch, whose per-leg clock read WOULD
+// re-open §62d inside the executor's fan-out. filterPolicy carries the argument.
+//
+// # A refusal here does not STRAND the ladder, and the distinction is the reason
+// # this check is admissible where the premise guard was not
+//
+// SubmitSpotReduction is deliberately un-premise-guarded because refusing to
+// send an already-reserved spot reduction does not PREVENT a commitment, it
+// strands one — TLC returned a 16-state stuttering behaviour for the guarded
+// variant. This check looks like the same shape and is not, for two reasons. An
+// off-grid order is one the VENUE refuses too, so refusing locally forfeits
+// nothing and gains a diagnosis; the premise guard would have refused an order
+// the venue would have filled. And the refusal is RECOVERABLE where a venue
+// rejection is not: everything here is a read, before any generation record is
+// journaled and before the aggregate advances, so the generation stays exactly
+// where it was and the same rung can be re-presented against a refreshed map.
+// A venue rejection burns the ClientOrderID's single unrepeatable Place.
+//
+// # It runs LAST, on the preflight's own ordering argument
+//
+// The four checks above give sharper diagnoses for the failures they name — a
+// missized leg reported as ErrGenerationLegMissized names the generation's
+// requirement, where the same order reported as off-lot-step names the venue's
+// grid and sends an operator to the wrong map. Same reason the executor runs its
+// filter pass second, after the package-shape checks.
 func (d *Deleverer) verifyLeg(g *domain.Generation, ref DispatchRef, role legRole,
 	want fixedpoint.Quantity) (ports.OrderRecord, error) {
 	if ref.ID == "" {
@@ -1039,6 +1097,10 @@ func (d *Deleverer) verifyLeg(g *domain.Generation, ref DispatchRef, role legRol
 	if cmp != 0 {
 		return ports.OrderRecord{}, fmt.Errorf("delever %s: %s leg %q is sized %s, the generation requires %s: %w",
 			g.Group(), role, ref.ID, rec.Order.Quantity, want, ErrGenerationLegMissized)
+	}
+	if err := d.filters.admits(rec.Order.Instrument, rec.Order.Quantity,
+		rec.Order.LimitPrice, d.clk.Now()); err != nil {
+		return ports.OrderRecord{}, fmt.Errorf("delever %s: %s leg %q: %w", g.Group(), role, ref.ID, err)
 	}
 	return rec, nil
 }

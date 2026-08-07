@@ -67,12 +67,12 @@ func TestGovernorConsumeRefusalsRemainResolvable(t *testing.T) {
 			reserver := newFakeReserver(t)
 			placer := &acceptanceRefusalPlacer{governor: reserver.governor, mode: mode}
 			dispatcher, err := application.NewDispatcher(
-				journal, placer, orders, clk, application.NewDispatchAuthority(),
+				journal, placer, orders, clk, application.NewDispatchAuthority(), testFilters(t), testFilterMaxAge,
 			)
 			if err != nil {
 				t.Fatalf("NewDispatcher: %v", err)
 			}
-			executor, err := application.NewExecutor(dispatcher, testFilters(t), testFilterMaxAge, reserver)
+			executor, err := application.NewExecutor(dispatcher, reserver)
 			if err != nil {
 				t.Fatalf("NewExecutor: %v", err)
 			}

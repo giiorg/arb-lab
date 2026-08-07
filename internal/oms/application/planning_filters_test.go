@@ -248,13 +248,18 @@ func TestConstructionRefusesAnUnusableFiltersEntry(t *testing.T) {
 	}
 
 	j := newFakeJournal()
-	d, err := application.NewDispatcher(j, &fakePlacer{watch: j}, newFakeOrders(),
-		testClock(t), application.NewDispatchAuthority())
-	if err != nil {
-		t.Fatalf("NewDispatcher: %v", err)
+	if _, err := application.NewDispatcher(j, &fakePlacer{watch: j}, newFakeOrders(),
+		testClock(t), application.NewDispatchAuthority(), broken(), testFilterMaxAge); !errors.Is(err, domain.ErrFilterStepNotPositive) {
+		t.Errorf("NewDispatcher over a zero-step entry = %v, want ErrFilterStepNotPositive", err)
 	}
-	if _, err := application.NewExecutor(d, broken(), testFilterMaxAge, newFakeReserver(t)); !errors.Is(err, domain.ErrFilterStepNotPositive) {
-		t.Errorf("NewExecutor over a zero-step entry = %v, want ErrFilterStepNotPositive", err)
+
+	// The positive control for the line above, and NOT a duplicate of the
+	// suite's other constructions: this one asserts the entry validation is
+	// what refused, rather than the constructor objecting to something else
+	// about a fixture assembled by `broken`.
+	if _, err := application.NewDispatcher(j, &fakePlacer{watch: j}, newFakeOrders(),
+		testClock(t), application.NewDispatchAuthority(), testFilters(t), testFilterMaxAge); err != nil {
+		t.Errorf("NewDispatcher over a sound map = %v, want nil", err)
 	}
 }
 

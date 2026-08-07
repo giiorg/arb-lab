@@ -1,6 +1,76 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-07, session 120): **THE LIVE GENERATION IS REINSTATED AT §7.5 BOOT — SM §7's LADDER HAS ITS ENTRY BACK IN §6.7's SHARED LEDGER, AND THE GATE IT NEEDED COULD NOT BE THE REPLAY'S. DOCS v0.9.57, 29 MUTANTS / 3 REAL SURVIVORS (ALL CLOSED), `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
+## Status (2026-08-07, session 121): **SM §7's LADDER RE-VERIFIES §2.4's GRID AND §69's ROW DATE, PER LEG — AND #184's OWN FIRST OPTION WAS REFUTED BY A RULE ONE FILE AWAY. DOCS v0.9.58, 14 MUTANTS ALL CAUGHT, `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
+
+**Read `docs/superpowers/specs/2026-08-07-m4-184-ladder-filter-conformance.md`
+(§77) first** — the refutation that decided the design, the policy/check split,
+the stranding argument, the one finding, and the six rejected alternatives.
+
+**WHAT LANDED.** `application/filters.go` — `filterPolicy` (the map and its
+row-age bound as ONE value), `newFilterPolicy` (the three wiring refusals, moved
+off `NewExecutor`), and `admits` (conformance **then** date, at a caller-chosen
+instant). The `Dispatcher` now **holds** the policy and deliberately does not read
+it; `NewExecutor` **loses two parameters**; `Deleverer.verifyLeg` gains a fifth
+check, last. `oms.Module` wires one policy beside the one authority.
+
+**THE HEADLINE: #184 ASKED WHETHER THE PAIR SHOULD MOVE ONTO `Dispatch`, AND IT
+MAY NOT.** `Execute` already says why, in a comment: it stamps ONE admission
+instant per package because *"a two-leg package judged at two instants could
+straddle the filter-age bound and refuse asymmetrically"* (§62d). A freshness
+check inside `Dispatch` reads its own instant **per leg, inside the fan-out,
+after siblings may already have been sent** — that harm re-opened from the one
+method that cannot see it. So the check goes to each caller's **admission unit**:
+the package for the Executor, the **single leg** for the ladder, whose two legs
+are sequenced across a finality wait because the spot cap is the *confirmed* perp
+reduction. A row fresh for the perp leg may be stale for the spot leg, and that
+is correct.
+
+**THE POLICY MOVED EVEN THOUGH THE CHECK DID NOT.** §59b's argument on a second
+object: a root that could hand the Executor one grid and the Deleverer another
+would fragment §2.4's enforcement with no test able to see it, and the realistic
+accident is `NewDeleverer(..., nil, 0)` — legal, meaning "plans nothing", and it
+refuses every delever leg during an incident. Inherited, a second policy in one
+process is not expressible from outside the package. **The Planner keeps its own
+map on purpose**: plan time and admission time are different enforcement points,
+and the whole reason admission re-verifies is that they may differ.
+
+**A SPOT-RUNG REFUSAL DOES NOT STRAND THE LADDER, AND THAT IS THE SHARP PART.**
+`SubmitSpotReduction` is un-premise-guarded because TLC returned a 16-state
+stuttering behaviour for the guarded variant. This is not that shape, twice: an
+off-grid order is one the **venue** refuses too (the premise guard would have
+refused an order the venue would have *filled*), and the refusal is a **read**
+taken before any journal write, so the same rung admits a leg replanned onto the
+grid — where a venue rejection burns the id's one unrepeatable `Place`.
+
+**ONE FINDING, FILED AS #206.** `verifyLeg` requires the leg's quantity to EQUAL
+the generation's own figure, so §2.4's three QUANTITY members bite only on an
+off-grid **target or authorization** — and then no conforming leg exists at all.
+Pre-existing (the venue refused the same order before, later and with a burned
+id); the slice made it the only route to those branches. Not fixed, because the
+fix is a **derivation** and `filters.go` puts derivation with sizing — which is
+§7.1's escalation trigger, and does not exist yet. The recoverable member is the
+**price**, which the generation does not pin, and that is what the anti-stranding
+fixture had to vary.
+
+**THE CAMPAIGN.** 14 mutants, all caught. Three isolated to exactly one test: the
+ordering swap, `conformsToFilters` substituted for `admits`, and journal-before-
+verify. **One claim has no single-line mutant and it is stated rather than
+implied** — "the instant is re-read per leg" can only be broken by CACHING it,
+which is a design change, so the test defends a future refactor.
+
+**WHAT IS NOT DONE.** Triggering the ladder from core §7.1's liq-distance
+escalation — nothing calls `Open`, and it is now milestone 4's **only** open
+ladder work. Task **#206** (above) and task **#205** (`Classifier.Track`'s second
+caller) are untouched by this slice.
+
+**Unchanged:** three standing operator decisions ($20/$55 live test, #171's
+credential, §38f); credentials deferred; capture **PID 8495**; never rebuild over
+`bin/arblab`; `make ci` runs `-race` AND the ka staleness gate (needs node); cap
+`TLC_WORKERS` at 4; docs/i18n parity is `bun test`.
+
+---
+
+## Status (2026-08-07, session 120 — HISTORICAL): **THE LIVE GENERATION IS REINSTATED AT §7.5 BOOT — SM §7's LADDER HAS ITS ENTRY BACK IN §6.7's SHARED LEDGER, AND THE GATE IT NEEDED COULD NOT BE THE REPLAY'S. DOCS v0.9.57, 29 MUTANTS / 3 REAL SURVIVORS (ALL CLOSED), `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
 
 **Read `docs/superpowers/specs/2026-08-07-m4-204-generation-reinstatement.md`
 (§76) first** — the quantity that decided the slice's shape, the seam that

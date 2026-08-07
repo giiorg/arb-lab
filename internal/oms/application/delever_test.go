@@ -3,10 +3,12 @@ package application_test
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/giiorg/arb-lab/internal/oms/application"
 	"github.com/giiorg/arb-lab/internal/oms/application/ports"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
+	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
@@ -168,10 +170,27 @@ type deleverFixture struct {
 	journal      *fakeGenerationJournal
 	orderJournal *fakeJournal
 	placer       *fakePlacer
+	clk          *clock.TestClock
 }
 
 // newDeleverer builds the use case over a hedge group already holding `records`.
 func newDeleverer(t *testing.T, records ...ports.OrderRecord) *deleverFixture {
+	t.Helper()
+	return newDelevererOn(t, testClock(t), testFilters(t), testFilterMaxAge, records...)
+}
+
+// newDelevererOn is newDeleverer with §2.4/§69's three knobs exposed — the
+// clock each leg's admission instant is read from, the filter map the ladder
+// judges its legs against, and the row-age bound (#184).
+//
+// They reach the Deleverer through the DISPATCHER, which is the point: there is
+// no parameter on NewDeleverer through which a second policy could arrive, so
+// this helper is also the demonstration that the ladder enforces the process's
+// one policy rather than a copy of its own.
+func newDelevererOn(t *testing.T, clk *clock.TestClock,
+	filters map[ids.VenueInstrument]domain.TradingFilters, maxAge time.Duration,
+	records ...ports.OrderRecord) *deleverFixture {
+
 	t.Helper()
 	groupOrders := &fakeGroupOrders{records: records}
 	classifier, err := application.NewClassifier(groupOrders)
@@ -185,7 +204,8 @@ func newDeleverer(t *testing.T, records ...ports.OrderRecord) *deleverFixture {
 	oj := newFakeJournal()
 	placer := &fakePlacer{watch: oj}
 	orders := newFakeOrders()
-	dispatcher, err := application.NewDispatcher(oj, placer, orders, testClock(t), application.NewDispatchAuthority())
+	dispatcher, err := application.NewDispatcher(oj, placer, orders, clk,
+		application.NewDispatchAuthority(), filters, maxAge)
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
@@ -197,7 +217,7 @@ func newDeleverer(t *testing.T, records ...ports.OrderRecord) *deleverFixture {
 
 	f := &deleverFixture{
 		t: t, deleverer: d, classifier: classifier, groupOrders: groupOrders,
-		orders: orders, journal: gj, orderJournal: oj, placer: placer,
+		orders: orders, journal: gj, orderJournal: oj, placer: placer, clk: clk,
 	}
 	for _, rec := range records {
 		f.orders.records[rec.Order.ClientOrderID] = rec
@@ -274,6 +294,31 @@ func (f *deleverFixture) open(target string) *domain.Generation {
 		f.t.Fatalf("Open: %v", err)
 	}
 	return g
+}
+
+// toSpotAuthorization drives a freshly-opened generation to
+// `SpotReduceAuthorized` — the rung a test about the SPOT leg has to start from,
+// which is four calls away and which §7's sequencing makes unavoidable: the
+// authorized size is capped by the CONFIRMED perp reduction, so the perp leg has
+// to be submitted, filled and finalised first.
+//
+// target is the perp leg's size and its full fill; authorized is the spot
+// reduction the caller then fixes, which the aggregate caps at target.
+func (f *deleverFixture) toSpotAuthorization(target, authorized string) {
+	f.t.Helper()
+	perp := f.add(perpLeg(f.t, 10, target))
+	if _, err := f.deleverer.SubmitPerpReduction(hedgeGroup(), ref(perp)); err != nil {
+		f.t.Fatalf("SubmitPerpReduction: %v", err)
+	}
+	if err := f.deleverer.RecordPerpFill(hedgeGroup(), qty(f.t, target)); err != nil {
+		f.t.Fatalf("RecordPerpFill: %v", err)
+	}
+	if err := f.deleverer.ConfirmPerpReduction(hedgeGroup()); err != nil {
+		f.t.Fatalf("ConfirmPerpReduction: %v", err)
+	}
+	if err := f.deleverer.AuthorizeSpotReduction(hedgeGroup(), qty(f.t, authorized)); err != nil {
+		f.t.Fatalf("AuthorizeSpotReduction(%s): %v", authorized, err)
+	}
 }
 
 // completeWithNoSpotSale drives the generation to `Complete` the shortest way

@@ -19,18 +19,21 @@ import (
 
 // executorOn is newExecutor with the three §69 knobs exposed: the clock the
 // admission instant is read from, the filters map the ages live in, and the
-// bound they are judged against.
+// bound they are judged against. Since #184 the last two reach the executor
+// through the DISPATCHER, which is where the policy now lives — so this helper
+// is also the fixture proving the executor enforces the inherited one and not
+// a copy of its own.
 func executorOn(t *testing.T, clk clock.Clock, filters map[ids.VenueInstrument]domain.TradingFilters,
 	maxAge time.Duration) (*application.Executor, *fakeJournal, *fakePlacer, *fakeOrders) {
 	t.Helper()
 	j := newFakeJournal()
 	p := &fakePlacer{watch: j, ack: ports.Ack{VenueOrderID: "V-1"}}
 	r := newFakeOrders()
-	d, err := application.NewDispatcher(j, p, r, clk, application.NewDispatchAuthority())
+	d, err := application.NewDispatcher(j, p, r, clk, application.NewDispatchAuthority(), filters, maxAge)
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	e, err := application.NewExecutor(d, filters, maxAge, newFakeReserver(t))
+	e, err := application.NewExecutor(d, newFakeReserver(t))
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
@@ -193,32 +196,39 @@ func TestExecuteReadsOneAdmissionInstantPerPackage(t *testing.T) {
 	}
 }
 
-// TestNewExecutorRefusesAMismatchedFilterPolicy: the map and the bound are
+// TestNewDispatcherRefusesAMismatchedFilterPolicy: the map and the bound are
 // one policy, and half of it is a wiring error named at construction — not a
 // first order refusing for a reason assembled two fields apart.
-func TestNewExecutorRefusesAMismatchedFilterPolicy(t *testing.T) {
+//
+// It moved from NewExecutor with the policy (#184). The refusal has to sit
+// where the policy is CONSTRUCTED rather than where it is enforced, because
+// the Deleverer never constructs one — it inherits, so a root that could still
+// get half a policy past this line would reach the ladder unchecked.
+func TestNewDispatcherRefusesAMismatchedFilterPolicy(t *testing.T) {
 	t.Parallel()
 
-	newDispatcher := func(t *testing.T) *application.Dispatcher {
-		t.Helper()
-		d, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, newFakeOrders(),
-			testClock(t), application.NewDispatchAuthority())
-		if err != nil {
-			t.Fatalf("NewDispatcher: %v", err)
-		}
-		return d
+	dispatcherWith := func(filters map[ids.VenueInstrument]domain.TradingFilters, maxAge time.Duration) error {
+		_, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, newFakeOrders(),
+			testClock(t), application.NewDispatchAuthority(), filters, maxAge)
+		return err
 	}
 
-	if _, err := application.NewExecutor(newDispatcher(t), testFilters(t), 0, newFakeReserver(t)); !errors.Is(err, application.ErrFilterMaxAgeInvalid) {
-		t.Errorf("NewExecutor(filters, no bound) = %v, want ErrFilterMaxAgeInvalid", err)
+	if err := dispatcherWith(testFilters(t), 0); !errors.Is(err, application.ErrFilterMaxAgeInvalid) {
+		t.Errorf("NewDispatcher(filters, no bound) = %v, want ErrFilterMaxAgeInvalid", err)
 	}
-	if _, err := application.NewExecutor(newDispatcher(t), testFilters(t), -time.Hour, newFakeReserver(t)); !errors.Is(err, application.ErrFilterMaxAgeInvalid) {
-		t.Errorf("NewExecutor(filters, negative bound) = %v, want ErrFilterMaxAgeInvalid", err)
+	if err := dispatcherWith(testFilters(t), -time.Hour); !errors.Is(err, application.ErrFilterMaxAgeInvalid) {
+		t.Errorf("NewDispatcher(filters, negative bound) = %v, want ErrFilterMaxAgeInvalid", err)
 	}
-	if _, err := application.NewExecutor(newDispatcher(t), nil, testFilterMaxAge, newFakeReserver(t)); !errors.Is(err, application.ErrFilterMaxAgeInvalid) {
-		t.Errorf("NewExecutor(no filters, bound) = %v, want ErrFilterMaxAgeInvalid", err)
+	if err := dispatcherWith(nil, testFilterMaxAge); !errors.Is(err, application.ErrFilterMaxAgeInvalid) {
+		t.Errorf("NewDispatcher(no filters, bound) = %v, want ErrFilterMaxAgeInvalid", err)
 	}
-	if _, err := application.NewExecutor(newDispatcher(t), nil, 0, newFakeReserver(t)); err != nil {
-		t.Errorf("NewExecutor(no filters, no bound) = %v, want nil — the reconcile-only shape", err)
+	if err := dispatcherWith(nil, 0); err != nil {
+		t.Errorf("NewDispatcher(no filters, no bound) = %v, want nil — the reconcile-only shape", err)
+	}
+	// The positive control the four above need: a WELL-formed policy must
+	// still admit, or a constructor refusing every filter argument scores
+	// four out of four.
+	if err := dispatcherWith(testFilters(t), testFilterMaxAge); err != nil {
+		t.Errorf("NewDispatcher(filters, bound) = %v, want nil", err)
 	}
 }

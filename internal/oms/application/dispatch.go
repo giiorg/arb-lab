@@ -3,6 +3,7 @@ package application
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/giiorg/arb-lab/internal/oms/application/ports"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
@@ -43,11 +44,18 @@ type Dispatcher struct {
 	placer  ports.OrderPlacer
 	orders  ports.OrderWriteRepository
 
-	// clk is read for exactly one thing: §5.3's authorization anchor, in the
-	// venue's own frame. Nothing else in this use case is time-dependent, and
-	// the narrowness is worth keeping — a second reader of this field would be
-	// a decision about time taken on the dispatch path, which is the path with
-	// the least room for one.
+	// clk is read by THIS use case for exactly one thing: §5.3's authorization
+	// anchor, in the venue's own frame. Nothing else in Dispatch is
+	// time-dependent, and the narrowness is worth keeping — a second reader
+	// inside this method would be a decision about time taken on the dispatch
+	// path, which is the path with the least room for one.
+	//
+	// The Executor and the Deleverer both COPY it, and neither is that second
+	// reader: each stamps its own admission instant for the filter policy
+	// below, in its own frame and before this method is entered. Which is the
+	// distinction the field is really guarding — the instant belongs to
+	// whatever unit of legs must be refused together, and Dispatch is beneath
+	// every such unit.
 	clk clock.Clock
 
 	// auth is the in-process double-dispatch backstop, one set per PROCESS and
@@ -55,6 +63,30 @@ type Dispatcher struct {
 	// a backstop rather than the mechanism is stated, and DispatchAuthority,
 	// where the reason it is no longer a private map is.
 	auth *DispatchAuthority
+
+	// filters is the process's ONE admission-time filter policy (§2.4's grid,
+	// §69's row-age bound), and this type HOLDS it without READING it. Both
+	// halves of that are deliberate.
+	//
+	// Held here, because the alternative is a root that can hand the Executor
+	// one grid and the Deleverer another — and those two are the process's only
+	// admission-time enforcers, so a disagreement between them has no honest
+	// meaning. It is §59b's move on a second object: the Executor and the
+	// Deleverer are both built FROM a dispatcher, so a second policy in one
+	// process is no longer expressible from outside this package. The Planner
+	// holds its own map and that is NOT the same fragmentation — plan time and
+	// admission time are different enforcement points, and the whole reason
+	// admission re-verifies is that a plan-time map may be a different
+	// revision (filters.go states it).
+	//
+	// Not read, because enforcing it needs an admission INSTANT, and the
+	// instant belongs to the unit of legs that must be refused together — which
+	// this method's caller knows and this method does not. Checking here would
+	// read a per-leg clock inside the Executor's fan-out, so a two-leg package
+	// could straddle the age bound and refuse leg 2 after leg 1 was sent: §62d's
+	// harm, re-opened in the one place that cannot see it. filterPolicy's own
+	// doc carries the argument in full.
+	filters filterPolicy
 }
 
 // NewDispatcher constructs the use case, refusing a missing port.
@@ -75,8 +107,34 @@ type Dispatcher struct {
 // the per-path fragmentation DispatchAuthority exists to end — and the caller
 // who would discover the gap is a second dispatch path re-presenting an order
 // this one already sent, over a projection that broke.
+//
+// # filters and filterMaxAge are the process's admission-time policy (§2.4, §69)
+//
+// They arrive HERE rather than at the two use cases that enforce them, so that
+// a root cannot give the Executor one grid and the Deleverer another. The
+// Dispatcher never reads them; see the field, which states both why it holds
+// them and why enforcing them is not its job. The half-a-policy refusals are
+// newFilterPolicy's and were NewExecutor's until this slice.
 func NewDispatcher(j ports.Journal, p ports.OrderPlacer, orders ports.OrderWriteRepository,
-	clk clock.Clock, auth *DispatchAuthority) (*Dispatcher, error) {
+	clk clock.Clock, auth *DispatchAuthority,
+	filters map[ids.VenueInstrument]domain.TradingFilters, filterMaxAge time.Duration) (*Dispatcher, error) {
+	policy, err := newFilterPolicy(filters, filterMaxAge)
+	if err != nil {
+		return nil, err
+	}
+	return newDispatcher(j, p, orders, clk, auth, policy)
+}
+
+// newDispatcher is the constructor over an ALREADY-VALIDATED policy, for the
+// Executor's per-leg dispatchers.
+//
+// It exists so that the fan-out's dispatchers are built from the executor's own
+// policy value rather than from a map re-validated N times per package — and,
+// more to the point, so that they cannot be built from a different one. Every
+// nil refusal stays here, because the executor's loop deliberately re-runs them
+// (a constructor growing a new refusal must not become a half-sent package).
+func newDispatcher(j ports.Journal, p ports.OrderPlacer, orders ports.OrderWriteRepository,
+	clk clock.Clock, auth *DispatchAuthority, filters filterPolicy) (*Dispatcher, error) {
 	if j == nil {
 		return nil, ErrJournalMissing
 	}
@@ -98,6 +156,7 @@ func NewDispatcher(j ports.Journal, p ports.OrderPlacer, orders ports.OrderWrite
 		orders:  orders,
 		clk:     clk,
 		auth:    auth,
+		filters: filters,
 	}, nil
 }
 

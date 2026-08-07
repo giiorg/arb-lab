@@ -45,14 +45,13 @@ import (
 // DispatchAuthority). Serialisation of Execute itself is the composition
 // root's, on the same terms the dispatcher states for Dispatch.
 type Executor struct {
-	journal      ports.Journal
-	placer       ports.OrderPlacer
-	orders       ports.OrderWriteRepository
-	clk          clock.Clock
-	auth         *DispatchAuthority
-	filters      map[ids.VenueInstrument]domain.TradingFilters
-	filterMaxAge time.Duration
-	reserver     ports.CapacityReserver
+	journal  ports.Journal
+	placer   ports.OrderPlacer
+	orders   ports.OrderWriteRepository
+	clk      clock.Clock
+	auth     *DispatchAuthority
+	filters  filterPolicy
+	reserver ports.CapacityReserver
 }
 
 // NewExecutor constructs the use case FROM the process's dispatcher, and the
@@ -70,53 +69,41 @@ type Executor struct {
 // authority, journal, placer, repository and clock; a second authority in one
 // process is no longer expressible from outside this package.
 //
-// # filters is the Planner's map, taken again on purpose
+// # The filter policy is INHERITED, on exactly the authority's argument
 //
 // The preflight RE-verifies every leg against §2.4's trading filters even
 // though Plan refused nonconforming legs before journaling them — because the
 // repository the refs point into is also rebuilt by §7.5's replay, and a
 // replayed StatePlanned record was conformed by whatever revision (or
 // pre-filters build) planned it, not by this process's. filters.go states the
-// argument in full. NewPlanner's nil-map contract holds here identically: a
-// nil map executes nothing, refusing each package on its first leg.
+// argument in full, and NewPlanner's nil-map contract holds here identically:
+// a nil map executes nothing, refusing each package on its first leg.
 //
-// # filterMaxAge is the deployment's declared row-age tolerance (§69)
-//
-// The boot-time check proves the rows were fresh when the process STARTED;
-// this bound is the same tolerance re-judged at every package's admission,
-// because a long-running process's map stays green while the venue moves. The
-// bound and the map are one policy, so half of it is a wiring error with a
-// name: a non-empty map needs a positive bound, and a bound over an empty map
-// is a root claiming a tolerance for rows it never supplied.
-func NewExecutor(d *Dispatcher, filters map[ids.VenueInstrument]domain.TradingFilters,
-	filterMaxAge time.Duration, reserver ports.CapacityReserver) (*Executor, error) {
+// The map and the row-age bound were parameters here until #184, and they
+// moved to NewDispatcher for the authority's own reason. The Deleverer is the
+// process's SECOND admission-time enforcer of the same policy, and a seam that
+// could hand it a different grid — a stale revision, or the empty map that
+// refuses every safety leg during an incident — would fragment §2.4's
+// enforcement exactly as two authorities fragment the dispatch backstop, with
+// no test able to see it. Inherited, a second policy in one process is not
+// expressible from outside this package.
+func NewExecutor(d *Dispatcher, reserver ports.CapacityReserver) (*Executor, error) {
 	if d == nil {
 		return nil, ErrDispatcherMissing
-	}
-	if err := validateFilters(filters); err != nil {
-		return nil, err
-	}
-	if len(filters) > 0 && filterMaxAge <= 0 {
-		return nil, fmt.Errorf("filter max age %s with %d filter rows: %w",
-			filterMaxAge, len(filters), ErrFilterMaxAgeInvalid)
-	}
-	if len(filters) == 0 && filterMaxAge != 0 {
-		return nil, fmt.Errorf("filter max age %s with no filter rows: %w",
-			filterMaxAge, ErrFilterMaxAgeInvalid)
 	}
 	if reserver == nil {
 		return nil, ErrReserverMissing
 	}
-	// d's own constructor refused every nil, so these copies are known good.
+	// d's own constructor refused every nil and validated the policy, so these
+	// copies are known good.
 	return &Executor{
-		journal:      d.journal,
-		placer:       d.placer,
-		orders:       d.orders,
-		clk:          d.clk,
-		auth:         d.auth,
-		filters:      filters,
-		filterMaxAge: filterMaxAge,
-		reserver:     reserver,
+		journal:  d.journal,
+		placer:   d.placer,
+		orders:   d.orders,
+		clk:      d.clk,
+		auth:     d.auth,
+		filters:  d.filters,
+		reserver: reserver,
 	}, nil
 }
 
@@ -329,9 +316,9 @@ func (e *Executor) Execute(c *boot.Checklist, refs []DispatchRef, urgency ports.
 	// with nothing sent.
 	dispatchers := make([]*Dispatcher, len(refs))
 	for i := range refs {
-		d, err := NewDispatcher(e.journal, e.placer, e.orders, e.clk, e.auth)
+		d, err := newDispatcher(e.journal, e.placer, e.orders, e.clk, e.auth, e.filters)
 		if err != nil {
-			// Unreachable while NewExecutor and NewDispatcher refuse the same
+			// Unreachable while NewExecutor and newDispatcher refuse the same
 			// nils, and refused rather than assumed: a constructor growing a
 			// new refusal must not become a half-sent package.
 			return Execution{}, fmt.Errorf("execute package leg %d: %w", i, err)
@@ -481,34 +468,12 @@ func (e *Executor) preflight(refs []DispatchRef, now time.Time) ([]ports.OrderRe
 	// than surfacing as a filters/asset disagreement on whichever leg the
 	// first pass reached.
 	for i, rec := range recs {
-		if err := conformsToFilters(e.filters, rec.Order.Instrument,
-			rec.Order.Quantity, rec.Order.LimitPrice); err != nil {
+		// Conformance AND its date, at the package's one instant — the pair is
+		// filterPolicy's, so the Deleverer's per-leg admission enforces the
+		// same two halves and cannot enforce only one.
+		if err := e.filters.admits(rec.Order.Instrument, rec.Order.Quantity,
+			rec.Order.LimitPrice, now); err != nil {
 			return nil, fmt.Errorf("execute package leg %d: %q: %w", i, rec.Order.ClientOrderID, err)
-		}
-		// §69's freshness half, beside the conformance it qualifies: conforming
-		// to a row the venue may have moved past is a claim about the ROW, and
-		// this is the claim about its date. The bound is inclusive — a row aged
-		// exactly the tolerance still admits — and the entry is known present
-		// because conformsToFilters just consulted it.
-		//
-		// A FUTURE row refuses first, with its own sentinel: a negative age
-		// passes the staleness comparison trivially, and it has a real
-		// producer — a backward wall-clock step after boot, exactly the event
-		// platform/clock's clamp exists for, met here on a map resolved before
-		// the step. The operator's fix differs too: a stale row wants a fresh
-		// revision, a future row wants the clock investigated.
-		f := e.filters[rec.Order.Instrument]
-		if f.ObservedAt.After(now) {
-			return nil, fmt.Errorf("execute package leg %d: %q filters for %s observed %s, after the admission instant %s: %w",
-				i, rec.Order.ClientOrderID, rec.Order.Instrument,
-				f.ObservedAt.Format(time.RFC3339), now.Format(time.RFC3339),
-				ErrFiltersFromTheFuture)
-		}
-		if age := now.Sub(f.ObservedAt); age > e.filterMaxAge {
-			return nil, fmt.Errorf("execute package leg %d: %q filters for %s observed %s, %s ago against a %s bound: %w",
-				i, rec.Order.ClientOrderID, rec.Order.Instrument,
-				f.ObservedAt.Format(time.RFC3339), age.Round(time.Second),
-				e.filterMaxAge, ErrFiltersStaleAtAdmission)
 		}
 	}
 	return recs, nil

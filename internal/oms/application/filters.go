@@ -2,18 +2,20 @@ package application
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/giiorg/arb-lab/internal/oms/domain"
 	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 )
 
-// This file is §2.4's verification half, shared by the two use cases that
-// enforce it: the Planner (per leg, before anything is journaled) and the
-// Executor's preflight (per package, before any fsync or send). ONE
-// implementation on purpose — two statements of "conforms to the venue's
-// grid" is how a plan-time pass and an execute-time refusal come to disagree
-// by one lot step, the drift TargetQty's doc warns about on the sizing side.
+// This file is §2.4's verification half, shared by the three use cases that
+// enforce it: the Planner (per leg, before anything is journaled), the
+// Executor's preflight (per package, before any fsync or send) and the
+// Deleverer's verifyLeg (per ladder leg, same). ONE implementation on purpose
+// — two statements of "conforms to the venue's grid" is how a plan-time pass
+// and an execute-time refusal come to disagree by one lot step, the drift
+// TargetQty's doc warns about on the sizing side.
 //
 // The normative sources are §2.4's trading-filter conformance bullet (the
 // four members, the two enforcement points, the no-repair rule) and §6 step
@@ -51,6 +53,93 @@ func validateFilters(filters map[ids.VenueInstrument]domain.TradingFilters) erro
 		if err := f.Validate(); err != nil {
 			return fmt.Errorf("trading filters for %s: %w", inst, err)
 		}
+	}
+	return nil
+}
+
+// filterPolicy is the venue's published grid and the deployment's row-age
+// tolerance held as ONE value, because §69 makes them one policy: a grid you
+// cannot date is a claim about a row nobody has vouched for, and a tolerance
+// over no rows is a root declaring a bound for something it never supplied.
+// Holding them in one type is what stops a caller from enforcing half of it.
+//
+// # It is enforced at the caller's ADMISSION UNIT, never inside Dispatch
+//
+// The unit is the set of legs that must be refused together, and it differs by
+// caller: the Executor's is the whole package (§62d — one instant for every
+// leg, or a two-leg package can straddle the age bound and refuse
+// asymmetrically after a sibling was sent), the Deleverer's is the single leg
+// (SM §7 sequences its two deliberately — the spot cap is unknown until the
+// perp confirms, so there is no shared instant to stamp). Dispatch cannot know
+// which it is being called under, so a check placed there would read its own
+// clock per leg inside the executor's fan-out — which is §62d re-opened in the
+// one method that cannot see the harm. See Dispatcher.filters, which holds this
+// value without reading it, and says why.
+type filterPolicy struct {
+	rows   map[ids.VenueInstrument]domain.TradingFilters
+	maxAge time.Duration
+}
+
+// newFilterPolicy refuses a policy no leg could be judged against, at
+// construction, where the message names the root.
+//
+// The half-a-policy refusals are §69's and were the Executor's until the
+// policy got a type: a non-empty map with a non-positive bound is a grid
+// nothing dates, and a bound over an empty map is a tolerance for rows that do
+// not exist. Both are wiring, and the empty/zero pair is legal — it is the
+// reconcile-only deployment, which conforms nothing because it plans nothing
+// and whose every leg is refused by ErrFiltersUnknown rather than admitted.
+func newFilterPolicy(rows map[ids.VenueInstrument]domain.TradingFilters, maxAge time.Duration) (filterPolicy, error) {
+	if err := validateFilters(rows); err != nil {
+		return filterPolicy{}, err
+	}
+	if len(rows) > 0 && maxAge <= 0 {
+		return filterPolicy{}, fmt.Errorf("filter max age %s with %d filter rows: %w",
+			maxAge, len(rows), ErrFilterMaxAgeInvalid)
+	}
+	if len(rows) == 0 && maxAge != 0 {
+		return filterPolicy{}, fmt.Errorf("filter max age %s with no filter rows: %w",
+			maxAge, ErrFilterMaxAgeInvalid)
+	}
+	return filterPolicy{rows: rows, maxAge: maxAge}, nil
+}
+
+// admits judges one leg against the grid AND the grid's date, at the instant
+// the caller chose. It returns the bare finding; the caller wraps it with the
+// context only the caller has (which leg of which package, which rung of which
+// ladder).
+//
+// The two halves run in this order and are not separable by a caller: a leg
+// that conforms to a row the venue may have moved past has satisfied a claim
+// about the ROW, and §69's whole point is that the row's date is the other half
+// of that claim. Splitting them across two layers is how one gets enforced and
+// the other forgotten — which is exactly what #184 found on the ladder's path,
+// where neither ran.
+func (p filterPolicy) admits(inst ids.VenueInstrument, quantity fixedpoint.Quantity,
+	limit fixedpoint.Price, now time.Time) error {
+
+	if err := conformsToFilters(p.rows, inst, quantity, limit); err != nil {
+		return err
+	}
+
+	// The entry is known present because conformsToFilters just consulted it.
+	//
+	// A FUTURE row refuses first, with its own sentinel: a negative age passes
+	// the staleness comparison trivially, and it has a real producer — a
+	// backward wall-clock step after boot, exactly the event platform/clock's
+	// clamp exists for, met here on a map resolved before the step. The
+	// operator's fix differs too: a stale row wants a fresh revision, a future
+	// row wants the clock investigated.
+	f := p.rows[inst]
+	if f.ObservedAt.After(now) {
+		return fmt.Errorf("filters for %s observed %s, after the admission instant %s: %w",
+			inst, f.ObservedAt.Format(time.RFC3339), now.Format(time.RFC3339), ErrFiltersFromTheFuture)
+	}
+	// The bound is inclusive — a row aged exactly the tolerance still admits.
+	if age := now.Sub(f.ObservedAt); age > p.maxAge {
+		return fmt.Errorf("filters for %s observed %s, %s ago against a %s bound: %w",
+			inst, f.ObservedAt.Format(time.RFC3339), age.Round(time.Second), p.maxAge,
+			ErrFiltersStaleAtAdmission)
 	}
 	return nil
 }

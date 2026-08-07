@@ -532,22 +532,24 @@ func New(deps Deps) (*Module, error) {
 		return nil, errors.Join(fmt.Errorf("oms: order gateway: %w", err), journal.Close())
 	}
 
-	// ONE authority for the process's every dispatch path — the module's own
-	// dispatcher and the executor's per-leg dispatchers. Two would be two
-	// backstops each blind to the other's sends (§59b), and the executor's
-	// constructor makes the second one inexpressible: it is built FROM the
-	// dispatcher and inherits its authority, so this seam cannot cross the
-	// wires however it is edited.
+	// ONE authority AND one filter policy for the process's every dispatch path
+	// — the module's own dispatcher, the executor's per-leg dispatchers, and
+	// SM §7's ladder. Two authorities would be two backstops each blind to the
+	// other's sends (§59b); two filter policies would be two answers to "does
+	// this order conform to the venue's grid" held by the two use cases that
+	// admit orders at send time (#184). Both constructors make the second one
+	// inexpressible: the executor and the deleverer are built FROM this
+	// dispatcher and inherit both, so this seam cannot cross the wires however
+	// it is edited.
 	dispatcher, err := application.NewDispatcher(journal, placer, orders, deps.Clock,
-		application.NewDispatchAuthority())
+		application.NewDispatchAuthority(), deps.InstrumentFilters, deps.FilterMaxAge)
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("oms: dispatcher: %w", err), journal.Close())
 	}
 
 	// The same gateway is narrowed into placement and reservation capabilities;
 	// reserve-here/place-there cannot be wired by the root.
-	executor, err := application.NewExecutor(dispatcher, deps.InstrumentFilters,
-		deps.FilterMaxAge, placer)
+	executor, err := application.NewExecutor(dispatcher, placer)
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("oms: executor: %w", err), journal.Close())
 	}

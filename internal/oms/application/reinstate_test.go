@@ -75,7 +75,7 @@ func newReinstater(t *testing.T, tracked bool, records ...ports.OrderRecord) *re
 	oj := newFakeJournal()
 	placer := &fakePlacer{watch: oj}
 	orders := newFakeOrders()
-	dispatcher, err := application.NewDispatcher(oj, placer, orders, testClock(t), application.NewDispatchAuthority())
+	dispatcher, err := application.NewDispatcher(oj, placer, orders, testClock(t), application.NewDispatchAuthority(), testFilters(t), testFilterMaxAge)
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}

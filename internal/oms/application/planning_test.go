@@ -607,7 +607,7 @@ func TestPlannedOrdersAreDispatchable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPlanner: %v", err)
 	}
-	dispatcher, err := application.NewDispatcher(j, placer, r, testClock(t), application.NewDispatchAuthority())
+	dispatcher, err := application.NewDispatcher(j, placer, r, testClock(t), application.NewDispatchAuthority(), testFilters(t), testFilterMaxAge)
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}

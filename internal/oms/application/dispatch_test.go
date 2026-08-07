@@ -625,7 +625,7 @@ func newDispatcher(t *testing.T) (*application.Dispatcher, *fakeJournal, *fakePl
 	j := newFakeJournal()
 	p := &fakePlacer{watch: j}
 	r := newFakeOrders()
-	d, err := application.NewDispatcher(j, p, r, testClock(t), application.NewDispatchAuthority())
+	d, err := application.NewDispatcher(j, p, r, testClock(t), application.NewDispatchAuthority(), testFilters(t), testFilterMaxAge)
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
@@ -663,25 +663,25 @@ func TestNewDispatcherRefusesAMissingPort(t *testing.T) {
 	// One omission at a time and a DIFFERENT sentinel per case: together they
 	// catch a constructor that checks only the first port, and one that answers
 	// a single blanket refusal to all four.
-	if _, err := application.NewDispatcher(nil, &fakePlacer{}, newFakeOrders(), testClock(t), application.NewDispatchAuthority()); !errors.Is(err, application.ErrJournalMissing) {
+	if _, err := application.NewDispatcher(nil, &fakePlacer{}, newFakeOrders(), testClock(t), application.NewDispatchAuthority(), testFilters(t), testFilterMaxAge); !errors.Is(err, application.ErrJournalMissing) {
 		t.Errorf("NewDispatcher(nil, placer, orders, clock, authority) = %v, want ErrJournalMissing", err)
 	}
-	if _, err := application.NewDispatcher(newFakeJournal(), nil, newFakeOrders(), testClock(t), application.NewDispatchAuthority()); !errors.Is(err, application.ErrPlacerMissing) {
+	if _, err := application.NewDispatcher(newFakeJournal(), nil, newFakeOrders(), testClock(t), application.NewDispatchAuthority(), testFilters(t), testFilterMaxAge); !errors.Is(err, application.ErrPlacerMissing) {
 		t.Errorf("NewDispatcher(journal, nil, orders, clock, authority) = %v, want ErrPlacerMissing", err)
 	}
-	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, nil, testClock(t), application.NewDispatchAuthority()); !errors.Is(err, application.ErrOrdersMissing) {
+	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, nil, testClock(t), application.NewDispatchAuthority(), testFilters(t), testFilterMaxAge); !errors.Is(err, application.ErrOrdersMissing) {
 		t.Errorf("NewDispatcher(journal, placer, nil, clock, authority) = %v, want ErrOrdersMissing", err)
 	}
-	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, newFakeOrders(), nil, application.NewDispatchAuthority()); !errors.Is(err, application.ErrClockMissing) {
+	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, newFakeOrders(), nil, application.NewDispatchAuthority(), testFilters(t), testFilterMaxAge); !errors.Is(err, application.ErrClockMissing) {
 		t.Errorf("NewDispatcher(journal, placer, orders, nil, authority) = %v, want ErrClockMissing", err)
 	}
-	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, newFakeOrders(), testClock(t), nil); !errors.Is(err, application.ErrAuthorityMissing) {
+	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, newFakeOrders(), testClock(t), nil, testFilters(t), testFilterMaxAge); !errors.Is(err, application.ErrAuthorityMissing) {
 		t.Errorf("NewDispatcher(journal, placer, orders, clock, nil) = %v, want ErrAuthorityMissing", err)
 	}
 
 	// The positive control. Without it a constructor that refused everything
 	// would score four out of four above.
-	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, newFakeOrders(), testClock(t), application.NewDispatchAuthority()); err != nil {
+	if _, err := application.NewDispatcher(newFakeJournal(), &fakePlacer{}, newFakeOrders(), testClock(t), application.NewDispatchAuthority(), testFilters(t), testFilterMaxAge); err != nil {
 		t.Errorf("NewDispatcher with every port = %v, want nil", err)
 	}
 }
@@ -845,7 +845,7 @@ func TestDispatchRefusesAnUncalibratedVenueAboveTheFsync(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTestClock: %v", err)
 	}
-	d, err := application.NewDispatcher(j, p, r, clk, application.NewDispatchAuthority())
+	d, err := application.NewDispatcher(j, p, r, clk, application.NewDispatchAuthority(), testFilters(t), testFilterMaxAge)
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
@@ -1323,7 +1323,7 @@ func TestASecondDispatcherOverTheSameRepositoryIsAlsoRefused(t *testing.T) {
 	o := dispatchableOrder(t)
 	plant(t, r, o)
 
-	first, err := application.NewDispatcher(j, p, r, testClock(t), application.NewDispatchAuthority())
+	first, err := application.NewDispatcher(j, p, r, testClock(t), application.NewDispatchAuthority(), testFilters(t), testFilterMaxAge)
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
@@ -1331,7 +1331,7 @@ func TestASecondDispatcherOverTheSameRepositoryIsAlsoRefused(t *testing.T) {
 		t.Fatalf("first Dispatch = %v", err)
 	}
 
-	second, err := application.NewDispatcher(j, p, r, testClock(t), application.NewDispatchAuthority())
+	second, err := application.NewDispatcher(j, p, r, testClock(t), application.NewDispatchAuthority(), testFilters(t), testFilterMaxAge)
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
