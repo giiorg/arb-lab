@@ -16,6 +16,7 @@ import (
 	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
 	riskdomain "github.com/giiorg/arb-lab/internal/risk/domain"
 	"github.com/giiorg/arb-lab/internal/risk/infrastructure/attestation"
+	riskdriven "github.com/giiorg/arb-lab/internal/risk/infrastructure/driven"
 )
 
 // Config is §5.2's configuration schema for the OMS, which is the construct three
@@ -245,7 +246,7 @@ func (d Dialect) Validate() error {
 // standing argument: a default table would judge an account model nobody
 // selected.
 // postureFamilies is which product families §4.1's posture read rides on this
-// dialect, derived from the codec's own encoded steps.
+// dialect, for a deployment whose roster has the given coverage.
 //
 // # Why this is a CONFIG question at all (record §73n F20)
 //
@@ -256,36 +257,154 @@ func (d Dialect) Validate() error {
 // unreachable is refused at startup, by name", reached through an omission
 // rather than through a value.
 //
-// It bites in both directions and on both venues, which is why it is derived
-// rather than listed: all three Binance probes ride the futures family, so a
-// deployment trading only spot must still declare a futures endpoint (record
-// §73k F14); and on Bybit TWO probes ride spot while two ride linear-perp, so
-// either one-sided deployment is short one. §73k F14's note that Bybit is "not
-// symmetric — answerable regardless" was true of the exchange and false of this
-// routing, which is exactly the reassurance that stopped anybody looking.
-func (d Dialect) postureFamilies(v ids.Venue) ([]ids.ProductCategory, error) {
-	codec, err := orderCodecFor(d, v)
+// # It is the coverage-narrowed set, not the union (task #199, record §73p)
+//
+// The first cut took the union of every step's family, which is the answer to a
+// question nobody asked: it demanded a futures endpoint from a deployment
+// holding only the spot leg of a cross-venue carry, whose rules have nothing to
+// say about a perpetual and whose boot would then depend on a futures API it
+// never calls. A family is required here iff some step ANSWERS a setting whose
+// rule is live under this coverage.
+//
+// The narrowing is not a Binance exemption, and the two venues are the proof.
+// Every one of Binance's five probed rules is SubjectDerivativesLeg, so a
+// no-derivatives deployment there requires no family at all and still enforces
+// Portfolio-Margin, which is attested and needs no endpoint. On Bybit,
+// /v5/account/info answers three SubjectAccount settings, so a spot-only
+// deployment there still requires the linear-perp family that call is routed to.
+// §73k F14's "Bybit is not symmetric — answerable regardless" was true of the
+// exchange and false of this routing; what makes the two differ is the rule
+// table, not the venue.
+func (d Dialect) postureFamilies(v ids.Venue, coverage riskdomain.RosterCoverage) ([]ids.ProductCategory, error) {
+	steps, dialect, err := d.postureSteps(v)
 	if err != nil {
 		return nil, err
 	}
-	posture, ok := codec.(venue.AccountPostureCodec)
-	if !ok {
-		// §4.1 makes the posture a precondition of trading, so a dialect whose
-		// codec cannot answer it is not one this system may be configured for.
-		return nil, fmt.Errorf("dialect %q has no account posture surface: %w",
-			string(d), ErrDialectUnknown)
-	}
-	steps, err := posture.EncodePosture()
+	live, err := dialect.ProbedSettings(coverage)
 	if err != nil {
 		return nil, err
 	}
 	var families []ids.ProductCategory
 	for _, s := range steps {
+		answersLive, err := stepAnswersAny(s, live)
+		if err != nil {
+			return nil, err
+		}
+		if !answersLive {
+			continue
+		}
 		if !slices.Contains(families, s.Call.Family) {
 			families = append(families, s.Call.Family)
 		}
 	}
 	return families, nil
+}
+
+// postureSteps returns the dialect's encoded posture steps beside the risk
+// table they are checked against, validating each step on the way out.
+func (d Dialect) postureSteps(v ids.Venue) ([]venue.PostureStep, riskdomain.Dialect, error) {
+	codec, err := orderCodecFor(d, v)
+	if err != nil {
+		return nil, "", err
+	}
+	posture, ok := codec.(venue.AccountPostureCodec)
+	if !ok {
+		// §4.1 makes the posture a precondition of trading, so a dialect whose
+		// codec cannot answer it is not one this system may be configured for.
+		return nil, "", fmt.Errorf("dialect %q has no account posture surface: %w",
+			string(d), ErrDialectUnknown)
+	}
+	steps, err := posture.EncodePosture()
+	if err != nil {
+		return nil, "", err
+	}
+	for _, s := range steps {
+		if err := s.Validate(); err != nil {
+			return nil, "", err
+		}
+	}
+	dialect, err := d.PostureDialect()
+	if err != nil {
+		return nil, "", err
+	}
+	return steps, dialect, nil
+}
+
+// stepAnswersAny reports whether the step establishes any of the given domain
+// settings, translating through the ACL that already owns the two vocabularies.
+func stepAnswersAny(s venue.PostureStep, settings []riskdomain.Setting) (bool, error) {
+	for _, a := range s.Answers {
+		translated, err := riskdriven.TranslateSetting(a)
+		if err != nil {
+			return false, fmt.Errorf("posture step %s: %w", s.Probe, err)
+		}
+		if slices.Contains(settings, translated) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// validatePostureCoverage refuses a dialect whose rule table names a probed
+// setting that no step answers.
+//
+// # The check #186 wrote for fold names, one surface over
+//
+// The rule table and the codec's step list are two statements about one thing —
+// which settings this system can establish — written in different packages and
+// edited months apart. A rule with no probe can never be answered, so it fails
+// on every boot with ReasonUnobserved: a permanent refusal whose cause is in
+// neither file's own tests, because each half is internally consistent.
+//
+// It runs against RosterCoverageDerivatives rather than this deployment's own
+// coverage on purpose. The question is whether the TABLES agree, which is a
+// property of the code and not of one operator's config, and the maximal
+// coverage is the only one that reaches every rule. A deployment-specific run
+// would let a missing probe hide behind a lapsed rule until the day somebody
+// configures a perpetual.
+func (d Dialect) validatePostureCoverage(v ids.Venue) error {
+	steps, dialect, err := d.postureSteps(v)
+	if err != nil {
+		return err
+	}
+	return postureCoverageAgrees(steps, dialect, maximalPostureCoverage)
+}
+
+// maximalPostureCoverage is the coverage the agreement check runs at.
+//
+// A named constant rather than a literal argument, because it is a CLAIM and
+// this is what lets it be one: a check run at a narrower coverage passes
+// vacuously for every rule that coverage lapses, and on Binance the narrow
+// coverage lapses all five — so the whole check would evaporate while still
+// running, returning nil, and looking exactly as it does now. With the value
+// named and postureCoverageAgrees taking it as a parameter, the two answers are
+// separable and a test can show they differ (task #199, record §73p).
+const maximalPostureCoverage = riskdomain.RosterCoverageDerivatives
+
+// postureCoverageAgrees is validatePostureCoverage's pure core: does this step
+// list answer every setting the table probes at this coverage?
+func postureCoverageAgrees(steps []venue.PostureStep, dialect riskdomain.Dialect, coverage riskdomain.RosterCoverage) error {
+	probed, err := dialect.ProbedSettings(coverage)
+	if err != nil {
+		return err
+	}
+	answered := make(map[riskdomain.Setting]struct{}, len(probed))
+	for _, s := range steps {
+		for _, a := range s.Answers {
+			translated, err := riskdriven.TranslateSetting(a)
+			if err != nil {
+				return fmt.Errorf("posture step %s: %w", s.Probe, err)
+			}
+			answered[translated] = struct{}{}
+		}
+	}
+	for _, want := range probed {
+		if _, ok := answered[want]; !ok {
+			return fmt.Errorf("§4.1's %s table requires %s at %s and no posture probe answers it: %w",
+				dialect, want, coverage, ErrPostureSettingUnprobed)
+		}
+	}
+	return nil
 }
 
 func (d Dialect) PostureDialect() (riskdomain.Dialect, error) {
@@ -663,8 +782,16 @@ func (c Config) validatePosture() error {
 	// Derived here and passed rather than re-derived by the caller: the roster
 	// and the carrier must come from ONE read of the instrument table, or the
 	// pair can disagree about a document neither of them changed.
-	if _, err := c.PostureRequirement(riskdomain.AttestationUnstated); err != nil {
+	req, err := c.PostureRequirement(riskdomain.AttestationUnstated)
+	if err != nil {
 		return fmt.Errorf("§4.1 posture requirement: %w", err)
+	}
+	// Whether the two tables agree is a property of the CODE, so it is asked
+	// before anything about this document: a rule no probe answers refuses every
+	// boot of every config, and diagnosing that from a document is the wrong
+	// file to be reading.
+	if err := c.Venue.Dialect.validatePostureCoverage(c.Venue.Venue); err != nil {
+		return err
 	}
 	// Every family the posture read RIDES must have an endpoint, or the gate is
 	// unanswerable on every boot of this document (record §73n F20). It is
@@ -672,9 +799,14 @@ func (c Config) validatePosture() error {
 	// refusal names the line to add while an unrouted probe at boot arrives as
 	// "the posture could not be established" — the retryable arm, for a
 	// deployment no retry will ever change. The instrument→endpoint rule above
-	// cannot see this: these families are the POSTURE's, and it reads two of
-	// them on a deployment that trades neither.
-	families, err := c.Venue.Dialect.postureFamilies(c.Venue.Venue)
+	// cannot see this: these families are the POSTURE's, and on the ordinary
+	// deployment it reads two of them for instruments it does not trade.
+	//
+	// Narrowed by the requirement's OWN coverage rather than by a second walk of
+	// c.Instruments (task #199): the roster and the families must come from one
+	// derivation, or a document neither of them changed can be refused by one
+	// and admitted by the other.
+	families, err := c.Venue.Dialect.postureFamilies(c.Venue.Venue, req.Coverage)
 	if err != nil {
 		return err
 	}

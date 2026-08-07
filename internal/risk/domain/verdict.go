@@ -205,6 +205,74 @@ type Verdict struct {
 
 	// Failures is every check that did not pass, sorted deterministically.
 	Failures []Failure
+
+	// Lapsed is every rule that did NOT run because its subject is not part of
+	// this deployment, sorted deterministically (task #199, record §73p).
+	//
+	// # An exemption that cannot be read is an exemption nobody can audit
+	//
+	// The rule this field exists for is real — a deployment holding only the
+	// spot leg of a cross-venue carry has nothing to say about a perpetual's
+	// position mode, and requiring an endpoint to ask would make a spot-only
+	// boot depend on a futures API it never calls. But the DIFFERENCE between
+	// "checked and passed" and "not checked" is exactly what a posture verdict
+	// exists to carry, and dropping the row would leave a clean verdict standing
+	// for an account whose settings nobody read.
+	//
+	// So the rows are kept, and Evaluated deliberately does not count them: they
+	// did not run. That pairing is what keeps Satisfied's vacuity guard load-
+	// bearing — a dialect whose whole table lapsed evaluates zero checks and is
+	// REFUSED, so no future coverage carrier can exempt an account into a clean
+	// answer.
+	Lapsed []Lapse
+}
+
+// Lapse is one rule that did not run, and why.
+type Lapse struct {
+	// Setting, Scope and Subject identify the rule. There is no per-subject
+	// enumeration here as there is for Failure: a lapsed rule ran against
+	// nothing, so it names no symbol and no coin.
+	Setting Setting
+	Scope   Scope
+	Subject Subject
+
+	// Coverage is the roster coverage that lapsed it, carried so the line says
+	// what was assumed rather than only what was skipped. An operator reading it
+	// is being shown a claim they made in config.
+	Coverage RosterCoverage
+
+	// Required is what the check would have wanted, rendered for a human. Kept
+	// so the line is actionable the moment the coverage changes.
+	Required string
+}
+
+// Validate reports whether the lapse is one that can be rendered.
+func (l Lapse) Validate() error {
+	if err := l.Setting.Validate(); err != nil {
+		return err
+	}
+	if err := l.Scope.Validate(); err != nil {
+		return fmt.Errorf("%s: %w", l.Setting, err)
+	}
+	if err := l.Subject.Validate(); err != nil {
+		return fmt.Errorf("%s: %w", l.Setting, err)
+	}
+	if err := l.Coverage.Validate(); err != nil {
+		return fmt.Errorf("%s: %w", l.Setting, err)
+	}
+	return nil
+}
+
+// String renders the lapse as the operator-facing line.
+func (l Lapse) String() string {
+	var b strings.Builder
+	b.WriteString(l.Setting.String())
+	b.WriteString(": not checked — " + l.Subject.String())
+	b.WriteString(" is not part of this deployment (" + l.Coverage.String() + ")")
+	if l.Required != "" {
+		b.WriteString(fmt.Sprintf(", would have required %s", l.Required))
+	}
+	return b.String()
 }
 
 // Satisfied reports whether the posture may be traded on.
@@ -222,12 +290,22 @@ func (v Verdict) Satisfied() (bool, error) {
 
 // String renders the verdict as the operator-facing summary line plus one line
 // per failure.
+// The lapse count is on the SUMMARY line and not only in the detail below it,
+// because an operator who reads one line is the one this has to reach: "11
+// checks, 0 failed" and "1 check, 0 failed, 5 not checked" are the same verdict
+// to a skimmer and different facts about the account (record §73p).
 func (v Verdict) String() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s posture (%s): %d checks, %d failed",
 		v.Venue, v.Dialect, v.Evaluated, len(v.Failures))
+	if len(v.Lapsed) > 0 {
+		fmt.Fprintf(&b, ", %d not checked", len(v.Lapsed))
+	}
 	for _, f := range v.Failures {
 		b.WriteString("\n  " + f.String())
+	}
+	for _, l := range v.Lapsed {
+		b.WriteString("\n  " + l.String())
 	}
 	return b.String()
 }

@@ -458,6 +458,107 @@ type AccountPostureCodec interface {
 type PostureStep struct {
 	Probe PostureProbe
 	Call  transport.Call
+
+	// Answers is every setting this one call establishes.
+	//
+	// # It exists so a family requirement can be DERIVED rather than unioned
+	//
+	// §4.1's posture read is routed by product family, and a family with no
+	// configured endpoint makes its probe unissuable (record §73n F20). The
+	// first cut required the union of every probe's family, which demanded a
+	// futures endpoint from a deployment holding only the spot leg. The right
+	// quantity is narrower — the families of the probes that answer a setting
+	// this deployment's rules actually govern — and answering that needs the
+	// probe→setting relation, which until now lived only inside
+	// DecodePostureStep's body where nothing could read it (task #199).
+	//
+	// # It is a claim about the WIRE, and it is checked against the rule table
+	//
+	// This package does not know which settings matter; that is the risk
+	// context's table, and this list must not restate it. The two are joined at
+	// the composition root, which refuses a deployment whose table names a
+	// probed setting no step answers — the shape #186 used for fold names, and
+	// for the same reason: a constant and a table are two statements of one fact
+	// and the pair disagrees the moment either moves.
+	//
+	// A step answering nothing is refused rather than skipped: it would be a
+	// call this system issues, pays weight for, and derives nothing from.
+	Answers []PostureSetting
+}
+
+// Validate reports whether the step is one this system may issue.
+func (s PostureStep) Validate() error {
+	if err := s.Probe.Validate(); err != nil {
+		return err
+	}
+	if len(s.Answers) == 0 {
+		return fmt.Errorf("posture step %s answers no setting: %w", s.Probe, ErrPostureStepAnswersNothing)
+	}
+	for _, a := range s.Answers {
+		if err := a.Validate(); err != nil {
+			return fmt.Errorf("posture step %s: %w", s.Probe, err)
+		}
+	}
+	return nil
+}
+
+// PostureStepsFor narrows a codec's step list to the calls that establish at
+// least one of the wanted settings.
+//
+// # This is NOT a partial read, and the distinction is the whole design
+//
+// §4.1's premise is a conjunction and AccountPostureSource's doc refuses a
+// best-effort answer: a read that performed four of five calls has established
+// nothing about the fifth. Narrowing here is a different act — it changes what
+// the conjunction is OVER, decided before any call is issued, from a rule table
+// that says which settings govern this deployment at all (task #199, record
+// §73p). Every wanted setting is still established or the read fails.
+//
+// That is why a wanted setting no step answers is an ERROR rather than a
+// silently shorter list. It is the same claim the composition root checks at
+// config time, restated where the call is actually issued: those two run at
+// different moments against different inputs, and this one is what stops a
+// caller assembling a want-set the codec cannot serve.
+//
+// The empty want-set is refused for the reason every empty fold is refused
+// here: it reads as a posture with nothing to check, and returns cleanly.
+func PostureStepsFor(steps []PostureStep, want []PostureSetting) ([]PostureStep, error) {
+	if len(want) == 0 {
+		return nil, fmt.Errorf("posture read wants no setting: %w", ErrPostureUnreadable)
+	}
+	wanted := make(map[PostureSetting]struct{}, len(want))
+	for _, s := range want {
+		if err := s.Validate(); err != nil {
+			return nil, err
+		}
+		wanted[s] = struct{}{}
+	}
+
+	var (
+		narrowed []PostureStep
+		answered = make(map[PostureSetting]struct{}, len(want))
+	)
+	for _, step := range steps {
+		if err := step.Validate(); err != nil {
+			return nil, err
+		}
+		var keep bool
+		for _, a := range step.Answers {
+			if _, ok := wanted[a]; ok {
+				keep, answered[a] = true, struct{}{}
+			}
+		}
+		if keep {
+			narrowed = append(narrowed, step)
+		}
+	}
+	for _, s := range want {
+		if _, ok := answered[s]; !ok {
+			return nil, fmt.Errorf("posture read wants %s and no probe answers it: %w",
+				s, ErrPostureUnreadable)
+		}
+	}
+	return narrowed, nil
 }
 
 // AccountPosture reads the account's whole safety posture.
@@ -476,7 +577,12 @@ type PostureStep struct {
 // posture read shed as Routine would leave the trade to proceed on a stale
 // snapshot, which is the exact reading §73c-2 rejected. The method refuses to
 // guess, as SpotBalances does.
-func (c *OrderClient) AccountPosture(ctx context.Context, urgency ratelimit.Priority) (AccountPostureReport, error) {
+// The want-set names every setting the caller needs established. It is required
+// rather than optional, on this file's standing direction: an absent list would
+// have to mean "all of them", so a caller that forgot to build one would read
+// the whole surface — issuing calls on families it may not have routed, which is
+// the failure this argument exists to remove (task #199, record §73p).
+func (c *OrderClient) AccountPosture(ctx context.Context, urgency ratelimit.Priority, want []PostureSetting) (AccountPostureReport, error) {
 	op := string(c.codec.Venue()) + ".AccountPosture"
 
 	if err := urgency.Validate(); err != nil {
@@ -488,7 +594,11 @@ func (c *OrderClient) AccountPosture(ctx context.Context, urgency ratelimit.Prio
 			fmt.Errorf("%s: %w", c.codec.Venue(), ErrPostureUnsupported))
 	}
 
-	steps, err := codec.EncodePosture()
+	encoded, err := codec.EncodePosture()
+	if err != nil {
+		return AccountPostureReport{}, apperror.Precondition(op, "encode", err)
+	}
+	steps, err := PostureStepsFor(encoded, want)
 	if err != nil {
 		return AccountPostureReport{}, apperror.Precondition(op, "encode", err)
 	}
@@ -496,6 +606,12 @@ func (c *OrderClient) AccountPosture(ctx context.Context, urgency ratelimit.Prio
 		// A codec that renders no steps would report a posture nothing was
 		// read for, and an empty observation list passes every rule that
 		// folds over it looking for failures.
+		//
+		// Unreachable through PostureStepsFor, which refuses an empty want-set
+		// and refuses a wanted setting no step answers — so a non-empty want
+		// always yields a non-empty list. Kept because the reachable-looking
+		// path here is the one that must never return a clean report, and the
+		// cost of the guard is a comparison.
 		return AccountPostureReport{}, apperror.Precondition(op, "encode",
 			fmt.Errorf("%s: %w", c.codec.Venue(), ErrPostureUnreadable))
 	}

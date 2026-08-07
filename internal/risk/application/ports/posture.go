@@ -9,11 +9,21 @@
 package ports
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 	"github.com/giiorg/arb-lab/internal/risk/domain"
 )
+
+// ErrPostureScopeSettingsUnstated reports a posture scope that names no setting
+// to establish.
+//
+// The package's first sentinel, and it is here rather than in domain because
+// what it refuses is a malformed REQUEST — a caller that did not say what it
+// needs read — rather than anything about an account. See PostureScope.Settings
+// for why the empty list cannot be given a meaning.
+var ErrPostureScopeSettingsUnstated = errors.New("risk: posture scope names no setting to establish")
 
 // AccountPostureSource reads one venue account's whole §4.1 posture.
 //
@@ -55,12 +65,42 @@ type AccountPostureSource interface {
 // above.
 type PostureScope struct {
 	Venue ids.Venue
+
+	// Settings is every setting this read must establish.
+	//
+	// # It narrows WHAT IS ASKED, and never how completely it is answered
+	//
+	// The type above refuses a partial answer, and this field is not a way back
+	// to one: it is decided before any call is issued, from the rule table's
+	// statement of which settings govern this deployment at all, and every
+	// setting in it is established or the read fails (task #199, record §73p).
+	// The conjunction is unchanged; what changed is what it ranges over.
+	//
+	// It exists because a setting that governs a leg this deployment does not
+	// trade would otherwise be read from an endpoint the deployment has no
+	// reason to route — turning §4.1's gate unanswerable for a shape §5.2
+	// actively builds toward (record §73n F20).
+	//
+	// Empty is REFUSED rather than meaning "everything". The absent list would
+	// have to mean one or the other, and "everything" is the reading that lets a
+	// caller who forgot to build one read a surface it cannot route; "nothing"
+	// is the reading that returns a clean posture nobody checked. Both are worse
+	// than a refusal that names the field.
+	Settings []domain.Setting
 }
 
 // Validate reports whether the scope names a read a venue could serve.
 func (s PostureScope) Validate() error {
 	if err := s.Venue.Validate(); err != nil {
 		return fmt.Errorf("posture scope venue: %w", err)
+	}
+	if len(s.Settings) == 0 {
+		return fmt.Errorf("posture scope for %s: %w", s.Venue, ErrPostureScopeSettingsUnstated)
+	}
+	for _, set := range s.Settings {
+		if err := set.Validate(); err != nil {
+			return fmt.Errorf("posture scope for %s: %w", s.Venue, err)
+		}
 	}
 	return nil
 }

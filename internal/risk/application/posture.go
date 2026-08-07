@@ -73,7 +73,36 @@ func (g *PostureGuard) Venue() string { return g.requirement.Venue.String() }
 // posture could not be established at all — the read failed, or the answer
 // could not be judged — and is never a posture that happens to be fine.
 func (g *PostureGuard) Assert() (domain.Verdict, error) {
-	scope := ports.PostureScope{Venue: g.requirement.Venue}
+	// The want-set is derived from the SAME requirement the verdict is judged
+	// against, so the read and the judgement cannot disagree about which
+	// settings this deployment is governed by. Deriving it here rather than in
+	// the adapter is what keeps that true: an adapter with its own opinion would
+	// be a second statement of the rule table (task #199, record §73p).
+	settings, err := g.requirement.Dialect.ProbedSettings(g.requirement.Coverage)
+	if err != nil {
+		return domain.Verdict{}, err
+	}
+	if len(settings) == 0 {
+		// # A deployment with nothing to READ is judged without a read
+		//
+		// It is reachable on exactly one shape today and the shape is real: a
+		// Binance deployment configuring no derivative instrument. Every probed
+		// rule in that dialect governs the derivatives leg, so all five lapse,
+		// and §4.1's only remaining Binance check is the Portfolio-Margin
+		// ATTESTATION — which no venue read could answer in any case (record
+		// §73b F1). Issuing a read here would ask three futures endpoints a
+		// question no rule is waiting for.
+		//
+		// This is the one path that reaches Check with an empty report on
+		// purpose, and what keeps it honest is that it does not get to declare
+		// the outcome: Check still evaluates the attestation, still records the
+		// five lapses, and Satisfied still refuses a verdict that evaluated
+		// nothing. So if the attested rule were ever removed from that table,
+		// this branch would produce Evaluated==0 and REFUSE, rather than a clean
+		// posture for an account nobody asked about (task #199, record §73p).
+		return domain.CheckWithoutVenueRead(g.requirement)
+	}
+	scope := ports.PostureScope{Venue: g.requirement.Venue, Settings: settings}
 	if err := scope.Validate(); err != nil {
 		// Unreachable through NewPostureGuard, which validated the venue — and
 		// reachable through `var g PostureGuard`, which is the case it exists

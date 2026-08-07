@@ -25,6 +25,23 @@ var (
 	ErrScopeInvalid    = errors.New("risk: posture scope is not a declared value")
 	ErrPresenceInvalid = errors.New("risk: posture presence is not a declared value")
 
+	// ErrSubjectInvalid reports a RULE ROW whose subject is the zero value or is
+	// not a declared member. Unlike the three above it, this is never an ACL
+	// fault and never an account fault: the rule tables are this package's own
+	// data, so it is a defect in the table and it is raised by the audit that
+	// reads the table rather than by anything on the wire path (record §73p).
+	ErrSubjectInvalid = errors.New("risk: posture rule subject is not a declared value")
+
+	// ErrVenueReadOwed reports CheckWithoutVenueRead called for a requirement
+	// whose table DOES have settings to read.
+	//
+	// The precondition it guards is the only thing standing between a legitimate
+	// no-read verdict and a general-purpose way to judge any account without
+	// looking at it — on Bybit that would drop eight venue checks and report a
+	// clean posture. It names the count and the coverage, because the caller's
+	// bug is always that one of those two is not what they assumed.
+	ErrVenueReadOwed = errors.New("risk: this requirement owes a venue read and may not be judged without one")
+
 	// ErrFailureReasonInvalid reports a Failure carrying no declared reason.
 	// A failure that cannot say why is one an operator cannot act on.
 	ErrFailureReasonInvalid = errors.New("risk: failure reason is not a declared value")

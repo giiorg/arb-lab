@@ -1,6 +1,77 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-06, session 115): **#199 ITEM 1 — THE OWED OPERATOR RULING WAS A DEFECT REPORT. §4.1's BINANCE GATE REFUSED ON EVERY ACCOUNT, NOT ONLY FLAT ONES. DOCS v0.9.53, NINE MUTANTS ALL CAUGHT, `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
+## Status (2026-08-07, session 116): **#199 IS RULED AND SLICE A HAS NO OPEN QUESTIONS. `Scope` WAS DOING DUTY FOR A PROPERTY IT DOES NOT CARRY. DOCS v0.9.54, NINE MUTANTS ALL CAUGHT, `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO.**
+
+**Read `docs/superpowers/specs/2026-08-06-m4-198-account-posture.md` §73p
+first** — the fifteen-row subject table, the four rejected alternatives, the
+mutant table, and what it deliberately does NOT settle.
+
+**THE HEADLINE: THE LAST OPEN QUESTION WAS NOT A TRADE-OFF.** #199 asked whether
+a spot-only Binance deployment must route the futures family, framed as config
+burden vs. coverage loss. A rule's **scope** is the granularity it is *answered*
+at; the family requirement was derived from the union of all probes, which reads
+that as the rule's **subject** — which part of the deployment it *governs*.
+`observationKey`'s own comment had said those differ since the rules landed
+(`positionMode` is `ScopeAccount` on Binance and `ScopeSymbol` on Bybit, one
+subject at two granularities), stated as a fact about one setting and never as a
+fact about the table. `posture.go`'s doc comment said the opposite outright.
+
+**TABULATING ALL FIFTEEN ROWS SETTLED IT, AND THE TWO VENUES DISAGREE.** Every
+**probed** Binance rule governs the derivatives leg; the one whose subject
+reaches the spot wallet is Portfolio-Margin, which is attested and needs no
+endpoint. So a spot-only Binance deployment issues **zero** probes and still
+enforces the only check that could hurt it. A spot-only **Bybit** deployment
+still requires linear-perp, because `/v5/account/info` rides it and answers three
+**account**-subject settings. **Same question, opposite answers, one rule** —
+which is why this is an axis on the rule and not "Binance is exempt". The
+plausible wrong implementation (*skip the posture families when the roster has no
+derivative*) passes the Binance test and fails
+`TestASpotOnlyBybitDeploymentMustStillRouteTheLinearFamily`.
+
+**THE LAPSE IS STATED, NEVER SILENT.** `Verdict.Lapsed` carries every rule that
+did not run with its subject and the coverage that lapsed it; `Evaluated`
+excludes them, so the vacuity guard still refuses a verdict that evaluated
+nothing. An exemption can narrow what is asked and can never mint a clean answer.
+
+**NARROWING THE CONFIG WITHOUT NARROWING THE READ WOULD HAVE BEEN WORSE THAN
+DOING NOTHING** — it moves F20's failure from config-time to boot-time. So the
+want-set travels: `ProbedSettings` → `PostureScope.Settings` → the ACL's inverse
+translation → `PostureStepsFor`. `CheckWithoutVenueRead` handles the one shape
+with nothing to read and **checks its own precondition**, so it cannot be reused
+to judge a Bybit account without looking.
+
+**THREE THINGS FELL OUT, NONE ABSORBED.** (1) `Check`'s per-symbol loop claimed
+an empty roster was already refused — **false from the session it was written**,
+since the guard is conditional on `RosterCoverageDerivatives` and
+`RosterCoverageNoDerivatives` was added by the same slice. (2) §4.1's only
+end-to-end refusing-path fixture rested on the same conflation *in a test*
+(*"it is an ACCOUNT-WIDE rule, so it fires on a deployment with no derivative"*)
+— it read as covered because its assertion is true of the rule in general. (3)
+Mutant M7 returned `TIMEOUT!!`: `TestProcessKillMidIOC`'s 60s channel bound tied
+`mutate.sh`'s own 60s default, so the guard could never be seen to fire. Now 10s,
+matching every other bound in the repo, and the hang became a kill.
+
+**WHAT IS NOW OPEN AND IS NEW — task #201.** Profiles §2's Binance cell checks
+**nothing** about a spot leg where the Bybit cell checks three things. A
+spot-only Binance deployment's whole §4.1 answer is one attestation and zero
+venue reads. That is the rule table faithfully applied *and* the first time the
+gap has been visible, because every Binance deployment previously dragged in the
+futures probes regardless. Binance spot accounts do support margin borrowing —
+the same hazard Bybit's borrow rows refuse. **Filed, not guessed**: blocked on
+the same WAF and missing credential as #180/#171, and a rule on a guessed field
+name would halt every Binance spot deployment. Try the spec-generated connector
+first; it answered §73o's field question. Beside it, #171's unchanged loosening
+trigger: whether Bybit's `position/list` answers for a never-traded symbol.
+
+**Everything below the venue codecs is still fixture-tested and has never met a
+real account** (§73f). Unchanged: three standing operator decisions, credentials
+deferred, capture **PID 8495**, never rebuild over `bin/arblab`, `make ci` runs
+`-race` AND the ka staleness gate (needs node), cap `TLC_WORKERS` at 4,
+docs/i18n parity is `bun test`.
+
+---
+
+## Status (2026-08-06, session 115 — HISTORICAL): **#199 ITEM 1 — THE OWED OPERATOR RULING WAS A DEFECT REPORT. §4.1's BINANCE GATE REFUSED ON EVERY ACCOUNT, NOT ONLY FLAT ONES. DOCS v0.9.53, NINE MUTANTS ALL CAUGHT, `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
 
 **Read `docs/superpowers/specs/2026-08-06-m4-198-account-posture.md` §73o
 first** — the verified field lists, the fold, the collapse checklist, the mutant

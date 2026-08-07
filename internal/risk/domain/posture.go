@@ -130,7 +130,8 @@ func (s Setting) String() string {
 	return fmt.Sprintf("Setting(%d)", uint8(s))
 }
 
-// Scope is what an observation, and the rule reading it, is about.
+// Scope is the GRANULARITY at which an observation, and the rule reading it, is
+// answered — how many times the check runs and what names each run.
 //
 // Three scopes rather than a flat list because the COVERAGE question differs
 // per scope and the check asks it separately: an account-wide setting is
@@ -138,6 +139,16 @@ func (s Setting) String() string {
 // CONFIGURED symbol, not merely for the ones the venue happened to return
 // (record §73b F4); and a per-asset setting is answered for whatever the wallet
 // enumerated, since no roster of coins exists to compare against.
+//
+// # Scope is not the SUBJECT, and this comment used to say it was
+//
+// It read "what an observation, and the rule reading it, is about" until
+// record §73p. That is a different property, it is Subject below, and the two
+// come apart on this very table: SettingPositionMode is ScopeAccount on Binance
+// and ScopeSymbol on Bybit — ONE subject at two granularities, which is exactly
+// what observationKey's own comment says. Reading this field as the subject is
+// what made §4.1's family requirement demand an endpoint for a leg the
+// deployment does not trade (task #199).
 type Scope uint8
 
 const (
@@ -177,6 +188,109 @@ func (s Scope) String() string {
 		return "ScopeAsset"
 	}
 	return fmt.Sprintf("Scope(%d)", uint8(s))
+}
+
+// Subject is WHICH PART OF THE DEPLOYMENT a rule's setting governs — the
+// property Scope was doing duty for until task #199 (record §73p).
+//
+// # Why the axis has to exist
+//
+// §4.1's posture read is routed by product family, so a family this deployment
+// declares no endpoint for makes its probes unissuable (record §73n F20). The
+// first cut derived the required families from the UNION of a dialect's probes,
+// which demanded a futures endpoint from a deployment holding only the spot leg
+// of a cross-venue carry — a shape §5.2's singular venue block actively builds
+// toward. The union is the wrong quantity: a rule that governs a leg this
+// deployment does not trade has nothing to say about it, and an endpoint routed
+// only to answer such a rule buys nothing while making a spot-only boot depend
+// on a futures API it never calls.
+//
+// # It is a classification of the RULE, not of the venue
+//
+// Stated here rather than as "Binance is exempt", because the two venues get
+// OPPOSITE answers from the same axis and neither is a special case. Every one
+// of Binance's five probed rules is SubjectDerivativesLeg, and the single rule
+// whose subject reaches the spot wallet — SettingPortfolioMargin, the account
+// TYPE — is expectAttested and needs no endpoint at all. Bybit does not mirror
+// it: GET /v5/account/info carries three SubjectAccount rules, so a spot-only
+// Bybit deployment still requires the linear-perp family.
+//
+// A lapsed rule is never a silently skipped one. Check records it in
+// Verdict.Lapsed, and Satisfied's vacuity guard is what stops an exemption from
+// emptying a table: a no-derivatives Binance verdict evaluates exactly one rule.
+type Subject uint8
+
+const (
+	// SubjectUnspecified is the zero value: a rule row nobody classified.
+	// Refused by rulesFor's audit rather than defaulted, because either default
+	// is wrong — defaulting to "always live" reinstates the union this axis
+	// exists to replace, and defaulting to "lapses" drops a real check.
+	SubjectUnspecified Subject = iota
+
+	// SubjectAccount governs the account itself, whatever it holds: its type,
+	// its collateral model, whether its legs are segregated. Never lapses,
+	// because the account exists on every deployment.
+	SubjectAccount
+
+	// SubjectDerivativesLeg governs the perpetual leg — its position mode, its
+	// margin isolation, its leverage. Lapses when this deployment configures no
+	// derivative instrument, which is the only such statement any carrier makes
+	// (RosterCoverage).
+	SubjectDerivativesLeg
+
+	// SubjectSpotLeg governs the spot leg — its borrow, its margin mode.
+	//
+	// It NEVER lapses today, and the reason is recorded rather than left to be
+	// re-derived as an oversight: no carrier states "this deployment has no spot
+	// leg" (RosterCoverage answers only the derivatives question), and under
+	// Bybit's UTA a spot borrow is account-wide leverage regardless of which leg
+	// took it on. A future coverage carrier must argue the second point before
+	// reusing the first.
+	SubjectSpotLeg
+)
+
+const maxSubject = SubjectSpotLeg
+
+// Validate reports whether s names a subject, excluding the sentinel.
+func (s Subject) Validate() error {
+	if s == SubjectUnspecified || s > maxSubject {
+		return fmt.Errorf("posture subject %d: %w", uint8(s), ErrSubjectInvalid)
+	}
+	return nil
+}
+
+// String implements fmt.Stringer.
+func (s Subject) String() string {
+	switch s {
+	case SubjectUnspecified:
+		return "SubjectUnspecified"
+	case SubjectAccount:
+		return "SubjectAccount"
+	case SubjectDerivativesLeg:
+		return "SubjectDerivativesLeg"
+	case SubjectSpotLeg:
+		return "SubjectSpotLeg"
+	}
+	return fmt.Sprintf("Subject(%d)", uint8(s))
+}
+
+// Live reports whether a rule with this subject is answerable, and required, on
+// a deployment whose roster has the given coverage.
+//
+// The coverage is validated by the caller (Requirement.Validate), so an
+// unspecified one reaching here would be a defect upstream; it answers false,
+// which lapses the rule — and a lapse is visible in the verdict, where a
+// silently live rule against an unstated coverage would not be.
+func (s Subject) Live(c RosterCoverage) bool {
+	switch s {
+	case SubjectAccount, SubjectSpotLeg:
+		return true
+	case SubjectDerivativesLeg:
+		return c == RosterCoverageDerivatives
+	case SubjectUnspecified:
+		return false
+	}
+	return false
 }
 
 // Presence is how much the venue actually said about a setting.

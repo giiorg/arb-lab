@@ -316,6 +316,18 @@ var (
 	// makes the posture a precondition of trading at all, so a venue whose
 	// posture cannot be read is not a venue this system may trade on.
 	ErrPostureUnsupported = errors.New("venue: codec has no account posture surface")
+
+	// ErrPostureStepAnswersNothing reports a posture step declaring no setting
+	// it establishes.
+	//
+	// Its own sentinel rather than a shape of ErrPostureUnreadable, because
+	// nothing on the wire is involved: it is a CODEC defect, found before any
+	// request is issued, and the step it names is a call this system would pay
+	// weight for and derive nothing from. It is also what stops the family
+	// derivation degrading quietly — a step answering nothing contributes no
+	// live setting, so its family would simply stop being required (task #199,
+	// record §73p).
+	ErrPostureStepAnswersNothing = errors.New("venue: posture step establishes no setting")
 )
 
 // There is deliberately no sentinel here for "funding asked of a spot

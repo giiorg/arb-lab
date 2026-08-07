@@ -95,6 +95,7 @@ func (c *BinanceOrderCodec) EncodePosture() ([]PostureStep, error) {
 				Family: ids.ProductLinearPerp,
 				Cost:   ratelimit.Cost{Weight: binanceUnverifiedWeight},
 			},
+			Answers: []PostureSetting{PostureMultiAssets},
 		},
 		{
 			Probe: PostureProbePositionDual,
@@ -105,6 +106,7 @@ func (c *BinanceOrderCodec) EncodePosture() ([]PostureStep, error) {
 				Family: ids.ProductLinearPerp,
 				Cost:   ratelimit.Cost{Weight: binanceUnverifiedWeight},
 			},
+			Answers: []PostureSetting{PosturePositionMode},
 		},
 		{
 			Probe: PostureProbeSymbolConfig,
@@ -114,6 +116,13 @@ func (c *BinanceOrderCodec) EncodePosture() ([]PostureStep, error) {
 				Path:   "/fapi/v1/symbolConfig",
 				Family: ids.ProductLinearPerp,
 				Cost:   ratelimit.Cost{Weight: binanceUnverifiedWeight},
+			},
+			// The three-for-one call, and the reason the probe count is three
+			// rather than six (record §73o).
+			Answers: []PostureSetting{
+				PostureMarginMode,
+				PostureLeverage,
+				PostureAutoAddMargin,
 			},
 		},
 	}, nil

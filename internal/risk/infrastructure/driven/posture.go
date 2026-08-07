@@ -48,7 +48,7 @@ const posturePriority = ratelimit.PrioritySafety
 // declared where it is CONSUMED rather than imported as a concrete client —
 // the shape SpotBalanceReader and VenuePositionReader already take.
 type AccountPostureReader interface {
-	AccountPosture(ctx context.Context, urgency ratelimit.Priority) (venue.AccountPostureReport, error)
+	AccountPosture(ctx context.Context, urgency ratelimit.Priority, want []venue.PostureSetting) (venue.AccountPostureReport, error)
 }
 
 // NewAccountPosture builds the adapter.
@@ -79,7 +79,16 @@ func (a *AccountPosture) AccountPosture(scope ports.PostureScope) (domain.Report
 	// not answered", and the second refuses to conclude the assertion — which
 	// is correct, but it would make an unrelated shutdown look like a posture
 	// failure at the one gate an operator reads most carefully.
-	report, err := a.client.AccountPosture(context.Background(), posturePriority)
+	want := make([]venue.PostureSetting, 0, len(scope.Settings))
+	for _, s := range scope.Settings {
+		translated, err := venueSettingFor(s)
+		if err != nil {
+			return domain.Report{}, err
+		}
+		want = append(want, translated)
+	}
+
+	report, err := a.client.AccountPosture(context.Background(), posturePriority, want)
 	if err != nil {
 		// Unwrapped: engine/venue already classified the effect, and a read
 		// that failed must not be re-derived into an empty report.
@@ -110,7 +119,7 @@ func (a *AccountPosture) AccountPosture(scope ports.PostureScope) (domain.Report
 
 // translateObservation maps one venue observation into the domain's.
 func translateObservation(o venue.PostureObservation) (domain.Observation, error) {
-	setting, err := translateSetting(o.Setting)
+	setting, err := TranslateSetting(o.Setting)
 	if err != nil {
 		return domain.Observation{}, err
 	}
@@ -135,7 +144,7 @@ func translateObservation(o venue.PostureObservation) (domain.Observation, error
 	}, nil
 }
 
-// translateSetting maps the venue's setting vocabulary onto the domain's.
+// TranslateSetting maps the venue's setting vocabulary onto the domain's.
 //
 // Every member is named (§3.6 rule 10), so a setting added to the venue surface
 // has to choose a side here. The sentinel refuses rather than mapping to the
@@ -147,7 +156,65 @@ func translateObservation(o venue.PostureObservation) (domain.Observation, error
 // cannot produce one, which is correct and load-bearing: that setting has no
 // venue read path at all (record §73b F1), so the only thing that could
 // satisfy it is the operator attestation the requirement carries.
-func translateSetting(s venue.PostureSetting) (domain.Setting, error) {
+//
+// # Why it is exported, having been a detail of the read path
+//
+// It has a second caller that is not on the wire path at all: the composition
+// root, which joins a codec's PostureStep.Answers against the domain's rule
+// table to decide which product families §4.1's read rides (task #199, record
+// §73p). That join has to cross the same vocabulary boundary this ACL exists
+// for, at CONFIG time rather than at decode time, and a second translation
+// written beside it would be a second statement of one fact.
+// venueSettingFor is TranslateSetting's inverse: the domain says which settings
+// it needs established, and the read is issued in the venue's vocabulary.
+//
+// # Why it is a second switch and not a reversed map
+//
+// A map built by inverting the one above would agree with it by construction,
+// which is the property that makes it worthless as a check — the pair could
+// then be jointly wrong and nothing would notice. Written out, the two are
+// independent statements and the round-trip test below can disagree with either.
+//
+// SettingPortfolioMargin is the one domain setting with no venue member, and it
+// is UNREACHABLE here rather than merely absent: ProbedSettings excludes every
+// attested rule, so the guard never asks for it. The refusal is kept because
+// "unreachable" is a claim about today's callers, and the alternative — mapping
+// it to some nearby member — would silently satisfy §4.1's one attestation with
+// a venue read (record §73b F1 is why that must never happen).
+func venueSettingFor(s domain.Setting) (venue.PostureSetting, error) {
+	switch s {
+	case domain.SettingMarginMode:
+		return venue.PostureMarginMode, nil
+	case domain.SettingMultiAssets:
+		return venue.PostureMultiAssets, nil
+	case domain.SettingAccountKind:
+		return venue.PostureAccountKind, nil
+	case domain.SettingSpotHedging:
+		return venue.PostureSpotHedging, nil
+	case domain.SettingSpotMarginMode:
+		return venue.PostureSpotMarginMode, nil
+	case domain.SettingPositionMode:
+		return venue.PosturePositionMode, nil
+	case domain.SettingAutoAddMargin:
+		return venue.PostureAutoAddMargin, nil
+	case domain.SettingLeverage:
+		return venue.PostureLeverage, nil
+	case domain.SettingBorrowAmount:
+		return venue.PostureBorrowAmount, nil
+	case domain.SettingSpotBorrow:
+		return venue.PostureSpotBorrow, nil
+	case domain.SettingPortfolioMargin:
+		return venue.PostureSettingUnspecified, fmt.Errorf(
+			"setting %s has no venue read path and must be attested: %w",
+			s, ErrAccountPostureUntranslatable)
+	case domain.SettingUnspecified:
+		return venue.PostureSettingUnspecified, fmt.Errorf("posture scope states no setting: %w",
+			ErrAccountPostureUntranslatable)
+	}
+	return venue.PostureSettingUnspecified, fmt.Errorf("domain setting %s: %w", s, ErrAccountPostureUntranslatable)
+}
+
+func TranslateSetting(s venue.PostureSetting) (domain.Setting, error) {
 	switch s {
 	case venue.PostureMarginMode:
 		return domain.SettingMarginMode, nil

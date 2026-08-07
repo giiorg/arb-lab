@@ -91,6 +91,155 @@ func TestBinanceEncodePostureIsThreeProbesOnTheFuturesFamily(t *testing.T) {
 	}
 }
 
+// TestEveryPostureStepDeclaresWhatItAnswers is the totality check on the new
+// column (task #199, record §73p).
+//
+// The Answers list is what lets the composition root derive which families a
+// deployment must route, so a step that declares nothing contributes nothing and
+// its family silently stops being required — a narrowing by omission, which is
+// the direction this repo refuses everywhere else. The per-probe counts are
+// written out because "at least one" is satisfied by a symbolConfig step that
+// admits to answering only one of its three settings, which would drop two rules
+// from the required set.
+func TestEveryPostureStepDeclaresWhatItAnswers(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		steps []venue.PostureStep
+		want  map[venue.PostureProbe]int
+	}{
+		{
+			name:  "binance",
+			steps: encodePosture(t, binanceCodec(t)),
+			want: map[venue.PostureProbe]int{
+				venue.PostureProbeMultiAssets:  1,
+				venue.PostureProbePositionDual: 1,
+				// The three-for-one call (record §73o).
+				venue.PostureProbeSymbolConfig: 3,
+			},
+		},
+		{
+			name:  "bybit",
+			steps: encodePosture(t, bybitCodec(t)),
+			want: map[venue.PostureProbe]int{
+				// The three ACCOUNT-subject settings, which is why a spot-only
+				// Bybit deployment still needs this call's family.
+				venue.PostureProbeAccountInfo:  3,
+				venue.PostureProbeSpotMargin:   1,
+				venue.PostureProbeWallet:       2,
+				venue.PostureProbePositionList: 3,
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			seen := make(map[venue.PostureSetting]venue.PostureProbe)
+			for _, s := range tc.steps {
+				if err := s.Validate(); err != nil {
+					t.Errorf("step %s: %v", s.Probe, err)
+					continue
+				}
+				if got := len(s.Answers); got != tc.want[s.Probe] {
+					t.Errorf("%s answers %d settings %v, want %d", s.Probe, got, s.Answers, tc.want[s.Probe])
+				}
+				// One setting, one probe. Two probes answering the same setting
+				// would make either family look required for it, so dropping
+				// one would be invisible to the derivation.
+				for _, a := range s.Answers {
+					if prior, dup := seen[a]; dup {
+						t.Errorf("%s is answered by both %s and %s", a, prior, s.Probe)
+					}
+					seen[a] = s.Probe
+				}
+			}
+		})
+	}
+}
+
+// TestPostureStepValidateRefusesAStepThatAnswersNothing is the negative control
+// for the field above — both real codecs are complete, so without a hand-built
+// step nothing has ever made Validate object.
+func TestPostureStepValidateRefusesAStepThatAnswersNothing(t *testing.T) {
+	step := venue.PostureStep{Probe: venue.PostureProbeMultiAssets}
+	if err := step.Validate(); !errors.Is(err, venue.ErrPostureStepAnswersNothing) {
+		t.Errorf("a step answering nothing validated with %v, want ErrPostureStepAnswersNothing", err)
+	}
+	step.Answers = []venue.PostureSetting{venue.PostureSettingUnspecified}
+	if err := step.Validate(); err == nil {
+		t.Error("a step answering the SENTINEL validated — the zero value is not a setting")
+	}
+}
+
+// TestPostureStepsForNarrowsToTheWantedSettings is the read half of #199's
+// ruling: a deployment that needs nothing from a family stops calling it.
+func TestPostureStepsForNarrowsToTheWantedSettings(t *testing.T) {
+	steps := encodePosture(t, bybitCodec(t))
+
+	// Bybit under a no-derivatives roster: six settings, three probes. The
+	// position enumeration drops out and account/info does NOT — which is the
+	// assertion, since a narrowing keyed on "no derivatives configured" rather
+	// than on the settings would drop both.
+	want := []venue.PostureSetting{
+		venue.PostureMarginMode, venue.PostureAccountKind, venue.PostureSpotHedging,
+		venue.PostureSpotMarginMode, venue.PostureBorrowAmount, venue.PostureSpotBorrow,
+	}
+	got, err := venue.PostureStepsFor(steps, want)
+	if err != nil {
+		t.Fatalf("PostureStepsFor: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("narrowed to %d steps, want 3", len(got))
+	}
+	for _, s := range got {
+		if s.Probe == venue.PostureProbePositionList {
+			t.Errorf("the position enumeration survived a want-set that names none of its settings")
+		}
+	}
+
+	// The whole set narrows to the whole list — the positive control, without
+	// which a filter that dropped everything would pass the check above.
+	all := []venue.PostureSetting{
+		venue.PostureMarginMode, venue.PostureAccountKind, venue.PostureSpotHedging,
+		venue.PostureSpotMarginMode, venue.PostureBorrowAmount, venue.PostureSpotBorrow,
+		venue.PosturePositionMode, venue.PostureLeverage, venue.PostureAutoAddMargin,
+	}
+	if got, err := venue.PostureStepsFor(steps, all); err != nil || len(got) != len(steps) {
+		t.Errorf("the full want-set narrowed to %d steps (err %v), want all %d", len(got), err, len(steps))
+	}
+}
+
+// TestPostureStepsForRefusesAWantItCannotServe covers both ways the want-set and
+// the codec can disagree. Each is a refusal rather than a shorter list, because
+// a shorter list is a read that establishes less than the caller believes.
+func TestPostureStepsForRefusesAWantItCannotServe(t *testing.T) {
+	binance := encodePosture(t, binanceCodec(t))
+
+	// A setting this codec does not answer. Binance has no spot-borrow probe,
+	// and asking for one must not quietly return the three futures steps.
+	if _, err := venue.PostureStepsFor(binance, []venue.PostureSetting{venue.PostureSpotBorrow}); !errors.Is(err, venue.ErrPostureUnreadable) {
+		t.Errorf("a want-set naming an unanswerable setting returned %v, want ErrPostureUnreadable", err)
+	}
+	// A want-set whose members are PARTLY answerable is still a refusal: the
+	// premise is a conjunction, so serving the answerable half is exactly the
+	// partial read this surface forbids.
+	partial := []venue.PostureSetting{venue.PostureMultiAssets, venue.PostureSpotBorrow}
+	if _, err := venue.PostureStepsFor(binance, partial); !errors.Is(err, venue.ErrPostureUnreadable) {
+		t.Errorf("a partly answerable want-set returned %v, want ErrPostureUnreadable", err)
+	}
+	// And the empty want-set, which would otherwise narrow to zero steps and
+	// report a posture nothing was read for.
+	if _, err := venue.PostureStepsFor(binance, nil); !errors.Is(err, venue.ErrPostureUnreadable) {
+		t.Errorf("an empty want-set returned %v, want ErrPostureUnreadable", err)
+	}
+}
+
+func encodePosture(t *testing.T, c venue.AccountPostureCodec) []venue.PostureStep {
+	t.Helper()
+	steps, err := c.EncodePosture()
+	if err != nil {
+		t.Fatalf("EncodePosture: %v", err)
+	}
+	return steps
+}
+
 // TestBinanceDecodeMultiAssetsSeparatesAbsentFromFalse is the pointer-bool
 // claim, and it is the single most load-bearing test in this file.
 //

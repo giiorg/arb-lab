@@ -29,16 +29,34 @@ type fakeReader struct {
 	report     venue.AccountPostureReport
 	err        error
 	lastCtxNil bool
+
+	// lastWant is the same kind of claim as urgencies, one field over: the
+	// want-set is what makes a spot-only deployment stop issuing futures probes
+	// (task #199), and a translation nothing reads is a translation nothing
+	// checks.
+	lastWant []venue.PostureSetting
 }
 
-func (f *fakeReader) AccountPosture(ctx context.Context, urgency ratelimit.Priority) (venue.AccountPostureReport, error) {
+func (f *fakeReader) AccountPosture(ctx context.Context, urgency ratelimit.Priority, want []venue.PostureSetting) (venue.AccountPostureReport, error) {
 	f.calls++
 	f.urgencies = append(f.urgencies, urgency)
 	f.lastCtxNil = ctx == nil
+	f.lastWant = want
 	if f.err != nil {
 		return venue.AccountPostureReport{}, f.err
 	}
 	return f.report, nil
+}
+
+// adapterScope is a scope naming the settings a test's fixture speaks about.
+// Every scope must name at least one (ports.ErrPostureScopeSettingsUnstated),
+// and which ones is irrelevant to the translation tests — the adapter passes
+// them through and judges nothing.
+func adapterScope(settings ...domain.Setting) ports.PostureScope {
+	if len(settings) == 0 {
+		settings = []domain.Setting{domain.SettingMultiAssets}
+	}
+	return ports.PostureScope{Venue: adapterVenue, Settings: settings}
 }
 
 func observedAt(t *testing.T) clock.ServerTime {
@@ -64,6 +82,51 @@ func adapterT(t *testing.T, r *fakeReader) *AccountPosture {
 	return a
 }
 
+// TestTheScopesWantSetReachesTheVenueTranslated is the other direction through
+// this ACL, and the one #199 added (record §73p).
+//
+// The scope names DOMAIN settings and the client speaks the VENUE's vocabulary,
+// so an adapter that forwarded nothing — or forwarded a list it built itself —
+// would leave the read unnarrowed while every observation still translated back
+// correctly on the way in. The order is asserted too: the want-set is the
+// caller's statement of what it needs, and a reordering here would be a
+// different read on a codec whose steps are ordered (record §73c-2's quotable
+// cost is measured over that order).
+func TestTheScopesWantSetReachesTheVenueTranslated(t *testing.T) {
+	r := &fakeReader{report: venueReport(t)}
+
+	scope := adapterScope(domain.SettingMarginMode, domain.SettingSpotBorrow, domain.SettingAccountKind)
+	if _, err := adapterT(t, r).AccountPosture(scope); err != nil {
+		t.Fatalf("AccountPosture: %v", err)
+	}
+	want := []venue.PostureSetting{
+		venue.PostureMarginMode, venue.PostureSpotBorrow, venue.PostureAccountKind,
+	}
+	if len(r.lastWant) != len(want) {
+		t.Fatalf("the client was asked for %d settings %v, want %d", len(r.lastWant), r.lastWant, len(want))
+	}
+	for i := range want {
+		if r.lastWant[i] != want[i] {
+			t.Errorf("want[%d] = %s, want %s", i, r.lastWant[i], want[i])
+		}
+	}
+}
+
+// And the setting with no venue read path never reaches the client at all: a
+// scope naming it is a caller bug, refused before the request is issued rather
+// than forwarded as some neighbouring member.
+func TestAScopeNamingTheAttestedSettingIsRefusedBeforeTheRead(t *testing.T) {
+	r := &fakeReader{report: venueReport(t)}
+
+	scope := adapterScope(domain.SettingPortfolioMargin)
+	if _, err := adapterT(t, r).AccountPosture(scope); !errors.Is(err, ErrAccountPostureUntranslatable) {
+		t.Errorf("a scope naming the attested setting returned %v, want ErrAccountPostureUntranslatable", err)
+	}
+	if r.calls != 0 {
+		t.Errorf("the venue was called %d times for a setting no read can answer", r.calls)
+	}
+}
+
 func TestAdapterTranslatesAWholeReport(t *testing.T) {
 	r := &fakeReader{report: venueReport(t,
 		venue.PostureObservation{
@@ -81,7 +144,7 @@ func TestAdapterTranslatesAWholeReport(t *testing.T) {
 		},
 	)}
 
-	got, err := adapterT(t, r).AccountPosture(ports.PostureScope{Venue: adapterVenue})
+	got, err := adapterT(t, r).AccountPosture(adapterScope())
 	if err != nil {
 		t.Fatalf("AccountPosture: %v", err)
 	}
@@ -120,7 +183,7 @@ func TestEveryVenueSettingTranslatesOrRefuses(t *testing.T) {
 	valid := 0
 	for i := 0; i <= 255; i++ {
 		s := venue.PostureSetting(i)
-		got, err := translateSetting(s)
+		got, err := TranslateSetting(s)
 		if s.Validate() == nil {
 			valid++
 			if err != nil {
@@ -149,6 +212,66 @@ func TestEveryVenueSettingTranslatesOrRefuses(t *testing.T) {
 	}
 	if _, reachable := translated[domain.SettingPortfolioMargin]; reachable {
 		t.Fatal("a venue observation can now produce SettingPortfolioMargin — the attestation is bypassable")
+	}
+}
+
+// TestEverySettingRoundTripsThroughBothTranslations is the mirror of the test
+// above, for the inverse the posture WANT-SET travels through (task #199,
+// record §73p).
+//
+// The two switches are written out separately on purpose — an inverted map would
+// agree with its source by construction — so this is what makes the pair
+// checkable. Both directions are asserted from the same loop, because a
+// one-directional test passes against a `venueSettingFor` that maps two domain
+// settings onto one venue member: the read would then be issued for the wrong
+// probe, and every field would still decode.
+func TestEverySettingRoundTripsThroughBothTranslations(t *testing.T) {
+	seen := make(map[venue.PostureSetting]domain.Setting)
+	valid := 0
+	for i := 0; i <= 255; i++ {
+		d := domain.Setting(i)
+		got, err := venueSettingFor(d)
+		if d.Validate() != nil {
+			if !errors.Is(err, ErrAccountPostureUntranslatable) {
+				t.Fatalf("domain setting %d is invalid but translated to %s (err %v)", i, got, err)
+			}
+			continue
+		}
+		valid++
+		// SettingPortfolioMargin is the one valid domain setting with NO venue
+		// member, and it must refuse rather than land on a neighbour: mapping it
+		// anywhere would let a wire answer satisfy §4.1's one attested check
+		// (record §73b F1).
+		if d == domain.SettingPortfolioMargin {
+			if !errors.Is(err, ErrAccountPostureUntranslatable) {
+				t.Fatalf("%s translated to venue member %s — the attestation is bypassable", d, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("domain setting %s does not translate to a venue member: %v", d, err)
+		}
+		if prior, dup := seen[got]; dup {
+			t.Fatalf("domain settings %s and %s both translate to venue %s", prior, d, got)
+		}
+		seen[got] = d
+
+		back, err := TranslateSetting(got)
+		if err != nil {
+			t.Fatalf("venue %s does not translate back: %v", got, err)
+		}
+		if back != d {
+			t.Fatalf("%s -> %s -> %s; the round trip must be the identity", d, got, back)
+		}
+	}
+	// Eleven domain settings, ten of which have a venue member. The counts are
+	// literals for the reason the sibling test states: if they ever become
+	// equal, the attested check has acquired a wire answer.
+	if valid != 11 {
+		t.Fatalf("domain declares %d settings, want 11", valid)
+	}
+	if len(seen) != 10 {
+		t.Fatalf("%d domain settings reach a venue member, want 10", len(seen))
 	}
 }
 
@@ -226,7 +349,7 @@ func TestAdapterRefusesTheWholeReportOnAnUntranslatableObservation(t *testing.T)
 		},
 	)}
 
-	got, err := adapterT(t, r).AccountPosture(ports.PostureScope{Venue: adapterVenue})
+	got, err := adapterT(t, r).AccountPosture(adapterScope())
 	if !errors.Is(err, ErrAccountPostureUntranslatable) {
 		t.Fatalf("err = %v, want ErrAccountPostureUntranslatable", err)
 	}
@@ -239,7 +362,7 @@ func TestAdapterRefusesTheWholeReportOnAnUntranslatableObservation(t *testing.T)
 // the gate immediately before an authorization fsync.
 func TestAdapterReadsAtSafetyPriority(t *testing.T) {
 	r := &fakeReader{report: venueReport(t)}
-	if _, err := adapterT(t, r).AccountPosture(ports.PostureScope{Venue: adapterVenue}); err != nil {
+	if _, err := adapterT(t, r).AccountPosture(adapterScope()); err != nil {
 		t.Fatalf("AccountPosture: %v", err)
 	}
 	if len(r.urgencies) != 1 || r.urgencies[0] != ratelimit.PrioritySafety {
@@ -255,7 +378,7 @@ func TestAdapterReadsAtSafetyPriority(t *testing.T) {
 // error or an observation.
 func TestAdapterPassesAnEmptyReportThrough(t *testing.T) {
 	got, err := adapterT(t, &fakeReader{report: venueReport(t)}).
-		AccountPosture(ports.PostureScope{Venue: adapterVenue})
+		AccountPosture(adapterScope())
 	if err != nil {
 		t.Fatalf("AccountPosture: %v", err)
 	}
@@ -269,7 +392,7 @@ func TestAdapterPassesAnEmptyReportThrough(t *testing.T) {
 
 func TestAdapterRefusesAnotherVenuesScope(t *testing.T) {
 	r := &fakeReader{report: venueReport(t)}
-	_, err := adapterT(t, r).AccountPosture(ports.PostureScope{Venue: ids.Venue("binance")})
+	_, err := adapterT(t, r).AccountPosture(ports.PostureScope{Venue: ids.Venue("binance"), Settings: []domain.Setting{domain.SettingMultiAssets}})
 	if !errors.Is(err, ErrAccountPostureVenueMismatch) {
 		t.Fatalf("err = %v, want ErrAccountPostureVenueMismatch", err)
 	}
@@ -287,7 +410,7 @@ func TestAdapterRefusesAnUnvalidatableScope(t *testing.T) {
 
 func TestAdapterPropagatesTheReadFailureUnwrapped(t *testing.T) {
 	_, err := adapterT(t, &fakeReader{err: errVenueUnreachable}).
-		AccountPosture(ports.PostureScope{Venue: adapterVenue})
+		AccountPosture(adapterScope())
 	if !errors.Is(err, errVenueUnreachable) {
 		t.Fatalf("err = %v, want the venue's own error", err)
 	}
@@ -353,7 +476,7 @@ func TestBybitHedgeRowsReachTheDomainAsAnAmbiguity(t *testing.T) {
 	}
 
 	report, err := adapterT(t, &fakeReader{report: venueReport(t, obs...)}).
-		AccountPosture(ports.PostureScope{Venue: adapterVenue})
+		AccountPosture(adapterScope())
 	if err != nil {
 		t.Fatalf("AccountPosture: %v", err)
 	}
@@ -401,7 +524,7 @@ func TestBybitHedgeRowsReachTheDomainAsAnAmbiguity(t *testing.T) {
 		t.Fatalf("one-way position list: %v", err)
 	}
 	clean, err := adapterT(t, &fakeReader{report: venueReport(t, oneWay...)}).
-		AccountPosture(ports.PostureScope{Venue: adapterVenue})
+		AccountPosture(adapterScope())
 	if err != nil {
 		t.Fatalf("AccountPosture (one-way): %v", err)
 	}

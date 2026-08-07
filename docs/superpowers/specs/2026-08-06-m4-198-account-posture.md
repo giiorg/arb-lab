@@ -1407,3 +1407,178 @@ a field list for this one.
 Worth promoting to a habit on that evidence: **when a record rules a neighbouring
 consumer out in a subordinate clause, that clause is a finding waiting to happen.
 Check it in the same session, because it costs a grep now and a defect later.**
+
+---
+
+## §73p — The last open ruling was a conflated property (session 116, task #199)
+
+Slice A's final open item asked the operator: **must a spot-only Binance
+deployment route the futures family?** It was framed as a trade-off — a config
+burden and 60 weight per boot on an untraded budget, against losing two
+account-wide checks. It is neither, and the reason it is neither was written in
+this repo already.
+
+### The premise that was false
+
+`Scope` is **the granularity at which a rule is answered** — once, per symbol,
+per coin. The family requirement (§73n F20) was derived from the **union** of a
+dialect's probes, which silently reads scope as the rule's **subject**: which
+part of the deployment it governs. Those are different properties, and
+`observationKey`'s own comment had said so since the rules landed:
+
+> Scope is part of the key rather than derived from the subject: the same
+> setting legitimately arrives at DIFFERENT scopes on the two venues
+> (`SettingPositionMode` is account-wide on Binance and per-symbol on Bybit).
+
+One subject, two granularities — stated as a fact about *one setting*, never as
+a fact about *the table*. `posture.go`'s own doc comment said the opposite
+outright (*"Scope is what an observation, and the rule reading it, is about"*),
+and both were true enough locally that neither was challenged.
+
+### Tabulating the fifteen rows is what settled it
+
+| Dialect | Rule | Scope | Subject | Probe rides |
+|---|---|---|---|---|
+| Binance | multiAssetsMargin | Account | **Derivatives** | futures |
+| Binance | dualSidePosition | Account | **Derivatives** | futures |
+| Binance | Portfolio-Margin | Account | **Account** | *(attested — none)* |
+| Binance | marginType / leverage / autoAddMargin | Symbol | **Derivatives** | futures |
+| Bybit | marginMode / unifiedMarginStatus / spotHedging | Account | **Account** | linear-perp |
+| Bybit | spot-margin mode | Account | **Spot** | spot |
+| Bybit | borrowAmount / spotBorrow | Asset | **Spot** | spot |
+| Bybit | positionIdx / leverage / autoAddMargin | Symbol | **Derivatives** | linear-perp |
+
+Every **probed** Binance rule governs the derivatives leg. The one Binance rule
+whose subject reaches the spot wallet is Portfolio-Margin — a different account
+**type**, which unifies the two — and it is the one rule with no venue read path
+anywhere. So a spot-only Binance deployment needs **zero** probes and still
+enforces the only check that could hurt it. The trade-off the question was built
+around does not exist.
+
+### Why it is an AXIS and not an exemption
+
+Bybit does not mirror it. `GET /v5/account/info` rides linear-perp and answers
+three **account**-subject settings, so a spot-only *Bybit* deployment still
+requires that family — under UTA, `marginMode` is the segregation property
+deciding whether its spot holding can be consumed as margin. **Same question,
+opposite answers, one rule.** That asymmetry is the whole argument for putting
+the property on the rule rather than writing "Binance is exempt", and it is what
+`TestASpotOnlyBybitDeploymentMustStillRouteTheLinearFamily` exists to pin: the
+plausible wrong implementation — *skip the posture families when the roster has
+no derivative* — passes the Binance test and fails that one.
+
+### Rejected alternatives
+
+1. **Keep the requirement (status quo).** Rejected on the cost nobody had
+   priced: a spot-only boot would depend on the **futures API being reachable**,
+   and would spend 60 weight per boot against a budget for a product it never
+   trades — to establish two settings that govern a leg it does not hold.
+2. **Exempt silently.** Rejected as the direction this project's defaults refuse
+   everywhere else. "Checked and passed" and "not checked" would become the same
+   verdict, and the operator reading it could not tell a narrow **deployment**
+   from a narrow **read**. Hence `Verdict.Lapsed`.
+3. **Exempt by venue** (`if dialect == binance && no derivatives`). Rejected
+   because it gets Bybit **wrong** — it would let a document boot that can never
+   establish its own segregation property — and because it states as a fact about
+   a venue what is a fact about a rule.
+4. **Defer for #171's credential.** Rejected: no credentialed read bears on it.
+   The question was never about what the venues publish.
+
+### What the ruling required beyond itself, and why
+
+Narrowing the **config** requirement without narrowing the **read** would have
+moved F20's failure from config-time to boot-time — strictly worse, and the
+exact complaint F20 was filed for. So the want-set travels: `ProbedSettings`
+(domain) → `PostureScope.Settings` (port) → the ACL's inverse translation →
+`PostureStepsFor` (venue). Three consequences worth keeping:
+
+- **It is not a partial read.** §4.1's premise is a conjunction and the port
+  refuses best-effort answers. Narrowing changes what the conjunction is *over*,
+  decided before any call is issued; every wanted setting is still established or
+  the read fails, and a wanted setting no probe answers is an **error**.
+- **The empty want-set is real**, and reachable on exactly one shape: Binance
+  with no derivative. `CheckWithoutVenueRead` handles it, and **checks its own
+  precondition** — a caller cannot use it to judge any other requirement without
+  looking, which on Bybit would drop eight venue checks. Its verdict carries the
+  **zero** observation instant, because there was no read and a local wall-clock
+  reading would be a fact nobody established.
+- **`PostureStep.Answers` had to exist**, and it pays for itself twice: the
+  probe→setting relation previously lived only inside `DecodePostureStep`'s body
+  where nothing could read it, and exposing it makes the #186-shaped agreement
+  check possible — a rule with a read path that **no probe answers** is now a
+  startup refusal.
+
+### Three things fell out, none absorbed
+
+- **A comment that was false from the session it was written.** `Check`'s
+  per-symbol loop claimed *"Requirement.Validate has already refused an empty
+  roster, so this loop cannot be the vacuous one."* The guard it cites is
+  conditional on `Coverage == RosterCoverageDerivatives`, and
+  `RosterCoverageNoDerivatives` — added by the **same slice** — makes an empty
+  roster valid. Corrected in place; what makes the claim true now is the subject
+  gate, which lapses those rules *before* the loop rather than running them over
+  nothing.
+- **The conflation had propagated into the fixtures.** §4.1's only end-to-end
+  refusing-path witness violated `multiAssetsMargin` on `spotOnly`, justified in
+  its own comment by *"it is an ACCOUNT-WIDE rule, so it fires on a deployment
+  with no derivative instrument."* Same inference, in a test — and it read as
+  covered because the assertion it makes is true of the rule **in general**. It
+  moved to `perpRoster`, and the spot-only side gained its own pair.
+  Generalising: *a scope-shaped premise propagates into the fixtures, where the
+  collapse checklist does not look — because the fixture is not degenerate, it is
+  aimed at a case that does not exist.*
+- **A bound set at the harness's own limit is not a bound.** Mutant M7 returned
+  `TIMEOUT!!`. `TestProcessKillMidIOC` guards its channel receive with
+  `time.After(60 * time.Second)` and `tools/mutate.sh`'s default
+  `MUTATE_TIMEOUT` is **60s** — they tie, the harness wins, and the `t.Fatalf`
+  that prints the child's stderr and names the cause can never fire. Every other
+  bound in this repo is ≤10s; this was the sole outlier. Reduced to 10s, which
+  turned the hang into a kill. *"A test that hangs is not a test that fails" has
+  a second form: the guard exists, is correct, and the tool built to fire it can
+  never see it do so.*
+
+### One claim needed a name to be checkable
+
+`validatePostureCoverage` must run at the **maximal** coverage: whether the rule
+table and the codec agree is a property of the code, not of one operator's
+config. Run at the narrow coverage it still runs, still returns `nil`, and on
+Binance checks **nothing** — every probed rule there lapses. As a literal
+argument that is unmutatable in place, so the value is a named constant
+(`maximalPostureCoverage`) and the check's pure core takes it as a parameter.
+The test feeds a **truncated** step list to both coverages and shows they
+disagree, which is the only way the constant becomes a claim.
+
+### The mutants
+
+Nine, all caught. Two needed re-aiming and one of those re-aims was itself the
+finding above.
+
+| # | Mutation | Verdict |
+|---|---|---|
+| M1 | a derivatives rule is always live | caught (6) |
+| M2 | an account/spot rule never runs | caught (49) |
+| M3 | the **spot** leg lapses too | caught (24) |
+| M4 | Portfolio-Margin becomes a derivatives rule — the spot-only account loses its only check | caught (4) |
+| M5 | the subject gate never lapses anything | caught (2) |
+| M6 | every step's family is required — the union returns | `NOBUILD!!` → re-aimed → caught (1) |
+| M7 | `ProbedSettings` asks the venue for the **attested** setting | `TIMEOUT!!` → **finding** → caught (42) |
+| M8 | `account/info` under-declares — spot-only Bybit stops needing its family | caught (7) |
+| M9 | only the **last** lapse is kept — the exemption stops being auditable | caught (2) |
+
+M6's `NOBUILD!!` printed *"declared and not used: answersLive"* — a bad sed that
+orphaned the branch's only reader, which is the re-aim signal and not a kill.
+
+### What this does NOT settle
+
+**Profiles §2's Binance cell checks nothing about a spot leg, where its Bybit
+cell checks three things** (spot-margin mode off; every coin's `borrowAmount==0`
+and `spotBorrow==0`). A spot-only Binance deployment's entire §4.1 answer is now
+one attestation and **zero** venue reads — which is the rule table faithfully
+applied, and also the first time that gap has been visible, because every Binance
+deployment previously dragged in the futures probes regardless. Binance spot
+accounts do support margin borrowing, so this is the same hazard Bybit's rows
+refuse. Filed as **task #201** rather than guessed: it is a question about the
+venue's published surface, blocked on the same WAF and missing credential as
+#180/#171, and §4.1's failure direction means a rule on a **guessed** field name
+would halt every Binance spot deployment. The **mirror rule across venues**,
+surfaced by a ruling rather than by a review.

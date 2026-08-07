@@ -390,10 +390,23 @@ func TestProcessKillMidIOC(t *testing.T) {
 	}()
 
 	// Both legs in flight — the mid-IOC window, entered deterministically.
+	//
+	// # The bound is 10s because a 60s one was not a bound at all
+	//
+	// It read 60s until task #199, and tools/mutate.sh's own default timeout is
+	// 60s (MUTATE_TIMEOUT). The two tied, the harness won, and a mutation that
+	// stopped this subprocess reaching the venue — any refusal in config
+	// validation does it — was reported as TIMEOUT!! rather than as this
+	// t.Fatalf, which prints the child's stderr and names the cause outright. A
+	// hanging test names no defect, and a bound set at the harness's own limit
+	// is the shape of that trap one layer out: the guard exists, it is correct,
+	// and the tool built to fire it can never see it do so.
+	//
+	// 10s matches every other bound in this repo and is ~20x the healthy path.
 	for i := 0; i < 2; i++ {
 		select {
 		case <-venue.arrivals:
-		case <-time.After(60 * time.Second):
+		case <-time.After(10 * time.Second):
 			t.Fatalf("leg %d never reached the venue; exercise stderr:\n%s\nstdout:\n%s",
 				i, stderr.String(), stdout.String())
 		}

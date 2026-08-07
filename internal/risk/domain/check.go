@@ -73,7 +73,13 @@ type expectation struct {
 type rule struct {
 	setting Setting
 	scope   Scope
-	expect  expectation
+
+	// subject is which part of the deployment this row governs, and it is a
+	// SEPARATE axis from scope — see Subject. A row that leaves it unspecified
+	// is refused by auditRules rather than defaulted (record §73p, task #199).
+	subject Subject
+
+	expect expectation
 
 	// why cites the Profiles §2 clause or the record finding this row encodes.
 	// Carried as a field rather than a comment so that a rule added without a
@@ -89,40 +95,64 @@ type rule struct {
 // `positionSide/dual`.dualSidePosition==false; configured leverage matches pin.
 // Six checks, six rows — and THREE of them ride symbolConfig, which is why six
 // checks need only three probes (record §73o).
+// # Every PROBED row here is SubjectDerivativesLeg, and that is the finding
+//
+// All five name a USDⓈ-M futures setting: the futures wallet's collateral mode,
+// the futures position mode, and three per-symbol settings of a perpetual
+// contract. None of them is observable on, or governs, a spot holding. The one
+// row whose subject reaches the spot wallet is Portfolio-Margin — a different
+// account TYPE, which unifies the two — and it is the one row with no venue read
+// path at all, so it costs no endpoint (record §73p).
+//
+// The consequence is task #199's ruling: a Binance deployment configuring no
+// derivative instrument needs ZERO probes and still enforces the only check that
+// could hurt it. Do not read that as "Binance is exempt" — it falls out of the
+// subject column, and Bybit's table below gets the opposite answer from it.
 var binanceClassicRules = []rule{
 	{
 		setting: SettingMultiAssets,
 		scope:   ScopeAccount,
+		subject: SubjectDerivativesLeg,
 		expect:  expectation{kind: expectWord, words: []string{"false"}},
 		why:     "Profiles §2: multiAssetsMargin==false — Multi-Assets forces Cross and is mutually exclusive with Isolated",
 	},
 	{
 		setting: SettingPositionMode,
 		scope:   ScopeAccount,
+		subject: SubjectDerivativesLeg,
 		expect:  expectation{kind: expectWord, words: []string{"false"}},
 		why:     "Profiles §2: one-way — dualSidePosition==false (hedge mode also forbids reduceOnly at param level)",
 	},
 	{
 		setting: SettingPortfolioMargin,
 		scope:   ScopeAccount,
+		// SubjectAccount and not SubjectDerivativesLeg: Portfolio Margin is an
+		// account TYPE rather than a futures setting, and what it does is
+		// entangle the spot wallet with the futures one. It is therefore the
+		// row that must survive on a deployment holding only spot — which it
+		// does for free, being the one row nothing has to be routed to read.
+		subject: SubjectAccount,
 		expect:  expectation{kind: expectAttested},
 		why:     "Profiles §2: Portfolio-Margin OFF — no read path in either document; operator attestation, default refuse (record §73b F1, §73c-1)",
 	},
 	{
 		setting: SettingMarginMode,
 		scope:   ScopeSymbol,
+		subject: SubjectDerivativesLeg,
 		expect:  expectation{kind: expectWord, words: []string{"ISOLATED"}},
 		why:     "Profiles §2: symbolConfig.marginType==ISOLATED",
 	},
 	{
 		setting: SettingLeverage,
 		scope:   ScopeSymbol,
+		subject: SubjectDerivativesLeg,
 		expect:  expectation{kind: expectLeveragePin},
 		why:     "Profiles §2: configured leverage matches pin — the pin is operator-declared, never the venue's own earlier answer (record §73b F3)",
 	},
 	{
 		setting: SettingAutoAddMargin,
 		scope:   ScopeSymbol,
+		subject: SubjectDerivativesLeg,
 		expect:  expectation{kind: expectWord, words: []string{"false"}},
 		why:     "Profiles §2: symbolConfig.isAutoAddMargin==false (read-only, no REST setter)",
 	},
@@ -136,28 +166,56 @@ var binanceClassicRules = []rule{
 // coin borrowAmount==0 ∧ spotBorrow==0; auto-add-margin OFF for every
 // configured linear symbol (not only open positions); one-way positionIdx==0;
 // configured leverage matches pin.
+//
+// # This table is why the subject axis is an AXIS and not a Binance exemption
+//
+// Binance's five probed rows are all SubjectDerivativesLeg, so a no-derivatives
+// deployment there needs no probe at all. Here the same column says the
+// opposite: `GET /v5/account/info` answers THREE SubjectAccount rows, so a
+// spot-only Bybit deployment still requires the linear-perp family that
+// endpoint is routed to. Same question, two answers, one rule (record §73p).
+//
+// Note what that surfaces and does not settle: /v5/account/info and
+// /v5/account/wallet-balance are BOTH account-level reads taking no category,
+// and posture_bybit.go routes the first to linear-perp and the second to spot.
+// Neither family is forced by the endpoint, so the choice decides which
+// one-sided deployment can boot. It is left alone here because the codec's
+// routing is a venue-side fact this table must not restate — the agreement
+// check below is what keeps the two honest.
 var bybitUTARules = []rule{
 	{
 		setting: SettingMarginMode,
 		scope:   ScopeAccount,
+		// The whole UTA account, spot included: under UTA this word IS the
+		// segregation property, so it governs whether a spot holding can be
+		// consumed as margin. A deployment holding only spot needs it MOST.
+		subject: SubjectAccount,
 		expect:  expectation{kind: expectWord, words: []string{"ISOLATED_MARGIN"}},
 		why:     "Profiles §2: marginMode==ISOLATED_MARGIN — under UTA this IS the segregation property",
 	},
 	{
 		setting: SettingAccountKind,
 		scope:   ScopeAccount,
+		subject: SubjectAccount,
 		expect:  expectation{kind: expectNumberIn, numbers: []int{3, 4, 5, 6}},
 		why:     "Profiles §2: unifiedMarginStatus ∈ {3,4,5,6}; classic 1 refused, 2 and anything added later unlisted (record §73b F5)",
 	},
 	{
 		setting: SettingSpotHedging,
 		scope:   ScopeAccount,
+		// SubjectAccount rather than either leg: what it governs is the
+		// RELATIONSHIP between them. A deployment configuring no derivative
+		// still needs it off, because the setting is what would let a spot
+		// holding be netted against a derivative position — including one this
+		// deployment did not open and cannot see.
+		subject: SubjectAccount,
 		expect:  expectation{kind: expectWord, words: []string{"OFF"}},
 		why:     "Profiles §2: spotHedgingStatus==OFF — spot hedging lets spot offset derivatives, re-entangling the legs",
 	},
 	{
 		setting: SettingSpotMarginMode,
 		scope:   ScopeAccount,
+		subject: SubjectSpotLeg,
 		// Profiles §2 states the SETTER as `/v5/spot-margin-trade/switch-mode 0`
 		// and the read as "`GET /v5/spot-margin-uta/status`==off"; the word the
 		// status endpoint answers with is NOT recorded in either document. "0"
@@ -171,30 +229,38 @@ var bybitUTARules = []rule{
 	{
 		setting: SettingBorrowAmount,
 		scope:   ScopeAsset,
+		subject: SubjectSpotLeg,
 		expect:  expectation{kind: expectZero},
 		why:     "Profiles §2: every coin borrowAmount==0 — an EMPTY figure is no evidence, not a zero (record §73b F2)",
 	},
 	{
 		setting: SettingSpotBorrow,
 		scope:   ScopeAsset,
+		subject: SubjectSpotLeg,
 		expect:  expectation{kind: expectZero},
 		why:     "Profiles §2: every coin spotBorrow==0 — the second half of one conjunction, kept a separate setting so neither can mask the other",
 	},
 	{
 		setting: SettingPositionMode,
 		scope:   ScopeSymbol,
+		// One SUBJECT at two granularities, which is the pair that proves scope
+		// and subject are different axes: this is the same concern Binance
+		// answers at ScopeAccount.
+		subject: SubjectDerivativesLeg,
 		expect:  expectation{kind: expectWord, words: []string{"0"}},
 		why:     "Profiles §2: one-way — positionIdx==0, observable only per position row, hence ScopeSymbol where Binance is ScopeAccount",
 	},
 	{
 		setting: SettingLeverage,
 		scope:   ScopeSymbol,
+		subject: SubjectDerivativesLeg,
 		expect:  expectation{kind: expectLeveragePin},
 		why:     "Profiles §2: configured leverage matches pin (record §73b F3)",
 	},
 	{
 		setting: SettingAutoAddMargin,
 		scope:   ScopeSymbol,
+		subject: SubjectDerivativesLeg,
 		expect:  expectation{kind: expectWord, words: []string{"0"}},
 		why:     "Profiles §2: auto-add-margin OFF for EVERY CONFIGURED linear symbol, not only open positions (record §73b F4)",
 	},
@@ -207,13 +273,36 @@ var bybitUTARules = []rule{
 // account model added to Dialect fails to build here rather than silently
 // checking nothing.
 func rulesFor(d Dialect) ([]rule, error) {
+	var rules []rule
 	switch d {
 	case DialectBinanceClassic:
-		return binanceClassicRules, nil
+		rules = binanceClassicRules
 	case DialectBybitUTA:
-		return bybitUTARules, nil
+		rules = bybitUTARules
+	default:
+		return nil, fmt.Errorf("posture dialect %q: %w", string(d), ErrDialectUnknown)
 	}
-	return nil, fmt.Errorf("posture dialect %q: %w", string(d), ErrDialectUnknown)
+	if err := auditRules(d, rules); err != nil {
+		return nil, err
+	}
+	return rules, nil
+}
+
+// auditRules refuses a table row that is not fully classified.
+//
+// It is checked on every read rather than only in a test, for the reason the
+// zero value is unusable everywhere else in this project: an unclassified row's
+// subject is SubjectUnspecified, which Live answers false for, so a row somebody
+// added without thinking about the axis would LAPSE — silently dropping a real
+// check on every deployment rather than failing. The safe direction of a missing
+// classification is a refusal that names the setting.
+func auditRules(d Dialect, rules []rule) error {
+	for _, r := range rules {
+		if err := r.subject.Validate(); err != nil {
+			return fmt.Errorf("%s rule for %s: %w", d, r.setting, err)
+		}
+	}
+	return nil
 }
 
 // ConsumesAttestation reports whether the dialect's table has a rule that reads
@@ -241,6 +330,44 @@ func (d Dialect) ConsumesAttestation() bool {
 		}
 	}
 	return false
+}
+
+// ProbedSettings returns every setting this dialect's table needs a VENUE READ
+// for on a deployment with the given roster coverage.
+//
+// Two rules are excluded and for opposite reasons. An attested rule (Binance's
+// Portfolio-Margin) is excluded because no venue read exists anywhere — asking a
+// deployment to route an endpoint for it would be asking for one that cannot
+// answer. A lapsed rule is excluded because its subject is not part of this
+// deployment; see Subject.
+//
+// # What it is for
+//
+// The composition root joins this against the codec's PostureStep.Answers to
+// decide which product families §4.1's read actually rides, and to refuse a
+// dialect whose table names a setting no probe answers. Both directions matter,
+// which is why this is a list rather than a predicate: a family required for
+// nothing is a config burden, and a setting probed by nothing is a check that
+// can never pass (task #199, record §73p).
+//
+// Callers wanting the maximal set — every rule any deployment could reach —
+// pass RosterCoverageDerivatives, which lapses nothing.
+func (d Dialect) ProbedSettings(c RosterCoverage) ([]Setting, error) {
+	rules, err := rulesFor(d)
+	if err != nil {
+		return nil, err
+	}
+	settings := make([]Setting, 0, len(rules))
+	for _, r := range rules {
+		if r.expect.kind == expectAttested {
+			continue
+		}
+		if !r.subject.Live(c) {
+			continue
+		}
+		settings = append(settings, r.setting)
+	}
+	return settings, nil
 }
 
 // observationKey identifies one answered check.
@@ -271,6 +398,44 @@ type observationKey struct {
 // The fold does not stop. An operator restarting a boot to discover the next
 // violation pays a round trip per check, and a checker that halts on the first
 // violation never demonstrates that the later ones can fire at all.
+// CheckWithoutVenueRead judges a requirement for which this dialect has NOTHING
+// to read (task #199, record §73p).
+//
+// # It is not a way to skip a read, and its own precondition is what says so
+//
+// The case is reachable on exactly one shape: a Binance deployment configuring
+// no derivative instrument. Every probed rule in that table governs the
+// derivatives leg, so all five lapse, and the only §4.1 check left is the
+// Portfolio-Margin ATTESTATION, which no venue read can answer at all (record
+// §73b F1). Three futures calls would be issued to satisfy no rule.
+//
+// The precondition is checked HERE rather than trusted from the caller, and
+// that is the whole reason this is a domain function instead of the application
+// constructing an empty Report: a caller could otherwise hand Check an empty
+// report for any requirement at all and get a verdict that evaluated only the
+// attested rules — which on Bybit would silently drop eight venue checks. The
+// rule table is the only thing that can answer whether a read was owed, and it
+// lives here.
+//
+// The verdict's ObservedAt is the zero instant, which is the honest value: there
+// was no read, so there is no moment at which the account was observed to be in
+// this state. That is a difference a reader must be able to see, and giving it a
+// local wall-clock reading would erase it.
+func CheckWithoutVenueRead(req Requirement) (Verdict, error) {
+	if err := req.Validate(); err != nil {
+		return Verdict{}, err
+	}
+	probed, err := req.Dialect.ProbedSettings(req.Coverage)
+	if err != nil {
+		return Verdict{}, err
+	}
+	if len(probed) > 0 {
+		return Verdict{}, fmt.Errorf("%s requires %d venue-read settings under %s: %w",
+			req.Dialect, len(probed), req.Coverage, ErrVenueReadOwed)
+	}
+	return check(req, Report{Venue: req.Venue})
+}
+
 func Check(req Requirement, rep Report) (Verdict, error) {
 	if err := req.Validate(); err != nil {
 		return Verdict{}, err
@@ -278,6 +443,14 @@ func Check(req Requirement, rep Report) (Verdict, error) {
 	if err := rep.Validate(); err != nil {
 		return Verdict{}, err
 	}
+	return check(req, rep)
+}
+
+// check is the shared body. Report validation is the CALLER's, because the two
+// entry points differ in exactly that: one is handed a venue's answer and must
+// refuse a malformed one, the other builds the no-read report itself from a
+// requirement it has already validated.
+func check(req Requirement, rep Report) (Verdict, error) {
 	if req.Venue != rep.Venue {
 		return Verdict{}, fmt.Errorf("requirement names %s, report names %s: %w",
 			req.Venue, rep.Venue, ErrVenueMismatch)
@@ -308,6 +481,22 @@ func Check(req Requirement, rep Report) (Verdict, error) {
 	assets := enumeratedAssets(rep.Observations)
 
 	for _, r := range rules {
+		// The subject gate comes BEFORE the scope switch, because a rule that
+		// governs a leg this deployment does not have is not a rule answered
+		// zero times — it is a rule that was never asked. The two are the same
+		// arithmetic and different facts, and only one of them is auditable
+		// (task #199, record §73p).
+		if !r.subject.Live(req.Coverage) {
+			verdict.Lapsed = append(verdict.Lapsed, Lapse{
+				Setting:  r.setting,
+				Scope:    r.scope,
+				Subject:  r.subject,
+				Coverage: req.Coverage,
+				Required: r.expect.describe(""),
+			})
+			continue
+		}
+
 		switch r.scope {
 		case ScopeAccount:
 			verdict.Evaluated++
@@ -318,9 +507,17 @@ func Check(req Requirement, rep Report) (Verdict, error) {
 		case ScopeSymbol:
 			// The CONFIGURED roster drives this, not the venue's rows: a
 			// position-driven loop checks zero symbols on a flat account, which
-			// is every cold boot (record §73b F4). Requirement.Validate has
-			// already refused an empty roster, so this loop cannot be the
-			// vacuous one.
+			// is every cold boot (record §73b F4).
+			//
+			// This loop used to claim "Requirement.Validate has already refused
+			// an empty roster, so this loop cannot be the vacuous one". That was
+			// FALSE from the session it was written: requirement.go's guard is
+			// conditional on Coverage==RosterCoverageDerivatives, and under
+			// RosterCoverageNoDerivatives — added by the same slice — an empty
+			// roster is valid and this loop was exactly the vacuous one. What
+			// makes the claim true now is the subject gate above, which lapses
+			// every ScopeSymbol rule on both tables before reaching here rather
+			// than running them over nothing (record §73p).
 			for _, p := range req.Symbols {
 				verdict.Evaluated++
 				if f, failed := evaluateRule(r, index, p.Symbol, req, pins); failed {
@@ -361,7 +558,21 @@ func Check(req Requirement, rep Report) (Verdict, error) {
 	}
 
 	sortFailures(verdict.Failures)
+	sortLapses(verdict.Lapsed)
 	return verdict, nil
+}
+
+// sortLapses orders lapses by scope, then setting — the same key order as
+// sortFailures, minus the two components a lapse cannot have (it enumerated no
+// subject, and it reached no reason).
+func sortLapses(l []Lapse) {
+	sort.SliceStable(l, func(i, j int) bool {
+		a, b := l[i], l[j]
+		if a.Scope != b.Scope {
+			return a.Scope < b.Scope
+		}
+		return a.Setting < b.Setting
+	})
 }
 
 // indexObservations keys the report's observations and reports duplicates as

@@ -1131,44 +1131,35 @@ func pinnedPortfolioMarginAttestation(t *testing.T, account, key, secret string)
 // served a CLEAN posture. A gate whose passing path is tested and whose refusing
 // path is not is a gate that has never been shown to refuse.
 //
-// The violation is multi-assets ON, and the choice matters twice over. It is an
-// ACCOUNT-WIDE rule, so it fires on a deployment with no derivative instrument —
-// the per-symbol half is empty here, and a fixture violating a per-symbol rule
-// would prove nothing about this deployment. And it is a rule Profiles §2 calls
-// mutually exclusive with Isolated, so the account really is untradeable.
+// The violation is multi-assets ON, a rule Profiles §2 calls mutually exclusive
+// with Isolated, so the derivatives leg really is untradeable.
 //
-// The outcome must be NEEDS OPERATOR rather than FAILED: §73c-3 ruled that this
-// engine never repairs a posture, so no retry can lift it. That distinction is
-// what the assertions below pin, because both spellings block and only one of
-// them tells an operator to go and look.
+// # It runs on perpRoster, and the reason is task #199's whole finding
+//
+// It used to run on spotOnly, justified in this comment by: "It is an
+// ACCOUNT-WIDE rule, so it fires on a deployment with no derivative instrument."
+// That inference is exactly the one record §73p removed. ScopeAccount is the
+// GRANULARITY the setting is observed at; it says nothing about which leg the
+// setting governs, and multiAssetsMargin governs the futures wallet. On a
+// deployment configuring no derivative the rule now LAPSES — so §4.1's only
+// end-to-end refusing-path witness was standing on a deployment where the check
+// it fires does not apply, and it read as covered because the assertion it makes
+// is true of the rule in general.
+//
+// So the fixture moves to a deployment that trades the leg the violated rule
+// governs. The spot-only side of the same account is not left untested: the two
+// tests below it are the pair, and they are what shows the lapse is a ruling
+// rather than a hole.
 func TestAPostureThatWasReadAndFoundWrongLatches(t *testing.T) {
 	t.Setenv(testKeyVar, "key")
 	t.Setenv(testSecretVar, "secret")
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet && r.URL.Path == "/api/v3/account" {
-			w.Header().Set("X-Mbx-Used-Weight-1m", "20")
-			fmt.Fprint(w, binanceAccountBody)
-			return
-		}
-		if r.Method == http.MethodGet && r.URL.Path == "/fapi/v1/multiAssetsMargin" {
-			w.Header().Set("X-Mbx-Used-Weight-1m", "20")
-			fmt.Fprint(w, `{"multiAssetsMargin":true}`)
-			return
-		}
-		if body, ok := binancePostureBodies[r.URL.Path]; ok && r.Method == http.MethodGet {
-			w.Header().Set("X-Mbx-Used-Weight-1m", "20")
-			fmt.Fprint(w, body)
-			return
-		}
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprint(w, `{"code":-1000,"msg":"unexpected path in posture fake"}`)
-	}))
+	bodies := rosterPostureBodies(secondBootPin)
+	bodies["/fapi/v1/multiAssetsMargin"] = `{"multiAssetsMargin":true}`
+	srv := rosterPostureServer(t, bodies)
 	defer srv.Close()
 
-	dir := t.TempDir()
-	cfg := spotOnly(t, filepath.Join(dir, "journal.db"))
-	cfg.SpotBaseline = pinnedCleanBaseline(t, cfg.Account, "key", "secret")
+	cfg := perpRoster(t, filepath.Join(t.TempDir(), "journal.db"))
 	routeTo(t, &cfg, srv)
 	r := newRunnerFor(t, cfg, func(string) error { return nil })
 
@@ -1221,16 +1212,16 @@ func TestAPostureThatWasReadAndFoundWrongLatches(t *testing.T) {
 // The verdict must stay the zero one, and asking it whether it is satisfied must
 // REFUSE rather than say no: "the read failed" and "nothing was wrong" are the
 // same zero value everywhere except through ErrVerdictVacuous.
+//
+// It runs on perpRoster for the same reason its sibling above does (record
+// §73p): on a deployment configuring no derivative, Binance's posture read
+// issues no calls at all, so a fixture refusing every probe would be refusing
+// requests nobody makes — a fake that cannot fail the thing under test.
 func TestAPostureThatCouldNotBeReadIsIncompleteNotAnAlert(t *testing.T) {
 	t.Setenv(testKeyVar, "key")
 	t.Setenv(testSecretVar, "secret")
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet && r.URL.Path == "/api/v3/account" {
-			w.Header().Set("X-Mbx-Used-Weight-1m", "20")
-			fmt.Fprint(w, binanceAccountBody)
-			return
-		}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// Every posture probe refused. A 500 rather than a 400, so the failure
 		// is the venue not answering rather than this system asking wrongly.
 		w.WriteHeader(http.StatusInternalServerError)
@@ -1238,9 +1229,7 @@ func TestAPostureThatCouldNotBeReadIsIncompleteNotAnAlert(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	dir := t.TempDir()
-	cfg := spotOnly(t, filepath.Join(dir, "journal.db"))
-	cfg.SpotBaseline = pinnedCleanBaseline(t, cfg.Account, "key", "secret")
+	cfg := perpRoster(t, filepath.Join(t.TempDir(), "journal.db"))
 	routeTo(t, &cfg, srv)
 	r := newRunnerFor(t, cfg, func(string) error { return nil })
 
@@ -1356,17 +1345,46 @@ func TestBootRunsEveryPhaseAndReportsClean(t *testing.T) {
 	if got := accountReads.Load(); got != 1 {
 		t.Errorf("the venue saw %d account reads, want exactly 1", got)
 	}
-	// Three posture probes, the exact figure §73c-2 measures for a Binance read
-	// since record §73o. An exact count because it is the one instrument that
-	// distinguishes "the posture was asserted" from "the verdict was satisfied
-	// for another reason" — a guard that read nothing produces a verdict that
-	// evaluated nothing, and Satisfied() would have refused it, but a guard that
-	// read TWO of three probes would not be visible in the outcome at all.
-	if got := postureReads.Load(); got != 3 {
-		t.Errorf("the venue saw %d posture probes, want exactly 3", got)
+	// ZERO posture probes, and this is task #199's ruling measured at boot
+	// (record §73p). This deployment configures no derivative instrument, and
+	// every probed Binance rule governs the derivatives leg — so all five lapse
+	// and the read is not issued. It was three until the ruling, against three
+	// futures endpoints this deployment never trades on.
+	//
+	// The exact count is still the instrument, now pointing the other way: it is
+	// what would catch the read being issued anyway, which is the failure that
+	// would otherwise show up only as a spot-only deployment refusing to boot
+	// once it stopped declaring a futures endpoint.
+	if got := postureReads.Load(); got != 0 {
+		t.Errorf("the venue saw %d posture probes, want 0 — every probed Binance rule governs the derivatives leg", got)
 	}
+	// A verdict of ZERO checks would be refused by Satisfied, so "satisfied"
+	// here is the load-bearing half: exactly one rule still ran, and it is the
+	// Portfolio-Margin attestation — the only §4.1 Binance check whose subject
+	// reaches a spot wallet, and the only one no endpoint could have answered.
 	if ok, err := rep.AccountPosture.Satisfied(); !ok || err != nil {
 		t.Errorf("the report's verdict = %v, %v; want satisfied:\n%s", ok, err, rep.AccountPosture)
+	}
+	if rep.AccountPosture.Evaluated != 1 {
+		t.Errorf("evaluated %d checks, want exactly 1 (the attestation):\n%s",
+			rep.AccountPosture.Evaluated, rep.AccountPosture)
+	}
+	// The five that did NOT run are named. A verdict that simply reported one
+	// clean check would be the silent exemption this ruling deliberately did not
+	// take — an operator reading it could not tell a narrow deployment from a
+	// narrow read.
+	if n := len(rep.AccountPosture.Lapsed); n != 5 {
+		t.Errorf("%d lapses recorded, want 5:\n%s", n, rep.AccountPosture)
+	}
+	for _, l := range rep.AccountPosture.Lapsed {
+		if l.Subject != riskdomain.SubjectDerivativesLeg {
+			t.Errorf("lapse %s carries %s, want SubjectDerivativesLeg", l.Setting, l.Subject)
+		}
+	}
+	// And the summary line an operator actually reads says so, which is the only
+	// place the distinction survives a skim.
+	if !strings.Contains(rep.AccountPosture.String(), "not checked") {
+		t.Errorf("the verdict's summary hides the lapses:\n%s", rep.AccountPosture)
 	}
 	if rep.PostureCause != nil {
 		t.Errorf("PostureCause = %v, want nil on a boot whose posture was established", rep.PostureCause)
@@ -1861,28 +1879,47 @@ func TestBootOnAHedgeModeAccountLatchesAndStillNamesEveryOtherCheck(t *testing.T
 	}
 }
 
-// TestConfigRefusesADeploymentThatRoutesNoPostureFamily is F20 (record §73n).
+// TestConfigRefusesADeploymentThatRoutesNoPostureFamily is F20 (record §73n),
+// narrowed by task #199's ruling (record §73p).
 //
 // A posture probe is routed by product family, so a family with no endpoint
 // makes §4.1's gate unanswerable on every boot of that document — §5.2's
 // "a value that makes the permitted region unreachable is refused at startup",
-// reached through an omission. Both venues, both directions: the check is
-// derived from the codec's own steps rather than from a list, so neither venue
-// is a special case.
+// reached through an omission. What changed is WHICH families a document must
+// route: not every probe's, but every probe that answers a setting whose rule is
+// live for that deployment.
+//
+// # The two venues get opposite answers, and that is the assertion
+//
+// A test that only checked Binance would be satisfied by "spot-only deployments
+// are exempt", which is not the rule. The rule reads the subject column, so it
+// exempts the Binance futures family (every probed Binance rule governs the
+// derivatives leg) and still REQUIRES Bybit's linear-perp family from a
+// spot-only deployment, because /v5/account/info answers three SubjectAccount
+// settings. Both halves are below, and the second is the one a venue-shaped
+// implementation would fail.
 func TestConfigRefusesADeploymentThatRoutesNoPostureFamily(t *testing.T) {
 	t.Parallel()
 
 	journal := filepath.Join(t.TempDir(), "journal.db")
 
-	// Binance: all three probes are on the futures family (record §73k F14).
-	spot := spotOnly(t, journal)
-	dropFamily(&spot, ids.ProductLinearPerp)
-	if err := spot.Validate(); !errors.Is(err, ErrFamilyUnrouted) {
-		t.Errorf("a spot-only Binance document routing no futures family validated with %v, want ErrFamilyUnrouted", err)
+	// A Binance deployment that CONFIGURES a derivative still rides the futures
+	// family for all three of its probes, so dropping the endpoint refuses.
+	//
+	// This half is NOT isolating any more, and saying so is the point. Under the
+	// ruling the Binance posture rule fires only when a derivative is configured
+	// — and a configured derivative already makes the INSTRUMENT rule demand the
+	// same endpoint, so on this venue the posture requirement is now subsumed. A
+	// clean gate run is not evidence and a probe two rules can see is not
+	// evidence about either; the isolating case lives on Bybit, below.
+	perp := perpRoster(t, journal)
+	dropFamily(&perp, ids.ProductLinearPerp)
+	if err := perp.Validate(); !errors.Is(err, ErrFamilyUnrouted) {
+		t.Errorf("a Binance document trading perps and routing no futures family validated with %v, want ErrFamilyUnrouted", err)
 	}
 	// The positive control: the same document WITH the endpoint validates, or the
 	// check above would be a predicate that objects to everything.
-	if err := spotOnly(t, journal).Validate(); err != nil {
+	if err := perpRoster(t, journal).Validate(); err != nil {
 		t.Errorf("the same document declaring the futures endpoint must validate: %v", err)
 	}
 
@@ -1905,6 +1942,127 @@ func TestConfigRefusesADeploymentThatRoutesNoPostureFamily(t *testing.T) {
 	}
 	if err := bybitPostureConfig(t, journal).Validate(); err != nil {
 		t.Errorf("the two-family Bybit document must validate: %v", err)
+	}
+}
+
+// TestThePostureCoverageCheckRunsAtTheMAXIMALCoverage is the bite-check on
+// maximalPostureCoverage, which is otherwise a constant nothing could disagree
+// with (task #199, record §73p).
+//
+// The check asks whether the rule table and the codec's step list agree about
+// which settings can be established. That is a property of the CODE, so it must
+// be asked at the coverage that reaches every rule. Asked at the narrow one it
+// still runs, still returns nil, and on Binance checks NOTHING — every probed
+// rule there lapses under RosterCoverageNoDerivatives.
+//
+// The fixture is a step list with the symbolConfig call removed, which is what
+// makes the two coverages give different answers: at the maximal coverage three
+// per-symbol settings are owed and unanswered, and at the narrow one they are
+// not owed at all.
+func TestThePostureCoverageCheckRunsAtTheMAXIMALCoverage(t *testing.T) {
+	t.Parallel()
+
+	steps, dialect, err := DialectBinance.postureSteps("binance")
+	if err != nil {
+		t.Fatalf("postureSteps: %v", err)
+	}
+	var truncated []venue.PostureStep
+	for _, s := range steps {
+		if s.Probe != venue.PostureProbeSymbolConfig {
+			truncated = append(truncated, s)
+		}
+	}
+	if len(truncated) != len(steps)-1 {
+		t.Fatalf("the fixture removed %d steps, want exactly 1", len(steps)-len(truncated))
+	}
+
+	if err := postureCoverageAgrees(truncated, dialect, riskdomain.RosterCoverageDerivatives); !errors.Is(err, ErrPostureSettingUnprobed) {
+		t.Errorf("a codec missing symbolConfig agreed at the maximal coverage with %v, want ErrPostureSettingUnprobed", err)
+	}
+	// The same truncated list agrees at the NARROW coverage, which is the whole
+	// point: a check run there would have accepted it. If this ever starts
+	// failing, the two coverages no longer differ and the constant above has
+	// stopped being a claim.
+	if err := postureCoverageAgrees(truncated, dialect, riskdomain.RosterCoverageNoDerivatives); err != nil {
+		t.Errorf("the narrow coverage rejected the truncated list with %v — the two coverages must differ here", err)
+	}
+	// And the constant is the maximal one.
+	if maximalPostureCoverage != riskdomain.RosterCoverageDerivatives {
+		t.Errorf("maximalPostureCoverage = %s, want RosterCoverageDerivatives", maximalPostureCoverage)
+	}
+	// The positive control: the REAL step list agrees at the maximal coverage on
+	// both dialects, or the check above would be a predicate that objects to
+	// everything.
+	for _, d := range []Dialect{DialectBinance, DialectBybit} {
+		v := ids.Venue("binance")
+		if d == DialectBybit {
+			v = "bybit"
+		}
+		real, realDialect, err := d.postureSteps(v)
+		if err != nil {
+			t.Fatalf("postureSteps(%s): %v", d, err)
+		}
+		if err := postureCoverageAgrees(real, realDialect, riskdomain.RosterCoverageDerivatives); err != nil {
+			t.Errorf("%s's real codec does not answer its own table: %v", d, err)
+		}
+	}
+}
+
+// TestASpotOnlyBinanceDeploymentNeedNotRouteTheFuturesFamily is task #199's
+// ruling, stated as the behaviour it changes (record §73p).
+//
+// Every probed Binance rule is SubjectDerivativesLeg, so a deployment
+// configuring no derivative has nothing for those three calls to establish, and
+// requiring an endpoint to issue them would make a spot-only boot depend on a
+// futures API it never calls.
+func TestASpotOnlyBinanceDeploymentNeedNotRouteTheFuturesFamily(t *testing.T) {
+	t.Parallel()
+
+	journal := filepath.Join(t.TempDir(), "journal.db")
+
+	spot := spotOnly(t, journal)
+	dropFamily(&spot, ids.ProductLinearPerp)
+	if err := spot.Validate(); err != nil {
+		t.Errorf("a spot-only Binance document must validate without a futures endpoint: %v", err)
+	}
+}
+
+// TestASpotOnlyBybitDeploymentMustStillRouteTheLinearFamily is the same ruling
+// on the venue where it answers the other way, and it is the isolating probe.
+//
+// The test above passes under a WRONG implementation — "a deployment with no
+// derivative instrument skips the posture families" — which is a plausible
+// reading of #199 and is not the ruling. This one fails under it. Bybit's
+// /v5/account/info rides linear-perp and answers marginMode, unifiedMarginStatus
+// and spotHedgingStatus: three SubjectAccount settings that a spot-only
+// deployment needs MOST, since under UTA they decide whether its spot holding
+// can be consumed as margin.
+//
+// It is also why the family requirement was not simply deleted: on this venue,
+// deleting it would let a document boot that can never establish its own
+// segregation property.
+func TestASpotOnlyBybitDeploymentMustStillRouteTheLinearFamily(t *testing.T) {
+	t.Parallel()
+
+	journal := filepath.Join(t.TempDir(), "journal.db")
+
+	cfg := bybitPostureConfig(t, journal)
+	cfg.Instruments = keepFamily(cfg.Instruments, ids.ProductLinearPerp)
+	cfg.PositionScopes = nil
+	dropFamily(&cfg, ids.ProductLinearPerp)
+
+	err := cfg.Validate()
+	if !errors.Is(err, ErrFamilyUnrouted) {
+		t.Fatalf("a spot-only Bybit document routing no linear family validated with %v, want ErrFamilyUnrouted — /v5/account/info answers three account-subject settings", err)
+	}
+	// WHICH rule objected, not merely that something did. Two rules in this file
+	// return ErrFamilyUnrouted — the instrument→endpoint one and the posture one
+	// — and with no linear instrument configured only the second can fire. Left
+	// unasserted, this test would keep passing if the ruling were implemented as
+	// "skip the posture families when the roster has no derivative", because the
+	// sentinel alone cannot tell the two apart.
+	if !strings.Contains(err.Error(), "posture read rides") {
+		t.Errorf("refused with %q, want the POSTURE family rule — the instrument rule cannot fire here", err)
 	}
 }
 

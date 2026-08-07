@@ -93,6 +93,21 @@ func (c *BybitOrderCodec) EncodePosture() ([]PostureStep, error) {
 				Family: ids.ProductLinearPerp,
 				Cost:   ratelimit.RequestOnly(),
 			},
+			// All three of this venue's ACCOUNT-subject settings, which is why
+			// a spot-only Bybit deployment still requires the family this call
+			// is routed to where a spot-only Binance one requires none (task
+			// #199, record §73p).
+			//
+			// The family is a routing CHOICE, not a property of the endpoint:
+			// /v5/account/info takes no category, and its sibling
+			// /v5/account/wallet-balance — equally category-less — is routed to
+			// spot below. Left as it stands rather than changed in the same
+			// slice as the rule it interacts with, and recorded instead.
+			Answers: []PostureSetting{
+				PostureMarginMode,
+				PostureAccountKind,
+				PostureSpotHedging,
+			},
 		},
 		{
 			Probe: PostureProbeSpotMargin,
@@ -103,6 +118,7 @@ func (c *BybitOrderCodec) EncodePosture() ([]PostureStep, error) {
 				Family: ids.ProductSpot,
 				Cost:   ratelimit.RequestOnly(),
 			},
+			Answers: []PostureSetting{PostureSpotMarginMode},
 		},
 		{
 			Probe: PostureProbeWallet,
@@ -119,6 +135,7 @@ func (c *BybitOrderCodec) EncodePosture() ([]PostureStep, error) {
 				Family: ids.ProductSpot,
 				Cost:   ratelimit.RequestOnly(),
 			},
+			Answers: []PostureSetting{PostureBorrowAmount, PostureSpotBorrow},
 		},
 		{
 			Probe: PostureProbePositionList,
@@ -132,6 +149,16 @@ func (c *BybitOrderCodec) EncodePosture() ([]PostureStep, error) {
 				},
 				Family: ids.ProductLinearPerp,
 				Cost:   ratelimit.RequestOnly(),
+			},
+			// Bybit's three DERIVATIVES-subject settings, the mirror of
+			// Binance's symbolConfig call. Whether this endpoint answers for a
+			// configured-but-never-traded symbol is established nowhere and is
+			// #171's loosening trigger — it does not affect this list, which
+			// says which settings the call establishes, not for how many.
+			Answers: []PostureSetting{
+				PosturePositionMode,
+				PostureLeverage,
+				PostureAutoAddMargin,
 			},
 		},
 	}, nil

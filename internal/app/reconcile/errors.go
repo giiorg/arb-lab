@@ -58,6 +58,18 @@ var (
 	// is not a missing base URL — it is a query that cannot be issued at all.
 	ErrFamilyUnrouted = errors.New("reconcile: no endpoint serves this instrument's product family")
 
+	// ErrPostureSettingUnprobed reports a §4.1 rule with a venue read path that
+	// no posture probe answers.
+	//
+	// It is a CODE defect and never an operator one, which is why it is its own
+	// sentinel rather than a shape of ErrFamilyUnrouted: no document can cause
+	// it and no document can fix it. The failure it prevents is the expensive
+	// kind — the rule refuses every boot with ReasonUnobserved, a permanent halt
+	// whose cause is invisible to either half's own tests, because the rule table
+	// and the codec's step list are each internally consistent (task #199,
+	// record §73p; the shape is #186's fold-name check).
+	ErrPostureSettingUnprobed = errors.New("reconcile: a §4.1 rule has no posture probe to answer it")
+
 	// ErrScopeNotCovered reports a DERIVATIVE instrument that no position scope
 	// covers.
 	//
