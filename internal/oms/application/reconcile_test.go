@@ -109,7 +109,7 @@ func newReconcileFixture(t *testing.T, now time.Time, entries ...journalEntry) *
 	// this phase works, and they live beside this one.
 	marginJournal := &fakeMarginOpJournal{}
 	marginPort := marginFixture(t, "125", true)
-	marginOps, err := application.NewMarginOpResolver(marginJournal, marginPort, clk, marginOpTestBound)
+	marginOps, err := application.NewMarginOpResolver(marginJournal, marginPort, noActs(), clk, marginOpTestBound)
 	if err != nil {
 		t.Fatalf("NewMarginOpResolver: %v", err)
 	}

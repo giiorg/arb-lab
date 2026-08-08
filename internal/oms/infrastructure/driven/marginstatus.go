@@ -162,6 +162,14 @@ var (
 	// nothing behind it.
 	ErrVenueMarginStatusReaderMissing = errors.New("oms: venue margin status reader missing")
 
+	// ErrVenueMarginActReaderMissing reports an act-history adapter constructed
+	// with no venue reader (task #214). Its own sentinel rather than a shared
+	// "reader missing", because the two adapters fail differently: a missing
+	// margin-status reader makes every op unresolvable, and a missing act reader
+	// would — if it were ever absorbed rather than refused — resolve Binance ops
+	// by Bybit's single-source contract while every call succeeded.
+	ErrVenueMarginActReaderMissing = errors.New("oms: venue margin act reader missing")
+
 	// ErrMarginInstrumentUndeclared reports a read of an instrument this
 	// deployment's assets table does not name — an answer nobody can type, and
 	// specifically not a flat position.

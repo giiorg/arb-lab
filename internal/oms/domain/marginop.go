@@ -297,7 +297,7 @@ func (s MarginOpStatus) Concluded() (bool, error) {
 // all statuses, LiqMonitor's rule one type over, and for the same reason: this
 // section attaches a consequence to not knowing, and an error a caller logs and
 // moves past has silently lifted it.
-func (o MarginOp) Resolve(live fixedpoint.Money, held bool, now time.Time, bound time.Duration) (MarginOpStatus, error) {
+func (o MarginOp) Resolve(live fixedpoint.Money, held bool, hist MarginActHistory, now time.Time, bound time.Duration) (MarginOpStatus, error) {
 	if err := o.Validate(); err != nil {
 		return MarginOpUnresolved, err
 	}
@@ -307,6 +307,42 @@ func (o MarginOp) Resolve(live fixedpoint.Money, held bool, now time.Time, bound
 	if now.IsZero() {
 		return MarginOpUnresolved, fmt.Errorf("margin op %q: %w", o.ID, ErrMarginOpResolutionInstantUnset)
 	}
+	if err := hist.Validate(); err != nil {
+		return MarginOpUnresolved, fmt.Errorf("margin op %q act history: %w", o.ID, err)
+	}
+	if hist.Published() {
+		return o.resolveWithActHistory(live, held, hist, now, bound)
+	}
+	return o.resolveFromDelta(live, held, now, bound)
+}
+
+// Adds reports the direction of this op — true for a top-up, false for a
+// reduction — from the sign of its delta.
+//
+// It exists so the one place that renders the sign as a venue's `type` field and
+// the one place that matches a history row against it read the SAME derivation.
+// A zero delta is refused by Validate, so there is no third answer.
+func (o MarginOp) Adds() (bool, error) {
+	sign, err := o.Delta.Sign()
+	if err != nil {
+		return false, fmt.Errorf("margin op %q delta: %w", o.ID, err)
+	}
+	if sign == 0 {
+		return false, fmt.Errorf("margin op %q: %w", o.ID, ErrMarginOpDeltaZero)
+	}
+	return sign > 0, nil
+}
+
+// resolveFromDelta is the verdict on a venue that publishes no act history.
+//
+// Bybit, and there this is not a fallback but the ENTIRE contract §7.1 states —
+// "the `positionIM` delta vs the journaled before-state", with the transaction
+// log explicitly not to be relied on. Every rule in it is task #212's, unchanged,
+// and the reason it is now a named arm rather than the whole function is that its
+// twin below had to be allowed to differ: three of these rules turn out to rest
+// on the delta being the ONLY source, which is a premise that stops holding the
+// moment a second one exists.
+func (o MarginOp) resolveFromDelta(live fixedpoint.Money, held bool, now time.Time, bound time.Duration) (MarginOpStatus, error) {
 	if !held {
 		return MarginOpAmbiguous, nil
 	}
@@ -347,10 +383,118 @@ func (o MarginOp) Resolve(live fixedpoint.Money, held bool, now time.Time, bound
 	}
 
 	// The margin moved, and by something that is not what this op asked for.
-	// §7.1's three named causes all land here: a coincident manual adjustment, a
-	// position mutation (a fill moves the posted figure too, which is the
-	// confound this evidence cannot design away), and — once Binance's history
-	// half lands — a duplicate same-amount row.
+	// §7.1's two causes reachable without an act history land here: a coincident
+	// manual adjustment and a position mutation (a fill moves the posted figure
+	// too, which is the confound this evidence cannot design away). The third —
+	// a duplicate same-amount row — is a history observation and lives in the
+	// arm below.
+	return MarginOpAmbiguous, nil
+}
+
+// resolveWithActHistory is the verdict on a venue that records margin ACTS.
+//
+// Binance, via `positionMargin/history` (task #214). §7.1 words its evidence as
+// the history match "plus the position-risk margin delta", and the "plus" is not
+// a conjunction — marginevidence.go's file comment is the argument, and the
+// division of labour it lands on is:
+//
+//	a matching row is the ONLY thing here that concludes Applied
+//	the delta is the ONLY thing here that concludes NotApplied
+//
+// # THREE of the delta arm's rules rest on it being the only source
+//
+// Each was correct when task #212 wrote it and each is re-derived here rather
+// than inherited, because a rule's REASON is what carries across a change and
+// two of these reasons do not.
+//
+// **(i) A flat position no longer outranks everything.** #212's argument was
+// that "closing a position returns its isolated margin whether or not the top-up
+// landed first", so the before/after difference has no meaning. That is a claim
+// about the DELTA's evidence, not about the act's: a venue that recorded the
+// adjustment recorded it whether or not the position was closed afterwards. So
+// flatness blinds this arm only once the history has said nothing, and there it
+// still blinds it completely — there is no live posted margin to difference.
+//
+// **(ii) The bound guards the history's SILENCE, not the margin's stillness.**
+// #212 consulted the bound on exactly one observation, on the ground that "only
+// 'nothing has moved' is an observation that the passage of time can legitimately
+// change". With a second source that premise is simply false: "the act log has no
+// row yet" is also an observation time can change, and it can lag independently
+// of the margin figure. Concluding Ambiguous on a still-propagating op would make
+// the half built to REDUCE over-ambiguation introduce a new source of it, so the
+// bound is consulted whenever the history is silent — whatever the margin did.
+//
+// A row that HAS arrived is never held for the bound. An act the venue has
+// recorded is not made more or less true by waiting, and the reason #212 gave for
+// not hoisting the bound applies here with full force: it would delay a good
+// answer and dress a standing incident as a timer.
+//
+// **(iii) A movement equal to the delta is NOT Applied here.** This is the rule
+// that looks like a regression and is the point of the slice. On this venue the
+// act log has been asked whether the adjustment happened and has said no; the
+// margin moving by exactly that amount anyway is a second mover whose amount
+// coincides, which is more suspicious than a mismatch, not less. §7.1 says it
+// directly — "no row and the margin moved ⇒ Ambiguous, not NotApplied" — and the
+// verdict this arm gives up in exchange is bought back many times over by the
+// case it wins: a partial fill inside the window, which moves the delta to a
+// number matching nothing and leaves a clean row in the act log.
+func (o MarginOp) resolveWithActHistory(live fixedpoint.Money, held bool, hist MarginActHistory, now time.Time, bound time.Duration) (MarginOpStatus, error) {
+	rows, err := hist.matches(o, bound)
+	if err != nil {
+		return MarginOpUnresolved, err
+	}
+
+	if len(rows) > 1 {
+		// §7.1's named duplicate case, verbatim: "duplicate same-amount history
+		// row inside the window". The rows are indistinguishable — these records
+		// carry no id (Profiles §4) — so this system cannot tell its own act from
+		// a coincident one, which is what Ambiguous means.
+		return MarginOpAmbiguous, nil
+	}
+	if len(rows) == 1 {
+		switch rows[0].Cause {
+		case MarginActUserAdjust:
+			return MarginOpApplied, nil
+		case MarginActUnattributable:
+			// The venue recorded an act of this amount, in this direction, inside
+			// this op's window, for a reason that is not a manual adjustment or is
+			// one this system does not recognise. Reported rather than dropped —
+			// see MarginActUnattributable for why the silent reading is the unsafe
+			// one here.
+			return MarginOpAmbiguous, nil
+		case MarginActCauseUnset:
+			return MarginOpUnresolved, fmt.Errorf("margin op %q: %w", o.ID, ErrMarginActCauseUnset)
+		}
+		return MarginOpUnresolved, fmt.Errorf("margin op %q: %q: %w", o.ID, string(rows[0].Cause), ErrMarginActCauseInvalid)
+	}
+
+	// The history is SILENT: the venue answered and recorded no act this op could
+	// be. From here the delta speaks, and only to separate NotApplied from
+	// Ambiguous.
+	if now.Sub(o.Watermark) < bound {
+		return MarginOpPending, nil
+	}
+	if !held {
+		return MarginOpAmbiguous, nil
+	}
+	if err := live.Validate(); err != nil {
+		return MarginOpUnresolved, fmt.Errorf("margin op %q live posted margin: %w", o.ID, err)
+	}
+	if live.Asset() != o.BeforePosted.Asset() {
+		return MarginOpUnresolved, fmt.Errorf("margin op %q: live posted margin in %s, before-state in %s: %w",
+			o.ID, live.Asset(), o.BeforePosted.Asset(), ErrMarginOpAssetsDisagree)
+	}
+	moved, err := live.Sub(o.BeforePosted)
+	if err != nil {
+		return MarginOpUnresolved, fmt.Errorf("margin op %q: %w", o.ID, err)
+	}
+	movedSign, err := moved.Sign()
+	if err != nil {
+		return MarginOpUnresolved, fmt.Errorf("margin op %q: %w", o.ID, err)
+	}
+	if movedSign == 0 {
+		return MarginOpNotApplied, nil
+	}
 	return MarginOpAmbiguous, nil
 }
 

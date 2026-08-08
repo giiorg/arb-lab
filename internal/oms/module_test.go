@@ -1009,6 +1009,25 @@ func (s scriptedMargin) MarginStatus(_ context.Context, instrument ids.VenueInst
 
 var _ driven.VenueMarginStatusReader = scriptedMargin{}
 
+// scriptedActs is driven.VenueMarginActReader answering as a venue that keeps no
+// margin-act history — Bybit's documented shape (task #214).
+//
+// Every module fixture below asserts a verdict reached from the POSTED DELTA, so
+// the no-history answer is what keeps those claims about the arithmetic they were
+// written for. It is also the honest default for a fixture: the alternative — a
+// venue that publishes a history and returned no rows — resolves the same
+// arithmetic as Ambiguous, so a double that quietly chose it would change what
+// every test here is measuring.
+type scriptedActs struct{}
+
+func (scriptedActs) MarginActs(_ context.Context, _ ids.VenueInstrument, _ venue.InstrumentAssets,
+	_ venue.MarginActWindow, _ bool, _ ratelimit.Priority) ([]venue.MarginAct, bool, error) {
+
+	return nil, false, nil
+}
+
+var _ driven.VenueMarginActReader = scriptedActs{}
+
 // TestAJournaledMarginOpIsResolvedByTheAssembledModule is the wiring claim, and
 // it is asserted end to end rather than by reading a field.
 //
@@ -1026,6 +1045,7 @@ func TestAJournaledMarginOpIsResolvedByTheAssembledModule(t *testing.T) {
 
 	deps := fullDeps(t)
 	deps.VenueMargin = scriptedMargin{posted: "110"} // moved, and not by the delta
+	deps.VenueMarginActs = scriptedActs{}
 
 	// The predecessor's record. Its watermark is far enough in the past that the
 	// propagation bound has elapsed, so the resolution concludes rather than

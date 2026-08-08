@@ -233,6 +233,49 @@ var (
 	// comparable to one without a baseline this system does not record.
 	ErrPositionSurfaceAbsent = errors.New("venue: this product family has no position surface")
 
+	// The margin-act history refusals (task #214).
+	//
+	// ErrMarginActSurfaceAbsent reports a venue that keeps no margin-act history
+	// this system may rely on — Bybit, by the ruling in Profiles §4. It is
+	// distinct from ErrPositionSurfaceAbsent because the two say opposite things
+	// about whether the venue is usable: a family with no position surface is one
+	// this system may not hold a perpetual short at, while a venue with no act
+	// history is an ordinary supported deployment whose margin ops resolve from a
+	// single evidence source.
+	//
+	// It is also NOT the value a caller converts into "the venue recorded
+	// nothing". OrderClient.MarginActs reports absence through a declared bool,
+	// answered before any call is issued, so this sentinel is only ever reached by
+	// a caller that went around that check.
+	ErrMarginActSurfaceAbsent = errors.New("venue: this venue keeps no reliable margin-act history")
+
+	// ErrMarginActCodecAbsent reports a codec that does not implement the surface
+	// at all — a wiring defect, distinct from a codec that implements it and
+	// declares no history. Collapsing the two would silently downgrade a
+	// two-source evidence contract to one source.
+	ErrMarginActCodecAbsent = errors.New("venue: codec does not implement the margin-act surface")
+
+	// ErrMarginActUnreadable reports a history row this system cannot place in a
+	// match: no symbol, a non-positive amount, an undeclared direction, an absent
+	// or unplaceable timestamp, a row answering for another market.
+	//
+	// Every one of these fails PERMISSIVELY if absorbed rather than refused — an
+	// unplaceable row is a candidate match for every op on the instrument, and a
+	// misread direction either invents a candidate or deletes one.
+	ErrMarginActUnreadable = errors.New("venue: margin-act row cannot be matched")
+
+	// ErrMarginActWindowInvalid reports an empty, inverted or unset evidence
+	// window. Refused rather than fetched, because an inverted window returns no
+	// rows and no error — and "no rows" is the observation that turns a correct
+	// top-up into an operator incident.
+	ErrMarginActWindowInvalid = errors.New("venue: margin-act window is empty or unset")
+
+	// ErrMarginActPageFull reports a full page of history rows over a window a
+	// propagation bound wide. Refused rather than paged: the consumer counts
+	// matching rows, and a truncated page can only UNDERCOUNT them — turning
+	// §7.1's Ambiguous duplicate case into a single-row Applied.
+	ErrMarginActPageFull = errors.New("venue: margin-act history page is full")
+
 	// ErrPositionsUnreadable reports a position answer that does not describe the
 	// enumeration requested — a row with no symbol, a second row for a symbol
 	// already answered, an envelope naming another category.

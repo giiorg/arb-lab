@@ -777,6 +777,18 @@ var (
 	ErrMarginOpJournalMissing   = errors.New("oms: margin op resolver has no journal")
 	ErrVenueMarginStatusMissing = errors.New("oms: margin op resolver has no venue margin-status port")
 
+	// ErrVenueMarginActsMissing reports a resolver wired with no act-history port
+	// (task #214).
+	//
+	// It is refused rather than read as "this deployment's venues publish no act
+	// history", and the distinction is the same one domain.MarginActHistory's
+	// three states exist for, arriving one layer up. A nil standing for absence
+	// would make the composition root's omission identical to Bybit's adapter's
+	// deliberate answer — and on a Binance op the two differ by a whole verdict,
+	// because the delta alone concludes Applied where the silent history concludes
+	// Ambiguous.
+	ErrVenueMarginActsMissing = errors.New("oms: margin op resolver has no venue margin-act port")
+
 	// ErrMarginOpResolveMissing reports a boot that met a journaled margin op —
 	// in flight, or already recorded ambiguous — with no resolver wired.
 	//

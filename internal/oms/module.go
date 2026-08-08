@@ -271,6 +271,26 @@ type Deps struct {
 	// quantity (record §79). Five capabilities, five adapters, one client.
 	VenueMargin driven.VenueMarginStatusReader
 
+	// VenueMarginActs is the venue's margin-change HISTORY surface — the same
+	// client a sixth time, and core §7.1's second evidence source (task #214).
+	//
+	// # It is its own field rather than a type assertion on VenueMargin
+	//
+	// In every real deployment this is the same `*venue.OrderClient` already in
+	// the field above, so the economical wiring is to assert it to the act-reader
+	// interface and treat a failed assertion as "this venue keeps no history".
+	// That is the one shortcut this surface cannot take. Absence here is a claim
+	// about the VENUE — Bybit keeps no reliable act history, Binance does — and an
+	// assertion would let a narrower test double, or a root wired against an older
+	// client, make that claim by accident. The failure is silent and it is a whole
+	// verdict wide: the same posted-margin arithmetic that concludes Applied
+	// under "no history exists" concludes Ambiguous under "the history was
+	// consulted and was empty", which blocks openings until an operator clears it.
+	//
+	// So it is REQUIRED whenever VenueMargin is set, and the client itself answers
+	// the capability question per venue through PublishesMarginActs.
+	VenueMarginActs driven.VenueMarginActReader
+
 	// MarkRisk is the mark-risk read port ALREADY BUILT — the one adapter this
 	// module takes assembled rather than constructing, and a gate is the reason.
 	//
@@ -798,10 +818,25 @@ func New(deps Deps) (*Module, error) {
 	// Nil is a MEANING here and not a gap: the reconciler's phase passes on a
 	// journal holding no margin op and fails by name on one that does, which is
 	// the SecondLook pattern this root already wires twice.
+	//
+	// The act-history adapter is built in the SAME arm and is not separately
+	// optional (task #214). A resolver holding one evidence source and not the
+	// other is not a smaller deployment, it is a deployment whose Binance ops
+	// resolve by Bybit's contract — so the two surfaces arrive together or the
+	// resolver is not built at all.
 	var marginOps *application.MarginOpResolver
 	if marginStatus != nil {
+		if deps.VenueMarginActs == nil {
+			return nil, errors.Join(
+				fmt.Errorf("oms: margin op resolver: %w", driven.ErrVenueMarginActReaderMissing),
+				journal.Close())
+		}
+		marginActs, err := driven.NewVenueMarginActs(deps.VenueMarginActs, deps.InstrumentAssets)
+		if err != nil {
+			return nil, errors.Join(fmt.Errorf("oms: venue margin acts: %w", err), journal.Close())
+		}
 		marginOps, err = application.NewMarginOpResolver(
-			journal, marginStatus, deps.Clock, deps.Resolution.MaxLanding)
+			journal, marginStatus, marginActs, deps.Clock, deps.Resolution.MaxLanding)
 		if err != nil {
 			return nil, errors.Join(fmt.Errorf("oms: margin op resolver: %w", err), journal.Close())
 		}

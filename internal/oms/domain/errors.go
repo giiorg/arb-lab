@@ -479,6 +479,50 @@ var (
 	// look as though it were dispatched in the future.
 	ErrMarginOpResolutionInstantUnset = errors.New("oms: margin op resolution instant unset")
 
+	// The act-history refusals (task #214). Every one of them is a WIRING defect
+	// on the same rule Resolve states: nothing a venue can legitimately answer
+	// reaches this channel, because §7.1 attaches a consequence to not knowing and
+	// an error a caller logs and moves past has silently lifted it.
+	//
+	// ErrMarginActCauseUnset and ErrMarginActCauseInvalid report a history row
+	// whose cause never decoded. They are NOT the unrecognised-`deltaType` case,
+	// which is a first-class value (MarginActUnattributable) and resolves
+	// Ambiguous — these two mean no decoder ran at all, which would otherwise
+	// count a row this system cannot classify as one it caused.
+	ErrMarginActCauseUnset   = errors.New("oms: margin act carries no cause")
+	ErrMarginActCauseInvalid = errors.New("oms: margin act cause is not a declared value")
+
+	// ErrMarginActAmountNotPositive reports a row whose recorded amount is zero or
+	// negative. The venue publishes an unsigned magnitude with the direction in
+	// its own field, so a non-positive one is a decoder that read the sign off the
+	// wrong place — and a zero would match the magnitude of an op whose own zero
+	// delta is already refused as unresolvable.
+	ErrMarginActAmountNotPositive = errors.New("oms: margin act amount is not positive")
+
+	// ErrMarginActInstantUnset reports a row with no venue timestamp. It fails
+	// permissively: an unplaceable row cannot be excluded by a window, so it would
+	// be a candidate match for every op on the instrument.
+	ErrMarginActInstantUnset = errors.New("oms: margin act carries no venue instant")
+
+	// ErrMarginHistoryUnset reports the ZERO MarginActHistory reaching a
+	// resolution.
+	//
+	// It is the refusal the whole three-state design exists for. The alternative
+	// spelling — a nil slice standing for "the venue answered with nothing" —
+	// makes the value a forgetful caller produces mean the one thing that inverts
+	// a verdict: on a venue with no act history a matching delta is Applied, and
+	// under a silent-history reading the identical arithmetic is Ambiguous, which
+	// blocks openings until an operator clears it.
+	ErrMarginHistoryUnset = errors.New("oms: margin act history reading unset")
+
+	// ErrMarginHistoryAbsentWithRows reports rows attached to a venue declared to
+	// publish no act history. Unreachable through the constructors and refused
+	// anyway, because every matching rule below would silently ignore them.
+	ErrMarginHistoryAbsentWithRows = errors.New("oms: margin act history is absent yet carries rows")
+
+	// ErrMarginHistoryStateInvalid reports an undeclared history state.
+	ErrMarginHistoryStateInvalid = errors.New("oms: margin act history state is not a declared value")
+
 	// The reconciliation's three refusals, one per field core §7.3 names.
 	//
 	// They are separate sentinels rather than one malformed-record error because

@@ -111,6 +111,7 @@ func TestTheOperatorActLiftsAJournaledAmbiguity(t *testing.T) {
 	// resolve — every op here already carries its verdict — so what the venue
 	// answers is irrelevant, and that is the point of asserting it this way.
 	deps.VenueMargin = scriptedMargin{posted: "110"}
+	deps.VenueMarginActs = scriptedActs{}
 	journalAnAmbiguity(t, deps.JournalPath, "MOP-1")
 
 	if got := gateOutcome(t, deps); got != boot.OutcomeBlocksOpening {
@@ -148,6 +149,7 @@ func TestASecondOpenAmbiguityStillBlocksAfterOneIsCleared(t *testing.T) {
 
 	deps := fullDeps(t)
 	deps.VenueMargin = scriptedMargin{posted: "110"}
+	deps.VenueMarginActs = scriptedActs{}
 	journalAnAmbiguity(t, deps.JournalPath, "MOP-1", "MOP-2")
 
 	cleared, err := oms.ReconcileMarginOp(oms.ClearanceDeps{JournalPath: deps.JournalPath, Account: deps.Account}, clearanceAct(t, "MOP-1"))

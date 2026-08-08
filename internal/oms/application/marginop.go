@@ -42,6 +42,7 @@ import (
 type MarginOpResolver struct {
 	journal ports.MarginOpJournal
 	margin  ports.VenueMarginStatus
+	acts    ports.VenueMarginActs
 	clk     clock.Clock
 	bound   time.Duration
 }
@@ -67,8 +68,19 @@ type MarginOpResolver struct {
 // whose zero instant domain.MarginOp.Resolve refuses by name
 // (ErrMarginOpResolutionInstantUnset) rather than measuring an op's age against
 // it. Late, and it fails as an error — a wiring defect, not a verdict.
+// # The act-history port is REQUIRED, and a nil is not "this venue has none"
+//
+// The tempting wiring is to let a nil acts port mean the delta is the only
+// source, which reads as economical and is the one shortcut this design cannot
+// afford: it would put the venue-capability fact back into a nil check, where
+// the value a forgetful composition root produces is indistinguishable from the
+// value Bybit's adapter deliberately returns. domain.MarginActHistory spent a
+// three-state enum making that pairing unspellable; accepting a nil here would
+// hand it back one layer up. A deployment with no Binance instruments still
+// wires an adapter, and that adapter answers NoMarginActHistory — a positive
+// statement, made by something with a name.
 func NewMarginOpResolver(j ports.MarginOpJournal, m ports.VenueMarginStatus,
-	clk clock.Clock, bound time.Duration) (*MarginOpResolver, error) {
+	a ports.VenueMarginActs, clk clock.Clock, bound time.Duration) (*MarginOpResolver, error) {
 
 	if j == nil {
 		return nil, ErrMarginOpJournalMissing
@@ -76,13 +88,16 @@ func NewMarginOpResolver(j ports.MarginOpJournal, m ports.VenueMarginStatus,
 	if m == nil {
 		return nil, ErrVenueMarginStatusMissing
 	}
+	if a == nil {
+		return nil, ErrVenueMarginActsMissing
+	}
 	if clk == nil {
 		return nil, ErrClockMissing
 	}
 	if bound <= 0 {
 		return nil, fmt.Errorf("margin op resolver: bound %v: %w", bound, domain.ErrMarginOpBoundNotPositive)
 	}
-	return &MarginOpResolver{journal: j, margin: m, clk: clk, bound: bound}, nil
+	return &MarginOpResolver{journal: j, margin: m, acts: a, clk: clk, bound: bound}, nil
 }
 
 // MarginOpResolution is what one op's resolution concluded.
@@ -239,7 +254,17 @@ func (r *MarginOpResolver) resolveOne(op domain.MarginOp) (MarginOpResolution, e
 	// call site that chooses is here.
 	now := r.clk.ServerNow(op.Instrument.Venue).Instant()
 
-	status, err := op.Resolve(reading.PostedMargin, held, now, r.bound)
+	// The fetch window is the op's own, and it is derived from the SAME two
+	// quantities the match uses — the watermark and the propagation bound — so
+	// there is no second window to drift from the first. A fetch narrower than the
+	// match would starve it silently; a wider one costs nothing, because the match
+	// re-applies both edges to every row it is given.
+	hist, err := r.acts.MarginActs(op.Instrument, op.Watermark, op.Watermark.Add(r.bound))
+	if err != nil {
+		return MarginOpResolution{}, fmt.Errorf("resolve margin op %q act history: %w", op.ID, err)
+	}
+
+	status, err := op.Resolve(reading.PostedMargin, held, hist, now, r.bound)
 	if err != nil {
 		return MarginOpResolution{}, fmt.Errorf("resolve margin op %q: %w", op.ID, err)
 	}

@@ -187,7 +187,7 @@ func TestMarginOpResolve(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			op := marginOp(t)
 			op.Delta = marginMoney(t, tc.delta)
-			got, err := op.Resolve(marginMoney(t, tc.live), tc.held, tc.now, marginOpBound)
+			got, err := op.Resolve(marginMoney(t, tc.live), tc.held, domain.NoMarginActHistory(), tc.now, marginOpBound)
 			if err != nil {
 				t.Fatalf("Resolve: %v", err)
 			}
@@ -205,7 +205,7 @@ func TestMarginOpResolveReadsTheLiveFigureAgainstTheRecordedBefore(t *testing.T)
 	op := marginOp(t)
 	op.BeforePosted = marginMoney(t, "400")
 
-	got, err := op.Resolve(marginMoney(t, "425"), true, marginOpWatermark().Add(time.Minute), marginOpBound)
+	got, err := op.Resolve(marginMoney(t, "425"), true, domain.NoMarginActHistory(), marginOpWatermark().Add(time.Minute), marginOpBound)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -215,7 +215,7 @@ func TestMarginOpResolveReadsTheLiveFigureAgainstTheRecordedBefore(t *testing.T)
 
 	// And the live figure that WOULD have been applied against the fixture's
 	// usual before-state is now something else entirely.
-	got, err = op.Resolve(marginMoney(t, "125"), true, marginOpWatermark().Add(time.Minute), marginOpBound)
+	got, err = op.Resolve(marginMoney(t, "125"), true, domain.NoMarginActHistory(), marginOpWatermark().Add(time.Minute), marginOpBound)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestMarginOpResolveReadsTheLiveFigureAgainstTheRecordedBefore(t *testing.T)
 func TestMarginOpResolveMeasuresElapsedForward(t *testing.T) {
 	op := marginOp(t)
 	// One hour past the watermark, which is far outside any bound.
-	got, err := op.Resolve(marginMoney(t, "100"), true, marginOpWatermark().Add(time.Hour), marginOpBound)
+	got, err := op.Resolve(marginMoney(t, "100"), true, domain.NoMarginActHistory(), marginOpWatermark().Add(time.Hour), marginOpBound)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestMarginOpResolveRefusals(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			op := marginOp(t)
 			tc.edit(&op)
-			got, err := op.Resolve(tc.live, true, tc.now, tc.bound)
+			got, err := op.Resolve(tc.live, true, domain.NoMarginActHistory(), tc.now, tc.bound)
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("Resolve: got err %v, want %v", err, tc.want)
 			}
@@ -293,7 +293,7 @@ func TestMarginOpResolveRefusesAWiringDefectEvenWhenFlat(t *testing.T) {
 	op := marginOp(t)
 	op.Delta = marginMoney(t, "0")
 
-	got, err := op.Resolve(fixedpoint.Money{}, false, marginOpWatermark().Add(time.Minute), marginOpBound)
+	got, err := op.Resolve(fixedpoint.Money{}, false, domain.NoMarginActHistory(), marginOpWatermark().Add(time.Minute), marginOpBound)
 	if !errors.Is(err, domain.ErrMarginOpDeltaZero) {
 		t.Fatalf("Resolve of a zero-delta op reported flat: got err %v, want %v", err, domain.ErrMarginOpDeltaZero)
 	}
@@ -384,7 +384,7 @@ func TestMarginOpResolveOnlyEverAnswersADeclaredStatus(t *testing.T) {
 				for _, held := range []bool{true, false} {
 					op := marginOp(t)
 					op.Delta = marginMoney(t, delta)
-					got, err := op.Resolve(marginMoney(t, live), held, now, marginOpBound)
+					got, err := op.Resolve(marginMoney(t, live), held, domain.NoMarginActHistory(), now, marginOpBound)
 					if err != nil {
 						t.Fatalf("Resolve(delta=%s live=%s held=%t): %v", delta, live, held, err)
 					}

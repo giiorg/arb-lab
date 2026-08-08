@@ -122,9 +122,50 @@ func marginReadingOf(t *testing.T, posted string) ports.MarginReading {
 	}
 }
 
+// fakeMarginActs is ports.VenueMarginActs.
+//
+// It records the WINDOWS it was asked for, not only the count, because the claim
+// that the fetch window is derived from the op's own watermark and the
+// resolution's own bound is otherwise unobservable — a resolver that passed a
+// constant window, or swapped the two edges, would satisfy every verdict
+// assertion below while fetching evidence for the wrong interval.
+type fakeMarginActs struct {
+	hist    domain.MarginActHistory
+	err     error
+	queries []marginActQuery
+}
+
+type marginActQuery struct {
+	instrument ids.VenueInstrument
+	from, to   time.Time
+}
+
+var _ ports.VenueMarginActs = (*fakeMarginActs)(nil)
+
+func (f *fakeMarginActs) MarginActs(instrument ids.VenueInstrument, from, to time.Time) (domain.MarginActHistory, error) {
+	f.queries = append(f.queries, marginActQuery{instrument: instrument, from: from, to: to})
+	if f.err != nil {
+		return domain.MarginActHistory{}, f.err
+	}
+	return f.hist, nil
+}
+
+// noActs is the venue-with-no-history double, which is what every test written
+// for task #212 was implicitly using. Naming it makes those tests say which
+// venue's contract they assert rather than leaving it as the absence of a
+// parameter.
+func noActs() *fakeMarginActs { return &fakeMarginActs{hist: domain.NoMarginActHistory()} }
+
 func newMarginOpResolverT(t *testing.T, margin ports.VenueMarginStatus, j ports.MarginOpJournal) *application.MarginOpResolver {
 	t.Helper()
-	r, err := application.NewMarginOpResolver(j, margin, marginOpClock(t), marginOpTestBound)
+	return newMarginOpResolverWithActs(t, margin, j, noActs())
+}
+
+func newMarginOpResolverWithActs(t *testing.T, margin ports.VenueMarginStatus, j ports.MarginOpJournal,
+	acts ports.VenueMarginActs) *application.MarginOpResolver {
+
+	t.Helper()
+	r, err := application.NewMarginOpResolver(j, margin, acts, marginOpClock(t), marginOpTestBound)
 	if err != nil {
 		t.Fatalf("NewMarginOpResolver: %v", err)
 	}
@@ -147,18 +188,23 @@ func TestMarginOpResolverConstructorRefusals(t *testing.T) {
 		name    string
 		journal ports.MarginOpJournal
 		margin  ports.VenueMarginStatus
+		acts    ports.VenueMarginActs
 		clk     clock.Clock
 		bound   time.Duration
 		want    error
 	}{
-		{"no journal", nil, margin, marginOpClock(t), marginOpTestBound, application.ErrMarginOpJournalMissing},
-		{"no margin port", journal, nil, marginOpClock(t), marginOpTestBound, application.ErrVenueMarginStatusMissing},
-		{"no clock", journal, margin, nil, marginOpTestBound, application.ErrClockMissing},
-		{"zero bound", journal, margin, marginOpClock(t), 0, domain.ErrMarginOpBoundNotPositive},
+		{"no journal", nil, margin, noActs(), marginOpClock(t), marginOpTestBound, application.ErrMarginOpJournalMissing},
+		{"no margin port", journal, nil, noActs(), marginOpClock(t), marginOpTestBound, application.ErrVenueMarginStatusMissing},
+		// A nil act port is refused rather than read as "this venue keeps no
+		// history". The two are a whole verdict apart, and noActs() above is what
+		// the deliberate answer looks like — something with a name.
+		{"no act port", journal, margin, nil, marginOpClock(t), marginOpTestBound, application.ErrVenueMarginActsMissing},
+		{"no clock", journal, margin, noActs(), nil, marginOpTestBound, application.ErrClockMissing},
+		{"zero bound", journal, margin, noActs(), marginOpClock(t), 0, domain.ErrMarginOpBoundNotPositive},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := application.NewMarginOpResolver(tc.journal, tc.margin, tc.clk, tc.bound)
+			_, err := application.NewMarginOpResolver(tc.journal, tc.margin, tc.acts, tc.clk, tc.bound)
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("NewMarginOpResolver: got %v, want %v", err, tc.want)
 			}
@@ -167,7 +213,7 @@ func TestMarginOpResolverConstructorRefusals(t *testing.T) {
 
 	// The positive control: without it every refusal above is satisfied by a
 	// constructor that refuses everything.
-	if _, err := application.NewMarginOpResolver(journal, margin, marginOpClock(t), marginOpTestBound); err != nil {
+	if _, err := application.NewMarginOpResolver(journal, margin, noActs(), marginOpClock(t), marginOpTestBound); err != nil {
 		t.Fatalf("NewMarginOpResolver with everything wired: %v", err)
 	}
 }
@@ -520,5 +566,65 @@ func TestMarginOpResolverIssuesNothing(t *testing.T) {
 	if len(journal.dispatched) != 0 {
 		t.Fatalf("the resolver journalled %d dispatches — it re-fired a margin op",
 			len(journal.dispatched))
+	}
+}
+
+// TestTheActFetchWindowIsTheOPsOwnAnchorAndBOUND (task #214).
+//
+// The window handed to the act port must be [Watermark, Watermark+bound), built
+// from the same two quantities the domain's match re-applies. A resolver that
+// passed a constant window, the LOCAL clock's instant, or the two edges swapped
+// would satisfy every verdict assertion in this file while fetching evidence for
+// the wrong interval — and a wrong interval returns no rows, which is the
+// observation that turns a correct top-up into an operator incident.
+//
+// The op is aged deliberately, so the watermark is neither `now` nor the zero
+// instant and no edge can be right by coincidence.
+func TestTheActFetchWindowIsTheOPsOwnAnchorAndBOUND(t *testing.T) {
+	op := marginOpAged(t, "op-window", 5*time.Minute)
+	acts := noActs()
+	journal := &fakeMarginOpJournal{}
+	r := newMarginOpResolverWithActs(t, marginFixture(t, "125", true), journal, acts)
+
+	if _, err := r.Resolve(application.Recovery{InFlightMarginOps: []domain.MarginOp{op}}); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(acts.queries) != 1 {
+		t.Fatalf("the act port was asked %d times, want 1", len(acts.queries))
+	}
+
+	q := acts.queries[0]
+	if !q.from.Equal(op.Watermark) {
+		t.Errorf("window opens at %v, want the op's watermark %v", q.from, op.Watermark)
+	}
+	if want := op.Watermark.Add(marginOpTestBound); !q.to.Equal(want) {
+		t.Errorf("window closes at %v, want watermark+bound %v", q.to, want)
+	}
+	if !q.from.Before(q.to) {
+		t.Error("the window is empty or inverted")
+	}
+	if q.instrument != op.Instrument {
+		t.Errorf("window asked about %v, want %v", q.instrument, op.Instrument)
+	}
+}
+
+// TestAFailedActReadFailsTheRESOLUTION.
+//
+// The resolver's standing rule: inside a boot a venue that will not answer is an
+// error, because the checklist has a member for it and the gate is what decides
+// next. Absorbing it into a verdict would resolve the op from one source while
+// reporting the boot clean.
+func TestAFailedActReadFailsTheRESOLUTION(t *testing.T) {
+	boom := errors.New("act history unreachable")
+	acts := &fakeMarginActs{err: boom}
+	journal := &fakeMarginOpJournal{}
+	r := newMarginOpResolverWithActs(t, marginFixture(t, "125", true), journal, acts)
+
+	_, err := r.Resolve(application.Recovery{InFlightMarginOps: []domain.MarginOp{marginOpAged(t, "op-fail", time.Minute)}})
+	if !errors.Is(err, boom) {
+		t.Fatalf("Resolve: got %v, want %v", err, boom)
+	}
+	if len(journal.resolved) != 0 {
+		t.Errorf("a verdict was journaled despite the failed read: %v", journal.resolved)
 	}
 }
