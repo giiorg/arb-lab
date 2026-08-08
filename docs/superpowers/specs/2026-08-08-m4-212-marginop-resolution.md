@@ -1,7 +1,9 @@
 # Record §81 — M4 slice B3 part 1: the durable `MarginOp`, its resolution at boot, and the outcome that never latched
 
-**Date:** 2026-08-08 · **Task:** #212 · **Docs:** v0.9.62 (owed) ·
-`SPEC EDIT OWED` grep zero at close.
+**Date:** 2026-08-08 · **Task:** #212 · **Docs:** v0.9.62 · **Campaign:** 24
+mutants, 2 real survivors (both fixed, both in the FIXTURE), 1 claim covered by
+`exhaustiveswitch` rather than by the suite · `make ci` green on both modules ·
+`SPEC EDIT OWED` grep zero.
 
 Read `docs/build-spec.md` §7.1's *"every margin op is a durable target-state
 machine"* bullet and §7.5's two paragraphs on preconditions (the roster and the
@@ -91,8 +93,9 @@ the gate's ordinary case and inherited by the outcome that is its exception.
 
 ### 1b. What it costs today, which is a wrong exit code rather than a wrong trade
 
-`app/reconcile`'s `ExitClass` sorts `GateMarginOpsResolved` into the arm named
-*"the four with no producer anywhere"*, which falls through to **`ExitClean`**.
+`app/reconcile`'s `ExitClass` SORTED `GateMarginOpsResolved` into the arm named
+*"the four with no producer anywhere"* — which falls through to **`ExitClean`**.
+(That arm now names three, this slice's edit being the move.)
 So before this slice an Ambiguous margin op — a §9 accounting incident — would
 have exited `arblab reconcile` clean. Giving the gate a producer is what that
 arm's own comment instructs to act on (*"a gate added to §7.5's roster has to
@@ -306,3 +309,128 @@ record, checked by the same walk that checks everything else.
    launders the latch and inverts with age.
 5. **Resolve a flat position as `NotApplied`.** §3: it is a float-accounting
    claim wearing an evidence answer.
+
+---
+
+## 6. Two rulings the BUILD settled that §0's design did not
+
+**`Pending` is one branch's refusal, not a phase in front of the verdict.** The
+design's table listed it as a row beside the other three, which reads as "check
+the bound first". Written that way it is wrong in both directions: a movement
+already equal to the delta is `Applied` and waiting adds nothing, and a movement
+equal to neither is `Ambiguous`, which more time cannot disambiguate — so the
+bound would delay a good answer and dress a standing incident as a timer. Only
+*"nothing has moved"* is an observation the passage of time can legitimately
+change, so it is the only one the bound is consulted for.
+
+**The fold is by CONSEQUENCE, not by posture ordering, and the two disagree.** An
+ambiguity is stop-opening (posture 2) and a pending is reconcile-only (posture
+1), so "the most restrictive wins" reports a boot holding both as
+`OutcomeIncomplete`. That loses the LATCH — the property that must survive — and
+its extra restriction is one §7.1 explicitly does not want, because reconcile-only
+forbids `ActReduce` and would take the safety ladder away during the incident the
+section says safety actions must continue through. The ambiguity decides; what
+the pending costs is one more boot.
+
+---
+
+## 7. The campaign — 24 mutants, and both survivors were about the FIXTURE
+
+| Claim | Verdict |
+|---|---|
+| the bound is strictly-less: exactly AT it concludes | caught |
+| the elapsed interval is measured forward | caught |
+| the movement is `live − before` | caught |
+| equality with the delta is `Applied` | caught |
+| a flat position is `Ambiguous` | caught |
+| inside the bound is `Pending`, not `NotApplied` | caught |
+| a zero delta is refused | caught |
+| a NEGATIVE before-state is refused, not a positive one | caught |
+| a `Pending` is not CONCLUDED | caught |
+| the journal refuses a pending and admits the three verdicts | caught |
+| the chain covers the before-state, not the delta twice | caught |
+| the chain covers the watermark | caught |
+| the resolution's kind tag separates it from a state record | caught |
+| only an AMBIGUOUS verdict carries forward | caught |
+| two different verdicts for one op are refused | caught |
+| a verdict for an op no dispatch created is refused | caught |
+| one op dispatched twice is refused | caught |
+| an op with NO verdict is the in-flight one | caught |
+| a latched gate admits only a STRICTLY more restrictive escalation | caught |
+| an ambiguity outranks a pending in the fold | caught |
+| a pending is `OutcomeIncomplete`, not `Passed` | caught |
+| the verdict recorded is the one that was reached | caught |
+| the phase reports the resolution's own outcome | caught |
+| an unwired resolver fails on a CARRIED ambiguity too | caught |
+| a carried ambiguity still counts | caught |
+| **the age is measured on the VENUE clock** | **SURVIVED → fixed → caught** |
+| **the resolver is wired when the venue reader exists** | **SURVIVED → fixed → caught** |
+| an Ambiguous MarginOp LATCHES | covered by `exhaustiveswitch`, not by the suite |
+
+### 7a. Survivor 1 — a fixture that varied the right parameter by too little
+
+The anchor test placed the op **half a bound** old on the venue's clock and
+asserted `Pending`. Swapping `ServerNow(venue)` for `Now()` survived it, and
+correctly: the two clocks are `testVenueOffset` = **250ms** apart against a
+**30s** bound, so at half a bound both readings answer `Pending`. The fixture
+varied the parameter the claim is about and varied it by an amount the predicate
+cannot see — `[[fixture-too-small-for-the-mechanism]]`, and the guard already in
+the test (*"the offset is zero, so the two clocks cannot disagree"*) was the
+weaker half of the right idea.
+
+The repair puts the op in the window where the two clocks give **different**
+verdicts, which is exactly `|skew|` wide, and computes the sign from the clock
+rather than assuming it — because the offset's sign decides which side of the
+bound the venue lands on, and a test that silently depended on the fixture's
+choice of it would be one edit away from collapsing again.
+
+### 7b. Survivor 2 — a call site nothing exercised
+
+Making `oms.New` skip the resolver's construction entirely survived **every test
+in the package**. `fullDeps` supplies no `VenueMargin`, so the whole §7.1
+account-side branch was unwired in every module fixture. The new test covers the
+shared adapter and the resolver; the **liq monitor is still uncovered**, because
+it sits behind a different predicate (`len(deps.LiqPolicies) > 0`) that no module
+fixture sets — filed as **#216** rather than claimed by association.
+`[[call-site-arguments-are-their-own-claims]]`: a use case tested in isolation
+says nothing about a root that never builds it.
+
+The replacement writes the record through a **separate journal handle on the same
+path before the module exists**, which is precisely the shape a crashed
+predecessor leaves — and it is why the test needs no dispatcher, which does not
+exist until part 2. It distinguishes *wired and concluded* from *not wired at
+all* by asserting `OutcomeBlocksOpening` rather than merely non-`Passed`, since
+an unwired resolver reports `OutcomeFailed` on the same journal.
+
+### 7c. The claim the SUITE cannot check, and the guard that can
+
+Removing `OutcomeBlocksOpening` from `latching()`'s case list survives `go test`.
+The member then matches neither arm and falls to the switch's trailing
+`return true` — which exists so a *corrupted* enum reads as latching, and which
+therefore absorbs a *declared* member's removal.
+`[[switch-default-hides-its-own-group]]`, at the enum whose membership this whole
+slice is about.
+
+What refuses it is `exhaustiveswitch`, verified by running `make lint` against
+the mutant: *"switch over Outcome does not name OutcomeBlocksOpening: every
+declared member must be named so that adding one breaks the build here rather
+than falling through (§3.6 rule 10)"*. The same shape blocks the `ExitClass`
+arm-membership mutant one package over — the two arms are exhaustive over
+`boot.Gate`, so moving a member between them is a two-line edit the compiler
+rejects as a duplicate case, and the membership is asserted by a test row
+instead.
+
+---
+
+## 8. What is owed next, in the order it must land
+
+1. **The ambiguity's CLEARANCE.** An `Ambiguous` op blocks openings until an
+   explicit accounting act, and no act exists — there is no operator control
+   plane (§7.3) to issue one. Today this is unreachable, because nothing writes a
+   `MarginOp`; it must land **with or before** the dispatcher, or the first real
+   ambiguity is a permanent halt. Its right shape depends on §7.3's operator
+   identity, which is why it is not guessed here.
+2. **Binance's `positionMargin/history` evidence half** (§3b), before the
+   dispatcher, so no Binance op is ever over-`Ambiguous`ed in production.
+3. **The dispatch path** — before-state read, fsync, `AddIsolatedMargin`, and
+   §7.1's one-op-in-flight-per-position serialization.

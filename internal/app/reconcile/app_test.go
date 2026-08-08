@@ -830,6 +830,20 @@ func TestExitClassIsNotThePosture(t *testing.T) {
 			want: ExitClean,
 		},
 		{
+			// The margin gate's arm membership, asserted positively because it
+			// cannot be mutated: the two arms are exhaustive over boot.Gate, so
+			// moving a member between them is a two-line edit the compiler
+			// refuses as a duplicate case. What a wrong membership would produce
+			// is exactly this row answering ExitClean — a §7.1 margin op that
+			// could not be resolved, reported as a run with nothing to act on.
+			name: "a blocking margin gate is a real incompleteness",
+			rep: Report{
+				Posture:  boot.PostureReconcileOnly,
+				Blocking: append([]boot.Gate{boot.GateMarginOpsResolved}, structural...),
+			},
+			want: ExitIncomplete,
+		},
+		{
 			name: "latched: an operator hold",
 			rep: Report{Posture: boot.PostureReconcileOnly,
 				Blocking: append([]boot.Gate{boot.GateVenueJoined}, structural...),

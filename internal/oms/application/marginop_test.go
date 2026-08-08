@@ -227,31 +227,58 @@ func TestMarginOpResolverConcludesAndJournalsTheVerdict(t *testing.T) {
 
 // TestMarginOpResolverMeasuresTheAgeOnTheVENUEClock is the anchor claim.
 //
-// The watermark is venue time and the test clock's venue runs testVenueOffset
-// away from the host's, so an op positioned just inside the bound ON THE VENUE'S
-// CLOCK is outside it on the host's (or vice versa, depending on the offset's
-// sign). A resolver reading clk.Now() instead of clk.ServerNow(venue) therefore
-// answers NotApplied where the truth is Pending — a conclusion of "nothing
-// happened" about a write that may still be landing.
+// # The op has to STRADDLE the bound, and a merely-nonzero skew is not enough
+//
+// The first version of this test placed the op half a bound old and asserted
+// Pending. It SURVIVED a mutation swapping ServerNow(venue) for Now(), and
+// correctly: the two clocks are testVenueOffset apart (250ms) against a 30s
+// bound, so at half a bound BOTH readings say Pending and the fixture varied the
+// right parameter by an amount the predicate cannot see.
+//
+// So the op is positioned in the window where the two clocks give DIFFERENT
+// verdicts — width exactly |skew| — and the expected answer is the VENUE's. A
+// resolver reading the host's clock answers the other one, which in the positive
+// -skew case is "nothing happened" about a write that may still be landing.
+//
+// The straddle is computed from the clock rather than assumed, because the
+// offset's SIGN decides which side of the bound the venue lands on and this test
+// must not silently depend on the fixture's choice of it.
 func TestMarginOpResolverMeasuresTheAgeOnTheVENUEClock(t *testing.T) {
-	if testVenueOffset == 0 {
+	clk := marginOpClock(t)
+	skew := clk.ServerNow(perp().Venue).Instant().Sub(clk.Now())
+	if skew == 0 {
 		t.Fatal("the fixture's venue offset is zero, so the two clocks cannot disagree " +
 			"and this test asserts nothing")
+	}
+	if abs := skew; abs < 0 {
+		abs = -abs
+		if abs >= marginOpTestBound {
+			t.Fatalf("the venue skew (%v) is not smaller than the bound (%v); "+
+				"the straddle below assumes it is", abs, marginOpTestBound)
+		}
+	}
+
+	// age is measured from the VENUE's now, so venueElapsed == age and
+	// localElapsed == age - skew. Pick the age that puts exactly one of them past
+	// the bound.
+	age, want := marginOpTestBound, domain.MarginOpNotApplied
+	if skew < 0 {
+		age, want = marginOpTestBound+skew, domain.MarginOpPending
 	}
 
 	journal := &fakeMarginOpJournal{}
 	r := newMarginOpResolverT(t, marginFixture(t, "100", true), journal)
 
-	// Half a bound old on the VENUE's clock. Nothing moved, so the only thing
-	// deciding between Pending and NotApplied is which clock the age is measured
-	// on.
-	op := marginOpAged(t, "op-1", marginOpTestBound/2)
-	res, err := r.Resolve(application.Recovery{InFlightMarginOps: []domain.MarginOp{op}})
+	// Nothing moved, so the only thing deciding between Pending and NotApplied is
+	// which clock the age is measured on.
+	res, err := r.Resolve(application.Recovery{
+		InFlightMarginOps: []domain.MarginOp{marginOpAged(t, "op-1", age)},
+	})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if got := res.Resolved[0].Status; got != domain.MarginOpPending {
-		t.Fatalf("status = %s, want %s — the age was not measured against ServerNow(venue)", got, domain.MarginOpPending)
+	if got := res.Resolved[0].Status; got != want {
+		t.Fatalf("status = %s, want %s — the age was not measured against ServerNow(venue)", got, want)
 	}
 }
 

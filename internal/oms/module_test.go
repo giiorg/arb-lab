@@ -976,3 +976,105 @@ func TestAnAckConflictLatchesLiveAndRefusesTheNextBoot(t *testing.T) {
 		t.Fatalf("Rebuild over a conflicted journal = %v, want ErrVenueOrderIDConflict", err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Core §7.1's margin-op resolution, wired (task #212)
+// ---------------------------------------------------------------------------
+
+// scriptedMargin is driven.VenueMarginStatusReader with one scripted answer.
+//
+// It reports the position as HELD with a posted margin the caller chooses, which
+// is the only venue fact core §7.1's evidence contract reads.
+type scriptedMargin struct {
+	posted string
+}
+
+func (s scriptedMargin) MarginStatus(_ context.Context, instrument ids.VenueInstrument,
+	_ venue.InstrumentAssets, _ ratelimit.Priority) (venue.MarginStatus, bool, error) {
+
+	posted, err := fixedpoint.ParseMoney("USDT", s.posted)
+	if err != nil {
+		return venue.MarginStatus{}, false, err
+	}
+	maintenance, err := fixedpoint.ParseMoney("USDT", "10")
+	if err != nil {
+		return venue.MarginStatus{}, false, err
+	}
+	return venue.MarginStatus{
+		Instrument:   instrument,
+		Maintenance:  maintenance,
+		PostedMargin: posted,
+	}, true, nil
+}
+
+var _ driven.VenueMarginStatusReader = scriptedMargin{}
+
+// TestAJournaledMarginOpIsResolvedByTheAssembledModule is the wiring claim, and
+// it is asserted end to end rather than by reading a field.
+//
+// A mutation making New skip the resolver's construction SURVIVED every other
+// test in this file, because nothing exercised the branch: fullDeps supplies no
+// VenueMargin, so the whole §7.1 account surface was unwired in every fixture.
+// The call site is its own claim, and a use case tested in isolation says nothing
+// about a root that never builds it.
+//
+// The record is written by a SEPARATE journal handle on the same path before the
+// module exists, which is exactly the shape a crashed predecessor leaves — and
+// it is why this test needs no dispatcher, which does not exist until part 2.
+func TestAJournaledMarginOpIsResolvedByTheAssembledModule(t *testing.T) {
+	t.Parallel()
+
+	deps := fullDeps(t)
+	deps.VenueMargin = scriptedMargin{posted: "110"} // moved, and not by the delta
+
+	// The predecessor's record. Its watermark is far enough in the past that the
+	// propagation bound has elapsed, so the resolution concludes rather than
+	// waiting — Pending is a different case with a different outcome.
+	delta, err := fixedpoint.ParseMoney("USDT", "25")
+	if err != nil {
+		t.Fatalf("ParseMoney: %v", err)
+	}
+	before, err := fixedpoint.ParseMoney("USDT", "100")
+	if err != nil {
+		t.Fatalf("ParseMoney: %v", err)
+	}
+	predecessor, err := driven.OpenSQLiteJournal(deps.JournalPath)
+	if err != nil {
+		t.Fatalf("OpenSQLiteJournal: %v", err)
+	}
+	op := domain.MarginOp{
+		ID:           "MOP-1",
+		Instrument:   perpInstrument(),
+		Delta:        delta,
+		BeforePosted: before,
+		Watermark:    deps.Clock.ServerNow("binance").Instant().Add(-time.Hour),
+	}
+	if err := predecessor.AppendMarginOpDispatched(op); err != nil {
+		t.Fatalf("AppendMarginOpDispatched: %v", err)
+	}
+	if err := predecessor.Close(); err != nil {
+		t.Fatalf("closing the predecessor's journal: %v", err)
+	}
+
+	m := newModule(t, deps)
+	c, err := boot.NewChecklist(boot.GateJournalReplayed, boot.GateVenueJoined,
+		boot.GateGenerationsReinstated, boot.GateNetDeltaAsserted, boot.GateMarginOpsResolved)
+	if err != nil {
+		t.Fatalf("NewChecklist: %v", err)
+	}
+	if _, err := m.Reconcile.Reconcile(c); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	got, declared := c.Outcome(boot.GateMarginOpsResolved)
+	if !declared {
+		t.Fatal("GateMarginOpsResolved is not declared by this checklist")
+	}
+	// OutcomeFailed is what an UNWIRED resolver reports on this journal
+	// (ErrMarginOpResolveMissing), so this assertion distinguishes "wired and it
+	// concluded" from "not wired at all" — which is the whole point.
+	if got != boot.OutcomeBlocksOpening {
+		t.Fatalf("GateMarginOpsResolved = %s, want OutcomeBlocksOpening — "+
+			"the margin-op resolver was not wired into the assembled module", got)
+	}
+}

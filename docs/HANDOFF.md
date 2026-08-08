@@ -1,6 +1,74 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-08, session 124): **§7.1's LIQ-DISTANCE TRIGGER IS BUILT — AND §5.2's FOUR THRESHOLDS ANSWER TWO QUESTIONS, NOT ONE LADDER. DOCS v0.9.61, 36 MUTANTS / 2 REAL SURVIVORS (BOTH FIXED, THE SECOND FOUND BY THE MIRROR), `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO.**
+## Status (2026-08-08, session 125): **§7.1's `MarginOp` RESOLVES AT BOOT — AND THE OUTCOME DECLARED FOR IT NEVER LATCHED. DOCS v0.9.62, 24 MUTANTS / 2 REAL SURVIVORS (BOTH FIXED, BOTH IN THE FIXTURE), `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
+
+**Read `docs/superpowers/specs/2026-08-08-m4-212-marginop-resolution.md` (§81)
+first** — the outcome with no producer, the scope §7.5 sorted on, the stored
+verdict's two failure directions, and both survivors (a clock-skew fixture too
+small to cross its own bound, and a call site nothing exercised).
+
+**`boot.GateMarginOpsResolved` HAS A PRODUCER**, after five slices of being
+declared with none. So it crosses `app/reconcile` `ExitClass` into the produced
+arm — and before that crossing an **`Ambiguous` margin op would have exited
+`arblab reconcile` CLEAN**, because the gate sat in the arm named *"the four with
+no producer anywhere"* and fell through. §7.1 calls that state a §9 case needing
+explicit accounting.
+
+**THE HEADLINE: `boot.OutcomeBlocksOpening` HAD NO PRODUCER, AND ITS OWN DOC
+QUOTED THE CLAUSE THAT MAKES IT LATCH.** The member was declared for exactly one
+condition — §7.5's Ambiguous `MarginOp` — and placed in the freely re-reportable
+column, so a later `OutcomePassed` on the same gate lifted a §9 incident with
+nobody having looked. §7.5 sorts self-clearing from latching by **precondition**
+where the property belongs to the **outcome**, and one precondition produces
+both: a `Pending` op clears itself, an `Ambiguous` one does not. Three grounds,
+and only the third is probabilistic — both normative sentences; the checklist
+holds **one outcome per gate rather than one per op**; and re-reading the
+evidence is more **confounded**, not more informative.
+
+**`Report`'s POSTURE COMPARISON WAS LOOSER THAN ITS OWN DOC AND NOBODY COULD
+SEE IT.** It read `<=` where the doc says STRICTLY more restrictive. That agreed
+only because the three latching members happened to have three **distinct
+postures**, so equality could hold only for a repeat. The accident expired the
+moment a second member reached the stop-opening row.
+
+**THE VERDICT IS JOURNALED, NOT RE-DERIVED, AND THE TWO WRONG ANSWERS GO
+OPPOSITE WAYS.** An ambiguity held only in a checklist dies with the process, so
+a **restart would satisfy** "until the staged-float ledger is explicitly
+reconciled". An `Applied` re-derived after Binance's windowed history has rolled
+past **inverts** to `NotApplied` — the reading under which nothing happened.
+
+**BOTH SURVIVORS WERE THE FIXTURE, NOT THE CODE.** The venue-clock anchor test
+placed the op half a bound old and asserted `Pending`: the clocks are 250ms apart
+against a 30s bound, so both readings agreed and the right parameter was varied
+by an amount the predicate cannot see. It straddles the bound now, sign computed
+from the clock. And nothing exercised the module wiring at all — `fullDeps`
+supplies no `VenueMargin`, so making `oms.New` skip the resolver survived every
+test in the package. What the new fixture covers is the **shared margin adapter
+and the resolver**; the liq monitor built one slice earlier sits behind a
+different predicate (`len(deps.LiqPolicies) > 0`) that no module fixture sets, so
+**its wiring is still unexercised** — filed as **#216** rather than claimed.
+
+**ONE CLAIM IS COVERED BY THE LINTER RATHER THAN THE SUITE, VERIFIED BY RUNNING
+IT.** Removing `OutcomeBlocksOpening` from `latching()`'s case list survives `go
+test` — the trailing `return true` (there for a corrupted enum) absorbs a
+declared member's removal. `exhaustiveswitch` refuses it by name.
+
+**NEXT, IN THE ORDER IT MUST LAND:** (1) the ambiguity's **clearance** — no
+operator act exists to lift it, which is unreachable today because nothing writes
+a `MarginOp`, and a permanent halt the day one does; (2) Binance's
+`positionMargin/history` evidence half, so no Binance op is over-`Ambiguous`ed in
+production; (3) the **dispatch** path (before-state read, fsync,
+`AddIsolatedMargin`, one-op-in-flight-per-position). Then B4 — the escalation
+that finally calls `Deleverer.Open`.
+
+**Unchanged:** three standing operator decisions ($20/$55 live test, #171's
+credential, §38f); credentials deferred; capture **PID 8495**; never rebuild over
+`bin/arblab`; `make ci` runs `-race` AND the ka staleness gate (needs node); cap
+`TLC_WORKERS` at 4; docs/i18n parity is `bun test`. **#180 is untouched.**
+
+---
+
+## Status (2026-08-08, session 124 — HISTORICAL): **§7.1's LIQ-DISTANCE TRIGGER IS BUILT — AND §5.2's FOUR THRESHOLDS ANSWER TWO QUESTIONS, NOT ONE LADDER. DOCS v0.9.61, 36 MUTANTS / 2 REAL SURVIVORS (BOTH FIXED, THE SECOND FOUND BY THE MIRROR), `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO.**
 
 **Read `docs/superpowers/specs/2026-08-08-m4-210-liq-distance-monitor.md` (§80)
 first** — the deleted band, #209's convergence argument, the side that cannot be
