@@ -42,7 +42,10 @@ import (
 // value, and a caller reading a field off it would be reading a fact no venue
 // states. What replaces it is the journaled before-state: `domain.MarginOp`
 // exists precisely because this call cannot answer "which operation was that".
-// [SPEC EDIT OWED — §4's MarginGateway signature]
+// §4 now declares the same signature for the same reason, and states it for
+// `ReduceIsolatedMargin` too — same endpoint, same absent identity — while
+// `TransferCollateral` keeps its `Ack` because transfers are the one op with a
+// real one (core v0.9.65, task #215, record §84).
 //
 // A nil error therefore carries the whole acknowledgement: the venue said it
 // performed the act, on the market and in the direction and (where the venue

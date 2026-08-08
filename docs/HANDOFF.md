@@ -1,19 +1,68 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## ⏳ IN PROGRESS — #215's CODE is landed (`2d4cfbe`), its DOCS are not
+## Status (2026-08-08, session 128): **§7.1's MARGIN TOP-UP DISPATCHES — AND A RETURNED CALL MUST CONCLUDE, OR THE REMEDY'S SUCCESS IS INDISTINGUISHABLE FROM ITS FAILURE. DOCS v0.9.65, 19 MUTANTS / 0 SURVIVORS, `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
 
 **Read `docs/superpowers/specs/2026-08-08-m4-215-marginop-dispatch.md` (§84)
-first, section 3.** §7.1's margin-op DISPATCH path is built, tested (19 mutants,
-0 survivors) and wired; `make ci` is green on both modules. What is NOT done is
-the docs commit — the §4 signature edit that discharges the one open
-`[SPEC EDIT OWED]` marker, §7.1's and §12's annotations, Profiles §4, this
-file's own status section, `adr-history` §84, and turning that record from a
-handoff note into a decision record. The status section below is therefore one
-slice STALE: it names #215 as next, and #215's code is in.
+first** — the six rulings, the alternatives each rejected, and what B4 inherits.
+
+**#215 IS CLOSED, CODE AND DOCS.** The code landed in `2d4cfbe` (session 127b);
+this session is its docs half — §4's signature edit, which **discharged the
+slice's one `[SPEC EDIT OWED]` marker**, plus §7.1's dispatch bullet, §12's
+part-2 annotation, Profiles §4's two new bullets and its second ⚠, `adr-history`
+§84, and this file. The 19-mutant / 0-survivor figure belongs to the code commit;
+the only code touched today is the marker line's replacement.
+
+**THE DESIGN QUESTION WAS WHO IS ENTITLED TO CONCLUDE, NOT HOW TO CALL THE
+ENDPOINT.** The tidy instinct is to route every op through `MarginOp.Resolve` so
+§7.1's evidence rule keeps one home. Run right after a call that returned, that
+path answers **`Pending`** on a venue with an act history — #214's own re-derived
+premise is that the history lags *independently* of the margin figure, so the
+propagation bound guards its silence. No verdict ⇒ nothing journaled ⇒ the
+position stays latched ⇒ the ladder escalates to a `PackageDelever` **on a top-up
+that worked**. The narrower reading is also the more accurate one:
+`ResolveMarginOp` is a *reconstruction* of what the response would have said,
+built for the case where no response was read.
+
+**THE TWO VENUES ACKNOWLEDGE IN COMPLEMENTARY, NON-OVERLAPPING VOCABULARIES.**
+Binance states the **act** (`{amount, code, msg, type}` — no symbol); Bybit
+states the **subject** (a position snapshot — no amount). So there is no shared
+echo helper, unlike `marginLiqPrice` on the read side: each codec checks its own
+venue's half and records what it structurally cannot. Bybit's `positionIM` is
+deliberately unread — a second authority for a figure `MarginStatus` owns, on one
+venue, in the one case that needs no evidence at all.
+
+**THE LATCH IS RELEASED BY DURABILITY, NOT BY KNOWLEDGE.** A verdict known but
+not journaled must be rebuilt from evidence later, and a second op on that
+position **destroys** that evidence — the posted margin then moved by the sum of
+two deltas and matches neither. Different from `Outcome.Journaled` on the order
+path, where a lost state record is re-derived by query.
+
+**B4 IS NOW THE WHOLE GAP, AND IT IS THE CRITICAL PATH.** All three of §7.1's
+rungs exist — trigger (#210), top-up (#215), ladder (#177) — and **not one is
+driven**. Nothing re-resolves a *live* in-flight op either, so a failed top-up
+latches its position until the next boot; that is §7.1's escalation rather than a
+gap, but B4 is where it stops being the only answer.
+
+**#217 NOW COVERS TWO UNVERIFIED BINANCE WEIGHTS, NOT ONE.** The write
+(`POST /fapi/v1/positionMargin`) joins the read (`positionMargin/history`), both
+charged at 20 behind #180's WAF wall. The write's argument was made **afresh
+rather than inherited**, because unlike the boot-time read it is on the incident
+path — what makes overcharging affordable there is §7.1's own
+one-op-in-flight-per-position ceiling, not a traffic estimate.
+
+**NEXT:** (1) **slice B4** — the loop that drives the monitor, calls the
+dispatcher on the Rebalance band and `Deleverer.Open` on failure; it is what
+turns three rungs into a ladder. **#216** (the liq monitor's unwired module
+branch) is still open and independent of it.
+
+**Unchanged:** three standing operator decisions ($20/$55 live test, #171's
+credential, §38f); credentials deferred; capture **PID 8495**; never rebuild over
+`bin/arblab`; `make ci` runs `-race` AND the ka staleness gate (needs node); cap
+`TLC_WORKERS` at 4; docs/i18n parity is `bun test`. **#180 is untouched.**
 
 ---
 
-## Status (2026-08-08, session 127): **BINANCE'S ACT HISTORY LANDS — AND TWO OF #212's CORRECT RULES TURNED OUT TO BE SCOPED TO A ONE-SOURCE WORLD. DOCS v0.9.64, 22 MUTANTS / 2 REAL SURVIVORS (BOTH FIXTURE COLLAPSES IN THE NEW TESTS, BOTH CLOSED), `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
+## Status (2026-08-08, session 127 — HISTORICAL): **BINANCE'S ACT HISTORY LANDS — AND TWO OF #212's CORRECT RULES TURNED OUT TO BE SCOPED TO A ONE-SOURCE WORLD. DOCS v0.9.64, 22 MUTANTS / 2 REAL SURVIVORS (BOTH FIXTURE COLLAPSES IN THE NEW TESTS, BOTH CLOSED), `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
 
 **Read `docs/superpowers/specs/2026-08-08-m4-214-marginop-act-history.md` (§83)
 first** — the division of labour between the two sources, the distinction that
