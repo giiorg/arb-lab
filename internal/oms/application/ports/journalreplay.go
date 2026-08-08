@@ -143,4 +143,25 @@ type JournalVisitor interface {
 	// above do not own — see GenerationJournal.AppendGenerationPhase, which
 	// refuses the others at the write end so this one never sees them.
 	Phase(seq uint64, id domain.GenerationID, phase domain.GenerationPhase) error
+
+	// MarginOpDispatched is one AppendMarginOpDispatched record: core §7.1's
+	// `MarginOp` as it was fsynced before the venue call.
+	//
+	// The whole record is handed over rather than its fields, unlike every method
+	// above, and the difference is that this one's fields are not independently
+	// meaningful: the delta, the before-state and the watermark are three parts
+	// of ONE comparison, and a visitor holding two of them can conclude nothing.
+	// domain.MarginOp.Validate is what says so, and passing the assembled value
+	// is what lets the adapter run it before the visitor ever sees the record.
+	MarginOpDispatched(seq uint64, op domain.MarginOp) error
+
+	// MarginOpResolved is one AppendMarginOpResolved record: the verdict that
+	// ended a margin op.
+	//
+	// A replay that dropped it would rebuild every resolved op as still in
+	// flight, and the two directions that fails in are the two the stored verdict
+	// exists to prevent — an ambiguity laundered by a restart, and an `Applied`
+	// re-derived into `NotApplied` once the venue's evidence window has rolled
+	// past. See MarginOpJournal.AppendMarginOpResolved.
+	MarginOpResolved(seq uint64, id domain.MarginOpID, status domain.MarginOpStatus) error
 }

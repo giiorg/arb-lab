@@ -113,6 +113,9 @@ const (
 	kindTagGenerationSpotSubmitted uint8 = 8
 	kindTagGenerationSuperseded    uint8 = 9
 	kindTagGenerationPhase         uint8 = 10
+
+	kindTagMarginOpDispatched uint8 = 11
+	kindTagMarginOpResolved   uint8 = 12
 )
 
 // Kind names, as they appear in the kind column.
@@ -148,6 +151,9 @@ const (
 	kindGenerationSpotSubmitted = "generation_spot_submitted"
 	kindGenerationSuperseded    = "generation_superseded"
 	kindGenerationPhase         = "generation_phase"
+
+	kindMarginOpDispatched = "margin_op_dispatched"
+	kindMarginOpResolved   = "margin_op_resolved"
 )
 
 // genesisHash is the prev_hash of sequence 1.
@@ -365,6 +371,57 @@ func encodeGenerationPhase(id domain.GenerationID, phase domain.GenerationPhase)
 	b = append(b, kindTagGenerationPhase)
 	b = appendString(b, string(id))
 	b = appendString(b, string(phase))
+	return b
+}
+
+// encodeMarginOpDispatched is the canonical preimage of core §7.1's `MarginOp`.
+//
+// Every field of the record is in it, and for this kind that is not the usual
+// completeness reflex: the delta, the before-state and the watermark are the
+// three inputs of ONE comparison, and a chain covering two of them would leave
+// the third alterable without the link breaking. The one whose alteration is
+// silent is the before-state — a resolution against a shifted before-state does
+// not fail, it CONCLUDES, and the conclusion it reaches is whichever verdict the
+// shift was chosen to produce.
+//
+// The asset is encoded once, and the record carries it once, because
+// domain.MarginOp.Validate requires the two amounts to share it. Two encoded
+// copies would be two fields that must agree with no rule for a replay finding
+// they do not — the shape encodeAuthorized declines for the same reason.
+func encodeMarginOpDispatched(op domain.MarginOp) []byte {
+	b := make([]byte, 0, 96)
+	b = append(b, kindTagMarginOpDispatched)
+	b = appendString(b, string(op.ID))
+	b = appendString(b, string(op.Instrument.Venue))
+	b = appendString(b, string(op.Instrument.Product))
+	b = appendString(b, op.Instrument.Symbol)
+	b = appendString(b, string(op.Instrument.Contract))
+	b = appendString(b, string(op.Delta.Asset()))
+	b = appendInt64(b, op.Delta.Mantissa())
+	b = appendInt64(b, op.BeforePosted.Mantissa())
+	b = appendInt64(b, op.Watermark.UnixNano())
+	return b
+}
+
+// encodeMarginOpResolved is the canonical preimage of a margin op's verdict.
+//
+// Structurally encodeState again — a subject followed by one length-prefixed
+// string — which is the collision the kind tag exists for, now for the fifth
+// distinct pair. It matters more here than usual because the two id spaces are
+// not the same: an order id and a margin-op id can spell the same string, so
+// without the tag a state record for order X and a resolution for margin op X
+// would hash alike.
+//
+// The verdict is inside the chain rather than merely stored beside it, and that
+// is the property the stored-verdict ruling rests on (record §81 §2a). A verdict
+// nothing covers is a verdict an edit can change, and both directions of that
+// edit are silent: an `ambiguous` flipped to `applied` lifts a §9 incident, and
+// an `applied` flipped to `not_applied` invites a top-up that already happened.
+func encodeMarginOpResolved(id domain.MarginOpID, status domain.MarginOpStatus) []byte {
+	b := make([]byte, 0, 64)
+	b = append(b, kindTagMarginOpResolved)
+	b = appendString(b, string(id))
+	b = appendString(b, string(status))
 	return b
 }
 

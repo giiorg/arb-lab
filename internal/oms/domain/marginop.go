@@ -1,0 +1,355 @@
+package domain
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
+	"github.com/giiorg/arb-lab/internal/platform/ids"
+)
+
+// This file is core §7.1's `MarginOp`: the durable record a margin top-up is
+// journaled as before it is dispatched, and the rule by which a crashed or
+// timed-out one is resolved afterwards.
+//
+// # Why a margin op needs a record at all, when an order does not
+//
+// An order carries its own identity to the venue — a client order id both sides
+// agree on — so §5.3 can ask "what happened to THIS order" and get an answer
+// keyed by the thing it asked about. A margin op has no such key on either
+// venue: Bybit's add-margin answers with a position snapshot and no operation
+// id, and Binance's `positionMargin/history` rows carry no id at all (Profiles
+// §4). So the question "did my top-up apply" cannot be asked directly, and what
+// replaces it is a BEFORE-STATE this side wrote down and a live reading taken
+// afterwards. The record is the only half of that comparison the venue does not
+// hold, which is why it is fsynced before the call rather than after it.
+//
+// # This slice is the RESOLUTION half
+//
+// Nothing here dispatches. The dispatcher — the read of the before-state, the
+// journal write, the `AddIsolatedMargin` call and §7.1's one-op-in-flight-per-
+// position serialization — is part 2 (record §81 §0), and it lands after this
+// because it is a non-idempotent external write whose ambiguous outcome must
+// have somewhere to be resolved before it may be issued at all.
+
+// MarginOpID identifies one margin operation locally. Like GenerationID and
+// ReservationID it is an opaque string minted by the caller: the venues supply
+// no identity to borrow, which is the whole reason this record exists.
+type MarginOpID string
+
+// MarginOp is §7.1's journaled margin operation — "local op ID, intended delta,
+// before-state snapshot + venue watermark".
+//
+// Every field is fixed at dispatch and none is ever amended. A margin op is not
+// a state machine with phases: it is one external write that either landed or
+// did not, and what evolves is the EVIDENCE about it, which lives at the venue.
+type MarginOp struct {
+	// ID is the local handle. It is this system's only name for the operation.
+	ID MarginOpID
+
+	// Instrument is the isolated perpetual position the margin was posted
+	// against — what a resolution re-reads.
+	Instrument ids.VenueInstrument
+
+	// Delta is the intended change to the position's posted isolated margin,
+	// SIGNED: positive adds, negative reduces.
+	//
+	// # One signed amount rather than a kind beside a magnitude
+	//
+	// Bybit's API is already this shape (`position/add-margin` takes a `margin`
+	// that adds when positive and reduces when negative), and Binance's `type`
+	// 1/2 is a rendering of the same sign. A `MarginOpKind` enum would therefore
+	// be a second home for a fact the amount carries — and, with only the adding
+	// direction having a caller, a one-member enum whose every fixture makes
+	// "this op's direction" and "the only direction" the same answer.
+	//
+	// A ZERO delta is refused by Validate. It is the one amount under which
+	// Applied and NotApplied are indistinguishable by any evidence either venue
+	// publishes, so an op that moves nothing is not an op.
+	Delta fixedpoint.Money
+
+	// BeforePosted is the position's posted isolated margin as read immediately
+	// before the call — Binance `isolatedWallet`, Bybit `positionIM`.
+	//
+	// It is the POSTED figure and not a margin balance, for the reason task
+	// #208 established from the other side: both venues' posted figures exclude
+	// unrealized PnL, so they do not move with the mark. That is what makes this
+	// evidence at all — a figure that moved with price would be confounded by
+	// exactly the rally that provoked the top-up.
+	//
+	// What still moves it is a FILL on the position, and that confound is not
+	// designed away: see Resolve.
+	BeforePosted fixedpoint.Money
+
+	// Watermark is the VENUE's clock at the instant BeforePosted was read.
+	//
+	// Venue time, never local time, and the distinction is load-bearing rather
+	// than pedantic. This instant anchors the evidence window, and the rows that
+	// window will be matched against when Binance's `positionMargin/history`
+	// half lands (record §81 §3b) are stamped by the venue. A window opened on
+	// the local clock and closed against venue-stamped rows is wrong by the
+	// calibration offset — a small, stable number that reads as correct.
+	Watermark time.Time
+}
+
+// Validate reports whether the record is one a resolution can be performed
+// against.
+//
+// The asset agreement between the delta and the before-state is checked here
+// rather than left to the first subtraction, because the two are read from
+// different places at dispatch — the delta from a top-up decision, the
+// before-state from a venue read — and a mismatch surfaces otherwise as a
+// runtime tag failure inside Resolve, one layer away from the record that
+// caused it.
+func (o MarginOp) Validate() error {
+	if o.ID == "" {
+		return ErrMarginOpIDUnset
+	}
+	if err := o.Instrument.Validate(); err != nil {
+		return fmt.Errorf("margin op %q instrument: %w", o.ID, err)
+	}
+	if !o.Instrument.Product.IsPerp() {
+		// Isolated margin is a property of a derivatives position; neither venue
+		// has a surface that would post margin against a spot holding. The same
+		// refusal ports.MarginReading makes, for the same reason: a rule enforced
+		// on one of two mirrors leaves the other holding the shape it exists to
+		// eliminate.
+		return fmt.Errorf("margin op %q on %s: %w", o.ID, o.Instrument.Symbol, ErrMarginOpNotPerp)
+	}
+	if err := o.Delta.Validate(); err != nil {
+		return fmt.Errorf("margin op %q delta: %w", o.ID, err)
+	}
+	sign, err := o.Delta.Sign()
+	if err != nil {
+		return fmt.Errorf("margin op %q delta: %w", o.ID, err)
+	}
+	if sign == 0 {
+		return fmt.Errorf("margin op %q: %w", o.ID, ErrMarginOpDeltaZero)
+	}
+	if err := o.BeforePosted.Validate(); err != nil {
+		return fmt.Errorf("margin op %q before-state: %w", o.ID, err)
+	}
+	beforeSign, err := o.BeforePosted.Sign()
+	if err != nil {
+		return fmt.Errorf("margin op %q before-state: %w", o.ID, err)
+	}
+	if beforeSign < 0 {
+		// Neither venue publishes a negative posted margin, so a negative one is
+		// a parse that read a sign off the wrong field. It fails permissively
+		// downstream: it makes every observed movement look larger than it was.
+		return fmt.Errorf("margin op %q before-state is %s: %w", o.ID, o.BeforePosted, ErrMarginOpBeforeNegative)
+	}
+	if o.Delta.Asset() != o.BeforePosted.Asset() {
+		return fmt.Errorf("margin op %q: delta in %s, before-state in %s: %w",
+			o.ID, o.Delta.Asset(), o.BeforePosted.Asset(), ErrMarginOpAssetsDisagree)
+	}
+	if o.Watermark.IsZero() {
+		// A record with no watermark cannot bound its own evidence window, so
+		// every reading of it would look arbitrarily old — which is the reading
+		// that concludes rather than waits.
+		return fmt.Errorf("margin op %q: %w", o.ID, ErrMarginOpWatermarkUnset)
+	}
+	return nil
+}
+
+// MarginOpStatus is §7.1's four-member resolution outcome.
+//
+// A string rather than an ordinal because it is JOURNALED: the log is the thing
+// a later process and a human both read, and a stored ordinal is a number whose
+// meaning lives somewhere else and shifts when a member is inserted.
+type MarginOpStatus string
+
+const (
+	// MarginOpUnresolved is the zero value and names no outcome. Validate
+	// refuses it: the alternative is a resolution that claims a verdict by
+	// omission.
+	MarginOpUnresolved MarginOpStatus = ""
+
+	// MarginOpApplied is evidence that the operation landed.
+	MarginOpApplied MarginOpStatus = "applied"
+
+	// MarginOpNotApplied is evidence that it did not, positively concluded
+	// rather than assumed from silence.
+	//
+	// It is NOT an instruction to retry. §7.1 prohibits blind delta retries
+	// outright, and the ladder above is robust to this outcome by re-reading
+	// LIVE liq distance — which is the trigger's actual input and is indifferent
+	// to whether a top-up was attempted.
+	MarginOpNotApplied MarginOpStatus = "not_applied"
+
+	// MarginOpPending is a refusal to conclude, because too little time has
+	// passed for the venue's silence to be evidence.
+	//
+	// It is the only member that is not a verdict, and it is reached from
+	// exactly one observation — see Resolve.
+	MarginOpPending MarginOpStatus = "pending"
+
+	// MarginOpAmbiguous is evidence that something happened which this system
+	// cannot attribute: §7.1's "coincident manual adjustment, position mutation,
+	// or duplicate same-amount history row inside the window".
+	//
+	// It is a FIRST-CLASS outcome and not a failure — "evidence is not causal
+	// identity" — and its consequence is stated by §7.1 and §7.5 together: new
+	// openings are blocked, safety actions continue from live liq distance, and
+	// the staged-float ledger is reconciled by explicit accounting or operator
+	// action, which is a §9 case. Nothing a re-read can lift.
+	MarginOpAmbiguous MarginOpStatus = "ambiguous"
+)
+
+// Validate refuses the zero value and any undeclared status.
+func (s MarginOpStatus) Validate() error {
+	switch s {
+	case MarginOpApplied, MarginOpNotApplied, MarginOpPending, MarginOpAmbiguous:
+		return nil
+	case MarginOpUnresolved:
+		return ErrMarginOpStatusUnset
+	}
+	return fmt.Errorf("%q: %w", string(s), ErrMarginOpStatusInvalid)
+}
+
+// String implements fmt.Stringer.
+func (s MarginOpStatus) String() string { return string(s) }
+
+// Concluded reports whether this status is a VERDICT — an answer that gets
+// written to the log and never re-derived.
+//
+// Three of the four are. MarginOpPending is not, and the asymmetry is the point:
+// journaling a pending would put a value in the log that every later reader must
+// know to ignore, which is the shape a stale record takes when somebody forgets.
+//
+// Why the verdicts are stored rather than recomputed at the next boot is the
+// argument for this method existing at all, and it has two halves that fail in
+// opposite directions. An AMBIGUOUS held only in a process's checklist dies with
+// the process, so a restart would satisfy "until the staged-float ledger is
+// explicitly reconciled" by rebooting. An APPLIED re-derived later inverts:
+// Binance's `positionMargin/history` is a windowed query over rows the venue
+// retains for a bounded time, so the same op resolves by a matching row today
+// and by that row's absence tomorrow — NotApplied, the reading under which
+// nothing happened.
+func (s MarginOpStatus) Concluded() (bool, error) {
+	switch s {
+	case MarginOpApplied, MarginOpNotApplied, MarginOpAmbiguous:
+		return true, nil
+	case MarginOpPending:
+		return false, nil
+	case MarginOpUnresolved:
+		return false, ErrMarginOpStatusUnset
+	}
+	return false, fmt.Errorf("%q: %w", string(s), ErrMarginOpStatusInvalid)
+}
+
+// Resolve concludes what happened to this operation, from the position's LIVE
+// posted margin.
+//
+// # The evidence is a delta against the journaled before-state
+//
+// live − BeforePosted is compared against Delta. On Bybit this is the entire
+// contract §7.1 states — "the `positionIM` delta vs the journaled before-state",
+// with the transaction log explicitly not to be relied on — and on Binance it is
+// the half of the contract this slice builds, the `positionMargin/history` match
+// being deferred with its cost named (record §81 §3b).
+//
+// # Pending is one branch's refusal, not a phase in front of the verdict
+//
+// The tempting shape is to ask "has the propagation bound elapsed?" first and
+// answer Pending if not. That is wrong in both directions. A movement that
+// already equals the delta is APPLIED — waiting adds nothing and delays a good
+// answer — and a movement that equals neither is AMBIGUOUS, which more time
+// cannot disambiguate either, so reporting it as "not yet" would dress a
+// standing incident as a timer. Only "nothing has moved" is an observation that
+// the passage of time can legitimately change, so it is the only one the bound
+// is consulted for.
+//
+// The bound is SM §2 step 1's propagation bound, which this repo already holds
+// as ResolutionPolicy.MaxLanding: how long after we stop waiting the venue may
+// still accept the write. It is a property of the transport, and both surfaces
+// go through the same signed client, so a second bound with its own name would
+// be one transport with two assumptions about it, free to drift apart.
+//
+// The comparison is `<`, so an op exactly at the bound CONCLUDES. A bound is a
+// statement about how long the venue may still act, and at its far edge it may
+// no longer.
+//
+// # A flat position is Ambiguous, and it outranks every other branch
+//
+// held false means the venue reports no position on this instrument, so the
+// subject the margin was posted against is gone and the before/after difference
+// has no meaning: closing a position returns its isolated margin whether or not
+// the top-up landed first. It outranks the bound because waiting cannot restore
+// a closed position's evidence, and it outranks the arithmetic because there is
+// no live posted margin to difference.
+//
+// The tempting answer — the position is gone, so nothing is owed — is a claim
+// about the staged-float ledger wearing an evidence answer, and that ledger is
+// precisely what §7.1 says must be reconciled explicitly.
+//
+// # now must be on the SAME clock as Watermark
+//
+// Venue time. Nothing here can check it, so it is stated: the caller reads
+// clock.ServerNow(instrument.Venue), and passing a local instant makes the
+// elapsed interval wrong by the calibration offset in whichever direction the
+// host drifts.
+//
+// # Every error return is a WIRING defect
+//
+// A malformed record, a live reading in the wrong asset, a non-positive bound.
+// Nothing a venue can cause reaches the error channel — the venue's answers are
+// all statuses, LiqMonitor's rule one type over, and for the same reason: this
+// section attaches a consequence to not knowing, and an error a caller logs and
+// moves past has silently lifted it.
+func (o MarginOp) Resolve(live fixedpoint.Money, held bool, now time.Time, bound time.Duration) (MarginOpStatus, error) {
+	if err := o.Validate(); err != nil {
+		return MarginOpUnresolved, err
+	}
+	if bound <= 0 {
+		return MarginOpUnresolved, fmt.Errorf("margin op %q: bound %v: %w", o.ID, bound, ErrMarginOpBoundNotPositive)
+	}
+	if now.IsZero() {
+		return MarginOpUnresolved, fmt.Errorf("margin op %q: %w", o.ID, ErrMarginOpResolutionInstantUnset)
+	}
+	if !held {
+		return MarginOpAmbiguous, nil
+	}
+
+	if err := live.Validate(); err != nil {
+		return MarginOpUnresolved, fmt.Errorf("margin op %q live posted margin: %w", o.ID, err)
+	}
+	if live.Asset() != o.BeforePosted.Asset() {
+		return MarginOpUnresolved, fmt.Errorf("margin op %q: live posted margin in %s, before-state in %s: %w",
+			o.ID, live.Asset(), o.BeforePosted.Asset(), ErrMarginOpAssetsDisagree)
+	}
+	moved, err := live.Sub(o.BeforePosted)
+	if err != nil {
+		return MarginOpUnresolved, fmt.Errorf("margin op %q: %w", o.ID, err)
+	}
+
+	// Exact equality, and inexactness is Ambiguous rather than Applied. Both
+	// venues apply the amount that was asked for — a margin op is a transfer of
+	// a stated quantity, not a computation the venue performs — so a near miss
+	// is a second mover inside the window rather than rounding.
+	cmp, err := moved.Cmp(o.Delta)
+	if err != nil {
+		return MarginOpUnresolved, fmt.Errorf("margin op %q: %w", o.ID, err)
+	}
+	if cmp == 0 {
+		return MarginOpApplied, nil
+	}
+
+	movedSign, err := moved.Sign()
+	if err != nil {
+		return MarginOpUnresolved, fmt.Errorf("margin op %q: %w", o.ID, err)
+	}
+	if movedSign == 0 {
+		if now.Sub(o.Watermark) < bound {
+			return MarginOpPending, nil
+		}
+		return MarginOpNotApplied, nil
+	}
+
+	// The margin moved, and by something that is not what this op asked for.
+	// §7.1's three named causes all land here: a coincident manual adjustment, a
+	// position mutation (a fill moves the posted figure too, which is the
+	// confound this evidence cannot design away), and — once Binance's history
+	// half lands — a duplicate same-amount row.
+	return MarginOpAmbiguous, nil
+}

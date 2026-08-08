@@ -45,6 +45,7 @@ type Reconciler struct {
 	join      *Joiner
 	resolve   *Resolver
 	reinstate *Reinstater
+	marginOps *MarginOpResolver
 	look      SecondLook
 }
 
@@ -99,7 +100,17 @@ func (l SecondLook) validate() error {
 // (ErrGenerationRestoreMissing), because reporting the gate satisfied would
 // report §7.5's ledger rebuilt over a ledger nothing touched — which is the
 // FM-5-shaped hole the gate exists to hold.
-func NewReconciler(replay *Replayer, join *Joiner, resolve *Resolver, reinstate *Reinstater, look SecondLook) (*Reconciler, error) {
+//
+// The core §7.1 MARGIN-OP resolver is optional on the same pattern and for a
+// reason one degree sharper: a deployment that has never topped up a position has
+// no margin op to resolve, and until slice B3 part 2 lands NOTHING writes one, so
+// requiring it would make every binary in this repo declare a collaborator with
+// no possible work. A boot that MEETS one with no resolver wired fails by name
+// (ErrMarginOpResolveMissing) — the alternative is a process that boots clean
+// over a journaled write that may have moved real money.
+func NewReconciler(replay *Replayer, join *Joiner, resolve *Resolver, reinstate *Reinstater,
+	marginOps *MarginOpResolver, look SecondLook) (*Reconciler, error) {
+
 	if replay == nil {
 		return nil, ErrReplayerMissing
 	}
@@ -112,7 +123,10 @@ func NewReconciler(replay *Replayer, join *Joiner, resolve *Resolver, reinstate 
 	if err := look.validate(); err != nil {
 		return nil, err
 	}
-	return &Reconciler{replay: replay, join: join, resolve: resolve, reinstate: reinstate, look: look}, nil
+	return &Reconciler{
+		replay: replay, join: join, resolve: resolve,
+		reinstate: reinstate, marginOps: marginOps, look: look,
+	}, nil
 }
 
 // UnprovedOrder is one order §5.3's rule could not conclude about, and the gate
@@ -144,6 +158,11 @@ type Reconciliation struct {
 	// put back — which for a generation whose premise dissolved during the outage
 	// are different things, since the reassessment may have superseded it.
 	Reinstatement Reinstatement
+
+	// MarginOps is core §7.1's margin-op phase report, zero when the phase found
+	// nothing — which is every real boot until slice B3 part 2 gives the record a
+	// writer.
+	MarginOps MarginResolution
 
 	// Resolved is how many of Join.Absent §5.3's rule concluded about, and
 	// Unproved names the ones it could not, with the gate that refused.
@@ -258,6 +277,26 @@ func (r *Reconciler) Reconcile(c *boot.Checklist) (Reconciliation, error) {
 	// The replay's own evidence is the records, and it rebuilt everything the
 	// records can rebuild.
 	if err := c.Report(boot.GateJournalReplayed, boot.OutcomePassed); err != nil {
+		return out, err
+	}
+
+	// §7.1's in-flight MarginOp, resolved BEFORE the join and independently of it.
+	//
+	// # It runs early, and the placement is an argument rather than an ordering
+	// # convenience
+	//
+	// Every other phase below waits on something: the reinstatement needs the
+	// venue's executed quantities, the assertion needs the projection the join
+	// filled in. This one needs the log and one per-instrument margin read, and
+	// neither of those is what the join produces. Running it here means a §9
+	// accounting incident is REPORTED on a boot whose join never concluded —
+	// which is the boot most likely to be happening during the venue trouble that
+	// left the op in flight in the first place.
+	//
+	// Its evidence being independent is also why its failure does not stop the
+	// sequence: the gate carries the verdict and the picture of the account
+	// behind it still gets built.
+	if err := r.resolveMarginOps(rec, c, &out); err != nil {
 		return out, err
 	}
 
@@ -521,6 +560,64 @@ func (r *Reconciler) reinstateGenerations(rec Recovery, c *boot.Checklist, out *
 		return c.Report(boot.GateGenerationsReinstated, boot.OutcomeIncomplete)
 	}
 	return c.Report(boot.GateGenerationsReinstated, boot.OutcomePassed)
+}
+
+// resolveMarginOps is §7.5's in-flight `MarginOp` phase, reported into
+// GateMarginOpsResolved — the gate's first producer, after five slices of being
+// declared with none.
+//
+// # The empty case PASSES, and the two things it must not do are opposite
+//
+// reinstateGenerations' ruling, and it binds harder here because for now the
+// empty case is the ONLY case any real boot reaches: nothing writes a `MarginOp`
+// until part 2. Staying unreported would hold every deployment below trading for
+// ever over a record kind none of them has yet written. Reporting a FAILURE
+// would do the same and blame the venue for it.
+//
+// What makes the pass honest rather than vacuous is that the empty case is
+// distinguishable from the working case only in the fixtures — which is why the
+// suite writes records through ports.MarginOpJournal directly, and why a clean
+// run of this phase against a real journal is evidence of nothing at all.
+//
+// # An unwired resolver is a wiring defect ONLY on the boot that meets work
+//
+// SecondLook's pattern, third instance. What it must never be is a pass: a boot
+// that meets a journaled margin op with no resolver would report §7.5's
+// precondition satisfied about a non-idempotent write that may have moved real
+// money, and the log would still hold the op the next time.
+//
+// The CARRIED ambiguities are checked in this arm too, and that is the half a
+// reader would omit. An op a previous process resolved to Ambiguous constrains
+// this one — that is the whole reason the verdict is durable — so a deployment
+// that dropped the resolver from its wiring must not thereby lose the incident.
+func (r *Reconciler) resolveMarginOps(rec Recovery, c *boot.Checklist, out *Reconciliation) error {
+	if r.marginOps == nil {
+		if len(rec.InFlightMarginOps) == 0 && len(rec.AmbiguousMarginOps) == 0 {
+			return c.Report(boot.GateMarginOpsResolved, boot.OutcomePassed)
+		}
+		out.Cause = ErrMarginOpResolveMissing
+		return c.Report(boot.GateMarginOpsResolved, boot.OutcomeFailed)
+	}
+
+	if err := c.Report(boot.GateMarginOpsResolved, boot.OutcomePending); err != nil {
+		return err
+	}
+	resolution, err := r.marginOps.Resolve(rec)
+	out.MarginOps = resolution
+	if err != nil {
+		out.Cause = err
+		// A venue that would not answer, or a record that could not be resolved.
+		// OutcomeFailed rather than a ladder state, because this runs once inside
+		// a boot and the checklist is what decides next — see
+		// MarginOpResolver.Resolve.
+		//
+		// The partial resolution is kept: verdicts written before the failure are
+		// true, and re-deriving them at the next boot is what the durable verdict
+		// exists to prevent. If any of them was an ambiguity, the next boot reads
+		// it back and reports this gate blocking regardless of what happens here.
+		return c.Report(boot.GateMarginOpsResolved, boot.OutcomeFailed)
+	}
+	return c.Report(boot.GateMarginOpsResolved, resolution.Outcome())
 }
 
 // resolveAbsences runs §5.3's rule over the orders the venue's order surface did

@@ -812,13 +812,12 @@ func TestCheckJournalStorageOnAMissingDirectory(t *testing.T) {
 func TestExitClassIsNotThePosture(t *testing.T) {
 	t.Parallel()
 
-	// The four gates with no producer, which block on every run and mean
-	// nothing. GateAccountPosture LEFT this list in #198 item 7: it now has a
-	// producer here, so a blocking one is a real incompleteness and the case
-	// below asserts exactly that.
+	// The two gates with no producer, which block on every run and mean nothing.
+	// GateAccountPosture LEFT this list in #198 item 7 and GateMarginOpsResolved
+	// in #212: each now has a producer here, so a blocking one is a real
+	// incompleteness and the cases below assert exactly that.
 	structural := []boot.Gate{
-		boot.GateDeactivationsResolved,
-		boot.GateMarginOpsResolved, boot.GateWriterAuthority,
+		boot.GateDeactivationsResolved, boot.GateWriterAuthority,
 	}
 	cases := []struct {
 		name string

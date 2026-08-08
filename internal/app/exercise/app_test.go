@@ -438,12 +438,12 @@ func cleanBoot() reconcile.Report {
 		Posture: boot.PostureReconcileOnly,
 		Blocking: []boot.Gate{
 			// The gates with no producer anywhere. GateAccountPosture LEFT
-			// this list in #198 item 7 — it has a producer now, so a blocking
-			// one is a real incompleteness rather than this deployment's
-			// known shape, and leaving it here would make every case below
-			// read ExitIncomplete for a reason none of them is about.
-			boot.GateDeactivationsResolved,
-			boot.GateMarginOpsResolved, boot.GateWriterAuthority,
+			// this list in #198 item 7 and GateMarginOpsResolved in #212 —
+			// each has a producer now, so a blocking one is a real
+			// incompleteness rather than this deployment's known shape, and
+			// leaving either here would make every case below read
+			// ExitIncomplete for a reason none of them is about.
+			boot.GateDeactivationsResolved, boot.GateWriterAuthority,
 		},
 	}
 }

@@ -376,6 +376,21 @@ func (p *prefixOrders) GenerationSuperseded(uint64, domain.GenerationID, domain.
 
 func (p *prefixOrders) Phase(uint64, domain.GenerationID, domain.GenerationPhase) error { return nil }
 
+// The two core §7.1 margin-op records are no-ops for the same reason as the six
+// above, and the reason is one step stronger here: a margin op mints no order id
+// and has no legs at all. It moves collateral against a position that already
+// exists, so nothing it records could belong in a document whose content is the
+// set of orders the journal held at a mark.
+//
+// The spot baseline is a SPOT quantity, and isolated margin is a derivatives
+// surface — so even the asset totals these records touch are on the other side
+// of the wallet split §4.1 pins.
+func (p *prefixOrders) MarginOpDispatched(uint64, domain.MarginOp) error { return nil }
+
+func (p *prefixOrders) MarginOpResolved(uint64, domain.MarginOpID, domain.MarginOpStatus) error {
+	return nil
+}
+
 // Encode renders the document exactly as Write persists it. Exported because
 // the record command must print the digest of the BYTES ON DISK for the
 // operator's config pin, and a second marshalling could disagree with the

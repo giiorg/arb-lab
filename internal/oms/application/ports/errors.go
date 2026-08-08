@@ -219,4 +219,14 @@ var (
 	// LiqPriceStated. The flag is the half consumers branch on, so the number
 	// would sit unread until something copied the struct field by field.
 	ErrMarginReadingLiqPriceContradicts = errors.New("oms: margin reading states no liq price but carries one")
+
+	// ErrMarginOpStatusNotConcluded reports an attempt to journal a `pending`
+	// margin-op resolution.
+	//
+	// A pending is this system declining to answer because too little time has
+	// passed for the venue's silence to be evidence. It is a momentary condition,
+	// and an append-only log turns a momentary condition into a permanent record
+	// every later reader must know to skip. Refused at the write end, which is
+	// the last place a refusal costs nothing.
+	ErrMarginOpStatusNotConcluded = errors.New("oms: margin op resolution is not a concluded verdict")
 )

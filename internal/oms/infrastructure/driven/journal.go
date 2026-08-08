@@ -270,6 +270,33 @@ CREATE TABLE IF NOT EXISTS journal_generation_phase (
 	phase TEXT NOT NULL
 ) STRICT;
 
+-- core §7.1's MarginOp, fsynced BEFORE the venue call it describes. The
+-- instrument is carried in full because a resolution has to RE-READ it, and the
+-- op's subject column holds a MarginOpID rather than a symbol.
+--
+-- There is ONE asset column for two amounts, and that is a claim rather than a
+-- saving: domain.MarginOp.Validate requires the delta and the before-state to be
+-- in one asset, so a schema with two columns would be able to store a record
+-- that contradicts its own type. The cost is named where it lands — the port's
+-- asset check becomes unreachable from a replay, and is exercised from the
+-- application side instead.
+CREATE TABLE IF NOT EXISTS journal_margin_op_dispatched (
+	seq              INTEGER PRIMARY KEY REFERENCES journal(seq),
+	venue            TEXT NOT NULL,
+	product          TEXT NOT NULL,
+	symbol           TEXT NOT NULL,
+	contract         TEXT NOT NULL,
+	asset            TEXT NOT NULL,
+	delta_mantissa   INTEGER NOT NULL,
+	before_mantissa  INTEGER NOT NULL,
+	watermark_unix_nano INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS journal_margin_op_resolved (
+	seq    INTEGER PRIMARY KEY REFERENCES journal(seq),
+	status TEXT NOT NULL
+) STRICT;
+
 CREATE TRIGGER IF NOT EXISTS journal_no_update BEFORE UPDATE ON journal
 	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS journal_no_delete BEFORE DELETE ON journal
@@ -309,6 +336,14 @@ CREATE TRIGGER IF NOT EXISTS journal_generation_superseded_no_delete BEFORE DELE
 CREATE TRIGGER IF NOT EXISTS journal_generation_phase_no_update BEFORE UPDATE ON journal_generation_phase
 	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS journal_generation_phase_no_delete BEFORE DELETE ON journal_generation_phase
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_margin_op_dispatched_no_update BEFORE UPDATE ON journal_margin_op_dispatched
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_margin_op_dispatched_no_delete BEFORE DELETE ON journal_margin_op_dispatched
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_margin_op_resolved_no_update BEFORE UPDATE ON journal_margin_op_resolved
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_margin_op_resolved_no_delete BEFORE DELETE ON journal_margin_op_resolved
 	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
 `
 

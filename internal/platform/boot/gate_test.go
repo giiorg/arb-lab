@@ -508,7 +508,7 @@ func TestChecklistClearRefusals(t *testing.T) {
 	// states and only one of them is the zero value.
 	for _, o := range []boot.Outcome{
 		boot.OutcomeUnreported, boot.OutcomePending, boot.OutcomeFailed,
-		boot.OutcomeBlocksOpening, boot.OutcomePassed,
+		boot.OutcomeIncomplete, boot.OutcomePassed,
 	} {
 		if err := c.Report(boot.GateVenueJoined, o); err != nil {
 			t.Fatalf("Report(%s): %v", o, err)
@@ -683,6 +683,89 @@ func TestProjectionStaleWithholdsOpeningsAndLatches(t *testing.T) {
 	}
 	if err := c.Report(boot.GateNetDeltaAsserted, boot.OutcomeEvidenceUnusable); err != nil {
 		t.Errorf("escalating NeedsOperator to EvidenceUnusable = %v, want nil", err)
+	}
+}
+
+// TestAmbiguousMarginOpWithholdsOpeningsAndLatches is task #212's claim: §7.5's
+// Ambiguous MarginOp blocks new openings and only an explicit reconciliation
+// lifts it.
+//
+// Stop-opening, because §7.1 says the safety actions continue from LIVE liq
+// distance — the ladder must stay available during the incident that produced
+// the ambiguity. Latching, because §7.5 blocks openings "until the staged-float
+// ledger is explicitly reconciled" and the evidence a re-run would read is a
+// delta against a journaled before-state, which every later position mutation
+// moves further away.
+//
+// It is the mirror of TestProjectionStaleWithholdsOpeningsAndLatches, and the
+// pair is the point: two members now share the stop-opening latching cell, so
+// each one's claims have to be asserted from its own side.
+func TestAmbiguousMarginOpWithholdsOpeningsAndLatches(t *testing.T) {
+	t.Parallel()
+
+	c := newChecklistT(t, allGates()...)
+	reportAllT(t, c, boot.OutcomePassed)
+	if err := c.Report(boot.GateMarginOpsResolved, boot.OutcomeBlocksOpening); err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+
+	if got := c.Posture(); got != boot.PostureStopOpening {
+		t.Errorf("Posture() = %s, want PostureStopOpening", got)
+	}
+	if !c.Posture().Permits(boot.ActReduce) {
+		t.Error("a process holding an ambiguous margin op may not reduce exposure — " +
+			"§7.1's safety actions read live liq distance and are explicitly not blocked")
+	}
+	if c.Posture().Permits(boot.ActOpen) {
+		t.Error("openings are permitted while a margin op is unattributable")
+	}
+
+	// Every weakening report, including the one that made this finding: a fresh
+	// OutcomePassed is exactly what a later op's successful resolution would
+	// report, and under the old classification it lifted the incident.
+	for _, o := range []boot.Outcome{
+		boot.OutcomePassed, boot.OutcomePending, boot.OutcomeIncomplete, boot.OutcomeFailed,
+	} {
+		if err := c.Report(boot.GateMarginOpsResolved, o); !errors.Is(err, boot.ErrGateLatched) {
+			t.Errorf("Report(%s) over an ambiguous margin op = %v, want ErrGateLatched", o, err)
+		}
+	}
+
+	// The SAME-CELL member is refused too, and that is the half a `<=` posture
+	// comparison admits. It weakens nothing — the hold is identical — but it
+	// replaces the cause an operator reads with whichever refusal was discovered
+	// last, and the cause is the only thing the two members differ in.
+	if err := c.Report(boot.GateMarginOpsResolved, boot.OutcomeProjectionStale); !errors.Is(err, boot.ErrGateLatched) {
+		t.Errorf("Report(ProjectionStale) over an ambiguous margin op = %v, want ErrGateLatched", err)
+	}
+
+	// The repeat is honest and admitted: a boot that found an ambiguity finds it
+	// again on every attempt.
+	if err := c.Report(boot.GateMarginOpsResolved, boot.OutcomeBlocksOpening); err != nil {
+		t.Errorf("restating the same ambiguity = %v, want nil", err)
+	}
+	// And the escalation is admitted, because it is strictly more restrictive.
+	if err := c.Report(boot.GateMarginOpsResolved, boot.OutcomeNeedsOperator); err != nil {
+		t.Errorf("escalating an ambiguous margin op to NeedsOperator = %v, want nil", err)
+	}
+}
+
+// TestAmbiguousMarginOpClears pins the one thing that DOES lift it, so the latch
+// above is not mistaken for a permanent halt.
+func TestAmbiguousMarginOpClears(t *testing.T) {
+	t.Parallel()
+
+	c := newChecklistT(t, boot.GateMarginOpsResolved)
+	if err := c.Report(boot.GateMarginOpsResolved, boot.OutcomeBlocksOpening); err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+	if err := c.Clear(boot.GateMarginOpsResolved); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+	// §7.5's rule that clearance returns a gate to UNREPORTED rather than to
+	// passed: the check still has to run and succeed afterwards.
+	if got, _ := c.Outcome(boot.GateMarginOpsResolved); got != boot.OutcomeUnreported {
+		t.Errorf("outcome after Clear = %s, want OutcomeUnreported", got)
 	}
 }
 

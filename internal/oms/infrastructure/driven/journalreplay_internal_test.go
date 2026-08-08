@@ -53,6 +53,11 @@ type recordingVisitor struct {
 	// preserve.
 	genCalls []genCall
 
+	// The core §7.1 margin-op half, in order, for genCalls' reason at a third
+	// subject: the claim one chain buys here is that a resolution follows its
+	// dispatch, which a per-kind slice each would discard.
+	marginCalls []marginCall
+
 	// failAt, when positive, makes the visit of that sequence fail. It is how
 	// the "stops at the first refusal" claim is asserted rather than inferred.
 	failAt  uint64
@@ -185,6 +190,58 @@ func (v *recordingVisitor) Phase(seq uint64, id domain.GenerationID, phase domai
 	}
 	v.genCalls = append(v.genCalls, genCall{kind: kindGenerationPhase, seq: seq, id: id, phase: phase})
 	return nil
+}
+
+// marginCall is one core §7.1 margin-op record as the visitor saw it.
+//
+// A record of its own rather than more fields on genCall, because the ORDERING
+// claims genCall exists for are about SM §7's ladder — a sequence of phases on
+// one subject — and a margin op has no ladder. Folding the two would make
+// `gen(t, kind)`'s exactly-one rule span two machines, so a fixture writing one
+// of each would satisfy an assertion about either.
+type marginCall struct {
+	kind   string
+	seq    uint64
+	op     domain.MarginOp
+	id     domain.MarginOpID
+	status domain.MarginOpStatus
+}
+
+func (v *recordingVisitor) MarginOpDispatched(seq uint64, op domain.MarginOp) error {
+	if err := v.note(seq); err != nil {
+		return err
+	}
+	v.marginCalls = append(v.marginCalls, marginCall{
+		kind: kindMarginOpDispatched, seq: seq, op: op, id: op.ID,
+	})
+	return nil
+}
+
+func (v *recordingVisitor) MarginOpResolved(seq uint64, id domain.MarginOpID, status domain.MarginOpStatus) error {
+	if err := v.note(seq); err != nil {
+		return err
+	}
+	v.marginCalls = append(v.marginCalls, marginCall{
+		kind: kindMarginOpResolved, seq: seq, id: id, status: status,
+	})
+	return nil
+}
+
+// margin returns the single recorded margin call of a kind — gen's rule, and it
+// binds for the same reason: the dispatch and the resolution are the two records
+// whose confusion would be silent.
+func (v *recordingVisitor) margin(t *testing.T, kind string) marginCall {
+	t.Helper()
+	var found []marginCall
+	for _, c := range v.marginCalls {
+		if c.kind == kind {
+			found = append(found, c)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("recorded %d %s calls, want exactly 1", len(found), kind)
+	}
+	return found[0]
 }
 
 // gen returns the single recorded call of a kind, failing if there is not

@@ -56,6 +56,13 @@ type journalEntry struct {
 	qty   fixedpoint.Quantity
 	path  domain.SupersessionPath
 	phase domain.GenerationPhase
+
+	// The core §7.1 margin-op half. Unlike the generation payloads above, `op` is
+	// carried whole and DOES reach the report — an in-flight op is what the boot
+	// phase resolves from, and it cannot resolve from an id.
+	op        domain.MarginOp
+	marginID  domain.MarginOpID
+	mopStatus domain.MarginOpStatus
 }
 
 // fakeReplay is ports.JournalReplay over a scripted log.
@@ -106,6 +113,10 @@ func (f *fakeReplay) Replay(v ports.JournalVisitor) error {
 			err = v.GenerationSuperseded(e.seq, e.gen, e.path)
 		case "generation_phase":
 			err = v.Phase(e.seq, e.gen, e.phase)
+		case "margin_op_dispatched":
+			err = v.MarginOpDispatched(e.seq, e.op)
+		case "margin_op_resolved":
+			err = v.MarginOpResolved(e.seq, e.marginID, e.mopStatus)
 		default:
 			return fmt.Errorf("fake replay: entry %d has kind %q", e.seq, e.kind)
 		}
@@ -1164,5 +1175,209 @@ func TestTheFirstArbitrationToCloseALadderIsTheOneReported(t *testing.T) {
 	if got := rec.BarredLadders[0].Path; got != domain.SupersededByEmergencyClose {
 		t.Errorf("BarredLadders[0].Path = %s, want the FIRST arbitration (%s)",
 			got, domain.SupersededByEmergencyClose)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Core §7.1's margin-op records (task #212)
+// ---------------------------------------------------------------------------
+
+// replayMarginOp is one journaled margin op. The numbers differ from each other
+// for the reason the driven fixtures state: a swapped column has to be visible.
+func replayMarginOp(t *testing.T, id domain.MarginOpID) domain.MarginOp {
+	t.Helper()
+	delta, err := fixedpoint.ParseMoney("USDT", "25")
+	if err != nil {
+		t.Fatalf("ParseMoney: %v", err)
+	}
+	before, err := fixedpoint.ParseMoney("USDT", "100")
+	if err != nil {
+		t.Fatalf("ParseMoney: %v", err)
+	}
+	return domain.MarginOp{
+		ID:           id,
+		Instrument:   perp(),
+		Delta:        delta,
+		BeforePosted: before,
+		Watermark:    time.Date(2026, 8, 8, 11, 59, 30, 0, time.UTC),
+	}
+}
+
+// TestReplaySplitsMarginOpsByTheirRecordedVerdict is the two lists' claim.
+//
+// Four ops in one log, one per reachable shape, so no list can be right by
+// accident of the fixture holding only its own case:
+//
+//	unresolved  -> InFlight, because recovery must conclude it
+//	applied     -> neither, finished business
+//	not applied -> neither, likewise
+//	ambiguous   -> Ambiguous, because §7.5 blocks openings until it is reconciled
+//
+// The applied and not-applied rows are what make this a PARTITION rather than
+// "everything resolved is ambiguous": a fold written as "not in flight" would put
+// all three resolved ops in the blocking list and every boot after a successful
+// top-up would refuse to trade.
+func TestReplaySplitsMarginOpsByTheirRecordedVerdict(t *testing.T) {
+	t.Parallel()
+
+	entries := []journalEntry{
+		{seq: 1, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-INFLIGHT")},
+		{seq: 2, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-APPLIED")},
+		{seq: 3, kind: "margin_op_resolved", marginID: "MOP-APPLIED", mopStatus: domain.MarginOpApplied},
+		{seq: 4, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-NOT-APPLIED")},
+		{seq: 5, kind: "margin_op_resolved", marginID: "MOP-NOT-APPLIED", mopStatus: domain.MarginOpNotApplied},
+		{seq: 6, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-AMBIGUOUS")},
+		{seq: 7, kind: "margin_op_resolved", marginID: "MOP-AMBIGUOUS", mopStatus: domain.MarginOpAmbiguous},
+	}
+	r, _, _ := newReplayer(t, entries...)
+
+	rec, err := r.Rebuild()
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	if rec.MarginOps != 4 {
+		t.Errorf("MarginOps = %d, want 4", rec.MarginOps)
+	}
+	if len(rec.InFlightMarginOps) != 1 || rec.InFlightMarginOps[0].ID != "MOP-INFLIGHT" {
+		t.Fatalf("InFlightMarginOps = %v, want exactly MOP-INFLIGHT", rec.InFlightMarginOps)
+	}
+	if len(rec.AmbiguousMarginOps) != 1 || rec.AmbiguousMarginOps[0] != "MOP-AMBIGUOUS" {
+		t.Fatalf("AmbiguousMarginOps = %v, want exactly MOP-AMBIGUOUS", rec.AmbiguousMarginOps)
+	}
+
+	// The in-flight op is carried WHOLE, because the resolution is a comparison
+	// against its three numbers and an id would leave the phase with nothing to
+	// compare.
+	got := rec.InFlightMarginOps[0]
+	want := replayMarginOp(t, "MOP-INFLIGHT")
+	if got.Delta.Mantissa() != want.Delta.Mantissa() ||
+		got.BeforePosted.Mantissa() != want.BeforePosted.Mantissa() ||
+		!got.Watermark.Equal(want.Watermark) {
+		t.Errorf("in-flight op replayed as %+v, want the journaled record", got)
+	}
+}
+
+// TestReplayRefusesAContradictoryMarginOpLog covers the three shapes a log can
+// take that no process could have written.
+//
+// Each is refused rather than reconciled by a rule, and the errors differ so an
+// operator reading a refusing boot knows which one they have.
+func TestReplayRefusesAContradictoryMarginOpLog(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		entries []journalEntry
+		want    error
+	}{
+		{
+			// Head truncation, or two processes on one journal. The two records
+			// name two before-states for one comparison.
+			name: "one op dispatched twice",
+			entries: []journalEntry{
+				{seq: 1, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-1")},
+				{seq: 2, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-1")},
+			},
+			want: application.ErrMarginOpAlreadyDispatched,
+		},
+		{
+			// A verdict attached to nothing. Skipping it would boot clean over a
+			// §9 incident the log records.
+			name: "a verdict for an op no dispatch created",
+			entries: []journalEntry{
+				{seq: 1, kind: "margin_op_resolved", marginID: "MOP-GHOST", mopStatus: domain.MarginOpAmbiguous},
+			},
+			want: application.ErrMarginOpNotDispatched,
+		},
+		{
+			// Neither answer has a safe side: last would lift a §9 incident,
+			// first would hold one over an op a better pass concluded had applied.
+			name: "one op resolved two different ways",
+			entries: []journalEntry{
+				{seq: 1, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-1")},
+				{seq: 2, kind: "margin_op_resolved", marginID: "MOP-1", mopStatus: domain.MarginOpAmbiguous},
+				{seq: 3, kind: "margin_op_resolved", marginID: "MOP-1", mopStatus: domain.MarginOpApplied},
+			},
+			want: application.ErrMarginOpVerdictConflict,
+		},
+		{
+			// A status column nothing wrote. It must not read as any of the four.
+			name: "a verdict with no status",
+			entries: []journalEntry{
+				{seq: 1, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-1")},
+				{seq: 2, kind: "margin_op_resolved", marginID: "MOP-1"},
+			},
+			want: domain.ErrMarginOpStatusUnset,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _, _ := newReplayer(t, tc.entries...)
+			if _, err := r.Rebuild(); !errors.Is(err, tc.want) {
+				t.Fatalf("Rebuild: got %v, want %v", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestReplayCountsARestatedVerdictAsADuplicate is the other half of the conflict
+// rule, and it is where this record kind parts company with §5.3's
+// duplicate-delivery tolerance in one direction only.
+//
+// A verdict restated identically says what the log already says. It is counted
+// rather than refused, so a journal that is mostly duplicates still tells an
+// operator that something upstream is re-delivering.
+func TestReplayCountsARestatedVerdictAsADuplicate(t *testing.T) {
+	t.Parallel()
+
+	r, _, _ := newReplayer(t,
+		journalEntry{seq: 1, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-1")},
+		journalEntry{seq: 2, kind: "margin_op_resolved", marginID: "MOP-1", mopStatus: domain.MarginOpAmbiguous},
+		journalEntry{seq: 3, kind: "margin_op_resolved", marginID: "MOP-1", mopStatus: domain.MarginOpAmbiguous},
+	)
+	rec, err := r.Rebuild()
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	if rec.Duplicates != 1 {
+		t.Errorf("Duplicates = %d, want 1", rec.Duplicates)
+	}
+	// And the op is still counted once, in the list its verdict puts it in.
+	if len(rec.AmbiguousMarginOps) != 1 {
+		t.Errorf("AmbiguousMarginOps = %v, want one entry", rec.AmbiguousMarginOps)
+	}
+}
+
+// TestReplaySortsMarginOpsById varies the dimension that would otherwise make
+// "sorted" and "record order" the same answer: the ops are journaled in
+// DESCENDING id order, so a report that simply walked the log returns them
+// backwards.
+func TestReplaySortsMarginOpsById(t *testing.T) {
+	t.Parallel()
+
+	r, _, _ := newReplayer(t,
+		journalEntry{seq: 1, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-C")},
+		journalEntry{seq: 2, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-A")},
+		journalEntry{seq: 3, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-B")},
+		journalEntry{seq: 4, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-Z")},
+		journalEntry{seq: 5, kind: "margin_op_resolved", marginID: "MOP-Z", mopStatus: domain.MarginOpAmbiguous},
+		journalEntry{seq: 6, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-Y")},
+		journalEntry{seq: 7, kind: "margin_op_resolved", marginID: "MOP-Y", mopStatus: domain.MarginOpAmbiguous},
+	)
+	rec, err := r.Rebuild()
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	var inFlight []domain.MarginOpID
+	for _, op := range rec.InFlightMarginOps {
+		inFlight = append(inFlight, op.ID)
+	}
+	if len(inFlight) != 3 || inFlight[0] != "MOP-A" || inFlight[1] != "MOP-B" || inFlight[2] != "MOP-C" {
+		t.Errorf("InFlightMarginOps = %v, want A, B, C in that order", inFlight)
+	}
+	if len(rec.AmbiguousMarginOps) != 2 ||
+		rec.AmbiguousMarginOps[0] != "MOP-Y" || rec.AmbiguousMarginOps[1] != "MOP-Z" {
+		t.Errorf("AmbiguousMarginOps = %v, want Y then Z", rec.AmbiguousMarginOps)
 	}
 }

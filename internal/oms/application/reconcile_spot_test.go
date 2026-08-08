@@ -81,7 +81,11 @@ func newSpotReconcileFixture(t *testing.T, leg application.SpotLeg, wired bool, 
 	// OutcomePassed over an empty log — so the spot bracket's assertions are made
 	// against a checklist that is complete rather than one missing a required
 	// gate.
-	r, err := application.NewReconciler(replayer, joiner, resolver, nil, look)
+	// The margin-op resolver is left unwired here for the reinstatement's reason,
+	// one phase over: a spot-bracket deployment tops up no isolated position, and
+	// the phase passes over a log with no margin op — which is what keeps this
+	// fixture's checklist complete rather than short a required gate.
+	r, err := application.NewReconciler(replayer, joiner, resolver, nil, nil, look)
 	if err != nil {
 		t.Fatalf("NewReconciler: %v", err)
 	}

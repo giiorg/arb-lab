@@ -198,10 +198,41 @@ func (g Gate) String() string {
 //	                  freely re-reportable   latching
 //	halted            OutcomeFailed          OutcomeEvidenceUnusable  (F1)
 //	reconcile-only    OutcomeIncomplete      OutcomeNeedsOperator     (G1)
-//	stop-opening      OutcomeBlocksOpening   OutcomeProjectionStale   (F2)
+//	stop-opening      —                      OutcomeProjectionStale   (F2)
+//	                                         OutcomeBlocksOpening     (B3)
 //
 // with OutcomeUnreported, OutcomePending and OutcomePassed outside it: the first
 // two are PRE-verdict and the third constrains nothing.
+//
+// # The stop-opening row's left cell is EMPTY, and it was never occupied
+//
+// OutcomeBlocksOpening sat there for four slices with no producer at all, and
+// when its one declared producer arrived (§7.5's Ambiguous MarginOp, task #212)
+// it turned out to belong on the right — its own doc had been quoting the clause
+// that makes it latch since the day it was written. So the cell is not vacated;
+// it is revealed to have been empty, filled by a member that answered a
+// different question from the row it was in.
+//
+// That is the third-axis lesson turned one notch further. F2's tabulation found
+// a cell filled by PRE-VERDICT members and read it as occupied; this one was
+// filled by a member with no producer, which is the same mistake with the
+// property "does anything actually report this?" as the axis. A member is a
+// claim about a condition, and until a condition reports it the claim is
+// untested — so the table's cells are only as trustworthy as the producers
+// standing in them.
+//
+// Nothing is invented to refill it. A stop-opening refusal that a re-run may
+// legitimately lift is a coherent idea and no gate has one; the member for it
+// lands with the condition, which is this repo's standing rule and is exactly
+// what would have avoided the misplacement above.
+//
+// The right cell now holds TWO members, and that is checked rather than
+// tolerated: they agree on every property this type decides (posture, latching,
+// verdict-bearing) and differ only in CAUSE — a stale projection versus an
+// unattributable margin movement — which is what the GATE names. See the
+// observation in record §81 §1c: the two other latching members are likewise
+// named for their first producer's cause, so the next second-producer to reach
+// either has this same question to ask.
 //
 // Slice F1 found the halted row's empty cell, added the member its own producer
 // needed, and stopped — leaving the stop-opening row in exactly the state the
@@ -343,6 +374,45 @@ const (
 	// OutcomeBlocksOpening is the gate refusing new exposure while leaving
 	// safety execution available — §7.5's Ambiguous MarginOp, which blocks
 	// openings "until the staged-float ledger is explicitly reconciled".
+	//
+	// [SPEC EDIT LANDED — v0.9.62] It LATCHES, and until its first producer
+	// landed it did not. The member was declared for exactly one condition, the
+	// clause above was quoted in this comment from the day it was written, and it
+	// was nonetheless placed in the freely re-reportable column — so a later
+	// OutcomePassed on the same gate would have lifted a §9 accounting incident
+	// with nobody having looked.
+	//
+	// The confusion is traceable and it is §7.5 sorting on the wrong SCOPE. That
+	// section lists the self-clearing preconditions and names this gate among
+	// them — "a journaled MarginOp resolves through its evidence contract […] a
+	// fresh report lifts it" — which is true of the GATE and false of this
+	// OUTCOME. An op that was merely in flight at the crash does resolve itself,
+	// and that case is OutcomeIncomplete. The ambiguity is the exception §7.1
+	// states one section earlier, and latching is a property of what was
+	// reported, not of which gate reported it — which is the distinction this
+	// type's doc exists to make, arriving at the member that was placed before
+	// anything could test it.
+	//
+	// Three independent reasons, and only the third is about probability:
+	//
+	//   - both normative sentences say so. §7.1: on Ambiguous the staged-float
+	//     ledger is "reconciled by explicit accounting / operator action, a §9
+	//     case". §7.5: openings are blocked "UNTIL" that reconciliation. Neither
+	//     describes a check that re-runs.
+	//   - the checklist holds one outcome per GATE, not one per op. A process
+	//     that resolves several margin ops reports this gate several times, so
+	//     without the latch the next Passed clears the previous ambiguity — and
+	//     the live top-up path that reports one at a time is the caller that
+	//     makes this certain rather than possible.
+	//   - re-reading the evidence is not more informative, it is more confounded.
+	//     The evidence is a delta against a journaled before-state, so every
+	//     later reading includes every later mutation of the position. A freely
+	//     re-reportable outcome invites exactly the retry that cannot help.
+	//
+	// What lifts it is Clear, and across processes the durable verdict is what
+	// stops a restart laundering it — see oms/application.MarginOpResolver, its
+	// first producer, and ports.MarginOpJournal for why the verdict is stored
+	// rather than re-derived.
 	OutcomeBlocksOpening
 
 	// OutcomeProjectionStale is the gate refusing new exposure because the
@@ -451,9 +521,9 @@ func (o Outcome) posture() Posture {
 // be lifted by the next report of the same check.
 func (o Outcome) latching() bool {
 	switch o {
-	case OutcomeNeedsOperator, OutcomeEvidenceUnusable, OutcomeProjectionStale:
+	case OutcomeNeedsOperator, OutcomeEvidenceUnusable, OutcomeProjectionStale, OutcomeBlocksOpening:
 		return true
-	case OutcomeUnreported, OutcomePending, OutcomeIncomplete, OutcomeFailed, OutcomeBlocksOpening, OutcomePassed:
+	case OutcomeUnreported, OutcomePending, OutcomeIncomplete, OutcomeFailed, OutcomePassed:
 		return false
 	}
 	// An unrecognised outcome, on posture's argument: Validate refuses it at the
@@ -546,7 +616,22 @@ func (c *Checklist) Report(g Gate, o Outcome) error {
 	if !declared {
 		return fmt.Errorf("gate %s: %w", g, ErrGateUndeclared)
 	}
-	if current.latching() && !(o.latching() && o.posture() <= current.posture()) {
+	// The two admitted cases, spelled as the doc above spells them: the SAME
+	// outcome again, and a latching outcome that is STRICTLY more restrictive.
+	//
+	// The comparison used to be `o.posture() <= current.posture()`, which said
+	// the same thing only by an accident that has now expired: the three latching
+	// members had three DISTINCT postures, so equality could only hold when o and
+	// current were the same member. OutcomeBlocksOpening joining
+	// OutcomeProjectionStale on the stop-opening row is the second instance that
+	// accident was scoped by, and under `<=` it would let one latched cause be
+	// overwritten by the other — no weaker hold, but the diagnosis an operator
+	// reads replaced by whichever refusal was discovered last. That is
+	// domain.Generation.Supersede's first-cause-wins rule, and the reason is the
+	// same: the cause shown must be the one that closed the gate.
+	repeat := o == current
+	escalation := o.latching() && o.posture() < current.posture()
+	if current.latching() && !repeat && !escalation {
 		return fmt.Errorf("gate %s: %w", g, ErrGateLatched)
 	}
 	c.outcomes[g] = o

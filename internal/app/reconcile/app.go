@@ -103,17 +103,17 @@ type Report struct {
 //
 // Checklist.Posture reduces over the REQUIRED gates, which is the default-deny
 // mechanism §7.5 insists on — and this root correctly declares gates whose
-// producers live in contexts that do not exist yet (three of the nine, as of
-// #204: the deactivation re-drive, the MarginOp resolution and the writer
-// authority). So the posture is PostureReconcileOnly on a boot that found
-// nothing at all and on a boot that found a foreign order, and an exit code
-// derived from it would answer the same on both. Blocking() has the same problem
-// one layer down: it names those three on every run, so a real finding arrives
-// as one row among four.
+// producers live in contexts that do not exist yet (two of the nine, as of
+// #212: the deactivation re-drive and the writer authority). So the posture is
+// PostureReconcileOnly on a boot that found nothing at all and on a boot that
+// found a foreign order, and an exit code derived from it would answer the same
+// on both. Blocking() has the same problem one layer down: it names those two on
+// every run, so a real finding arrives as one row among three.
 //
 // The count is stated as a count of the ARM below rather than in prose alone,
-// because it has already gone stale once — #198 item 7 gave GateAccountPosture a
-// producer and moved it across, and the sentence here kept saying five.
+// because it has already gone stale twice — #198 item 7 gave GateAccountPosture
+// a producer and moved it across while the sentence here kept saying five, and
+// #212 did the same for GateMarginOpsResolved.
 //
 // What distinguishes the two is whether anything LATCHED — which is precisely
 // §7.5's own distinction between preconditions that clear themselves and ones
@@ -195,11 +195,24 @@ func (r Report) ExitClass() ExitClass {
 			// load — and a retry may lift those. A posture that was read and
 			// found wrong latches instead (OutcomeNeedsOperator) and is
 			// answered above, because §73c-3 forbids this engine repairing one.
-			boot.GateAccountPosture:
+			boot.GateAccountPosture,
+			// GateMarginOpsResolved crossed with task #212, on the instruction
+			// this arm's own comment gives. Its blocking-but-not-latched cases are
+			// both retry-liftable and neither is an incident: a venue that would
+			// not answer the margin read, and a `Pending` op whose dispatch is too
+			// recent for silence to be evidence — which is a timer, and
+			// OutcomeIncomplete's own producer story.
+			//
+			// The case that IS an incident does not arrive here. An Ambiguous op
+			// latches (boot.OutcomeBlocksOpening), so it is answered by the
+			// Latched() branch above as ExitOperator — which is what §7.1's "a §9
+			// case … explicit accounting / operator action" asks for, and what
+			// ExitIncomplete's "a retry may lift it" would have got wrong.
+			boot.GateMarginOpsResolved:
 			return ExitIncomplete
 		case boot.GateUnspecified, boot.GateDeactivationsResolved,
-			boot.GateMarginOpsResolved, boot.GateWriterAuthority:
-			// The four with no producer anywhere, named rather than defaulted
+			boot.GateWriterAuthority:
+			// The three with no producer anywhere, named rather than defaulted
 			// (§3.6 rule 10): a gate added to §7.5's roster has to choose a side
 			// here, and choosing "not ours" by falling through is how a real
 			// refusal becomes invisible.

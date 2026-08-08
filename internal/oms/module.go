@@ -765,25 +765,69 @@ func New(deps Deps) (*Module, error) {
 		return nil, errors.Join(fmt.Errorf("oms: reinstater: %w", err), journal.Close())
 	}
 
+	// §7.1's account-side read, built ONCE and shared by its two consumers.
+	//
+	// It was constructed inside the liq-monitor branch when that was the only
+	// consumer (task #210). The margin-op resolver is the second, and the two
+	// share one adapter for the reconciler's own rule three lines down: a second
+	// adapter over the same client would be a second §7.6 shed class and a second
+	// place the instrument table can be wrong, for one venue surface.
+	//
+	// The predicate is the READER rather than either consumer's own
+	// configuration, because the two want it for different reasons and a
+	// deployment can legitimately want the second without the first: monitoring
+	// liq distance is a policy choice, and resolving a margin op a previous
+	// process journaled is not.
+	var marginStatus *driven.VenueMarginStatus
+	if deps.VenueMargin != nil {
+		marginStatus, err = driven.NewVenueMarginStatus(deps.VenueMargin, deps.InstrumentAssets)
+		if err != nil {
+			return nil, errors.Join(fmt.Errorf("oms: venue margin status: %w", err), journal.Close())
+		}
+	}
+
+	// §7.5's in-flight `MarginOp` resolution (task #212), wired exactly when the
+	// venue surface its evidence comes from exists.
+	//
+	// The bound is §5.3's own MaxLanding, not a second field: it is the same
+	// question about the same transport — how long after we stop waiting the
+	// venue may still accept the write — and a margin op and an order both go
+	// through the signed client. A second configured duration would be one
+	// transport with two assumptions about it.
+	//
+	// Nil is a MEANING here and not a gap: the reconciler's phase passes on a
+	// journal holding no margin op and fails by name on one that does, which is
+	// the SecondLook pattern this root already wires twice.
+	var marginOps *application.MarginOpResolver
+	if marginStatus != nil {
+		marginOps, err = application.NewMarginOpResolver(
+			journal, marginStatus, deps.Clock, deps.Resolution.MaxLanding)
+		if err != nil {
+			return nil, errors.Join(fmt.Errorf("oms: margin op resolver: %w", err), journal.Close())
+		}
+	}
+
 	// §7.5's phases in the one order they are correct in. It holds the same use
 	// cases the fields above expose, not copies: a reconcile that ran against a
 	// second replayer would rebuild a second projection and assert the invariant
 	// over neither of them.
-	reconciler, err := application.NewReconciler(replayer, joiner, resolver, reinstater,
+	reconciler, err := application.NewReconciler(replayer, joiner, resolver, reinstater, marginOps,
 		application.SecondLook{Wait: deps.SettleWait, Settle: deps.SpotSettle})
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("oms: reconciler: %w", err), journal.Close())
 	}
 
 	// §7.1's liq-distance trigger, built exactly when a policy table says this
-	// deployment monitors something (task #210). The margin adapter is
-	// constructed here like every other venue capability; the mark port arrives
-	// already built, for the fence Deps.MarkRisk states.
+	// deployment monitors something (task #210). The mark port arrives already
+	// built, for the fence Deps.MarkRisk states.
 	var liqMonitor *application.LiqMonitor
 	if len(deps.LiqPolicies) > 0 {
-		marginStatus, err := driven.NewVenueMarginStatus(deps.VenueMargin, deps.InstrumentAssets)
-		if err != nil {
-			return nil, errors.Join(fmt.Errorf("oms: venue margin status: %w", err), journal.Close())
+		if marginStatus == nil {
+			// A policy table with no margin reader behind it. NewLiqMonitor makes
+			// the same refusal from its own side; naming it here is what keeps the
+			// diagnosis at the wiring rather than at a nil interface.
+			return nil, errors.Join(
+				fmt.Errorf("oms: liq monitor: %w", driven.ErrVenueMarginStatusReaderMissing), journal.Close())
 		}
 		liqMonitor, err = application.NewLiqMonitor(
 			deps.MarkRisk, marginStatus, deps.LiqPolicies, deps.MarkMaxAge, deps.Clock)

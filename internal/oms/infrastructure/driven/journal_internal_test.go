@@ -331,6 +331,41 @@ func oraclePreimage(t *testing.T, db *sql.DB, r replayed) []byte {
 		b = append(b, oracleStr(r.subject)...)
 		b = append(b, oracleStr(phase)...)
 		return b
+
+	case "margin_op_dispatched":
+		var venue, product, symbol, contract, asset string
+		var delta, before, watermark int64
+		err := db.QueryRow(`SELECT venue, product, symbol, contract, asset,
+			delta_mantissa, before_mantissa, watermark_unix_nano
+			FROM journal_margin_op_dispatched WHERE seq = ?`, r.seq).
+			Scan(&venue, &product, &symbol, &contract, &asset, &delta, &before, &watermark)
+		if err != nil {
+			t.Fatalf("oracle margin op dispatch at seq %d: %v", r.seq, err)
+		}
+		var b []byte
+		b = append(b, 11) // kind tag, spelled as a literal
+		b = append(b, oracleStr(r.subject)...)
+		b = append(b, oracleStr(venue)...)
+		b = append(b, oracleStr(product)...)
+		b = append(b, oracleStr(symbol)...)
+		b = append(b, oracleStr(contract)...)
+		b = append(b, oracleStr(asset)...)
+		b = append(b, oracleI64(delta)...)
+		b = append(b, oracleI64(before)...)
+		b = append(b, oracleI64(watermark)...)
+		return b
+
+	case "margin_op_resolved":
+		var status string
+		if err := db.QueryRow(`SELECT status FROM journal_margin_op_resolved WHERE seq = ?`, r.seq).
+			Scan(&status); err != nil {
+			t.Fatalf("oracle margin op resolution at seq %d: %v", r.seq, err)
+		}
+		var b []byte
+		b = append(b, 12) // kind tag, spelled as a literal
+		b = append(b, oracleStr(r.subject)...)
+		b = append(b, oracleStr(status)...)
+		return b
 	}
 
 	t.Fatalf("oracle: record at seq %d has unknown kind %q", r.seq, r.kind)

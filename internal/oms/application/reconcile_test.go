@@ -60,6 +60,12 @@ type reconcileFixture struct {
 	// Reconciler around it — the fixture's `resolver` above is the venue DOUBLE
 	// the phase reads, which is a different object and not interchangeable.
 	resolveUseCase *application.Resolver
+
+	// The core §7.1 margin-op phase's two collaborators, exposed so a test can
+	// script the venue's live posted margin and read back which verdicts were
+	// made durable.
+	marginJournal *fakeMarginOpJournal
+	marginPort    *fakeMargin
 }
 
 func newReconcileFixture(t *testing.T, now time.Time, entries ...journalEntry) *reconcileFixture {
@@ -96,7 +102,18 @@ func newReconcileFixture(t *testing.T, now time.Time, entries ...journalEntry) *
 	if err != nil {
 		t.Fatalf("NewReinstater: %v", err)
 	}
-	r, err := application.NewReconciler(replayer, joiner, resolver, reinstater, application.SecondLook{})
+	// The core §7.1 margin-op phase, wired into the standard fixture so that
+	// EVERY reconcile test runs it. Its ordinary answer is "nothing to do", which
+	// is what every real boot sees until slice B3 part 2 gives the record a
+	// writer — so the fixtures that put a record in the log are the only evidence
+	// this phase works, and they live beside this one.
+	marginJournal := &fakeMarginOpJournal{}
+	marginPort := marginFixture(t, "125", true)
+	marginOps, err := application.NewMarginOpResolver(marginJournal, marginPort, clk, marginOpTestBound)
+	if err != nil {
+		t.Fatalf("NewMarginOpResolver: %v", err)
+	}
+	r, err := application.NewReconciler(replayer, joiner, resolver, reinstater, marginOps, application.SecondLook{})
 	if err != nil {
 		t.Fatalf("NewReconciler: %v", err)
 	}
@@ -104,17 +121,22 @@ func newReconcileFixture(t *testing.T, now time.Time, entries ...journalEntry) *
 		reconciler: r, replayer: replayer, joiner: joiner, orders: orders, replay: replay,
 		joinVenue: joinVenue, positions: positions, resolver: resolveVenue, journal: journal,
 		ladder: ladder, resolveUseCase: resolver,
+		marginJournal: marginJournal, marginPort: marginPort,
 	}
 }
 
-// bootChecklist is §7.5's FOUR OMS gates. All four, always — see checklist
+// bootChecklist is §7.5's FIVE OMS gates. All five, always — see checklist
 // item 1: a fixture declaring only the gates a case happens to exercise cannot
 // tell a gate that passed from a gate nobody reported, which is the one
 // distinction the posture fold is built on.
+//
+// The count is stated as a number here and in the literal below because it has
+// gone stale once already: GateMarginOpsResolved joined with task #212 and every
+// case in this file now runs its phase.
 func bootChecklist(t *testing.T) *boot.Checklist {
 	t.Helper()
 	c, err := boot.NewChecklist(boot.GateJournalReplayed, boot.GateVenueJoined,
-		boot.GateGenerationsReinstated, boot.GateNetDeltaAsserted)
+		boot.GateGenerationsReinstated, boot.GateNetDeltaAsserted, boot.GateMarginOpsResolved)
 	if err != nil {
 		t.Fatalf("NewChecklist: %v", err)
 	}
@@ -748,10 +770,10 @@ func TestReconcilerRefusesAMissingPhase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewReplayer: %v", err)
 	}
-	if _, err := application.NewReconciler(nil, nil, nil, nil, application.SecondLook{}); !errors.Is(err, application.ErrReplayerMissing) {
+	if _, err := application.NewReconciler(nil, nil, nil, nil, nil, application.SecondLook{}); !errors.Is(err, application.ErrReplayerMissing) {
 		t.Errorf("NewReconciler(nil,...) = %v, want ErrReplayerMissing", err)
 	}
-	if _, err := application.NewReconciler(replayer, nil, nil, nil, application.SecondLook{}); !errors.Is(err, application.ErrJoinerMissing) {
+	if _, err := application.NewReconciler(replayer, nil, nil, nil, nil, application.SecondLook{}); !errors.Is(err, application.ErrJoinerMissing) {
 		t.Errorf("NewReconciler(replayer, nil, nil) = %v, want ErrJoinerMissing", err)
 	}
 }
@@ -1096,9 +1118,233 @@ func concludingJoin(t *testing.T, f *reconcileFixture, order domain.Order) {
 // which is the optional-phase shape NewReconciler admits.
 func (f *reconcileFixture) unwireReinstatement(t *testing.T) {
 	t.Helper()
-	r, err := application.NewReconciler(f.replayer, f.joiner, f.resolveUseCase, nil, application.SecondLook{})
+	r, err := application.NewReconciler(f.replayer, f.joiner, f.resolveUseCase, nil, nil, application.SecondLook{})
 	if err != nil {
 		t.Fatalf("NewReconciler: %v", err)
 	}
 	f.reconciler = r
+}
+
+// ---------------------------------------------------------------------------
+// Core §7.1's in-flight MarginOp phase (task #212)
+// ---------------------------------------------------------------------------
+
+// marginOpEntry is one journaled margin op, positioned relative to the fixture's
+// VENUE clock so the resolver's bound decides what it decides.
+func marginOpEntry(t *testing.T, seq uint64, id domain.MarginOpID, age time.Duration) journalEntry {
+	t.Helper()
+	return journalEntry{seq: seq, kind: "margin_op_dispatched", op: marginOpAged(t, id, age)}
+}
+
+// TestReconcileAnAmbiguousMarginOpWithholdsOpenings is this slice's end-to-end
+// claim: a journaled op whose evidence cannot be attributed reaches §7.5's gate
+// as a LATCHING stop-opening refusal, and the verdict is made durable.
+//
+// The three assertions are separate on purpose. The outcome is what constrains
+// this process; the LATCH is what stops a later report lifting it; the journal
+// write is what stops a RESTART lifting it. Each has its own failure mode and no
+// two of them are the same claim.
+func TestReconcileAnAmbiguousMarginOpWithholdsOpenings(t *testing.T) {
+	t.Parallel()
+
+	f := newReconcileFixture(t, joinNow, marginOpEntry(t, 1, "MOP-1", time.Hour))
+	// The venue's posted margin moved by something that is not the op's delta —
+	// §7.1's "coincident manual adjustment, position mutation".
+	f.marginPort.statuses[perp()] = marginReadingOf(t, "110")
+
+	c := bootChecklist(t)
+	got, err := f.reconciler.Reconcile(c)
+	if err != nil {
+		t.Fatalf("Reconcile = %v, want nil — a refusal is a report, not an error", err)
+	}
+
+	if o := outcomeOf(t, c, boot.GateMarginOpsResolved); o != boot.OutcomeBlocksOpening {
+		t.Fatalf("GateMarginOpsResolved = %s, want OutcomeBlocksOpening", o)
+	}
+	if !latched(t, c, boot.GateMarginOpsResolved) {
+		t.Error("an unattributable margin op did not latch — a later report would lift a §9 incident")
+	}
+	if c.Posture().Permits(boot.ActOpen) {
+		t.Error("openings are permitted over an unattributable margin op")
+	}
+	// §7.1: "safety actions continue from live liq distance". Reconcile-only
+	// would take the ladder away during the incident it exists for.
+	if !c.Posture().Permits(boot.ActReduce) {
+		t.Error("the safety ladder is barred — §7.1 keeps it available through this incident")
+	}
+
+	if len(f.marginJournal.resolved) != 1 ||
+		f.marginJournal.resolved[0].status != domain.MarginOpAmbiguous {
+		t.Fatalf("journalled %v, want one ambiguous verdict for MOP-1", f.marginJournal.resolved)
+	}
+	if got.MarginOps.Ambiguous != 1 {
+		t.Errorf("Reconciliation.MarginOps.Ambiguous = %d, want 1", got.MarginOps.Ambiguous)
+	}
+}
+
+// TestReconcileAnAppliedMarginOpPasses is the positive control for the case
+// above, and it is the one that makes the phase's refusals mean something.
+func TestReconcileAnAppliedMarginOpPasses(t *testing.T) {
+	t.Parallel()
+
+	f := newReconcileFixture(t, joinNow, marginOpEntry(t, 1, "MOP-1", time.Hour))
+	f.marginPort.statuses[perp()] = marginReadingOf(t, "125")
+
+	c := bootChecklist(t)
+	if _, err := f.reconciler.Reconcile(c); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if o := outcomeOf(t, c, boot.GateMarginOpsResolved); o != boot.OutcomePassed {
+		t.Fatalf("GateMarginOpsResolved = %s, want OutcomePassed", o)
+	}
+	if len(f.marginJournal.resolved) != 1 ||
+		f.marginJournal.resolved[0].status != domain.MarginOpApplied {
+		t.Fatalf("journalled %v, want one applied verdict", f.marginJournal.resolved)
+	}
+}
+
+// TestReconcileAnEmptyLogPassesTheMarginGate is the state every real boot is in
+// until slice B3 part 2 gives the record a writer.
+//
+// It is asserted explicitly rather than inherited from the other cases, because
+// the two ways this phase can report OutcomePassed — nothing to do, and
+// everything resolved cleanly — are indistinguishable in a checklist, and only
+// the fixtures tell them apart.
+func TestReconcileAnEmptyLogPassesTheMarginGate(t *testing.T) {
+	t.Parallel()
+
+	f := newReconcileFixture(t, joinNow)
+	c := bootChecklist(t)
+	if _, err := f.reconciler.Reconcile(c); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if o := outcomeOf(t, c, boot.GateMarginOpsResolved); o != boot.OutcomePassed {
+		t.Fatalf("GateMarginOpsResolved = %s, want OutcomePassed", o)
+	}
+	if len(f.marginJournal.resolved) != 0 {
+		t.Errorf("wrote %v over an empty log", f.marginJournal.resolved)
+	}
+}
+
+// TestReconcileACarriedAmbiguityBlocksWithNoVenueRead is the durable verdict's
+// claim at the boot layer: an ambiguity a PREVIOUS process wrote down still
+// blocks, and this boot re-derives nothing.
+//
+// The venue is scripted to answer the reading a re-derivation would call APPLIED
+// — so a phase that recomputed carried verdicts would report a clean boot here.
+func TestReconcileACarriedAmbiguityBlocksWithNoVenueRead(t *testing.T) {
+	t.Parallel()
+
+	f := newReconcileFixture(t, joinNow,
+		marginOpEntry(t, 1, "MOP-OLD", time.Hour),
+		journalEntry{seq: 2, kind: "margin_op_resolved",
+			marginID: "MOP-OLD", mopStatus: domain.MarginOpAmbiguous},
+	)
+	f.marginPort.statuses[perp()] = marginReadingOf(t, "125")
+
+	c := bootChecklist(t)
+	got, err := f.reconciler.Reconcile(c)
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if o := outcomeOf(t, c, boot.GateMarginOpsResolved); o != boot.OutcomeBlocksOpening {
+		t.Fatalf("GateMarginOpsResolved = %s, want OutcomeBlocksOpening — a restart is not a reconciliation", o)
+	}
+	if len(f.marginJournal.resolved) != 0 {
+		t.Errorf("re-wrote %v for an op whose verdict the log already holds", f.marginJournal.resolved)
+	}
+	if len(got.MarginOps.Carried) != 1 || got.MarginOps.Carried[0] != "MOP-OLD" {
+		t.Errorf("MarginOps.Carried = %v, want [MOP-OLD]", got.MarginOps.Carried)
+	}
+	if len(got.MarginOps.Resolved) != 0 {
+		t.Errorf("resolved %d ops, want 0 — the verdict was read, not recomputed", len(got.MarginOps.Resolved))
+	}
+}
+
+// TestReconcileAPendingMarginOpIsIncomplete is the fold's timer arm: an op too
+// recently dispatched for silence to be evidence is not a failure and not an
+// incident, and its outcome does NOT latch — §7.5's own self-clearing sentence,
+// which is about exactly this case.
+func TestReconcileAPendingMarginOpIsIncomplete(t *testing.T) {
+	t.Parallel()
+
+	f := newReconcileFixture(t, joinNow, marginOpEntry(t, 1, "MOP-1", time.Second))
+	f.marginPort.statuses[perp()] = marginReadingOf(t, "100")
+
+	c := bootChecklist(t)
+	if _, err := f.reconciler.Reconcile(c); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if o := outcomeOf(t, c, boot.GateMarginOpsResolved); o != boot.OutcomeIncomplete {
+		t.Fatalf("GateMarginOpsResolved = %s, want OutcomeIncomplete", o)
+	}
+	if latched(t, c, boot.GateMarginOpsResolved) {
+		t.Error("a pending margin op latched — nothing here needs operator clearance, only time")
+	}
+	if len(f.marginJournal.resolved) != 0 {
+		t.Errorf("journalled %v — a pending is not a verdict", f.marginJournal.resolved)
+	}
+}
+
+// TestReconcileAMarginOpWithNoResolverFailsByName is the optional-collaborator
+// pattern's third instance, and both arms are asserted because the pair is the
+// claim: an unwired phase over an EMPTY log passes, and over a log with work it
+// fails by name rather than reporting §7.5's precondition satisfied.
+func TestReconcileAMarginOpWithNoResolverFailsByName(t *testing.T) {
+	t.Parallel()
+
+	build := func(t *testing.T, entries ...journalEntry) (*application.Reconciler, *boot.Checklist) {
+		t.Helper()
+		f := newReconcileFixture(t, joinNow, entries...)
+		r, err := application.NewReconciler(f.replayer, f.joiner, f.resolveUseCase, nil, nil,
+			application.SecondLook{})
+		if err != nil {
+			t.Fatalf("NewReconciler: %v", err)
+		}
+		return r, bootChecklist(t)
+	}
+
+	t.Run("an empty log passes", func(t *testing.T) {
+		r, c := build(t)
+		if _, err := r.Reconcile(c); err != nil {
+			t.Fatalf("Reconcile: %v", err)
+		}
+		if o := outcomeOf(t, c, boot.GateMarginOpsResolved); o != boot.OutcomePassed {
+			t.Fatalf("GateMarginOpsResolved = %s, want OutcomePassed", o)
+		}
+	})
+
+	t.Run("an in-flight op fails by name", func(t *testing.T) {
+		r, c := build(t, marginOpEntry(t, 1, "MOP-1", time.Hour))
+		got, err := r.Reconcile(c)
+		if err != nil {
+			t.Fatalf("Reconcile: %v", err)
+		}
+		if o := outcomeOf(t, c, boot.GateMarginOpsResolved); o != boot.OutcomeFailed {
+			t.Fatalf("GateMarginOpsResolved = %s, want OutcomeFailed", o)
+		}
+		if !errors.Is(got.Cause, application.ErrMarginOpResolveMissing) {
+			t.Errorf("Cause = %v, want ErrMarginOpResolveMissing", got.Cause)
+		}
+	})
+
+	t.Run("a carried ambiguity fails by name too", func(t *testing.T) {
+		// The half a reader would omit: an unwired deployment must not thereby
+		// lose an incident a previous process recorded.
+		r, c := build(t,
+			marginOpEntry(t, 1, "MOP-OLD", time.Hour),
+			journalEntry{seq: 2, kind: "margin_op_resolved",
+				marginID: "MOP-OLD", mopStatus: domain.MarginOpAmbiguous},
+		)
+		got, err := r.Reconcile(c)
+		if err != nil {
+			t.Fatalf("Reconcile: %v", err)
+		}
+		if o := outcomeOf(t, c, boot.GateMarginOpsResolved); o != boot.OutcomeFailed {
+			t.Fatalf("GateMarginOpsResolved = %s, want OutcomeFailed", o)
+		}
+		if !errors.Is(got.Cause, application.ErrMarginOpResolveMissing) {
+			t.Errorf("Cause = %v, want ErrMarginOpResolveMissing", got.Cause)
+		}
+	})
 }

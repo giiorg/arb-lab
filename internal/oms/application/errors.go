@@ -599,6 +599,36 @@ var (
 	// the missing opening record names would be re-Reserved by nothing.
 	ErrGenerationNotOpened = errors.New("oms: journal record names a generation no opening record created")
 
+	// ErrMarginOpAlreadyDispatched reports a journal that dispatches one margin
+	// op id twice.
+	//
+	// ErrGenerationAlreadyOpened's shape at a third subject, and it is NOT §7.1's
+	// one-op-in-flight-per-POSITION rule, which is a claim about the live world
+	// and the dispatcher's to enforce. This is a claim about the log, and a log
+	// that breaks it cannot be resolved at all: the two records name two
+	// different before-states for one comparison, and nothing chooses between
+	// them.
+	ErrMarginOpAlreadyDispatched = errors.New("oms: journal dispatches one margin op twice")
+
+	// ErrMarginOpNotDispatched reports a replayed resolution naming a margin op
+	// no dispatch record created — ErrGenerationNotOpened at margin-op scope,
+	// with the same head-truncation cause and a sharper permissive failure.
+	//
+	// Skipping it would leave a verdict attached to nothing, and the verdict that
+	// matters is `ambiguous`: the process would boot clean over a §9 incident its
+	// own log records.
+	ErrMarginOpNotDispatched = errors.New("oms: journal resolves a margin op no dispatch record created")
+
+	// ErrMarginOpVerdictConflict reports one margin op resolved two different
+	// ways.
+	//
+	// Refused rather than reconciled by a rule, because neither rule has a safe
+	// side: taking the LAST lets a later `applied` lift an `ambiguous` §9
+	// incident, and taking the FIRST lets an `ambiguous` stand over an op a
+	// better-evidenced pass concluded had applied. Choosing at all would be the
+	// re-derivation the stored verdict exists to prevent.
+	ErrMarginOpVerdictConflict = errors.New("oms: journal resolves one margin op two different ways")
+
 	// ErrGenerationLegWrongProduct reports a leg dispatched as the wrong half of
 	// the cash-and-carry — a spot order presented as the perp reduction, or the
 	// reverse.
@@ -705,4 +735,27 @@ var (
 	// reinstatement that reported success having reached no ladder is a boot that
 	// cleared its gate over a ledger it never touched.
 	ErrGenerationLadderMissing = errors.New("oms: reinstatement needs the PackageDelever ladder")
+
+	// ErrMarginOpJournalMissing and ErrVenueMarginStatusMissing report a margin-op
+	// resolver constructed without one of the two halves of core §7.1's evidence
+	// comparison.
+	//
+	// Refused rather than degraded, on ErrVenueOrderIndexMissing's rule: a nil
+	// margin read would make every op unresolvable, and a nil journal would let a
+	// verdict be reached and lost — the second is worse, because the boot would
+	// report the gate satisfied and the next one would re-derive from a staler
+	// window.
+	ErrMarginOpJournalMissing   = errors.New("oms: margin op resolver has no journal")
+	ErrVenueMarginStatusMissing = errors.New("oms: margin op resolver has no venue margin-status port")
+
+	// ErrMarginOpResolveMissing reports a boot that met a journaled margin op —
+	// in flight, or already recorded ambiguous — with no resolver wired.
+	//
+	// ErrGenerationRestoreMissing's rule at a third phase: the collaborator is
+	// optional because a deployment that never tops up a position has no work for
+	// it, and its ABSENCE is a failure only on the boot that meets the condition
+	// it exists for. Reporting the gate passed instead would declare §7.5's
+	// precondition satisfied about a non-idempotent write that may have moved
+	// real money.
+	ErrMarginOpResolveMissing = errors.New("oms: journal holds a margin op and no resolver is wired")
 )

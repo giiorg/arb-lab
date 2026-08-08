@@ -192,6 +192,34 @@ type Recovery struct {
 	// foundation decision, which is the one thing SupersessionPath.ResumesLadder
 	// exists to answer. Sorted by group.
 	BarredLadders []LadderBar
+
+	// MarginOps is how many distinct core §7.1 margin operations the journal
+	// dispatched, and the two lists below are the ones that still constrain this
+	// process.
+	//
+	// # Why there are TWO lists and not one filtered one
+	//
+	// They carry different things because they need different work, and the split
+	// is the stored-verdict ruling made visible (record §81 §2a). InFlight is an
+	// op with no verdict at all: recovery must CONCLUDE it, which needs the whole
+	// record — the delta, the before-state and the watermark are three parts of
+	// one comparison. Ambiguous is an op whose verdict was already reached and
+	// written down, so there is nothing left to compute and the id is the whole
+	// of what a report needs.
+	//
+	// # The Ambiguous list is the reason the verdict is in the log at all
+	//
+	// §7.5 blocks new openings on an ambiguous margin op "until the staged-float
+	// ledger is explicitly reconciled" — a fact about the OP, which outlives the
+	// process that discovered it. Recomputed at each boot instead of read back,
+	// it would be re-derived from a posted-margin delta that has drifted further
+	// since, so a restart could conclude Applied and lift a §9 incident with
+	// nobody having looked. Read back, a restart cannot launder it.
+	//
+	// Both sorted by id, for Unresolved's reason.
+	MarginOps          int
+	InFlightMarginOps  []domain.MarginOp
+	AmbiguousMarginOps []domain.MarginOpID
 }
 
 // GenerationRecovery is one `PackageDelever` generation exactly as the journal
@@ -282,6 +310,9 @@ func (r *Replayer) Rebuild() (Recovery, error) {
 		known:  make(map[domain.GenerationID]*GenerationRecovery),
 		ended:  make(map[domain.GenerationID]bool),
 		barred: make(map[domain.HedgeGroup]domain.SupersessionPath),
+
+		marginKnown:   make(map[domain.MarginOpID]domain.MarginOp),
+		marginVerdict: make(map[domain.MarginOpID]domain.MarginOpStatus),
 	}
 	if err := r.journal.Replay(rb); err != nil {
 		return Recovery{}, fmt.Errorf("rebuild from journal: %w", err)
@@ -338,6 +369,25 @@ type rebuild struct {
 	// closed the ladder, not whichever one arrived last against a package that
 	// was already closed to it.
 	barred map[domain.HedgeGroup]domain.SupersessionPath
+
+	// marginOps is every margin operation the journal dispatched, in record
+	// order, with `marginKnown` holding the record and `marginVerdict` the status
+	// that ended it.
+	//
+	// The same two-structure shape as the generations above, and the ordered
+	// slice earns its place for the same reason: it is what makes a resolution
+	// record naming an op this walk has never seen reportable rather than
+	// silently creating one. A resolution for an unknown op is not a stale
+	// duplicate — it is a verdict about a write nothing recorded, so the record
+	// that would say what was attempted is missing from an append-only log.
+	//
+	// marginVerdict is a map to a STATUS rather than to a bool, because the two
+	// verdicts differ in what they oblige: an op resolved Ambiguous still
+	// constrains this process, and one resolved Applied or NotApplied is finished
+	// business. A liveness bool would collapse exactly that distinction.
+	marginOps     []domain.MarginOpID
+	marginKnown   map[domain.MarginOpID]domain.MarginOp
+	marginVerdict map[domain.MarginOpID]domain.MarginOpStatus
 
 	records    int
 	lastSeq    uint64
@@ -591,6 +641,69 @@ func (b *rebuild) Phase(seq uint64, id domain.GenerationID, phase domain.Generat
 	return nil
 }
 
+// MarginOpDispatched applies core §7.1's `MarginOp` record: a margin write this
+// system committed to before issuing it.
+//
+// A SECOND dispatch of the same id is refused, on GenerationOpened's rule. It is
+// worth separating from §7.1's OTHER duplicate rule, which this is not: that one
+// forbids two ops IN FLIGHT on one POSITION, and it is the dispatcher's to
+// enforce (part 2) because it is a claim about the live world. This is a claim
+// about the log — one id, one dispatch — and a log that says otherwise cannot be
+// resolved at all, because the two records would name two different before-states
+// for one comparison.
+func (b *rebuild) MarginOpDispatched(seq uint64, op domain.MarginOp) error {
+	b.seen(seq)
+	if _, ok := b.marginKnown[op.ID]; ok {
+		return fmt.Errorf("journal record %d: replay dispatch of margin op %q: %w",
+			seq, op.ID, ErrMarginOpAlreadyDispatched)
+	}
+	b.marginKnown[op.ID] = op
+	b.marginOps = append(b.marginOps, op.ID)
+	return nil
+}
+
+// MarginOpResolved applies the verdict that ended a margin op.
+//
+// # A repeat of the SAME verdict is a duplicate; a DIFFERENT one is refused
+//
+// The asymmetry is deliberate, and it is where this record kind parts company
+// with §5.3's duplicate-delivery tolerance. A restated verdict is harmless — it
+// says what the log already says — and counting it keeps this walk's duplicate
+// figure honest. Two DIFFERENT verdicts for one op is a log that verifies and
+// does not compose, and it is the exact shape the stored verdict exists to make
+// impossible: whichever one a replay picked would be a re-derivation choosing
+// between answers, which is the decision §7.1 says must not be re-made.
+//
+// The direction it would fail in has no safe side, which is why it is refused
+// rather than resolved by a rule. Taking the LAST would let a later `applied`
+// lift an `ambiguous` §9 incident; taking the FIRST would let an `ambiguous`
+// stand over an op that a later, better-evidenced pass concluded had applied.
+func (b *rebuild) MarginOpResolved(seq uint64, id domain.MarginOpID, status domain.MarginOpStatus) error {
+	b.seen(seq)
+	if err := status.Validate(); err != nil {
+		return fmt.Errorf("journal record %d: replay resolution of margin op %q: %w", seq, id, err)
+	}
+	if _, ok := b.marginKnown[id]; !ok {
+		// knownGeneration's argument at margin-op scope, and the permissive
+		// failure here is sharper: an unknown resolution silently dropped leaves
+		// a verdict — possibly an `ambiguous` blocking openings — attached to
+		// nothing, so the process would boot clean over a §9 incident the log
+		// records.
+		return fmt.Errorf("journal record %d: replay resolution of margin op %q: %w",
+			seq, id, ErrMarginOpNotDispatched)
+	}
+	if prior, ok := b.marginVerdict[id]; ok {
+		if prior != status {
+			return fmt.Errorf("journal record %d: margin op %q resolved %s and then %s: %w",
+				seq, id, prior, status, ErrMarginOpVerdictConflict)
+		}
+		b.duplicates++
+		return nil
+	}
+	b.marginVerdict[id] = status
+	return nil
+}
+
 // knownGeneration refuses a record about a generation no opening record created.
 //
 // It is the generation-scope reading of the failure reconcile.go names as "the
@@ -646,6 +759,26 @@ func (b *rebuild) report() (Recovery, error) {
 		Orders:       len(b.created),
 		Duplicates:   b.duplicates,
 		Generations:  len(b.opened),
+		MarginOps:    len(b.marginOps),
+	}
+
+	// Both margin lists are derived from the two structures rather than
+	// accumulated during the walk, on LiveGenerations' rule: an op that was
+	// dispatched and then resolved must contribute to neither, and a walk that
+	// appended as it saw records would have to remember to remove it.
+	//
+	// The Ambiguous arm is deliberately NOT written as "everything not in
+	// InFlight that is not Applied": it names the one status that constrains, so
+	// a status added later lands in neither list and shows up as a gap rather
+	// than being swept into whichever arm a negation happened to put it in.
+	for _, id := range b.marginOps {
+		status, resolved := b.marginVerdict[id]
+		switch {
+		case !resolved:
+			rec.InFlightMarginOps = append(rec.InFlightMarginOps, b.marginKnown[id])
+		case status == domain.MarginOpAmbiguous:
+			rec.AmbiguousMarginOps = append(rec.AmbiguousMarginOps, id)
+		}
 	}
 
 	// Derived from the two sets rather than accumulated during the walk, on the
@@ -697,6 +830,12 @@ func (b *rebuild) report() (Recovery, error) {
 	sort.Slice(rec.LiveGenerations, func(i, j int) bool { return rec.LiveGenerations[i].ID < rec.LiveGenerations[j].ID })
 	sort.Slice(rec.BarredLadders, func(i, j int) bool {
 		return rec.BarredLadders[i].Group.String() < rec.BarredLadders[j].Group.String()
+	})
+	sort.Slice(rec.InFlightMarginOps, func(i, j int) bool {
+		return rec.InFlightMarginOps[i].ID < rec.InFlightMarginOps[j].ID
+	})
+	sort.Slice(rec.AmbiguousMarginOps, func(i, j int) bool {
+		return rec.AmbiguousMarginOps[i] < rec.AmbiguousMarginOps[j]
 	})
 	return rec, nil
 }

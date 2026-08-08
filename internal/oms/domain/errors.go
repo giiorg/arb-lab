@@ -425,4 +425,57 @@ var (
 	// direction the comparison happened to take — so it is refused at
 	// Validate, where the message names the field rather than the arithmetic.
 	ErrFilterObservedAtUnset = errors.New("oms: trading filter observation instant unset")
+
+	// The §7.1 MarginOp record's refusals. Every one of them describes a record
+	// a resolution could not be performed against, which at boot is a process
+	// unable to say whether a top-up moved real money.
+	//
+	// ErrMarginOpIDUnset reports a record with no local handle. The venues supply
+	// no operation identity of their own (Profiles §4), so this is the only name
+	// the operation has anywhere.
+	ErrMarginOpIDUnset = errors.New("oms: margin op carries no id")
+
+	// ErrMarginOpNotPerp reports a margin op against a spot instrument. Isolated
+	// margin is a property of a derivatives position and neither venue has a
+	// surface that would post it against a spot holding.
+	ErrMarginOpNotPerp = errors.New("oms: margin op instrument has no isolated-margin surface")
+
+	// ErrMarginOpDeltaZero reports an op that moves nothing — the one amount
+	// under which Applied and NotApplied are indistinguishable by any evidence
+	// either venue publishes.
+	ErrMarginOpDeltaZero = errors.New("oms: margin op delta is zero")
+
+	// ErrMarginOpBeforeNegative reports a negative posted-margin before-state.
+	// Neither venue publishes one, so it is a parse that read a sign off the
+	// wrong field — and it fails permissively, making every observed movement
+	// look larger than it was.
+	ErrMarginOpBeforeNegative = errors.New("oms: margin op before-state posted margin is negative")
+
+	// ErrMarginOpAssetsDisagree reports a delta, a before-state and a live
+	// reading that are not all in one asset. The three are read from three
+	// places, so the mismatch is a wiring defect rather than a venue answer.
+	ErrMarginOpAssetsDisagree = errors.New("oms: margin op amounts are in different assets")
+
+	// ErrMarginOpWatermarkUnset reports a record with no venue instant. It is
+	// what bounds the evidence window, and a zero one makes every reading look
+	// arbitrarily old — the reading that concludes rather than waits.
+	ErrMarginOpWatermarkUnset = errors.New("oms: margin op carries no venue watermark")
+
+	// ErrMarginOpStatusUnset and ErrMarginOpStatusInvalid report a resolution
+	// outcome that is the zero value or is not a declared member. The first is
+	// the realistic accident — a record whose status column was never written —
+	// and it must not read as any of the four.
+	ErrMarginOpStatusUnset   = errors.New("oms: margin op status unset")
+	ErrMarginOpStatusInvalid = errors.New("oms: margin op status is not a declared value")
+
+	// ErrMarginOpBoundNotPositive reports a resolution attempted with no
+	// propagation bound. A non-positive one would conclude NotApplied the instant
+	// after dispatch, which is the answer that says a top-up did not happen while
+	// it is still landing.
+	ErrMarginOpBoundNotPositive = errors.New("oms: margin op propagation bound is not positive")
+
+	// ErrMarginOpResolutionInstantUnset reports a resolution with no instant to
+	// measure the watermark against — the zero time, which would make every op
+	// look as though it were dispatched in the future.
+	ErrMarginOpResolutionInstantUnset = errors.New("oms: margin op resolution instant unset")
 )
