@@ -1,6 +1,76 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-08, session 126): **THE `Ambiguous` MARGIN OP HAS AN END — AND §7.3 HAD ALREADY SAID WHERE TO PUT IT. DOCS v0.9.63, 29 MUTANTS / 5 REAL SURVIVORS (ALL CLOSED, ONE BY A SIGNATURE), `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO.**
+## Status (2026-08-08, session 127): **BINANCE'S ACT HISTORY LANDS — AND TWO OF #212's CORRECT RULES TURNED OUT TO BE SCOPED TO A ONE-SOURCE WORLD. DOCS v0.9.64, 22 MUTANTS / 2 REAL SURVIVORS (BOTH FIXTURE COLLAPSES IN THE NEW TESTS, BOTH CLOSED), `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
+
+**Read `docs/superpowers/specs/2026-08-08-m4-214-marginop-act-history.md` (§83)
+first** — the division of labour between the two sources, the distinction that
+inverts a verdict, the two re-derived premises, and `deltaType`.
+
+**#215 IS NOW UNBLOCKED.** #214 was the last thing in front of the dispatch path.
+
+**THE "PLUS" IS NOT A CONJUNCTION, AND EACH SOURCE GETS THE JOB IT IS GOOD AT.**
+A history row records an **act**; the posted delta is a **live quantity every
+fill moves**. So: **the history is the only thing that can conclude `Applied`,
+the delta is the only thing that can conclude `NotApplied`, and disagreement is
+`Ambiguous`.** The case this wins is the ordinary one — a partial fill inside the
+window moves the margin to a figure matching nothing and leaves a clean row.
+
+**THE DISTINCTION THE WHOLE DESIGN PROTECTS: "no act history exists" and "the
+act history returned no rows" are OPPOSITE evidence.** One observation — the
+posted margin moved by exactly the delta — is `Applied` on Bybit and `Ambiguous`
+on Binance, because there the venue was asked and said it did not perform the
+act. A `[]MarginAct` whose nil means "no rows" makes the value a forgetful caller
+produces mean the reading that **blocks openings until an operator clears it**.
+Hence a three-state unexported enum whose zero is refused by name, two
+constructors, `ports.VenueMarginActs` returning the **domain type whole** (the
+one read port that does — the ACL mirrors exist for an import rule that does not
+apply here), a **required** act port on the resolver, and `Deps.VenueMarginActs`
+as its own field rather than a type assertion on `VenueMargin`.
+
+**COMPOSING BROKE TWO PREMISES #212 HAD DISCHARGED CORRECTLY.** (i) A **flat**
+position no longer outranks everything: that rule's argument was about the
+DELTA's evidence, and a venue that recorded the act recorded it whether or not
+the position closed afterwards. (ii) The propagation bound now guards the
+**history's SILENCE** rather than the margin's stillness — "no row yet" is also
+an observation time can change, and it lags independently, so holding the old
+rule would have made the half built to REDUCE over-ambiguation introduce a new
+source of it. A row that HAS arrived is never held for the bound.
+
+**§7.1's STATED MATCH IS MISSING A COMPONENT, AND §4.1 ALREADY IMPLIED IT.** The
+section says *symbol + type + amount + time-window*, silent about WHY the margin
+moved — while §4.1 reads `isAutoAddMargin` per configured symbol **precisely
+because the venue can add margin on its own**. The row shape is now verified
+**verbatim** (from the spec-generated connector's own mocked response, since the
+doc site answers a fetcher with a WAF challenge) and carries a seventh field,
+`deltaType`. Only `USER_ADJUST` is verified, so the decode is two-valued and an
+**unrecognised value is REPORTED, not dropped** — `platform/config`'s precedent
+inverted, because dropping is both the silent reading and the unsafe one.
+
+**BOTH SURVIVORS WERE THE SAME SHAPE, AND BOTH WERE IN TESTS WRITTEN THIS
+SESSION:** a fixture whose `live` figure made the mutant's fallthrough branch
+answer identically. The duplicate-row case used a **moved** margin, where
+dropping the row count sends two rows to the silent branch which also says
+`Ambiguous`; and the silent-and-flat case passed a **valid** zero where the
+resolver actually passes the **unset** `Money`, so removing the flat guard
+differenced a legal figure instead of failing.
+
+**NEW: #217** — the `positionMargin/history` weight is unverified behind the same
+WAF wall as #180 and charged at 20. Nearly free (one call per in-flight op at
+boot, zero in steady state), so it rides along with #180's browser read.
+
+**NEXT:** (1) **#215** — the dispatch path (before-state read, fsync,
+`AddIsolatedMargin`, one op in flight per position). Then B4, the loop that
+finally calls `Deleverer.Open`. **#216** (the liq monitor's unwired module
+branch) is still open and independent.
+
+**Unchanged:** three standing operator decisions ($20/$55 live test, #171's
+credential, §38f); credentials deferred; capture **PID 8495**; never rebuild over
+`bin/arblab`; `make ci` runs `-race` AND the ka staleness gate (needs node); cap
+`TLC_WORKERS` at 4; docs/i18n parity is `bun test`. **#180 is untouched.**
+
+---
+
+## Status (2026-08-08, session 126 — HISTORICAL): **THE `Ambiguous` MARGIN OP HAS AN END — AND §7.3 HAD ALREADY SAID WHERE TO PUT IT. DOCS v0.9.63, 29 MUTANTS / 5 REAL SURVIVORS (ALL CLOSED, ONE BY A SIGNATURE), `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO.**
 
 **Read `docs/superpowers/specs/2026-08-08-m4-213-marginop-clearance.md` (§82)
 first** — the home §7.3 names, the finding that is deliberately not a field, and
