@@ -1,6 +1,7 @@
 package oms_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -1096,5 +1097,133 @@ func TestAJournaledMarginOpIsResolvedByTheAssembledModule(t *testing.T) {
 	if got != boot.OutcomeBlocksOpening {
 		t.Fatalf("GateMarginOpsResolved = %s, want OutcomeBlocksOpening — "+
 			"the margin-op resolver was not wired into the assembled module", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Core §7.1's margin-op DISPATCH path, wired (task #215)
+// ---------------------------------------------------------------------------
+
+// scriptedMarginWriter is driven.VenueMarginWriter, recording what it was sent.
+type scriptedMarginWriter struct {
+	mu    sync.Mutex
+	calls []fixedpoint.Money
+}
+
+func (w *scriptedMarginWriter) AddIsolatedMargin(_ context.Context, _ ids.VenueInstrument,
+	_ venue.InstrumentAssets, amount fixedpoint.Money, _ ratelimit.Priority) error {
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.calls = append(w.calls, amount)
+	return nil
+}
+
+var _ driven.VenueMarginWriter = (*scriptedMarginWriter)(nil)
+
+// marginDispatchDeps is fullDeps plus the whole §7.1 margin surface.
+func marginDispatchDeps(t *testing.T, w *scriptedMarginWriter) oms.Deps {
+	t.Helper()
+	deps := fullDeps(t)
+	deps.VenueMargin = scriptedMargin{posted: "100"}
+	deps.VenueMarginActs = scriptedActs{}
+	deps.VenueMarginWriter = w
+	gen, err := ids.NewGenerator(deps.Clock, bytes.NewReader(bytes.Repeat([]byte{0x5A}, 4096)))
+	if err != nil {
+		t.Fatalf("NewGenerator: %v", err)
+	}
+	deps.IDs = gen
+	return deps
+}
+
+// TestTheAssembledModuleDispatchesAMarginTopUp is the wiring claim for part 2,
+// asserted end to end for the reason task #212's own wiring test states: a use
+// case tested in isolation says nothing about a root that never builds it, and a
+// mutation removing this branch would otherwise survive every test in the tree.
+//
+// What it asserts beyond "the field is non-nil" is the ORDER, through the real
+// SQLite journal: after one dispatch the log holds the record AND the venue was
+// called, and a module built from the same journal path re-reads the record.
+func TestTheAssembledModuleDispatchesAMarginTopUp(t *testing.T) {
+	t.Parallel()
+
+	w := &scriptedMarginWriter{}
+	deps := marginDispatchDeps(t, w)
+	m := newModule(t, deps)
+
+	if m.MarginTopUp == nil {
+		t.Fatal("the module exposes no margin top-up path with a writer wired")
+	}
+
+	amount, err := fixedpoint.ParseMoney("USDT", "137.45")
+	if err != nil {
+		t.Fatalf("ParseMoney: %v", err)
+	}
+	got, err := m.MarginTopUp.Dispatch(perpInstrument(), amount)
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if got.Status != domain.MarginOpApplied {
+		t.Fatalf("Status = %s, want applied", got.Status)
+	}
+	if len(w.calls) != 1 || w.calls[0].Decimal() != "137.45" {
+		t.Fatalf("the venue saw %v, want exactly one top-up of 137.45", w.calls)
+	}
+	// The record reached the REAL journal — not a fake — which is what makes the
+	// before-state recoverable by a successor process at all.
+	if got.Op.BeforePosted.Decimal() != "100" {
+		t.Errorf("BeforePosted = %s, want the venue's posted margin 100", got.Op.BeforePosted.Decimal())
+	}
+	if !got.Journaled || got.InFlight() {
+		t.Errorf("Journaled = %v, InFlight = %v — want a durable verdict and a freed position",
+			got.Journaled, got.InFlight())
+	}
+}
+
+// TestAMarginWriterWithNoReaderIsRefused is the asymmetry in the wiring, and it
+// is the half that must NOT be permissive: a process able to move margin and
+// unable to read the before-state can never say whether it did.
+func TestAMarginWriterWithNoReaderIsRefused(t *testing.T) {
+	t.Parallel()
+
+	deps := marginDispatchDeps(t, &scriptedMarginWriter{})
+	deps.VenueMargin = nil
+	deps.VenueMarginActs = nil
+
+	if _, err := oms.New(deps); !errors.Is(err, driven.ErrVenueMarginStatusReaderMissing) {
+		t.Fatalf("New(writer, no reader) = %v, want ErrVenueMarginStatusReaderMissing", err)
+	}
+}
+
+// TestAMarginReaderWithNoWriterBuilds is the OTHER half, and it is `arblab
+// reconcile`: a boot that resolves what a previous process left in flight and
+// dispatches nothing.
+func TestAMarginReaderWithNoWriterBuilds(t *testing.T) {
+	t.Parallel()
+
+	deps := marginDispatchDeps(t, nil)
+	deps.VenueMarginWriter = nil
+	deps.IDs = nil
+
+	m := newModule(t, deps)
+	if m.MarginTopUp != nil {
+		t.Error("a deployment with no write surface was given a dispatch path")
+	}
+	if m.Reconcile == nil {
+		t.Error("the reconcile path did not survive the absence of a writer")
+	}
+}
+
+// TestAMarginWriterWithNoIDSourceIsRefused: the op identity is the journal's
+// subject column, and a dispatcher that could not mint one would have to derive
+// it — every derivation collides for exactly the two ops §7.1 serializes.
+func TestAMarginWriterWithNoIDSourceIsRefused(t *testing.T) {
+	t.Parallel()
+
+	deps := marginDispatchDeps(t, &scriptedMarginWriter{})
+	deps.IDs = nil
+
+	if _, err := oms.New(deps); !errors.Is(err, application.ErrIDGeneratorMissing) {
+		t.Fatalf("New(writer, no id source) = %v, want ErrIDGeneratorMissing", err)
 	}
 }

@@ -291,6 +291,48 @@ type Deps struct {
 	// the capability question per venue through PublishesMarginActs.
 	VenueMarginActs driven.VenueMarginActReader
 
+	// VenueMarginWriter is the venue's margin TOP-UP surface — the same client a
+	// seventh time, and the only one of the seven that CHANGES anything at the
+	// venue other than an order (task #215).
+	//
+	// # Optional, where VenueMarginActs is required beside VenueMargin
+	//
+	// The two nils say different things and only one of them is a mistake. A
+	// margin reader with no act reader is a deployment whose Binance ops would
+	// resolve by Bybit's contract — a wrong verdict, so it is refused. A margin
+	// reader with no WRITER is `arblab reconcile`: a boot that resolves what a
+	// previous process left in flight and dispatches nothing, which is exactly
+	// the binary §7.5 describes and which must be able to run with no write path
+	// at all.
+	//
+	// What a nil costs a TRADING process is §7.1's Rebalance rung — the ladder
+	// can see the breach and has no remedy but to delever. The gate that would
+	// refuse a trading process in that state is the one LiqMonitor's field names
+	// as still missing; it lands with B4, and until then this field's absence is
+	// a deployment choice nothing checks.
+	VenueMarginWriter driven.VenueMarginWriter
+
+	// IDs mints the local margin-op identity (task #215).
+	//
+	// # It is an ids.Generator where every other id in this context is DERIVED
+	//
+	// The planner does not hold one: a ClientOrderID comes from
+	// ids.NewClientOrderID over (trade, leg, attempt), which is deterministic and
+	// meaningful. A MarginOpID cannot be derived that way, and the reason is
+	// §7.1's serialization rather than a shortage of components — the obvious ref
+	// is (instrument, watermark), and two ops on one instrument inside one
+	// millisecond then mint one id. That is unreachable in live trading, where a
+	// venue round-trip separates them, and trivially reachable under a stub
+	// clock; the failure it produces is not a collision warning but two dispatch
+	// records under one subject, which ports.JournalReplay refuses outright, so
+	// the process never boots again.
+	//
+	// Required only when VenueMarginWriter is set — a boot that dispatches
+	// nothing mints nothing. §3.5's parity is preserved because a Generator over
+	// an injected clock and a deterministic entropy reader is deterministic by
+	// construction; that is what the type is for.
+	IDs *ids.Generator
+
 	// MarkRisk is the mark-risk read port ALREADY BUILT — the one adapter this
 	// module takes assembled rather than constructing, and a gate is the reason.
 	//
@@ -552,6 +594,29 @@ type Module struct {
 	// monitor, and it is stated here rather than left as an absence a reader has
 	// to notice.
 	LiqMonitor *application.LiqMonitor
+
+	// MarginTopUp is core §7.1's margin-op DISPATCH path, and it is NIL on a
+	// deployment that wired no margin writer — `arblab reconcile` among them
+	// (task #215).
+	//
+	// # It is the remedy LiqMonitor's Rebalance band exists to trigger, and
+	// # nothing connects them yet
+	//
+	// Delever's field states the same gap from the escalation side: the trigger
+	// exists (task #210) and the ladder exists (task #177), and what runs between
+	// them is B4's loop. This field is the middle rung — the action §7.1 takes
+	// BEFORE delevering — so as of this slice all three of the ladder's pieces are
+	// built and none of them is driven.
+	//
+	// # A live Ambiguous is what makes GateMarginOpsResolved's latch load-bearing
+	//
+	// Until this field existed, every margin op the system could hold was one a
+	// PREVIOUS process journaled, so the gate that blocks openings on an
+	// ambiguity could only ever fire about history. A dispatch made in this
+	// process can leave an op unresolved, which the next boot resolves — possibly
+	// as the §9 incident §7.1 describes. The latch stops being a property of old
+	// logs and starts being a property of what this process just did.
+	MarginTopUp *application.MarginOpDispatcher
 
 	// journal is held only so Close can release it, and it is unexported for
 	// the same reason ports.OrderWriteRepository never becomes a field here: a
@@ -842,6 +907,37 @@ func New(deps Deps) (*Module, error) {
 		}
 	}
 
+	// §7.1's margin TOP-UP path (task #215), wired exactly when this deployment
+	// declared a write surface for it.
+	//
+	// The predicate is the WRITER rather than the margin reader, and the two
+	// refusals below are the wiring's own asymmetry made loud. A writer with no
+	// reader is refused: the before-state read is what makes a top-up resolvable
+	// at all, so that combination is a process able to move margin and unable to
+	// ever say whether it did. A reader with no writer is NOT refused — it is
+	// `arblab reconcile`, which resolves and dispatches nothing.
+	//
+	// It is deliberately built AFTER the resolver and shares its journal and its
+	// margin adapter, on the reconciler's rule: two use cases at either end of one
+	// op's life reading two adapters over one client would be two §7.6 shed
+	// classes and two places the instrument table can be wrong.
+	var marginTopUp *application.MarginOpDispatcher
+	if deps.VenueMarginWriter != nil {
+		if marginStatus == nil {
+			return nil, errors.Join(
+				fmt.Errorf("oms: margin op dispatcher: %w", driven.ErrVenueMarginStatusReaderMissing),
+				journal.Close())
+		}
+		gateway, err := driven.NewVenueMarginGateway(deps.VenueMarginWriter, deps.InstrumentAssets)
+		if err != nil {
+			return nil, errors.Join(fmt.Errorf("oms: venue margin gateway: %w", err), journal.Close())
+		}
+		marginTopUp, err = application.NewMarginOpDispatcher(journal, marginStatus, gateway, deps.Clock, deps.IDs)
+		if err != nil {
+			return nil, errors.Join(fmt.Errorf("oms: margin op dispatcher: %w", err), journal.Close())
+		}
+	}
+
 	// §7.5's phases in the one order they are correct in. It holds the same use
 	// cases the fields above expose, not copies: a reconcile that ran against a
 	// second replayer would rebuild a second projection and assert the invariant
@@ -872,24 +968,25 @@ func New(deps Deps) (*Module, error) {
 	}
 
 	return &Module{
-		Plan:       planner,
-		Dispatch:   dispatcher,
-		Execute:    executor,
-		Resolve:    resolver,
-		Classify:   classifier,
-		Recover:    replayer,
-		Join:       joiner,
-		Delever:    deleverer,
-		Reconcile:  reconciler,
-		LiqMonitor: liqMonitor,
-		journal:    journal,
-		orders:     orders,
-		reader:     reader,
-		balances:   deps.SpotBalances,
-		venue:      moduleVenue,
-		account:    deps.Account,
-		roster:     spot.Roster,
-		baselines:  baselines,
+		Plan:        planner,
+		Dispatch:    dispatcher,
+		Execute:     executor,
+		Resolve:     resolver,
+		Classify:    classifier,
+		Recover:     replayer,
+		Join:        joiner,
+		Delever:     deleverer,
+		Reconcile:   reconciler,
+		LiqMonitor:  liqMonitor,
+		MarginTopUp: marginTopUp,
+		journal:     journal,
+		orders:      orders,
+		reader:      reader,
+		balances:    deps.SpotBalances,
+		venue:       moduleVenue,
+		account:     deps.Account,
+		roster:      spot.Roster,
+		baselines:   baselines,
 	}, nil
 }
 

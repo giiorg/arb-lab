@@ -276,6 +276,41 @@ var (
 	// §7.1's Ambiguous duplicate case into a single-row Applied.
 	ErrMarginActPageFull = errors.New("venue: margin-act history page is full")
 
+	// The margin TOP-UP refusals (task #215).
+	//
+	// ErrMarginWriteCodecAbsent reports a codec that does not implement the
+	// top-up surface — a wiring defect, ErrMarginActCodecAbsent's case one
+	// surface over. It is NOT a venue capability: both venues publish this call
+	// (Profiles §4), and a venue that did not would be one §7.1's Rebalance band
+	// has no action on at all.
+	ErrMarginWriteCodecAbsent = errors.New("venue: codec does not implement the margin top-up surface")
+
+	// ErrMarginWriteAmountNotPositive reports a top-up of zero or less.
+	//
+	// Refused rather than clamped, and both absorbed readings are wrong in their
+	// own direction: a zero is a call that changes nothing while consuming an
+	// op's evidence window, and a negative is a REDUCTION rendered as an add —
+	// the opposite act, on a position whose liq distance is what provoked the
+	// call.
+	ErrMarginWriteAmountNotPositive = errors.New("venue: margin top-up amount is not positive")
+
+	// ErrMarginWriteUrgencyRoutine reports a top-up submitted under §7.6's
+	// Routine class. OrderRequest.Validate's refusal applied to its mirror: a
+	// state-changing call is not "a read that keeps the risk view live", and both
+	// neighbouring classes are a real decision rather than a rounding.
+	ErrMarginWriteUrgencyRoutine = errors.New("venue: margin top-up may not be sent at routine urgency")
+
+	// ErrMarginWriteUnacknowledged reports a venue that answered a top-up without
+	// acknowledging THIS one — Binance a different `type` or `amount`, Bybit a
+	// different `category` or `symbol`.
+	//
+	// It is reported rather than absorbed because the alternative is strictly
+	// worse for the operator: the posted-margin evidence path would see a
+	// movement matching nothing and raise §7.1's `Ambiguous`, which is a §9
+	// incident requiring an explicit accounting — for a discrepancy the venue's
+	// own response already stated in full.
+	ErrMarginWriteUnacknowledged = errors.New("venue: margin top-up acknowledgement does not describe the call made")
+
 	// ErrPositionsUnreadable reports a position answer that does not describe the
 	// enumeration requested — a row with no symbol, a second row for a symbol
 	// already answered, an envelope naming another category.

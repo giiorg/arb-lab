@@ -766,7 +766,7 @@ var (
 	ErrGenerationLadderMissing = errors.New("oms: reinstatement needs the PackageDelever ladder")
 
 	// ErrMarginOpJournalMissing and ErrVenueMarginStatusMissing report a margin-op
-	// resolver constructed without one of the two halves of core §7.1's evidence
+	// use case constructed without one of the two halves of core §7.1's evidence
 	// comparison.
 	//
 	// Refused rather than degraded, on ErrVenueOrderIndexMissing's rule: a nil
@@ -774,8 +774,15 @@ var (
 	// verdict be reached and lost — the second is worse, because the boot would
 	// report the gate satisfied and the next one would re-derive from a staler
 	// window.
-	ErrMarginOpJournalMissing   = errors.New("oms: margin op resolver has no journal")
-	ErrVenueMarginStatusMissing = errors.New("oms: margin op resolver has no venue margin-status port")
+	//
+	// Both are shared by the RESOLVER and the DISPATCHER (task #215), which is
+	// the correct scope rather than a saving: the two halves are the same two
+	// halves at either end of the op's life, and the dispatcher needs them for a
+	// sharper version of the same reason — it WRITES the before-state the
+	// resolver later reads, so a missing read port means no comparison can ever
+	// be made about a top-up that has already moved money.
+	ErrMarginOpJournalMissing   = errors.New("oms: margin op use case has no journal")
+	ErrVenueMarginStatusMissing = errors.New("oms: margin op use case has no venue margin-status port")
 
 	// ErrVenueMarginActsMissing reports a resolver wired with no act-history port
 	// (task #214).
@@ -799,4 +806,59 @@ var (
 	// precondition satisfied about a non-idempotent write that may have moved
 	// real money.
 	ErrMarginOpResolveMissing = errors.New("oms: journal holds a margin op and no resolver is wired")
+
+	// The margin-op DISPATCH refusals (task #215).
+	//
+	// ErrMarginGatewayMissing reports a dispatcher constructed with no §4
+	// MarginGateway. Refused at construction for ErrPlacerMissing's reason on a
+	// shorter fuse: the call that would discover it is §7.1's remedy for a
+	// position approaching liquidation, and a nil interface panics one frame
+	// AFTER the record claiming a top-up was attempted has been fsynced.
+	ErrMarginGatewayMissing = errors.New("oms: margin op dispatcher has no margin gateway")
+
+	// ErrIDGeneratorMissing reports a dispatcher constructed with no id source.
+	//
+	// The op identity is not decoration: it is the journal's subject column, the
+	// key a verdict attaches to, and the thing an operator names when clearing a
+	// §9 incident (task #213). A dispatcher that could not mint one would have to
+	// fall back to something derived — an instrument, an instant — and every such
+	// scheme collides for exactly the two ops §7.1's serialization is about.
+	ErrIDGeneratorMissing = errors.New("oms: margin op dispatcher has no id generator")
+
+	// ErrMarginOpInFlight reports core §7.1's serialization refusing a second
+	// top-up on a position whose first has not resolved: "at most one margin op
+	// in flight per position".
+	//
+	// It is NOT ErrMarginOpAlreadyDispatched, which is the replay's claim about
+	// the LOG (one id, two records). This one is a claim about the live world,
+	// and the confound it removes is §7.1's own: two same-amount candidates in
+	// one evidence window, which the section calls Ambiguous and which no
+	// evidence either venue publishes can tell apart.
+	//
+	// A caller reads it as a rung to skip rather than as a failure — the ladder's
+	// next escalation is a PackageDelever, which needs no second top-up to be
+	// correct.
+	ErrMarginOpInFlight = errors.New("oms: a margin op is already in flight on this position")
+
+	// ErrMarginPositionFlat reports a top-up asked of an instrument the venue
+	// reports no position on.
+	//
+	// The ladder acting on a view that went stale between the breach and the
+	// remedy: the position closed, so there is no isolated margin to post against
+	// and no before/after comparison to be about. Refused rather than treated as
+	// a no-op, because a caller told the remedy succeeded would record one that
+	// never happened — and because the same reading on the RESOLUTION side is
+	// §7.1's Ambiguous, deliberately, since a closed position returns its margin
+	// whether or not a top-up landed first.
+	ErrMarginPositionFlat = errors.New("oms: no position to post margin against")
+
+	// ErrMarginBeforeStateMismatch reports a margin read that answered about a
+	// different instrument than the one asked about.
+	//
+	// A port-contract violation, checked because the before-state is the half of
+	// §7.1's comparison the venue keeps no copy of: another position's posted
+	// margin written into this op's record makes every later resolution a
+	// difference of two unrelated figures, which concludes Ambiguous — a §9
+	// incident requiring explicit accounting, raised by a wiring defect.
+	ErrMarginBeforeStateMismatch = errors.New("oms: margin read answered about a different instrument")
 )

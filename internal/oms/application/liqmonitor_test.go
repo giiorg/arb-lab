@@ -81,11 +81,21 @@ type fakeMargin struct {
 	statuses map[ids.VenueInstrument]ports.MarginReading
 	held     map[ids.VenueInstrument]bool
 	err      error
+
+	// reads records every instrument this port was asked about, in order.
+	//
+	// The dispatch path's claim needs it and no earlier test did (task #215): a
+	// dispatcher that ran §7.1's evidence contract after a successful call would
+	// produce the same verdict on this venue and a DIFFERENT one on a venue with
+	// an act history, so the observable difference is the second read rather
+	// than the answer.
+	reads []ids.VenueInstrument
 }
 
 var _ ports.VenueMarginStatus = (*fakeMargin)(nil)
 
 func (f *fakeMargin) MarginStatus(vi ids.VenueInstrument) (ports.MarginReading, bool, error) {
+	f.reads = append(f.reads, vi)
 	if f.err != nil {
 		return ports.MarginReading{}, false, f.err
 	}

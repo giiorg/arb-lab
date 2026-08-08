@@ -24,6 +24,17 @@ type fakeMarginOpJournal struct {
 	resolved   []marginVerdictCall
 	reconciled []domain.MarginOpReconciliation
 	failOn     map[domain.MarginOpID]error
+
+	// failEvery and failDispatch are the DISPATCH path's scripts (task #215).
+	//
+	// failOn keys on an op id, which the resolver's tests can name because they
+	// build the op themselves. The dispatcher MINTS its id, so a test about its
+	// verdict write has nothing to key on — hence a script that names no
+	// subject. failDispatch is separate because the two failures sit on opposite
+	// sides of the venue call and must never be exercised together: one refuses
+	// the send, the other happens after it.
+	failEvery    error
+	failDispatch error
 }
 
 type marginVerdictCall struct {
@@ -34,11 +45,17 @@ type marginVerdictCall struct {
 var _ ports.MarginOpJournal = (*fakeMarginOpJournal)(nil)
 
 func (f *fakeMarginOpJournal) AppendMarginOpDispatched(op domain.MarginOp) error {
+	if f.failDispatch != nil {
+		return f.failDispatch
+	}
 	f.dispatched = append(f.dispatched, op)
 	return nil
 }
 
 func (f *fakeMarginOpJournal) AppendMarginOpResolved(id domain.MarginOpID, status domain.MarginOpStatus) error {
+	if f.failEvery != nil {
+		return f.failEvery
+	}
 	if err := f.failOn[id]; err != nil {
 		return err
 	}

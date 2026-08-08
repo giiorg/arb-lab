@@ -177,11 +177,22 @@ const (
 	// to whether a top-up was attempted.
 	MarginOpNotApplied MarginOpStatus = "not_applied"
 
-	// MarginOpPending is a refusal to conclude, because too little time has
-	// passed for the venue's silence to be evidence.
+	// MarginOpPending is a refusal to conclude, because too little has happened
+	// for the venue's silence to be evidence.
 	//
-	// It is the only member that is not a verdict, and it is reached from
-	// exactly one observation — see Resolve.
+	// It is the only member that is not a verdict, and it has TWO producers
+	// which reach it from different observations (task #215):
+	//
+	//	Resolve            — the evidence is silent and the propagation bound
+	//	                     has not elapsed
+	//	the DISPATCH path  — the call itself returned an effect that establishes
+	//	                     nothing, so there is no evidence yet to be silent
+	//
+	// The second was added rather than given its own member because the two say
+	// the same thing to every consumer: no verdict, nothing to journal, and the
+	// op is still in flight. A distinct "unheard" member would be a value whose
+	// only difference from this one is which layer produced it, which is a fact
+	// the journal already carries in the record's position.
 	MarginOpPending MarginOpStatus = "pending"
 
 	// MarginOpAmbiguous is evidence that something happened which this system
