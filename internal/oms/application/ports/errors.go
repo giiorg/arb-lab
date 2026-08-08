@@ -196,4 +196,27 @@ var (
 	// that the payload is UNRECOVERABLE once the phase is recorded without it,
 	// because none of the three is derivable from the order journal.
 	ErrGenerationPhaseNeedsPayload = errors.New("oms: this generation phase may not be recorded without its payload")
+
+	// ErrMarginReadingSurfaceAbsent reports a MarginReading on a spot
+	// instrument. Neither venue publishes a position surface for spot, so no
+	// adapter could have produced one — it is a fixture or a caller that built
+	// the reading directly (task #208).
+	ErrMarginReadingSurfaceAbsent = errors.New("oms: margin reading names an instrument with no position surface")
+
+	// ErrMarginReadingAssetsDisagree reports a reading whose figures are not all
+	// in one asset — the two money fields differing, or the liq price quoted in
+	// something other than the margin asset. On a linear perpetual they are the
+	// same asset, and that premise is what lets §7.1 compare them at all.
+	ErrMarginReadingAssetsDisagree = errors.New("oms: margin reading figures are not all in one asset")
+
+	// ErrMarginReadingLiqPriceNotPositive reports a stated liq price at or below
+	// zero. §7.1 takes a distance between it and the mark, and a SHORT's
+	// liquidation below its mark is a distance every formula reads as maximum
+	// headroom.
+	ErrMarginReadingLiqPriceNotPositive = errors.New("oms: margin reading liq price is not positive")
+
+	// ErrMarginReadingLiqPriceContradicts reports a liq price beside a cleared
+	// LiqPriceStated. The flag is the half consumers branch on, so the number
+	// would sit unread until something copied the struct field by field.
+	ErrMarginReadingLiqPriceContradicts = errors.New("oms: margin reading states no liq price but carries one")
 )

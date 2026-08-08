@@ -250,6 +250,15 @@ type OrderCodec interface {
 	// venue whose spot balances cannot be read is not a venue this system may
 	// hold a spot leg on.
 	SpotBalanceCodec
+
+	// MarginStatusCodec is the per-position margin surface (task #208),
+	// embedded on the same argument's risk half: §7.1 recomputes liq distance
+	// on every mark update and every margin event, and escalates to a
+	// PackageDelever when the top-up path fails — "it re-queries margin +
+	// position first". A venue whose margin status cannot be read is one whose
+	// perpetual short this system cannot keep a liquidation trigger on, so a
+	// separate interface would model a venue it may short but not monitor.
+	MarginStatusCodec
 }
 
 // OrderClient is §4's OrderGateway.Place for one venue.

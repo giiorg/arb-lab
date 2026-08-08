@@ -1,6 +1,6 @@
 # Venue Capability Profiles — Binance USDⓈ-M / Bybit V5
 
-**Status:** v0.9.54 (2026-08-07) — **§2's posture row gains a ⚠ that is an ABSENCE rather than an unknown value: every probed item in the Binance cell governs the DERIVATIVES leg, so that cell says nothing at all about a spot-only account beyond the Portfolio-Margin attestation — where the Bybit cell checks the spot leg in three places** (task #199, record §73p; filed as task #201). The asymmetry was invisible until §4.1 stopped requiring a spot-only deployment to route the futures family, because every Binance deployment previously issued the futures probes regardless. Nothing is guessed in its place: Binance spot accounts do support margin borrowing, which is the hazard Bybit's `borrowAmount==0 ∧ spotBorrow==0` rows refuse, but no endpoint in this document establishes its absence and §4.1's failure direction makes a guessed field name a halt on every Binance spot deployment. The spec-generated connector (`binance-connector-go`) is the source to try first — it answered §73o's field question and enumerates response models, which is exactly the shape this needs. Previous: v0.9.53 (2026-08-06) — **§2's second ⚠ mark is SETTLED and the answer is a defect report: `GET /fapi/v3/positionRisk` does NOT publish `isAutoAddMargin`, `GET /fapi/v1/symbolConfig` DOES, and §4.1's Binance gate was therefore unpassable on every account rather than only on flat ones** (milestone 4 slice A, task #199 item 1, record §73o). **This is the first venue fact in this document sourced from Binance's spec-generated connector** (`github.com/binance/binance-connector-go`) — raw, version-controlled, venue-published text, which is a source class this document accepts and the rendering proxies and AI summarizers it has caught misreporting numbers twice are not. §9's dated 2026-08-03 V3 transcription is **confirmed exactly** by it, so the twenty-field list was never an abbreviation. What that source could NOT answer is stated beside what it could: it carries **no weight annotations**, so **#180 is untouched**. Three edits follow: §2's posture row now names `symbolConfig` and records THREE per-symbol settings on ONE call (six checks, three probes); §4's auto-add-margin bullet is corrected in place rather than only contradicted later; §9 records that §4.1 now reads NEITHER version, which returns its V3 argument to the single consumer it was made for. One claim rests on the new source ALONE — that `symbolConfig` publishes the field — and it was landable before a credential because of its DIRECTION: if it is wrong the field decodes as absent and the gate refuses, which is what it already did.
+**Status:** v0.9.60 (2026-08-08) — **§9 gains the MARGIN fields on the two position endpoints, and "available margin" is on neither of them** (milestone 4, task #208, record §79). The endpoints were already transcribed for §7.5's enumeration; the fields §7.1's liq-distance trigger reads were not, because that consumer reads none of them. Both venues publish a maintenance requirement and a posted isolated margin (`maintMargin`/`isolatedWallet`, `positionMM`/`positionIM`); **neither publishes an available margin per position**, and the field whose NAME matches core §4's wording — Bybit's `positionBalance` — is documented `Deprecated, can refer to positionIM`. On Binance the word's real referent is `availableBalance`, at the TOP level of `GET /fapi/v3/account`. **Bybit's `liqPrice` is verbatim `""` when the liquidation price falls outside the symbol's price band** — the well-margined case, so the absence arrives on the healthy path — while Binance documents no absence spelling at all, which makes any degenerate value it sends unlabelled. Three more Bybit fields on that row are `Deprecated` and none may be read (`positionBalance`, `bustPrice`, `tradeMode`), and `positionIM`/`positionMM` each have a `…ByMp` twin documented equal today. Binance's half is sourced from the spec-generated connector again (§2's source class), which answered the field question and — as before — **carries no weight annotations, so #180 is untouched**. Previous: v0.9.54 (2026-08-07) — **§2's posture row gains a ⚠ that is an ABSENCE rather than an unknown value: every probed item in the Binance cell governs the DERIVATIVES leg, so that cell says nothing at all about a spot-only account beyond the Portfolio-Margin attestation — where the Bybit cell checks the spot leg in three places** (task #199, record §73p; filed as task #201). The asymmetry was invisible until §4.1 stopped requiring a spot-only deployment to route the futures family, because every Binance deployment previously issued the futures probes regardless. Nothing is guessed in its place: Binance spot accounts do support margin borrowing, which is the hazard Bybit's `borrowAmount==0 ∧ spotBorrow==0` rows refuse, but no endpoint in this document establishes its absence and §4.1's failure direction makes a guessed field name a halt on every Binance spot deployment. The spec-generated connector (`binance-connector-go`) is the source to try first — it answered §73o's field question and enumerates response models, which is exactly the shape this needs. Previous: v0.9.53 (2026-08-06) — **§2's second ⚠ mark is SETTLED and the answer is a defect report: `GET /fapi/v3/positionRisk` does NOT publish `isAutoAddMargin`, `GET /fapi/v1/symbolConfig` DOES, and §4.1's Binance gate was therefore unpassable on every account rather than only on flat ones** (milestone 4 slice A, task #199 item 1, record §73o). **This is the first venue fact in this document sourced from Binance's spec-generated connector** (`github.com/binance/binance-connector-go`) — raw, version-controlled, venue-published text, which is a source class this document accepts and the rendering proxies and AI summarizers it has caught misreporting numbers twice are not. §9's dated 2026-08-03 V3 transcription is **confirmed exactly** by it, so the twenty-field list was never an abbreviation. What that source could NOT answer is stated beside what it could: it carries **no weight annotations**, so **#180 is untouched**. Three edits follow: §2's posture row now names `symbolConfig` and records THREE per-symbol settings on ONE call (six checks, three probes); §4's auto-add-margin bullet is corrected in place rather than only contradicted later; §9 records that §4.1 now reads NEITHER version, which returns its V3 argument to the single consumer it was made for. One claim rests on the new source ALONE — that `symbolConfig` publishes the field — and it was landable before a credential because of its DIRECTION: if it is wrong the field decodes as absent and the gate refuses, which is what it already did.
 **Doc set:** normative core `build-spec.md` · venue facts `venue-profiles.md` · kernel machines `state-machines.md` · history/traceability `adr-history.md` · teaching companion `tutorial.md`.
 **Role:** per-venue facts + quirk matrices behind the core's venue-contract requirements (`build-spec.md` §4). **Citation coverage, stated honestly `[→ R1d-11]`:** every fact carries its verification *date* (2026-07-18 / 2026-07-19 / 2026-07-20); the **safety-kernel rows carry full source citations in §4 here**; the remaining §1/§3 rows' per-row citations live in the v0.6/v0.7 review records (`docs/review/`), not inline — treat any fact older than a venue API cycle as due for re-checking.
 
@@ -1288,3 +1288,62 @@ https://developers.binance.com/docs/derivatives/usds-margined-futures/error-code
 
 → https://bybit-exchange.github.io/docs/v5/position ·
 https://bybit-exchange.github.io/docs/v5/rate-limit
+
+### The MARGIN fields on those same rows — and "available margin" is on neither (verified 2026-08-08) `[→ task #208, record §79]`
+
+**Why this block exists.** Core §4 declares `AccountSource.MarginStatus` as *"available margin,
+maintenance, live liq price"* per instrument, and §7.1 makes it the account-side half of the
+liq-distance trigger. The endpoints are the two above; the FIELDS were never transcribed, because
+§7.5's consumer reads neither. Sources: Bybit's static docs fetched directly and quoted verbatim;
+Binance's through `github.com/binance/binance-connector-go` (§2's source-class note — the connector
+answered §73o's field question and this one, and still carries **no weight annotations**, so #180 is
+untouched again).
+
+| Concept | Binance `GET /fapi/v3/positionRisk` | Bybit `GET /v5/position/list` |
+|---|---|---|
+| liquidation price | `liquidationPrice` — no documented absence spelling | `liqPrice` — **`""` is documented and healthy**, see below |
+| maintenance margin | `maintMargin`, verbatim *"maintenance margin required"* | `positionMM`, verbatim *"Maintenance margin"* (`""` in Portfolio Margin) |
+| posted isolated margin | `isolatedWallet`, verbatim *"isolated wallet (if isolated position)"* | `positionIM`, verbatim *"Initial margin"* (`""` in Portfolio Margin) |
+| the margin's asset | `marginAsset` — **stated on the row** | not published; the settle coin is the only authority |
+| available margin | **account-level only** (`availableBalance` on `GET /fapi/v3/account`) | **not published**; `positionBalance` is `Deprecated` |
+
+- **"Available margin" is a quantity neither venue publishes PER POSITION, and the field whose NAME
+  matches it is the one Bybit retired.** Verbatim: `positionBalance` is *"Deprecated, can refer to
+  `positionIM` or `positionIMByMp` field"*. On Binance the word's real referent is
+  `availableBalance`, described by the connector as *"Available balance"* at the **top level** of the
+  account response, beside the positions array rather than inside it. Core §4 now says which figure
+  the port yields and why (v0.9.60).
+- **Bybit's `liqPrice` is EMPTY on a well-margined position, verbatim:** *"it is the real price for
+  isolated and cross positions, and keeps `""` when liqPrice <= minPrice or liqPrice >= maxPrice"*,
+  and for Portfolio Margin *"this field is empty … and no liquidation price will be provided"*. So
+  absence arrives on the HEALTHY path — a short whose liquidation sits above the symbol's price band
+  — not on a failure. Binance documents no absence spelling at all, which makes any degenerate value
+  it sends unlabelled. Read as a zero, either one puts a short's liquidation far below its mark.
+- **Three Bybit fields on this row are documented `Deprecated` and none may be read:**
+  `positionBalance` (above), `bustPrice` (*"Deprecated, always `""`"*) and `tradeMode`
+  (*"Deprecated, always `0`, check Get Account Info to know the margin mode"*).
+- **The two Binance descriptions above are `positionRisk`'s own**, and the SAME connector describes the
+  same two fields on `GET /fapi/v3/account`'s positions array in different words — *"Maintenance margin
+  requirement"* and *"Isolated wallet balance"*. Two endpoint models, one field pair, wordings that
+  corroborate rather than conflict; quoting either against the other endpoint would be a provenance
+  slip, and the richer pair is what makes `isolatedWallet` legible as a **wallet balance** rather than
+  a requirement.
+- **`positionIM`/`positionMM` have `…ByMp` twins** (*"the same value as positionIM"* / *"calculated
+  by mark price"*), so a row carries two spellings of each figure. They are documented equal today;
+  nothing here reads the twins, and a codec that picked one arbitrarily would be choosing between two
+  fields the venue may later separate.
+- **The `positionIM` pairing is not new.** §4's margin-op evidence rule already resolves a Bybit
+  top-up by *"the `positionIM` delta vs a before-state"* (§4's add-margin block above), so the read
+  side and the evidence side name one field. `isolatedWallet` is the Binance half of that pair rather
+  than `isolatedMargin`, because a top-up is the only thing that moves it — `isolatedMargin` moves
+  with price too, and evidence taken from it is confounded by the market move that provoked the op.
+- **`markPrice` is on BOTH rows and is not read from either.** The mark is §3.4's own data class with
+  its own budget and its own port (record §78); a second producer inside the account surface would
+  give §7.1's ratio a numerator and denominator from two different clocks.
+- **The Binance weight is the same unread line as the enumeration's, on its cheap arm.** #180's three
+  candidates give 5 / 5 / 1 for a symbol-BEARING call, so the charged figure is **5** — the maximum,
+  by the enumeration's own rule. The two figures are not independent: one browser read moves both.
+
+→ https://bybit-exchange.github.io/docs/v5/position ·
+https://raw.githubusercontent.com/binance/binance-connector-go/master/clients/derivativestradingusdsfutures/src/restapi/docs/PositionInformationV3ResponseInner.md ·
+https://raw.githubusercontent.com/binance/binance-connector-go/master/clients/derivativestradingusdsfutures/src/restapi/docs/AccountInformationV3Response.md

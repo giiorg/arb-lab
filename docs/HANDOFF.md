@@ -1,6 +1,93 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-08, session 122): **THE MARK IS §3.4's THIRD DATA CLASS, END TO END — §7.1's LIQ TRIGGER HAD NO INPUT IN THE SYSTEM AT ALL. DOCS v0.9.59, 16 MUTANTS / 1 REAL SURVIVOR (FIXED), `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO.**
+## Status (2026-08-08, session 123): **§4's `AccountSource.MarginStatus` IS BUILT ON BOTH VENUES — AND THE WORD §4 USED NAMES A QUANTITY NEITHER VENUE PUBLISHES PER POSITION. DOCS v0.9.60, 32 MUTANTS / 1 REAL SURVIVOR (FIXED), `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO.**
+
+**Read `docs/superpowers/specs/2026-08-08-m4-208-margin-status.md` (§79) first**
+— the three readings of "available margin", the two documented spellings of "no
+liquidation price", the re-derived V3 choice, the survivor and the comment it
+corrected.
+
+**§7.1's TRIGGER NOW HAS BOTH ITS INPUTS.** #207 landed the mark; this lands the
+account half. `MarginStatus` on both venues (Binance `GET /fapi/v3/positionRisk`
+scoped to one symbol, weight 5; Bybit `GET /v5/position/list` with
+`category`+`symbol`, request-metered), `ports.VenueMarginStatus` +
+`MarginReading`, and `driven.VenueMarginStatus` — the ACL that pins `Safety`.
+
+**THE HEADLINE: §4 LINE 331 SAID "AVAILABLE MARGIN", AND THERE IS NO SUCH
+PER-POSITION QUANTITY.** Three readings, coming apart exactly where this trigger
+fires. The account's FREE balance is real and is keyed on nothing — Binance
+publishes `availableBalance` at the **top level** of `GET /fapi/v3/account`,
+beside the positions array — and §7.2 already gives `treasury` the rescue-margin
+float. The position's MARGIN BALANCE is published by neither venue, so returning
+it would be a subtraction where the venue's computation is the definition. The
+**POSTED** figure is what both publish (`isolatedWallet` / `positionIM`), and it
+is now named for what it is: the difference is **unrealized PnL**, the quantity a
+rally moves against the short and largest at the instant the threshold breaches,
+so `posted − maintenance` is NOT headroom and §4 now says so. **The tell was the
+venue's own deprecation notice** — Bybit's `positionBalance`, the field a codec
+written from §4's word would have grabbed first, is documented `Deprecated`.
+
+**BOTH VENUES SPELL "NO LIQUIDATION PRICE" DIFFERENTLY AND BOTH SPELLINGS
+COMPUTE.** Bybit, verbatim: `liqPrice` keeps `""` when it falls outside the
+symbol's price band — the **well-margined** case, so absence arrives on the
+healthy path. Binance documents no absence spelling at all. Read as a zero,
+either one puts a **short's** liquidation far below its mark, and every distance
+formula reports maximum headroom: the trigger does not fail, it **retires**. So
+absence is a flag beside the value, the rule is stated once for both codecs, and
+an unreadable value stays an ERROR — §5.3's rule is what stops the conservative
+arm swallowing a format change.
+
+**THE V3-vs-V2 CHOICE WAS RE-DERIVED, AND LANDS ON V3 FOR A DIFFERENT REASON.**
+§7.5 needs a missing row to mean flat; a symbol-scoped call never asks that. This
+one needs a flat symbol not to answer with a **row of zeros**, which V2 gives.
+Two consequences had to be acted on: V3 answers for "position **or open
+orders**", so a resting order on a closed position yields a zero-amount row — a
+row is not a position; and Bybit returns a row "regardless of having position or
+not", so the two venues spell "no position" **oppositely** and §7.5's enumeration
+trained the reading that is wrong here.
+
+**TWO CODECS OVER ONE ANSWER, AND `markPrice` IS DECODED FROM NEITHER.** Record
+§78 §5's ruling built: the position codec's narrowing stands, so this surface
+reads the amount as a **presence test** only. The mark is on both venues' position
+rows and stays with its own class and port — a second producer would give §7.1's
+ratio a numerator and denominator from two different clocks.
+
+**THE CAMPAIGN.** 32 mutants, all caught. One real **SURVIVED**: the adapter's own
+`reading.Validate()` had no failing input, because every fixture came from the one
+implementation that cannot fail it (the reader is an **interface**). Diagnosing it
+also corrected the comment beside the call, which claimed the field-for-field copy
+made a **transposition** visible there — it does not, since both money fields are
+non-negative and in the same asset. One `NOBUILD!!` (bad sed, "declared and not
+used") and two `NO-OP!!` re-aimed. **The collapse checklist paid for itself before
+the campaign**: the zero-margin fixture it demanded is exactly what killed
+`sign < 0` → `sign <= 0`.
+
+**ALSO FIXED, AND IT WAS THIS DOC SET'S OWN CLAIM:** `adr-history.md`'s v0.9.59
+status line said §3 gained a task #207 block. It did not. Both #207's and #208's
+blocks are now in §3.
+
+**NEITHER ADAPTER IS WIRED INTO `oms.Module`, and the deferral is now doubled** —
+`markstate` and this one both wait on the same trigger: **B2's liq-distance
+monitor**, the first consumer of either. A root wiring them today drags
+`engine/state` into every OMS binary for nothing.
+
+**NEXT:** B2 (liq distance + §5.2's policy, the first consumer of both ports),
+then B3 (`MarginOp`, first producer for `GateMarginOpsResolved`), then B4 (the
+escalation that finally calls `Deleverer.Open`). Task **#209** is filed: what the
+ladder concludes from a liq price the venue declines to state — the decoder
+reports absence faithfully and deliberately does not answer it.
+
+**Unchanged:** three standing operator decisions ($20/$55 live test, #171's
+credential, §38f); credentials deferred; capture **PID 8495**; never rebuild over
+`bin/arblab`; `make ci` runs `-race` AND the ka staleness gate (needs node); cap
+`TLC_WORKERS` at 4; docs/i18n parity is `bun test`. **#180 is untouched** — the
+connector carries no weight annotations, so the charged 5 is still the
+conservative maximum over three unread candidates, and it is now the second line
+one browser read would loosen.
+
+---
+
+## Status (2026-08-08, session 122 — HISTORICAL): **THE MARK IS §3.4's THIRD DATA CLASS, END TO END — §7.1's LIQ TRIGGER HAD NO INPUT IN THE SYSTEM AT ALL. DOCS v0.9.59, 16 MUTANTS / 1 REAL SURVIVOR (FIXED), `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO.**
 
 **Read `docs/superpowers/specs/2026-08-08-m4-207-mark-data-class.md` (§78) first**
 — the two independent reasons the mark is its own class, the stateless-decoder

@@ -338,6 +338,56 @@ var (
 	// live setting, so its family would simply stop being required (task #199,
 	// record §73p).
 	ErrPostureStepAnswersNothing = errors.New("venue: posture step establishes no setting")
+
+	// ErrMarginAssetsDisagree reports a margin status whose figures are not all
+	// in one asset — the two money fields disagreeing, the liq price quoted in
+	// something other than the margin asset, or Binance's stated `marginAsset`
+	// differing from the caller's declared quote (task #208).
+	//
+	// One sentinel for all three because they are one claim from three sides:
+	// on a linear perpetual the margin asset IS the quote asset, and that
+	// premise is what lets this surface type a venue's margin figures at all.
+	// A violation is never a number to convert — fixedpoint has no rate here to
+	// convert with — and its failure direction is silent: every figure validates
+	// on its own and the disagreement surfaces at the first arithmetic inside
+	// the consumer, far from the decoder that caused it.
+	ErrMarginAssetsDisagree = errors.New("venue: margin status figures are not all in one asset")
+
+	// ErrMarginLiqPriceNotPositive reports a margin status carrying a stated liq
+	// price at or below zero.
+	//
+	// Mark.Validate's rule one field over and for the same consumer: §7.1 takes
+	// a distance between this and the mark, and a non-positive liq price puts a
+	// SHORT's liquidation below its mark, which every distance formula reads as
+	// maximum headroom. marginLiqPrice already declines to state such a value,
+	// so reaching this is a status built directly rather than decoded.
+	ErrMarginLiqPriceNotPositive = errors.New("venue: margin status liq price is not positive")
+
+	// ErrMarginLiqPriceContradicts reports a margin status carrying a liq price
+	// beside a cleared LiqPriceStated.
+	//
+	// Refused rather than repaired, because the two halves say different things
+	// and the half a consumer branches on is the flag — so the number would sit
+	// unread until something copied the struct field by field and lost the flag.
+	// Zeroing it here would make Validate silently absorb a decoder defect.
+	ErrMarginLiqPriceContradicts = errors.New("venue: margin status states no liq price but carries one")
+
+	// ErrMarginFigureNegative reports a maintenance requirement or posted margin
+	// below zero. Neither venue publishes one, so it is a parse that read a sign
+	// off the wrong field — and both directions are permissive: a negative
+	// maintenance makes any position look over-margined, a negative posted
+	// margin makes a top-up look larger than it was.
+	ErrMarginFigureNegative = errors.New("venue: margin status figure is negative")
+
+	// ErrMarginFigureUnstated reports a Bybit row whose `positionIM` or
+	// `positionMM` is empty — verbatim, "Portfolio margin mode: returns \"\"".
+	//
+	// §4.1's posture gate refuses Portfolio Margin, so this is an account that
+	// should never have reached §7.1's trigger, and the honest answer is a
+	// refusal naming the field. Both available absorptions read permissively: a
+	// zero maintenance is a position requiring nothing, and a zero posted margin
+	// is one whose top-up size would be computed from nothing.
+	ErrMarginFigureUnstated = errors.New("venue: margin status figure is unstated")
 )
 
 // There is deliberately no sentinel here for "funding asked of a spot
