@@ -1,6 +1,67 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-08, session 125): **§7.1's `MarginOp` RESOLVES AT BOOT — AND THE OUTCOME DECLARED FOR IT NEVER LATCHED. DOCS v0.9.62, 24 MUTANTS / 2 REAL SURVIVORS (BOTH FIXED, BOTH IN THE FIXTURE), `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
+## Status (2026-08-08, session 126): **THE `Ambiguous` MARGIN OP HAS AN END — AND §7.3 HAD ALREADY SAID WHERE TO PUT IT. DOCS v0.9.63, 29 MUTANTS / 5 REAL SURVIVORS (ALL CLOSED, ONE BY A SIGNATURE), `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO.**
+
+**Read `docs/superpowers/specs/2026-08-08-m4-213-marginop-clearance.md` (§82)
+first** — the home §7.3 names, the finding that is deliberately not a field, and
+five survivors of which only one was a missing test of a rule.
+
+**#212's TWO CORRECT DECISIONS COMPOSED INTO A PERMANENT HALT.** The verdict is
+durable, and `Ambiguous` latches — both right, both required by §7.1 and §7.5 —
+and together they meant the next boot read the verdict back, reported
+`OutcomeBlocksOpening` again, and returned `ExitOperator` again, for ever.
+Nothing in the system could end one. `arblab margin reconcile` is that act now,
+and it had to land **before** the dispatcher: unreachable today, unrecoverable
+the day #215 lands.
+
+**THE HOME WAS NOT A CHOICE BETWEEN TWO OPTIONS.** §7.3 requires *"an immutable
+per-actor audit of every control action (who / what / when, **appended to the
+tamper-evident log, §5.1**)"* — so the clearance is a **fourth record kind on the
+one chain**, and the document-shaped alternative (§4.1's attestation) becomes a
+recorded rejection. It is refused by that document's **own** discriminator: it
+exists because *"every field is the operator's own word"* and no machine work is
+involved, where a chain append at a sequence is machine work by construction.
+
+**THE RULING MOST LIKELY TO BE REOPENED IS THE FINDING THAT IS NOT A FIELD.**
+§4.1's attestation argues for one — record what was OBSERVED, never the verdict —
+and §7.1 refuses it in its own terms: the state is called `Ambiguous` because
+*"evidence is not causal identity"*, so demanding a determination demands exactly
+what the evidence cannot support, and **no reachable value would keep the block
+on** (even the doubled top-up §7.1 names reconciles and lifts). What is
+reconciled is the **float**, whose ledger is §7.2's unbuilt `treasury` — so the
+structured half is owed **with its consumer**, and §82 §2a is where to start.
+
+**§7.5 GAINS THE GENERAL OBLIGATION:** an outcome that latches across processes
+is only completable if some act can produce the evidence that clears it, and the
+act must land **with or before** the first thing that can produce the outcome.
+
+**FOUR OF FIVE SURVIVORS WERE NOT ABOUT RULES.** Two were one CLI fixture: an
+all-flags-empty invocation left four of five required-flag checks as dead code,
+and a usage assertion could not tell a **routed** subcommand from the
+fall-through, because the usage block prints the same flag names and both return
+`64`. One was a message — two refusals share a sentinel, so only the wording
+separates them. One was a guard duplicating a downstream check, kept for its
+failure direction and re-aimed at what only it can see. **The fifth was closed by
+the SIGNATURE:** two adjacent `string` parameters, and SQLite *creates* the file
+it is asked to open — so a swap would mint an empty journal named after the
+subaccount and refuse with the same message a mistyped op id produces.
+
+**NEXT, IN THE ORDER IT MUST LAND:** (1) **#214** — Binance's
+`positionMargin/history` evidence half, whose reading is already ruled in §7.1
+(the "plus" is a fallback, not a conjunction); (2) **#215** — the dispatch path
+(before-state read, fsync, `AddIsolatedMargin`, one op in flight per position),
+which #214 is now the last thing blocking. Then B4, the loop that finally calls
+`Deleverer.Open`. **#216** (the liq monitor's unwired module branch) is still
+open and is independent of all three.
+
+**Unchanged:** three standing operator decisions ($20/$55 live test, #171's
+credential, §38f); credentials deferred; capture **PID 8495**; never rebuild over
+`bin/arblab`; `make ci` runs `-race` AND the ka staleness gate (needs node); cap
+`TLC_WORKERS` at 4; docs/i18n parity is `bun test`. **#180 is untouched.**
+
+---
+
+## Status (2026-08-08, session 125 — HISTORICAL): **§7.1's `MarginOp` RESOLVES AT BOOT — AND THE OUTCOME DECLARED FOR IT NEVER LATCHED. DOCS v0.9.62, 24 MUTANTS / 2 REAL SURVIVORS (BOTH FIXED, BOTH IN THE FIXTURE), `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
 
 **Read `docs/superpowers/specs/2026-08-08-m4-212-marginop-resolution.md` (§81)
 first** — the outcome with no producer, the scope §7.5 sorted on, the stored
