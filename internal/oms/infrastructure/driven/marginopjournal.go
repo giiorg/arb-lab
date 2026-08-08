@@ -117,3 +117,43 @@ func (j *SQLiteJournal) AppendMarginOpResolved(id domain.MarginOpID, status doma
 			return err
 		})
 }
+
+// AppendMarginOpReconciled durably records core §7.3's per-actor audit of the
+// operator act that ends an Ambiguous op's incident (task #213, record §82).
+//
+// # The record is validated WHOLE, and every one of its refusals is a MISSING
+// # field rather than a malformed one
+//
+// AppendMarginOpDispatched validates whole because the record IS the state.
+// This one validates whole for a different reason: its four fields are §7.3's
+// who / what / when plus what-was-done, and three of them are typed by a person
+// at a prompt. The realistic defect is not a wrong value but an absent one — a
+// command wired with a flag nobody passed — and an absent actor is exactly the
+// artifact the audit requirement exists to prevent.
+//
+// # Whether the op is ambiguous is NOT checked here, and that is the same
+// # boundary AppendMarginOpResolved draws
+//
+// Legality belongs to the caller: application.MarginOpReconciler refuses an op
+// that does not exist, one still in flight, one whose verdict is not ambiguous,
+// and one already reconciled. A recorder holding a copy of those rules would be
+// a second home for them, and it could not enforce them anyway — it would have
+// to replay the log to know, which is the reader's job.
+//
+// What the single chain gives instead is better than a check: this record sits
+// after the verdict it clears in sequence order, so a replay meeting a clearance
+// for an op that is not ambiguous at that point has a location and a name for
+// the problem.
+func (j *SQLiteJournal) AppendMarginOpReconciled(rec domain.MarginOpReconciliation) error {
+	if err := rec.Validate(); err != nil {
+		return fmt.Errorf("oms journal: append margin op reconciliation: %w", err)
+	}
+	return j.appendRecord(kindMarginOpReconciled, string(rec.Op),
+		encodeMarginOpReconciled(rec),
+		func(tx *sql.Tx, seq int64) error {
+			_, err := tx.Exec(`INSERT INTO journal_margin_op_reconciled
+				(seq, actor, at_unix_nano, note) VALUES (?,?,?,?)`,
+				seq, rec.Actor, rec.At.UnixNano(), rec.Note)
+			return err
+		})
+}

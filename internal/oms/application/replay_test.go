@@ -3,6 +3,7 @@ package application_test
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,6 +64,12 @@ type journalEntry struct {
 	op        domain.MarginOp
 	marginID  domain.MarginOpID
 	mopStatus domain.MarginOpStatus
+
+	// The clearance (task #213) carries the whole act for the same reason `op`
+	// does: core §7.3's who / what / when are three parts of one audit entry, and
+	// a script passing only the subject could not tell a fold that dropped the
+	// actor from one that kept it.
+	act domain.MarginOpReconciliation
 }
 
 // fakeReplay is ports.JournalReplay over a scripted log.
@@ -117,6 +124,8 @@ func (f *fakeReplay) Replay(v ports.JournalVisitor) error {
 			err = v.MarginOpDispatched(e.seq, e.op)
 		case "margin_op_resolved":
 			err = v.MarginOpResolved(e.seq, e.marginID, e.mopStatus)
+		case "margin_op_reconciled":
+			err = v.MarginOpReconciled(e.seq, e.act)
 		default:
 			return fmt.Errorf("fake replay: entry %d has kind %q", e.seq, e.kind)
 		}
@@ -1379,5 +1388,250 @@ func TestReplaySortsMarginOpsById(t *testing.T) {
 	if len(rec.AmbiguousMarginOps) != 2 ||
 		rec.AmbiguousMarginOps[0] != "MOP-Y" || rec.AmbiguousMarginOps[1] != "MOP-Z" {
 		t.Errorf("AmbiguousMarginOps = %v, want Y then Z", rec.AmbiguousMarginOps)
+	}
+}
+
+// replayReconciliation is the operator act as a journal record (task #213).
+func replayReconciliation(op domain.MarginOpID, actor string) domain.MarginOpReconciliation {
+	return domain.MarginOpReconciliation{
+		Op:    op,
+		Actor: actor,
+		At:    time.Date(2026, 8, 8, 11, 30, 0, 0, time.UTC),
+		Note:  "counted the venue's isolated margin against the float ledger",
+	}
+}
+
+// TestReplayDropsAReconciledAmbiguityAndKeepsTheOther is the clearance's whole
+// point, and it needs TWO ambiguities to be a claim at all.
+//
+// With one, "the reconciled op left the blocking list" and "the blocking list is
+// empty" are the same observation, so a fold that dropped every ambiguity would
+// pass. The second op is unreconciled and must stay — which is also the case
+// that matters operationally, because the checklist holds one outcome per gate
+// rather than one per op: a boot with a second open incident reports exactly what
+// a boot with the first one did.
+func TestReplayDropsAReconciledAmbiguityAndKeepsTheOther(t *testing.T) {
+	t.Parallel()
+
+	entries := []journalEntry{
+		{seq: 1, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-CLEARED")},
+		{seq: 2, kind: "margin_op_resolved", marginID: "MOP-CLEARED", mopStatus: domain.MarginOpAmbiguous},
+		{seq: 3, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-OPEN")},
+		{seq: 4, kind: "margin_op_resolved", marginID: "MOP-OPEN", mopStatus: domain.MarginOpAmbiguous},
+		{seq: 5, kind: "margin_op_reconciled", act: replayReconciliation("MOP-CLEARED", "gb")},
+	}
+	r, _, _ := newReplayer(t, entries...)
+
+	rec, err := r.Rebuild()
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	if len(rec.AmbiguousMarginOps) != 1 || rec.AmbiguousMarginOps[0] != "MOP-OPEN" {
+		t.Fatalf("AmbiguousMarginOps = %v, want exactly MOP-OPEN", rec.AmbiguousMarginOps)
+	}
+	if len(rec.ReconciledMarginOps) != 1 || rec.ReconciledMarginOps[0].Op != "MOP-CLEARED" {
+		t.Fatalf("ReconciledMarginOps = %v, want exactly MOP-CLEARED", rec.ReconciledMarginOps)
+	}
+	// The act's fields survive the fold. Core §7.3's audit is who / what / when,
+	// and a fold keeping only the subject would leave the log's only record of who
+	// ended the incident unreachable from every report.
+	if got := rec.ReconciledMarginOps[0]; got.Actor != "gb" || got.Note == "" || got.At.IsZero() {
+		t.Fatalf("reconciliation replayed as %+v, want the journaled act's actor, note and instant", got)
+	}
+	// Still counted as a dispatched op: the clearance ends an incident, it does
+	// not un-dispatch the write that caused it.
+	if rec.MarginOps != 2 {
+		t.Errorf("MarginOps = %d, want 2", rec.MarginOps)
+	}
+}
+
+// TestReplayPartitionsEveryMarginOpAcrossTheFourCollections is the invariant the
+// reconciler's diagnostics rest on.
+//
+// Five ops, one per reachable shape. It is asserted as a PARTITION rather than
+// as four independent list checks because that is the property the use case
+// consumes: "this id is in none of the four" must mean UNKNOWN TO THE LOG, and
+// that is false the moment any dispatched op falls through every arm.
+func TestReplayPartitionsEveryMarginOpAcrossTheFourCollections(t *testing.T) {
+	t.Parallel()
+
+	entries := []journalEntry{
+		{seq: 1, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-INFLIGHT")},
+		{seq: 2, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-APPLIED")},
+		{seq: 3, kind: "margin_op_resolved", marginID: "MOP-APPLIED", mopStatus: domain.MarginOpApplied},
+		{seq: 4, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-NOT-APPLIED")},
+		{seq: 5, kind: "margin_op_resolved", marginID: "MOP-NOT-APPLIED", mopStatus: domain.MarginOpNotApplied},
+		{seq: 6, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-OPEN")},
+		{seq: 7, kind: "margin_op_resolved", marginID: "MOP-OPEN", mopStatus: domain.MarginOpAmbiguous},
+		{seq: 8, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-CLEARED")},
+		{seq: 9, kind: "margin_op_resolved", marginID: "MOP-CLEARED", mopStatus: domain.MarginOpAmbiguous},
+		{seq: 10, kind: "margin_op_reconciled", act: replayReconciliation("MOP-CLEARED", "gb")},
+	}
+	r, _, _ := newReplayer(t, entries...)
+
+	rec, err := r.Rebuild()
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	seen := map[domain.MarginOpID]string{}
+	place := func(id domain.MarginOpID, where string) {
+		if prior, dup := seen[id]; dup {
+			t.Fatalf("margin op %q is in both %s and %s — the collections are not disjoint", id, prior, where)
+		}
+		seen[id] = where
+	}
+	for _, op := range rec.InFlightMarginOps {
+		place(op.ID, "InFlight")
+	}
+	for _, id := range rec.AmbiguousMarginOps {
+		place(id, "Ambiguous")
+	}
+	for _, act := range rec.ReconciledMarginOps {
+		place(act.Op, "Reconciled")
+	}
+	for id := range rec.SettledMarginOps {
+		place(id, "Settled")
+	}
+
+	if len(seen) != rec.MarginOps {
+		t.Fatalf("the four collections hold %d of %d dispatched ops — the partition leaks",
+			len(seen), rec.MarginOps)
+	}
+	want := map[domain.MarginOpID]string{
+		"MOP-INFLIGHT":    "InFlight",
+		"MOP-APPLIED":     "Settled",
+		"MOP-NOT-APPLIED": "Settled",
+		"MOP-OPEN":        "Ambiguous",
+		"MOP-CLEARED":     "Reconciled",
+	}
+	for id, where := range want {
+		if seen[id] != where {
+			t.Errorf("margin op %q landed in %q, want %q", id, seen[id], where)
+		}
+	}
+	if rec.SettledMarginOps["MOP-APPLIED"] != domain.MarginOpApplied {
+		t.Errorf("SettledMarginOps[MOP-APPLIED] = %q, want applied — the status is what tells "+
+			"an operator whether the top-up landed", rec.SettledMarginOps["MOP-APPLIED"])
+	}
+}
+
+// TestReplayRefusesAnImpossibleReconciliation covers the four shapes a log can
+// take that no command could have written.
+//
+// Every case is reachable ONLY by bypassing the use case — which is what makes
+// the read-side check worth having, and is exactly how a log edited by hand or
+// written by a later build would arrive. The write-side twins are in
+// marginreconcile_test.go, and they are why these fixtures build their records
+// directly.
+func TestReplayRefusesAnImpossibleReconciliation(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		entries []journalEntry
+		want    error
+		// wantMessage is asserted where the sentinel does not separate two
+		// conditions on its own — see the no-verdict case.
+		wantMessage string
+	}{
+		{
+			name: "a clearance for an op no dispatch record created",
+			entries: []journalEntry{
+				{seq: 1, kind: "margin_op_reconciled", act: replayReconciliation("MOP-GHOST", "gb")},
+			},
+			want: application.ErrMarginOpNotDispatched,
+		},
+		{
+			// The sentinel alone does NOT pin this case, and a mutant proved it:
+			// deleting the no-verdict branch lets the op fall through to the
+			// settled check, whose status is the empty MarginOpUnresolved — same
+			// sentinel, and a message reading `resolved : ...` with a blank where
+			// the verdict should be. So this case also asserts the wording, which
+			// is the only thing that separates the two conditions for the operator
+			// reading a refusing boot.
+			name: "a clearance for an op no verdict has ended",
+			entries: []journalEntry{
+				{seq: 1, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-1")},
+				{seq: 2, kind: "margin_op_reconciled", act: replayReconciliation("MOP-1", "gb")},
+			},
+			want:        application.ErrMarginOpNotAmbiguous,
+			wantMessage: "no verdict has ended",
+		},
+		{
+			name: "a clearance for an op the evidence settled",
+			entries: []journalEntry{
+				{seq: 1, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-1")},
+				{seq: 2, kind: "margin_op_resolved", marginID: "MOP-1", mopStatus: domain.MarginOpApplied},
+				{seq: 3, kind: "margin_op_reconciled", act: replayReconciliation("MOP-1", "gb")},
+			},
+			want:        application.ErrMarginOpNotAmbiguous,
+			wantMessage: "resolved applied",
+		},
+		{
+			// Two actors, because a repeat by the same one is not the realistic
+			// shape and because the refusal's message names both.
+			name: "two clearances for one incident",
+			entries: []journalEntry{
+				{seq: 1, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-1")},
+				{seq: 2, kind: "margin_op_resolved", marginID: "MOP-1", mopStatus: domain.MarginOpAmbiguous},
+				{seq: 3, kind: "margin_op_reconciled", act: replayReconciliation("MOP-1", "gb")},
+				{seq: 4, kind: "margin_op_reconciled", act: replayReconciliation("MOP-1", "somebody-else")},
+			},
+			want: application.ErrMarginOpAlreadyReconciled,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			r, _, _ := newReplayer(t, c.entries...)
+			_, err := r.Rebuild()
+			if !errors.Is(err, c.want) {
+				t.Fatalf("Rebuild = %v, want %v", err, c.want)
+			}
+			if c.wantMessage != "" && !strings.Contains(err.Error(), c.wantMessage) {
+				t.Fatalf("Rebuild error %q does not say %q — the sentinel does not "+
+					"separate this case from its neighbour, so the wording must", err, c.wantMessage)
+			}
+		})
+	}
+}
+
+// TestReplayRefusesAClearanceThatPrecedesItsVerdict is the ORDERING claim the
+// single chain buys, and it is separate from the cases above because the same
+// two records in the other order are perfectly legal.
+//
+// A log holding the clearance BEFORE the ambiguity it names is a log where
+// somebody authorised the lifting of a verdict nobody had yet reached. The walk
+// is what catches it: "is this op ambiguous" is asked at the record's own point
+// in the sequence, not against the log's final state.
+func TestReplayRefusesAClearanceThatPrecedesItsVerdict(t *testing.T) {
+	t.Parallel()
+
+	early := []journalEntry{
+		{seq: 1, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-1")},
+		{seq: 2, kind: "margin_op_reconciled", act: replayReconciliation("MOP-1", "gb")},
+		{seq: 3, kind: "margin_op_resolved", marginID: "MOP-1", mopStatus: domain.MarginOpAmbiguous},
+	}
+	r, _, _ := newReplayer(t, early...)
+	if _, err := r.Rebuild(); !errors.Is(err, application.ErrMarginOpNotAmbiguous) {
+		t.Fatalf("Rebuild on a clearance before its verdict = %v, want ErrMarginOpNotAmbiguous", err)
+	}
+
+	// The positive control, and it is the SAME THREE RECORDS with two swapped:
+	// without it this test would pass against an implementation that refused
+	// every clearance.
+	ordered := []journalEntry{
+		{seq: 1, kind: "margin_op_dispatched", op: replayMarginOp(t, "MOP-1")},
+		{seq: 2, kind: "margin_op_resolved", marginID: "MOP-1", mopStatus: domain.MarginOpAmbiguous},
+		{seq: 3, kind: "margin_op_reconciled", act: replayReconciliation("MOP-1", "gb")},
+	}
+	ok, _, _ := newReplayer(t, ordered...)
+	rec, err := ok.Rebuild()
+	if err != nil {
+		t.Fatalf("Rebuild on the same records in order: %v", err)
+	}
+	if len(rec.AmbiguousMarginOps) != 0 {
+		t.Fatalf("AmbiguousMarginOps = %v, want empty", rec.AmbiguousMarginOps)
 	}
 }

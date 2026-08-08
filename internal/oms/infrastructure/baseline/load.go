@@ -376,20 +376,30 @@ func (p *prefixOrders) GenerationSuperseded(uint64, domain.GenerationID, domain.
 
 func (p *prefixOrders) Phase(uint64, domain.GenerationID, domain.GenerationPhase) error { return nil }
 
-// The two core §7.1 margin-op records are no-ops for the same reason as the six
-// above, and the reason is one step stronger here: a margin op mints no order id
-// and has no legs at all. It moves collateral against a position that already
-// exists, so nothing it records could belong in a document whose content is the
-// set of orders the journal held at a mark.
+// The three core §7.1 margin-op records are no-ops for the same reason as the
+// six above, and the reason is one step stronger here: a margin op mints no
+// order id and has no legs at all. It moves collateral against a position that
+// already exists, so nothing it records could belong in a document whose content
+// is the set of orders the journal held at a mark.
 //
 // The spot baseline is a SPOT quantity, and isolated margin is a derivatives
 // surface — so even the asset totals these records touch are on the other side
 // of the wallet split §4.1 pins.
+//
+// The third is the operator's reconciliation (task #213), and its no-op needs a
+// sentence of its own rather than being covered by "margin ops are irrelevant
+// here": it is an AUDIT record, so the question it invites is whether a document
+// asserting what the journal held should carry who cleared what. It should not.
+// This document's content is the order set at a mark, and an operator act on a
+// position's collateral changes neither the set nor the mark — its readership is
+// core §7.3's audit, which reads the journal directly.
 func (p *prefixOrders) MarginOpDispatched(uint64, domain.MarginOp) error { return nil }
 
 func (p *prefixOrders) MarginOpResolved(uint64, domain.MarginOpID, domain.MarginOpStatus) error {
 	return nil
 }
+
+func (p *prefixOrders) MarginOpReconciled(uint64, domain.MarginOpReconciliation) error { return nil }
 
 // Encode renders the document exactly as Write persists it. Exported because
 // the record command must print the digest of the BYTES ON DISK for the

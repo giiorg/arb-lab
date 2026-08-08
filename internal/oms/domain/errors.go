@@ -478,4 +478,31 @@ var (
 	// measure the watermark against — the zero time, which would make every op
 	// look as though it were dispatched in the future.
 	ErrMarginOpResolutionInstantUnset = errors.New("oms: margin op resolution instant unset")
+
+	// The reconciliation's three refusals, one per field core §7.3 names.
+	//
+	// They are separate sentinels rather than one malformed-record error because
+	// each names a DIFFERENT thing the operator failed to supply, and this is the
+	// one record in the log whose author is a human at a prompt: "who" is missing
+	// and "why" is missing are different conversations, and a single error would
+	// make the command's diagnostic say only that the act was rejected.
+	//
+	// An unattributed clearance is the exact artifact §7.3's audit requirement
+	// exists to prevent, so it is refused rather than defaulted to the host user
+	// — a default here would satisfy the audit's shape while recording nobody.
+	ErrMarginOpReconcileActorUnset = errors.New("oms: margin op reconciliation names no actor")
+
+	// ErrMarginOpReconcileNoteUnset reports a clearance with no accounting trail.
+	//
+	// The note is the only field carrying WHAT was done, because the finding is
+	// deliberately not a field (record §82 §2a): core §7.1 calls this state
+	// Ambiguous because the attribution may be impossible, so what the record can
+	// honestly hold is the operator's own account of the reconciliation. Blank, a
+	// clearance is a keystroke with no subject.
+	ErrMarginOpReconcileNoteUnset = errors.New("oms: margin op reconciliation carries no note")
+
+	// ErrMarginOpReconcileInstantUnset reports a clearance with no instant. It is
+	// §7.3's "when", and the zero value is refused for the reason every other
+	// unset instant in this package is: it reads as 1970 rather than as absent.
+	ErrMarginOpReconcileInstantUnset = errors.New("oms: margin op reconciliation carries no instant")
 )

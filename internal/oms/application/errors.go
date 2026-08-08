@@ -629,6 +629,35 @@ var (
 	// re-derivation the stored verdict exists to prevent.
 	ErrMarginOpVerdictConflict = errors.New("oms: journal resolves one margin op two different ways")
 
+	// ErrMarginOpNotAmbiguous reports a reconciliation of an op that has no open
+	// incident to end (task #213, record §82) — one still in flight, or one the
+	// evidence settled Applied or NotApplied.
+	//
+	// The two directions it prevents are different acts. Clearing an op still in
+	// flight is a PRE-authorisation: it would lift whatever verdict the next boot
+	// reaches, including an `ambiguous` nobody has yet seen. Clearing a settled
+	// one records an operator act against a §9 incident that never existed, which
+	// is an audit entry that misdescribes what happened.
+	//
+	// It is one sentinel for both because both are the same claim — this op is not
+	// an open ambiguity — and the two are told apart by the message, which names
+	// the status the log actually holds. The use case's refusals are separate,
+	// because there the operator is mid-act and needs to be told what to do next.
+	ErrMarginOpNotAmbiguous = errors.New("oms: journal reconciles a margin op that is not an open ambiguity")
+
+	// ErrMarginOpAlreadyReconciled reports a second operator act clearing one
+	// incident.
+	//
+	// Refused rather than tolerated, and it parts company with the verdict's
+	// duplicate rule for a reason that is about the record's contents: a restated
+	// verdict says what the log already says, while two reconciliations carry two
+	// actors, two instants and two notes and so are two different acts by
+	// construction. Neither reading is defensible — taking the first discards the
+	// later actor's attribution, taking the last lets a second person overwrite
+	// the record of who actually looked — and core §7.3 requires the per-actor
+	// audit to be IMMUTABLE, which "the second one wins" is the opposite of.
+	ErrMarginOpAlreadyReconciled = errors.New("oms: journal reconciles one margin op twice")
+
 	// ErrGenerationLegWrongProduct reports a leg dispatched as the wrong half of
 	// the cash-and-carry — a spot order presented as the perp reduction, or the
 	// reverse.

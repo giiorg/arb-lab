@@ -264,3 +264,195 @@ func TestAMarginOpAndAnOrderMayShareASpelling(t *testing.T) {
 		seen[key] = r.kind
 	}
 }
+
+// testReconciliation is the operator act (task #213, record §82).
+//
+// Its three text fields carry three DIFFERENT words, and the instant is not the
+// watermark any other fixture here uses. Both matter: the record is four fields
+// of which three are strings, so a fixture reusing a word would let an encoder
+// that swapped two of them hash identically — this repo's format-collapse shape.
+func testReconciliation(op domain.MarginOpID) domain.MarginOpReconciliation {
+	return domain.MarginOpReconciliation{
+		Op:    op,
+		Actor: "gb",
+		At:    time.Date(2026, 8, 8, 11, 30, 0, 0, time.UTC),
+		Note:  "counted the venue's isolated margin against the float ledger",
+	}
+}
+
+// TestAMarginOpReconciliationRoundTripsThroughTheChain is the record's own
+// claim, checked against the independent oracle.
+func TestAMarginOpReconciliationRoundTripsThroughTheChain(t *testing.T) {
+	t.Parallel()
+	j, path := openTestJournal(t)
+
+	if err := j.AppendMarginOpDispatched(testMarginOp(t, "MOP-1")); err != nil {
+		t.Fatalf("AppendMarginOpDispatched: %v", err)
+	}
+	if err := j.AppendMarginOpResolved("MOP-1", domain.MarginOpAmbiguous); err != nil {
+		t.Fatalf("AppendMarginOpResolved: %v", err)
+	}
+	act := testReconciliation("MOP-1")
+	if err := j.AppendMarginOpReconciled(act); err != nil {
+		t.Fatalf("AppendMarginOpReconciled: %v", err)
+	}
+
+	verifyChain(t, oracleReplay(t, path))
+
+	var v recordingVisitor
+	if err := j.Replay(&v); err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	got := v.margin(t, kindMarginOpReconciled).act
+	if got.Op != act.Op {
+		t.Errorf("op replayed as %q, want %q", got.Op, act.Op)
+	}
+	if got.Actor != act.Actor {
+		t.Errorf("actor replayed as %q, want %q", got.Actor, act.Actor)
+	}
+	if !got.At.Equal(act.At) {
+		t.Errorf("instant replayed as %s, want %s", got.At, act.At)
+	}
+	if got.Note != act.Note {
+		t.Errorf("note replayed as %q, want %q", got.Note, act.Note)
+	}
+
+	// The clearance FOLLOWS the verdict it ends, which is the ordering claim the
+	// single chain buys and the one the replay's refusal is built on.
+	verdict := v.margin(t, kindMarginOpResolved)
+	clearance := v.margin(t, kindMarginOpReconciled)
+	if clearance.seq <= verdict.seq {
+		t.Fatalf("clearance at seq %d, verdict at seq %d — the clearance must follow",
+			clearance.seq, verdict.seq)
+	}
+}
+
+// TestTheChainCoversEveryFieldOfAReconciliation is core §7.3's IMMUTABLE
+// per-actor audit as a property of the hash rather than of the table.
+//
+// The append-only triggers stop the ordinary edit, and somebody who can drop a
+// trigger can rewrite a row — which is exactly what each case below does. What
+// they cannot do is leave the chain verifying, and that only holds for fields the
+// preimage covers. So each of the three payload columns is tampered separately:
+// a preimage covering two of three would pass a test that tampered only the
+// third.
+//
+// The actor case is the one that matters most and would be silent: an audit whose
+// "who" can be changed records nothing.
+func TestTheChainCoversEveryFieldOfAReconciliation(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		stmt string
+		arg  any
+	}{
+		{"the actor", `UPDATE journal_margin_op_reconciled SET actor = ? WHERE seq = 3`, "somebody-else"},
+		{"the instant", `UPDATE journal_margin_op_reconciled SET at_unix_nano = ? WHERE seq = 3`, int64(0)},
+		{"the note", `UPDATE journal_margin_op_reconciled SET note = ? WHERE seq = 3`, "a different account"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			j, path := openTestJournal(t)
+
+			if err := j.AppendMarginOpDispatched(testMarginOp(t, "MOP-1")); err != nil {
+				t.Fatalf("AppendMarginOpDispatched: %v", err)
+			}
+			if err := j.AppendMarginOpResolved("MOP-1", domain.MarginOpAmbiguous); err != nil {
+				t.Fatalf("AppendMarginOpResolved: %v", err)
+			}
+			if err := j.AppendMarginOpReconciled(testReconciliation("MOP-1")); err != nil {
+				t.Fatalf("AppendMarginOpReconciled: %v", err)
+			}
+			// The positive control: it verified before the tamper, so a failure
+			// below is the edit and not the fixture.
+			verifyChain(t, oracleReplay(t, path))
+
+			tamperColumn(t, path, c.stmt, c.arg)
+
+			var v recordingVisitor
+			err := j.Replay(&v)
+			if err == nil {
+				t.Fatalf("Replay accepted a journal whose %s was edited — the chain does not cover it", c.name)
+			}
+			if !errors.Is(err, ports.ErrJournalChainBroken) &&
+				!errors.Is(err, domain.ErrMarginOpReconcileInstantUnset) {
+				t.Fatalf("Replay = %v, want a broken chain (or, for a zeroed instant, the record's own refusal)", err)
+			}
+		})
+	}
+}
+
+// TestAppendMarginOpReconciledRefusesAnIncompleteAct is the adapter's
+// well-formedness boundary: each of core §7.3's three, plus the note.
+//
+// Paired with the positive control the repo's rule requires — the complete act
+// is accepted, asserted by the round-trip test above — because a method that
+// refused everything would score perfectly here.
+func TestAppendMarginOpReconciledRefusesAnIncompleteAct(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		mangle func(*domain.MarginOpReconciliation)
+		want   error
+	}{
+		{"no op", func(r *domain.MarginOpReconciliation) { r.Op = "" }, domain.ErrMarginOpIDUnset},
+		{"no actor", func(r *domain.MarginOpReconciliation) { r.Actor = "" }, domain.ErrMarginOpReconcileActorUnset},
+		{"no instant", func(r *domain.MarginOpReconciliation) { r.At = time.Time{} }, domain.ErrMarginOpReconcileInstantUnset},
+		{"no note", func(r *domain.MarginOpReconciliation) { r.Note = "" }, domain.ErrMarginOpReconcileNoteUnset},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			j, path := openTestJournal(t)
+
+			act := testReconciliation("MOP-1")
+			c.mangle(&act)
+			if err := j.AppendMarginOpReconciled(act); !errors.Is(err, c.want) {
+				t.Fatalf("AppendMarginOpReconciled = %v, want %v", err, c.want)
+			}
+			// Nothing durable. A refused act that still extended the chain would
+			// leave an audit entry for a record the adapter declined to admit.
+			if got := oracleReplay(t, path); len(got) != 0 {
+				t.Fatalf("a refused act wrote %d records, want 0", len(got))
+			}
+		})
+	}
+}
+
+// TestAReconciliationAndAResolutionForOneOpDoNotHashAlike is the kind tag's job
+// at the pair most likely to collide.
+//
+// Both records are "a subject followed by strings", both are keyed by the SAME
+// MarginOpID, and both sit in one chain. Without the tag in the preimage they
+// would be distinguishable only by their payloads — so this fixture gives the
+// resolution a status and the reconciliation an actor that are the same length,
+// which is the shape under which a missing tag is invisible.
+func TestAReconciliationAndAResolutionForOneOpDoNotHashAlike(t *testing.T) {
+	t.Parallel()
+	j, path := openTestJournal(t)
+
+	if err := j.AppendMarginOpDispatched(testMarginOp(t, "MOP-1")); err != nil {
+		t.Fatalf("AppendMarginOpDispatched: %v", err)
+	}
+	// "ambiguous" is nine characters; so is the actor below.
+	if err := j.AppendMarginOpResolved("MOP-1", domain.MarginOpAmbiguous); err != nil {
+		t.Fatalf("AppendMarginOpResolved: %v", err)
+	}
+	act := testReconciliation("MOP-1")
+	act.Actor = "operator1"
+	if err := j.AppendMarginOpReconciled(act); err != nil {
+		t.Fatalf("AppendMarginOpReconciled: %v", err)
+	}
+
+	records := oracleReplay(t, path)
+	verifyChain(t, records)
+	if len(records) != 3 {
+		t.Fatalf("journal holds %d records, want 3", len(records))
+	}
+	if string(records[1].hash) == string(records[2].hash) {
+		t.Fatal("the resolution and the reconciliation hash alike — the kind tag is not in the preimage")
+	}
+}

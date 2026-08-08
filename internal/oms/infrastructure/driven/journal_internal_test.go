@@ -366,6 +366,22 @@ func oraclePreimage(t *testing.T, db *sql.DB, r replayed) []byte {
 		b = append(b, oracleStr(r.subject)...)
 		b = append(b, oracleStr(status)...)
 		return b
+
+	case "margin_op_reconciled":
+		var actor, note string
+		var at int64
+		if err := db.QueryRow(`SELECT actor, at_unix_nano, note
+			FROM journal_margin_op_reconciled WHERE seq = ?`, r.seq).
+			Scan(&actor, &at, &note); err != nil {
+			t.Fatalf("oracle margin op reconciliation at seq %d: %v", r.seq, err)
+		}
+		var b []byte
+		b = append(b, 13) // kind tag, spelled as a literal
+		b = append(b, oracleStr(r.subject)...)
+		b = append(b, oracleStr(actor)...)
+		b = append(b, oracleI64(at)...)
+		b = append(b, oracleStr(note)...)
+		return b
 	}
 
 	t.Fatalf("oracle: record at seq %d has unknown kind %q", r.seq, r.kind)

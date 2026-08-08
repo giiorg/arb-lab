@@ -32,12 +32,18 @@ import (
 // provably follows its dispatch record, checked by the walk that checks
 // everything else rather than by a discipline this package keeps.
 //
-// # Two methods, and the asymmetry between them is the design
+// # Three methods, and the asymmetry between them is the design
 //
 // A margin op is not a state machine with phases. It is ONE external write that
 // either landed or did not, and what evolves afterwards is the evidence, which
 // lives at the venue. So there is a record that says the attempt exists and a
 // record that says what it turned out to be, and nothing in between.
+//
+// The third is not a fact about the op at all. It is a fact about a PERSON —
+// core §7.1's "explicit accounting / operator action" — and it is in this
+// interface rather than in an operator-shaped one because core §7.3 says where
+// a control action is recorded: "an immutable per-actor audit of every control
+// action (who / what / when, appended to the tamper-evident log, §5.1)".
 type MarginOpJournal interface {
 	// AppendMarginOpDispatched durably records core §7.1's `MarginOp` — "local
 	// op ID, intended delta, before-state snapshot + venue watermark" — BEFORE
@@ -75,4 +81,30 @@ type MarginOpJournal interface {
 	// (domain.MarginOpStatus.Concluded): `Pending` is a refusal to answer, and a
 	// pending in the log is a value every later reader has to know to ignore.
 	AppendMarginOpResolved(id domain.MarginOpID, status domain.MarginOpStatus) error
+
+	// AppendMarginOpReconciled durably records the operator act that ends an
+	// Ambiguous op's incident (task #213, record §82).
+	//
+	// # It is the only thing in the system that can lift an ambiguity
+	//
+	// An `Ambiguous` verdict blocks new openings "until the staged-float ledger
+	// is explicitly reconciled" (§7.5), and the verdict is journaled precisely so
+	// that a restart cannot satisfy that sentence. The consequence, which task
+	// #212 landed and could not close, is that without this method the next boot
+	// reads the ambiguity back and blocks again — for ever. It must exist before
+	// the dispatcher does, or the first real ambiguity is a permanent halt.
+	//
+	// # What this method does NOT check, and where those checks live instead
+	//
+	// Whether the op exists, whether it was resolved at all, whether its verdict
+	// was the AMBIGUOUS one, and whether it has already been reconciled. All four
+	// are legality rather than well-formedness, and they belong to the caller for
+	// AppendMarginOpResolved's reason: a recorder holding a copy of the rules
+	// would be a second home for them.
+	//
+	// What the single chain gives instead is the ordering fact — a reconciliation
+	// record sits after the verdict it clears, so a replay meeting a clearance for
+	// an op that is not ambiguous at that point has a location and a name for the
+	// problem rather than a rule to have remembered.
+	AppendMarginOpReconciled(rec domain.MarginOpReconciliation) error
 }

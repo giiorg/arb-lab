@@ -216,10 +216,28 @@ type Recovery struct {
 	// since, so a restart could conclude Applied and lift a §9 incident with
 	// nobody having looked. Read back, a restart cannot launder it.
 	//
-	// Both sorted by id, for Unresolved's reason.
-	MarginOps          int
-	InFlightMarginOps  []domain.MarginOp
-	AmbiguousMarginOps []domain.MarginOpID
+	// # The four collections PARTITION the dispatched ops, and that is the
+	// # invariant to test rather than each list's contents
+	//
+	// InFlight (no verdict), Ambiguous (an open §9 incident), Reconciled (one an
+	// operator ended, task #213) and Settled (applied or not_applied — finished
+	// business). Every dispatched op is in exactly one, which is what makes
+	// "this id is in none of them" mean UNKNOWN TO THE LOG and nothing else. The
+	// reconciler's diagnostic rests on that: an operator who typed the wrong id
+	// and an operator naming an op the evidence settled are two different
+	// conversations, and a partition is what keeps them from collapsing into
+	// "not an open ambiguity".
+	//
+	// Settled exists ONLY for that distinction — no gate reads it, because a
+	// settled op constrains nothing. It is the one collection here that is not
+	// about what the boot must do.
+	//
+	// Sorted by id where ordered, for Unresolved's reason.
+	MarginOps           int
+	InFlightMarginOps   []domain.MarginOp
+	AmbiguousMarginOps  []domain.MarginOpID
+	ReconciledMarginOps []domain.MarginOpReconciliation
+	SettledMarginOps    map[domain.MarginOpID]domain.MarginOpStatus
 }
 
 // GenerationRecovery is one `PackageDelever` generation exactly as the journal
@@ -313,6 +331,7 @@ func (r *Replayer) Rebuild() (Recovery, error) {
 
 		marginKnown:   make(map[domain.MarginOpID]domain.MarginOp),
 		marginVerdict: make(map[domain.MarginOpID]domain.MarginOpStatus),
+		marginCleared: make(map[domain.MarginOpID]domain.MarginOpReconciliation),
 	}
 	if err := r.journal.Replay(rb); err != nil {
 		return Recovery{}, fmt.Errorf("rebuild from journal: %w", err)
@@ -385,9 +404,23 @@ type rebuild struct {
 	// verdicts differ in what they oblige: an op resolved Ambiguous still
 	// constrains this process, and one resolved Applied or NotApplied is finished
 	// business. A liveness bool would collapse exactly that distinction.
+	//
+	// marginCleared holds the operator acts that ended an ambiguity's incident
+	// (core §7.1's "explicit accounting / operator action", task #213). It is a
+	// THIRD structure rather than a fourth MarginOpStatus for record §82 §1's
+	// reason: the verdict answers what the evidence concluded and this answers
+	// what a person did, and one map holding both would make the clearance
+	// reachable by the fold that reads the verdict.
+	//
+	// It maps to the RECORD rather than to a bool, on marginVerdict's rule at a
+	// weaker level: no consumer yet distinguishes two clearances, but the act's
+	// actor and instant are the only things the log holds about who ended a §9
+	// incident, and a bool would discard them at the one seam an operator report
+	// reads from.
 	marginOps     []domain.MarginOpID
 	marginKnown   map[domain.MarginOpID]domain.MarginOp
 	marginVerdict map[domain.MarginOpID]domain.MarginOpStatus
+	marginCleared map[domain.MarginOpID]domain.MarginOpReconciliation
 
 	records    int
 	lastSeq    uint64
@@ -704,6 +737,61 @@ func (b *rebuild) MarginOpResolved(seq uint64, id domain.MarginOpID, status doma
 	return nil
 }
 
+// MarginOpReconciled applies the operator act that ended an Ambiguous op's
+// incident — core §7.1's "the staged-float ledger is reconciled by explicit
+// accounting / operator action" (task #213, record §82).
+//
+// # Three refusals, and each is a history that could not have happened
+//
+// The op must be known, for MarginOpResolved's reason. It must be RESOLVED and
+// resolved AMBIGUOUS, because a clearance is defined by what it clears: an op
+// still in flight has no incident yet, so a clearance ahead of it is a
+// pre-authorisation of whatever the evidence turns out to say, and an op
+// resolved Applied or NotApplied has no block for the act to lift.
+//
+// Both are checked HERE and not only at the write end, and the ordering claim is
+// the single chain's: this record sits after the verdict in sequence order, so
+// "is it ambiguous" is a question with an answer AT THIS POINT IN THE WALK
+// rather than one about the log's final state. A clearance written before the
+// resolution it names is refused by the same code path, which is what makes the
+// ordering a fact the replay checks rather than a discipline the writer keeps.
+//
+// # A SECOND clearance is refused, and this is where it parts company with the
+// # verdict's duplicate rule
+//
+// MarginOpResolved tolerates a restated verdict because it says what the log
+// already says. Two reconciliations cannot be identical in any useful sense —
+// they carry an actor, an instant and a note, so a repeat is a different act by
+// construction — and neither reading of which one governs is defensible. Taking
+// the first discards the later actor's attribution; taking the last lets a
+// second person overwrite the record of who actually looked. §7.3 requires an
+// immutable per-actor audit, and "the second one wins" is the opposite of that.
+func (b *rebuild) MarginOpReconciled(seq uint64, rec domain.MarginOpReconciliation) error {
+	b.seen(seq)
+	if err := rec.Validate(); err != nil {
+		return fmt.Errorf("journal record %d: replay reconciliation: %w", seq, err)
+	}
+	if _, ok := b.marginKnown[rec.Op]; !ok {
+		return fmt.Errorf("journal record %d: replay reconciliation of margin op %q: %w",
+			seq, rec.Op, ErrMarginOpNotDispatched)
+	}
+	status, resolved := b.marginVerdict[rec.Op]
+	if !resolved {
+		return fmt.Errorf("journal record %d: reconciliation of margin op %q, which no verdict has ended: %w",
+			seq, rec.Op, ErrMarginOpNotAmbiguous)
+	}
+	if status != domain.MarginOpAmbiguous {
+		return fmt.Errorf("journal record %d: reconciliation of margin op %q resolved %s: %w",
+			seq, rec.Op, status, ErrMarginOpNotAmbiguous)
+	}
+	if prior, ok := b.marginCleared[rec.Op]; ok {
+		return fmt.Errorf("journal record %d: margin op %q reconciled by %q and then by %q: %w",
+			seq, rec.Op, prior.Actor, rec.Actor, ErrMarginOpAlreadyReconciled)
+	}
+	b.marginCleared[rec.Op] = rec
+	return nil
+}
+
 // knownGeneration refuses a record about a generation no opening record created.
 //
 // It is the generation-scope reading of the failure reconcile.go names as "the
@@ -771,12 +859,29 @@ func (b *rebuild) report() (Recovery, error) {
 	// InFlight that is not Applied": it names the one status that constrains, so
 	// a status added later lands in neither list and shows up as a gap rather
 	// than being swept into whichever arm a negation happened to put it in.
+	//
+	// The clearance (task #213) subtracts from the Ambiguous arm and from nothing
+	// else, and the direction of its default is what matters: an empty
+	// marginCleared leaves every ambiguity listed, so the failure of the whole
+	// clearance mechanism — a dropped record, a fold that never runs — is a §9
+	// incident that keeps blocking rather than one that quietly lifts. It is
+	// asked of the AMBIGUOUS arm alone because that is the only arm a clearance
+	// can be about: MarginOpReconciled refuses one for any other status, so a
+	// cleared-and-in-flight op is not a state this walk can be handed.
 	for _, id := range b.marginOps {
 		status, resolved := b.marginVerdict[id]
+		_, cleared := b.marginCleared[id]
 		switch {
 		case !resolved:
 			rec.InFlightMarginOps = append(rec.InFlightMarginOps, b.marginKnown[id])
-		case status == domain.MarginOpAmbiguous:
+		case status != domain.MarginOpAmbiguous:
+			if rec.SettledMarginOps == nil {
+				rec.SettledMarginOps = make(map[domain.MarginOpID]domain.MarginOpStatus)
+			}
+			rec.SettledMarginOps[id] = status
+		case cleared:
+			rec.ReconciledMarginOps = append(rec.ReconciledMarginOps, b.marginCleared[id])
+		default:
 			rec.AmbiguousMarginOps = append(rec.AmbiguousMarginOps, id)
 		}
 	}
@@ -836,6 +941,14 @@ func (b *rebuild) report() (Recovery, error) {
 	})
 	sort.Slice(rec.AmbiguousMarginOps, func(i, j int) bool {
 		return rec.AmbiguousMarginOps[i] < rec.AmbiguousMarginOps[j]
+	})
+	// By op id and NOT by the reconciliation's instant, which is the field a
+	// reader would reach for. The instant is the operator's own, so ordering by
+	// it makes the report's row order depend on a clock this system does not
+	// control — two acts an operator dated by hand can order either way, and a
+	// list whose order a typo changes is one nobody can diff between boots.
+	sort.Slice(rec.ReconciledMarginOps, func(i, j int) bool {
+		return rec.ReconciledMarginOps[i].Op < rec.ReconciledMarginOps[j].Op
 	})
 	return rec, nil
 }

@@ -164,4 +164,18 @@ type JournalVisitor interface {
 	// re-derived into `NotApplied` once the venue's evidence window has rolled
 	// past. See MarginOpJournal.AppendMarginOpResolved.
 	MarginOpResolved(seq uint64, id domain.MarginOpID, status domain.MarginOpStatus) error
+
+	// MarginOpReconciled is one AppendMarginOpReconciled record: the operator act
+	// that ended an Ambiguous op's incident (task #213, record §82).
+	//
+	// A replay that dropped it would report every reconciled ambiguity as still
+	// blocking, which is the direction that never resolves: the act was already
+	// taken and the log already holds it, so there is nothing an operator could do
+	// next. It is the mirror of the resolution's own failure direction and the
+	// reason both records are read by the same walk.
+	//
+	// The whole record is handed over, on MarginOpDispatched's rule: §7.3's who /
+	// what / when are three parts of one audit entry, and a visitor holding two of
+	// them records an act by nobody.
+	MarginOpReconciled(seq uint64, rec domain.MarginOpReconciliation) error
 }

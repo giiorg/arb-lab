@@ -396,3 +396,89 @@ func TestMarginOpResolveOnlyEverAnswersADeclaredStatus(t *testing.T) {
 		}
 	}
 }
+
+// marginOpReconciliation is the complete act — core §7.3's who / what / when,
+// plus the note.
+//
+// Every field differs from every other in KIND as well as value, which matters
+// here more than usual: three of the four are strings, so a fixture using the
+// same word twice would let a constructor that put the actor in the note pass.
+func marginOpReconciliation() domain.MarginOpReconciliation {
+	return domain.MarginOpReconciliation{
+		Op:    "MOP-1",
+		Actor: "gb",
+		At:    time.Date(2026, 8, 8, 11, 30, 0, 0, time.UTC),
+		Note:  "counted the venue's isolated margin against the float ledger",
+	}
+}
+
+// TestMarginOpReconciliationRefusesEveryMissingField is core §7.3's audit
+// requirement as four claims rather than one.
+//
+// Each case blanks exactly ONE field of an otherwise complete act, so a
+// constructor that checked three of the four is caught by the case for the
+// fourth. Asserting on the sentinel rather than on "an error" is what makes the
+// four distinguishable: the whole reason they are separate sentinels is that an
+// operator missing an actor and one missing a note need different things said to
+// them (record §82 §2).
+func TestMarginOpReconciliationRefusesEveryMissingField(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		break_ func(*domain.MarginOpReconciliation)
+		want   error
+	}{
+		{"no op", func(r *domain.MarginOpReconciliation) { r.Op = "" }, domain.ErrMarginOpIDUnset},
+		{"no actor", func(r *domain.MarginOpReconciliation) { r.Actor = "" }, domain.ErrMarginOpReconcileActorUnset},
+		{"no instant", func(r *domain.MarginOpReconciliation) { r.At = time.Time{} }, domain.ErrMarginOpReconcileInstantUnset},
+		{"no note", func(r *domain.MarginOpReconciliation) { r.Note = "" }, domain.ErrMarginOpReconcileNoteUnset},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			rec := marginOpReconciliation()
+			c.break_(&rec)
+			err := rec.Validate()
+			if !errors.Is(err, c.want) {
+				t.Fatalf("Validate() = %v, want %v", err, c.want)
+			}
+		})
+	}
+}
+
+// TestMarginOpReconciliationAcceptsTheCompleteAct is the positive control the
+// four refusals above need: a predicate that objected to everything would score
+// perfectly on them.
+func TestMarginOpReconciliationAcceptsTheCompleteAct(t *testing.T) {
+	t.Parallel()
+
+	if err := marginOpReconciliation().Validate(); err != nil {
+		t.Fatalf("Validate() on a complete reconciliation: %v", err)
+	}
+}
+
+// TestMarginOpReconciliationAdmitsNoFinding is the RULING as a compile-time
+// claim, and it is here because record §82 §2a is the paragraph most likely to
+// be reopened by somebody who thinks a clearance should say what was found.
+//
+// It is written as an exhaustive field list rather than as a comment, so adding
+// a fifth field breaks this test and sends the author to §2a's argument: §7.1
+// calls this state Ambiguous because the attribution may be impossible, and no
+// value of a finding would keep the block on. If a field is added it must arrive
+// with a consumer — `treasury`'s float ledger — and this test is where the
+// argument gets re-read.
+func TestMarginOpReconciliationAdmitsNoFinding(t *testing.T) {
+	t.Parallel()
+
+	// A keyed literal would compile against extra fields; this one does not.
+	rec := domain.MarginOpReconciliation{
+		"MOP-1",
+		"gb",
+		time.Date(2026, 8, 8, 11, 30, 0, 0, time.UTC),
+		"counted the venue's isolated margin against the float ledger",
+	}
+	if err := rec.Validate(); err != nil {
+		t.Fatalf("Validate(): %v", err)
+	}
+}

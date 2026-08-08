@@ -22,6 +22,7 @@ import (
 type fakeMarginOpJournal struct {
 	dispatched []domain.MarginOp
 	resolved   []marginVerdictCall
+	reconciled []domain.MarginOpReconciliation
 	failOn     map[domain.MarginOpID]error
 }
 
@@ -42,6 +43,17 @@ func (f *fakeMarginOpJournal) AppendMarginOpResolved(id domain.MarginOpID, statu
 		return err
 	}
 	f.resolved = append(f.resolved, marginVerdictCall{id: id, status: status})
+	return nil
+}
+
+// The reconciliation is recorded WHOLE rather than by op id, because the claims
+// about it are about the fields core §7.3 requires — who and when — and a fake
+// keeping only the subject would satisfy a use case that dropped the actor.
+func (f *fakeMarginOpJournal) AppendMarginOpReconciled(rec domain.MarginOpReconciliation) error {
+	if err := f.failOn[rec.Op]; err != nil {
+		return err
+	}
+	f.reconciled = append(f.reconciled, rec)
 	return nil
 }
 

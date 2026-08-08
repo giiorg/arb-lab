@@ -413,6 +413,23 @@ const (
 	// stops a restart laundering it — see oms/application.MarginOpResolver, its
 	// first producer, and ports.MarginOpJournal for why the verdict is stored
 	// rather than re-derived.
+	//
+	// [SPEC EDIT LANDED — v0.9.63] The ACT that ends the incident exists, and it
+	// had to: this outcome and OutcomeProjectionStale latch for the same reason
+	// and are completable for opposite ones. The stale projection is lifted by a
+	// re-derivation a fresh process performs anyway (the reconcile-only boot), so
+	// its clearance came free. This one's durable verdict is stored precisely so
+	// that no re-derivation lifts it — which leaves no exit at all unless
+	// something outside the boot can record the reconciliation. That is
+	// oms.ReconcileMarginOp, behind `arblab margin reconcile`, writing core §7.3's
+	// per-actor audit into §5.1's chain (task #213, record §82).
+	//
+	// The obligation generalises, and it is why this note is on the OUTCOME
+	// rather than on the gate: an outcome that latches across processes is only
+	// completable if some act can produce the evidence that clears it, and that
+	// act must land WITH OR BEFORE the first thing that can produce the outcome.
+	// Here the producer (task #212) came first by one slice, which was survivable
+	// only because nothing writes a MarginOp yet.
 	OutcomeBlocksOpening
 
 	// OutcomeProjectionStale is the gate refusing new exposure because the

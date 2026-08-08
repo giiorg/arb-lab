@@ -83,7 +83,8 @@ SELECT j.seq, j.kind, j.subject, j.prev_hash, j.hash,
        gp.phase,
        md.venue, md.product, md.symbol, md.contract,
        md.asset, md.delta_mantissa, md.before_mantissa, md.watermark_unix_nano,
-       mr.status
+       mr.status,
+       mc.actor, mc.at_unix_nano, mc.note
 FROM journal j
 LEFT JOIN journal_planned                p    ON p.seq    = j.seq
 LEFT JOIN journal_state                  s    ON s.seq    = j.seq
@@ -96,6 +97,7 @@ LEFT JOIN journal_generation_superseded  gs   ON gs.seq   = j.seq
 LEFT JOIN journal_generation_phase       gp   ON gp.seq   = j.seq
 LEFT JOIN journal_margin_op_dispatched   md   ON md.seq   = j.seq
 LEFT JOIN journal_margin_op_resolved     mr   ON mr.seq   = j.seq
+LEFT JOIN journal_margin_op_reconciled   mc   ON mc.seq   = j.seq
 ORDER BY j.seq`
 
 // replayRow is one journal row with every detail table's columns attached.
@@ -143,6 +145,10 @@ type replayRow struct {
 	mopWatermarkUnixNano                         sql.NullInt64
 
 	mopStatus sql.NullString
+
+	mopActor      sql.NullString
+	mopAtUnixNano sql.NullInt64
+	mopNote       sql.NullString
 }
 
 // Replay is ports.JournalReplay: walk the log in sequence order, verifying the
@@ -195,6 +201,7 @@ func (j *SQLiteJournal) Replay(v ports.JournalVisitor) error {
 			&r.mopVenue, &r.mopProduct, &r.mopSymbol, &r.mopContract,
 			&r.mopAsset, &r.mopDeltaMantissa, &r.mopBeforeMantissa, &r.mopWatermarkUnixNano,
 			&r.mopStatus,
+			&r.mopActor, &r.mopAtUnixNano, &r.mopNote,
 		); err != nil {
 			return fmt.Errorf("oms journal: replay: scan: %w", err)
 		}
@@ -350,6 +357,13 @@ func replayPreimage(r replayRow) ([]byte, error) {
 		}
 		return encodeMarginOpResolved(
 			domain.MarginOpID(r.subject), domain.MarginOpStatus(r.mopStatus.String)), nil
+
+	case kindMarginOpReconciled:
+		rec, err := replayMarginOpReconciliation(r)
+		if err != nil {
+			return nil, err
+		}
+		return encodeMarginOpReconciled(rec), nil
 	}
 
 	// A kind column holding something no encoder knows. It is refused rather
@@ -545,6 +559,48 @@ func replayMarginOp(r replayRow) (domain.MarginOp, error) {
 	return op, nil
 }
 
+// replayMarginOpReconciliation rebuilds core §7.3's audit entry from its stored
+// columns (task #213, record §82).
+//
+// It VALIDATES for replayMarginOp's reason at a different subject. This record's
+// fields are not inputs to an arithmetic verdict — they are the answer to "who
+// ended this §9 incident, when, and on what account" — and a row whose actor
+// column was emptied rebuilds perfectly and reads as a clearance nobody took.
+// The chain is what makes that edit detectable; this is what makes a row that
+// somehow got past it unusable rather than quietly anonymous.
+//
+// The instant is rebuilt in UTC, matching replayMarginOp — but the reason is the
+// weaker one there. This instant is compared against nothing; it is UTC because
+// an audit read in the host's local zone prints a different moment on every
+// machine that reads it.
+func replayMarginOpReconciliation(r replayRow) (domain.MarginOpReconciliation, error) {
+	for _, c := range []struct {
+		name string
+		set  bool
+	}{
+		{"actor", r.mopActor.Valid},
+		{"at_unix_nano", r.mopAtUnixNano.Valid},
+		{"note", r.mopNote.Valid},
+	} {
+		if !c.set {
+			return domain.MarginOpReconciliation{},
+				detailMissing(r, "journal_margin_op_reconciled."+c.name)
+		}
+	}
+
+	rec := domain.MarginOpReconciliation{
+		Op:    domain.MarginOpID(r.subject),
+		Actor: r.mopActor.String,
+		At:    time.Unix(0, r.mopAtUnixNano.Int64).UTC(),
+		Note:  r.mopNote.String,
+	}
+	if err := rec.Validate(); err != nil {
+		return domain.MarginOpReconciliation{},
+			fmt.Errorf("oms journal: replay: record %d: %w", r.seq, err)
+	}
+	return rec, nil
+}
+
 // replayGenerationSize rebuilds FLAG-3's authorized spot quantity.
 //
 // A zero mantissa is a legal, ordinary value here and the reconstruction says
@@ -670,6 +726,14 @@ func visit(v ports.JournalVisitor, r replayRow) error {
 	case kindMarginOpResolved:
 		return v.MarginOpResolved(uint64(r.seq),
 			domain.MarginOpID(r.subject), domain.MarginOpStatus(r.mopStatus.String))
+
+	case kindMarginOpReconciled:
+		// Rebuilt a second time, on the planned record's rationale.
+		rec, err := replayMarginOpReconciliation(r)
+		if err != nil {
+			return err
+		}
+		return v.MarginOpReconciled(uint64(r.seq), rec)
 	}
 	return fmt.Errorf("oms journal: replay: record %d has kind %q: %w",
 		r.seq, r.kind, ErrJournalKindUnknown)

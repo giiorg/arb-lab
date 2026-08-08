@@ -353,3 +353,100 @@ func (o MarginOp) Resolve(live fixedpoint.Money, held bool, now time.Time, bound
 	// half lands — a duplicate same-amount row.
 	return MarginOpAmbiguous, nil
 }
+
+// MarginOpReconciliation is the operator act that ends an Ambiguous op's
+// incident — core §7.1's "the staged-float ledger is reconciled by explicit
+// accounting / operator action, a §9 case" (task #213, record §82).
+//
+// # It is the only record in this log whose author is a person
+//
+// Everything else here is something this system did and wrote down. This is
+// something a HUMAN did away from the system and is reporting, which is why its
+// fields are §7.3's three — "an immutable per-actor audit of every control
+// action (who / what / when, appended to the tamper-evident log, §5.1)" — and
+// why §7.3 is also what decides the record belongs in this chain rather than in
+// a document beside it.
+//
+// # There is no FINDING field, and the omission is a ruling rather than a gap
+//
+// The tempting fifth field is what the accounting concluded: did the top-up
+// land? §4.1's Portfolio-Margin attestation is the precedent that argues for one
+// — a record states what was OBSERVED, never the verdict — and it is refused
+// here on §7.1's own terms.
+//
+// §7.1's word for this state is Ambiguous because "evidence is not causal
+// identity": a coincident manual adjustment, a position mutation, or a duplicate
+// same-amount row. A required finding demands from the operator exactly the
+// determination the section says the evidence cannot support. And no reachable
+// value of one would keep the block on — §7.1 addresses the worst case by name
+// ("a doubled top-up is capital-allocation drift, not naked exposure — still an
+// incident (alert + reconcile the float), never silently absorbed"), which
+// reconciles and lifts like every other. A field whose every value produces one
+// effect is a name, not a decision.
+//
+// What §7.1 asks to be reconciled is the FLOAT rather than the op, and the
+// ledger that will hold it is `treasury`'s, which is unbuilt. When it lands, the
+// reconciliation gains a DERIVED half — re-anchoring the belief to the venue's
+// posted figure, which is machine work — and that half arrives with its
+// consumer. Record §82 §2a is where to start.
+//
+// So this record is, plainly, a checkbox, and that is the correct shape: §7.1
+// makes the operator's act the precondition, and a system demanding evidence for
+// it would be inventing a rule the section does not state. The design work is in
+// making the act attributable, durable, scoped to ONE incident, and impossible
+// to take by accident — see ports.MarginOpJournal and the use case.
+type MarginOpReconciliation struct {
+	// Op is the single incident this act ends — §7.3's "what".
+	//
+	// One id, and there is deliberately no bulk form anywhere above this type. A
+	// clearance covering every open ambiguity would let one keystroke end an
+	// incident the operator has not looked at, which satisfies the audit
+	// requirement's shape while making it worthless.
+	Op MarginOpID
+
+	// Actor is who took the act — §7.3's "who".
+	//
+	// Free text and self-asserted, because §7.4's approval kernel is
+	// "solo-honest by default" and there is no identity service to check it
+	// against. Self-asserted is not the same as absent: the value is inside the
+	// hash chain, so it is a claim that cannot be edited afterwards without
+	// breaking every record that follows it.
+	Actor string
+
+	// At is when the reconciliation was performed — §7.3's "when".
+	//
+	// The operator's own instant rather than a venue clock, and unlike
+	// MarginOp.Watermark that is right rather than a shortcut: this instant
+	// anchors no evidence window and is matched against no venue-stamped row. It
+	// is the audit's timestamp, and the frame an audit is read in is the one the
+	// human acted in.
+	At time.Time
+
+	// Note is the accounting trail — what was reconciled and against what.
+	//
+	// Required, because with the finding deliberately absent it is the only field
+	// carrying what was actually done. See ErrMarginOpReconcileNoteUnset.
+	Note string
+}
+
+// Validate refuses a reconciliation missing any of §7.3's three, and the note.
+//
+// Every field is required and none has a usable zero — `platform/`'s
+// zero-value-is-unusable rule reaching a record outside `platform/`, for exactly
+// the reason it exists there: an unpopulated actor reads as an act nobody took,
+// and this is the record whose whole purpose is saying who took it.
+func (r MarginOpReconciliation) Validate() error {
+	if r.Op == "" {
+		return ErrMarginOpIDUnset
+	}
+	if r.Actor == "" {
+		return fmt.Errorf("margin op %q reconciliation: %w", r.Op, ErrMarginOpReconcileActorUnset)
+	}
+	if r.At.IsZero() {
+		return fmt.Errorf("margin op %q reconciliation: %w", r.Op, ErrMarginOpReconcileInstantUnset)
+	}
+	if r.Note == "" {
+		return fmt.Errorf("margin op %q reconciliation: %w", r.Op, ErrMarginOpReconcileNoteUnset)
+	}
+	return nil
+}

@@ -205,6 +205,7 @@ type marginCall struct {
 	op     domain.MarginOp
 	id     domain.MarginOpID
 	status domain.MarginOpStatus
+	act    domain.MarginOpReconciliation
 }
 
 func (v *recordingVisitor) MarginOpDispatched(seq uint64, op domain.MarginOp) error {
@@ -223,6 +224,16 @@ func (v *recordingVisitor) MarginOpResolved(seq uint64, id domain.MarginOpID, st
 	}
 	v.marginCalls = append(v.marginCalls, marginCall{
 		kind: kindMarginOpResolved, seq: seq, id: id, status: status,
+	})
+	return nil
+}
+
+func (v *recordingVisitor) MarginOpReconciled(seq uint64, act domain.MarginOpReconciliation) error {
+	if err := v.note(seq); err != nil {
+		return err
+	}
+	v.marginCalls = append(v.marginCalls, marginCall{
+		kind: kindMarginOpReconciled, seq: seq, id: act.Op, act: act,
 	})
 	return nil
 }
@@ -759,6 +770,13 @@ func tamperColumn(t *testing.T, path, stmt string, args ...any) {
 		"journal_generation_opened_no_update", "journal_generation_leg_no_update",
 		"journal_generation_authorized_no_update", "journal_generation_superseded_no_update",
 		"journal_generation_phase_no_update",
+		// The three core §7.1 margin-op tables. They were absent until task
+		// #213 needed one, which is this helper's own recurring shape: a tamper
+		// list that has not kept up makes every read-side check on the tables it
+		// omits UNREACHABLE, and the omission looks exactly like a table nobody
+		// wanted to tamper.
+		"journal_margin_op_dispatched_no_update", "journal_margin_op_resolved_no_update",
+		"journal_margin_op_reconciled_no_update",
 	} {
 		if _, err := db.Exec(`DROP TRIGGER IF EXISTS ` + trigger); err != nil {
 			t.Fatalf("tamper: drop %s: %v", trigger, err)

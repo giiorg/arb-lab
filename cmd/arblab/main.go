@@ -66,6 +66,9 @@ func dispatch(args []string, stdout, stderr io.Writer) int {
 	if len(args) >= 2 && args[0] == "exercise" && args[1] == "run" {
 		return exerciseRun(args[2:], stdout, stderr)
 	}
+	if len(args) >= 2 && args[0] == "margin" && args[1] == "reconcile" {
+		return marginReconcile(args[2:], stdout, stderr)
+	}
 	fmt.Fprint(stderr, usage)
 	return 64 // EX_USAGE: the caller's request was malformed, not a capture verdict
 }
@@ -88,6 +91,7 @@ usage:
   arblab reference fetch  -reference <in.json> -out <out.json>
   arblab baseline record  -config <file> -out <file>
   arblab exercise run     -config <file>
+  arblab margin reconcile -config <file> -op <id> -actor <name> -at <RFC3339> -note <text>
 
 calibrate fetch commits one closed family-1 dataset identity (venue REST
 history, verbatim, digested) under datasets/; it refuses holdout-era
@@ -113,6 +117,17 @@ package from the config's trade block. Exit codes: reconcile's three, plus
 unjournaled, or a stale projection holding new trading). After a 3 the
 recovery path is "reconcile run"; re-running exercise with the same trade
 id is refused by §5.3's id-reuse rule.
+
+margin reconcile records core §7.1's "explicit accounting / operator
+action" against ONE Ambiguous margin op — the §9 incident that blocks new
+openings until it is reconciled, and the only thing that lifts one. It
+reads no venue and needs no credential; it appends who / what / when plus
+the note to §5.1's chain. The ENGINE MUST BE STOPPED: the journal is a
+single-writer store and the act takes effect at the next boot, because
+nothing lifts a latch inside a running process. Exit codes: 0 recorded,
+1 refused (the id is not in the log, the op has no verdict yet, it
+resolved applied/not_applied and blocks nothing, or it is already
+reconciled). A 0 still prints any incidents left open.
 
 capture verify exit codes: 0 clean, 1 integrity (the archive is lying),
 2 coverage (the archive is honest and thin). Integrity decides when both

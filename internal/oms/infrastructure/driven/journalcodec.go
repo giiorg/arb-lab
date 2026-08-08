@@ -116,6 +116,7 @@ const (
 
 	kindTagMarginOpDispatched uint8 = 11
 	kindTagMarginOpResolved   uint8 = 12
+	kindTagMarginOpReconciled uint8 = 13
 )
 
 // Kind names, as they appear in the kind column.
@@ -154,6 +155,7 @@ const (
 
 	kindMarginOpDispatched = "margin_op_dispatched"
 	kindMarginOpResolved   = "margin_op_resolved"
+	kindMarginOpReconciled = "margin_op_reconciled"
 )
 
 // genesisHash is the prev_hash of sequence 1.
@@ -422,6 +424,37 @@ func encodeMarginOpResolved(id domain.MarginOpID, status domain.MarginOpStatus) 
 	b = append(b, kindTagMarginOpResolved)
 	b = appendString(b, string(id))
 	b = appendString(b, string(status))
+	return b
+}
+
+// encodeMarginOpReconciled is the canonical preimage of the operator act that
+// ended an Ambiguous op's incident (record §82).
+//
+// # Every field is inside the chain, and here that IS the integrity claim
+//
+// The other kinds put their payload in the chain so a replay cannot be fed a
+// record this system did not write. This one has a further job: core §7.3
+// requires an IMMUTABLE per-actor audit, and immutability is not a property of a
+// table — the append-only triggers stop the ordinary edit, and a person who can
+// drop a trigger can rewrite a row. What they cannot do is rewrite it and leave
+// the chain verifying, and that only holds for the fields the preimage covers.
+//
+// So the actor is in it, because an audit whose "who" can be changed records
+// nothing; the instant is in it, because moving an act's time is how a
+// clearance is made to look like it preceded the incident it cleared; and the
+// note is in it, because it is the only field carrying WHAT was done and an
+// editable account of an act is not an account.
+//
+// The subject (the MarginOpID) is the first field, on encodeState's shape, and
+// the kind tag is what stops a resolution and a reconciliation for the same op
+// hashing alike.
+func encodeMarginOpReconciled(rec domain.MarginOpReconciliation) []byte {
+	b := make([]byte, 0, 96)
+	b = append(b, kindTagMarginOpReconciled)
+	b = appendString(b, string(rec.Op))
+	b = appendString(b, rec.Actor)
+	b = appendInt64(b, rec.At.UnixNano())
+	b = appendString(b, rec.Note)
 	return b
 }
 

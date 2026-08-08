@@ -297,6 +297,26 @@ CREATE TABLE IF NOT EXISTS journal_margin_op_resolved (
 	status TEXT NOT NULL
 ) STRICT;
 
+-- core §7.3's per-actor audit of the one control action this system has: the
+-- operator act that reconciles an Ambiguous margin op's staged float (§7.1).
+--
+-- Three columns for §7.3's "who / what / when" — "what" being the subject
+-- column, which holds the MarginOpID this act is about — plus the note, which
+-- carries what was actually done. There is deliberately no finding column: see
+-- domain.MarginOpReconciliation.
+--
+-- at_unix_nano is the OPERATOR's instant and not a venue clock's, which is the
+-- opposite choice from journal_margin_op_dispatched.watermark_unix_nano one
+-- table up. The difference is what each instant is compared against: a watermark
+-- anchors an evidence window closed against venue-stamped rows, and this one
+-- anchors nothing — it is read by a human, in the frame the human acted in.
+CREATE TABLE IF NOT EXISTS journal_margin_op_reconciled (
+	seq         INTEGER PRIMARY KEY REFERENCES journal(seq),
+	actor       TEXT NOT NULL,
+	at_unix_nano INTEGER NOT NULL,
+	note        TEXT NOT NULL
+) STRICT;
+
 CREATE TRIGGER IF NOT EXISTS journal_no_update BEFORE UPDATE ON journal
 	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS journal_no_delete BEFORE DELETE ON journal
@@ -344,6 +364,10 @@ CREATE TRIGGER IF NOT EXISTS journal_margin_op_dispatched_no_delete BEFORE DELET
 CREATE TRIGGER IF NOT EXISTS journal_margin_op_resolved_no_update BEFORE UPDATE ON journal_margin_op_resolved
 	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS journal_margin_op_resolved_no_delete BEFORE DELETE ON journal_margin_op_resolved
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_margin_op_reconciled_no_update BEFORE UPDATE ON journal_margin_op_reconciled
+	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_margin_op_reconciled_no_delete BEFORE DELETE ON journal_margin_op_reconciled
 	BEGIN SELECT RAISE(ABORT, 'oms journal is append-only'); END;
 `
 
