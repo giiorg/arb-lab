@@ -72,11 +72,50 @@ var forbiddenRoots = []string{
 // remaining defence there is that a boot gate has to be declared to be reported,
 // which is a weaker check than this one and is why the list is exact-path.
 var permittedByGate = []string{
-	"github.com/giiorg/arb-lab/internal/risk/domain",
 	"github.com/giiorg/arb-lab/internal/risk/application",
 	"github.com/giiorg/arb-lab/internal/risk/application/ports",
 	"github.com/giiorg/arb-lab/internal/risk/infrastructure/driven",
 	"github.com/giiorg/arb-lab/internal/risk/infrastructure/attestation",
+}
+
+// permittedByPolicyOwnership is the fence's SECOND exemption, and it exists
+// because the first one silently covered an edge it was never argued for (task
+// #210).
+//
+// # The edge, and why it is not the gate's
+//
+// `risk/domain` was on the list above from the day the posture guard landed, and
+// it arrived there through `risk/application` — this root constructs the guard,
+// the guard uses the domain's rule tables. Task #210 gave the same package a
+// completely different route in: §7.1's liq-distance policy is single-sourced to
+// §5.2 with consumers in two contexts (this monitor and §6 step 4's sizing), so
+// it lives in `risk/domain`, and `oms/application` now imports it. `internal/oms`
+// is this root's SUBJECT, so the edge is unavoidable and permanent.
+//
+// Nothing failed when that landed, and that is the finding: the entry was
+// already present, so the new edge was admitted by a permission granted for the
+// account-posture gate — the exact shape this file's own comment warns about
+// ("a blanket risk/application is fine would let the NEXT use case ride in
+// free"), reached through a package that was already listed rather than through
+// one that was added. An exemption generalizes over its PREDICATE, not over the
+// argument that motivated it ([[an-exemption-argued-from-one-cause]]).
+//
+// # Why the edge is nonetheless correct
+//
+// The fence's stated reason is that importing another context is how a boot
+// phase acquires a collaborator that ASSUMES the posture this phase has not yet
+// decided. `risk/domain`'s liq-distance policy assumes nothing: it is a
+// threshold table and two pure comparisons, with no port, no clock and no venue.
+// So it is exempted on its own ground, and the ground is written down here
+// rather than inferred from the fact that nothing went red.
+//
+// The two lists are separate so that TestRiskExemptionIsKeyedToTheGateItProduces
+// keys only on the packages whose reason really is the gate. Were `risk/domain`
+// left on that list alone, dropping GateAccountPosture from this root's roster
+// would report a permission outliving its argument for a package whose argument
+// had not expired.
+var permittedByPolicyOwnership = []string{
+	"github.com/giiorg/arb-lab/internal/risk/domain",
 }
 
 // forbidden reports which of deps fall under a forbidden root. A package IS its
@@ -86,7 +125,7 @@ var permittedByGate = []string{
 func forbidden(deps []string) []string {
 	var hits []string
 	for _, dep := range deps {
-		if slices.Contains(permittedByGate, dep) {
+		if slices.Contains(permittedByGate, dep) || slices.Contains(permittedByPolicyOwnership, dep) {
 			continue
 		}
 		for _, root := range forbiddenRoots {
@@ -147,9 +186,12 @@ func TestForbiddenStillBitesOnAnUnexemptedRiskPackage(t *testing.T) {
 			t.Errorf("%s is not on the exemption list and must still be refused", dep)
 		}
 	}
-	// And the exemption itself is not vacuous: every path on it passes.
+	// And neither exemption is vacuous: every path on either list passes.
 	if hits := forbidden(permittedByGate); len(hits) > 0 {
-		t.Errorf("the exemption list does not exempt %v", hits)
+		t.Errorf("the gate exemption list does not exempt %v", hits)
+	}
+	if hits := forbidden(permittedByPolicyOwnership); len(hits) > 0 {
+		t.Errorf("the policy-ownership exemption list does not exempt %v", hits)
 	}
 }
 
@@ -161,6 +203,12 @@ func TestForbiddenStillBitesOnAnUnexemptedRiskPackage(t *testing.T) {
 // with it — otherwise the permission outlives its argument, which is how a
 // narrow exemption becomes a general one nobody re-derives
 // ([[a-rejections-reason-can-expire]]).
+//
+// It keys on permittedByGate ALONE. `risk/domain` moved to its own list in task
+// #210 precisely so that this assertion keeps naming only the packages whose
+// reason is this gate — the policy package now reaches this graph through
+// `internal/oms` as well, and its presence says nothing about whether the gate
+// is still declared.
 func TestRiskExemptionIsKeyedToTheGateItProduces(t *testing.T) {
 	t.Parallel()
 

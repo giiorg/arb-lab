@@ -83,6 +83,81 @@ func (p Price) Cmp(o Price) (int, error) {
 	return cmpMantissa(p.p, o.p), nil
 }
 
+// binaryPair is Money's binaryAsset on the price axis: it refuses two prices
+// that are not quoting the same base in the same quote.
+//
+// Both tags rather than one, for the reason the type carries both: a check on
+// the quote alone admits BTC and ETH prices into one subtraction, and the
+// difference between a BTC mark and an ETH liquidation price is a number with a
+// plausible magnitude and no meaning.
+func binaryPair(op string, a, b Price) (base, quote Asset, err error) {
+	if err := a.Validate(); err != nil {
+		return "", "", fmt.Errorf("price %s: %w", op, err)
+	}
+	if err := b.Validate(); err != nil {
+		return "", "", fmt.Errorf("price %s: %w", op, err)
+	}
+	if a.base != b.base || a.quote != b.quote {
+		return "", "", fmt.Errorf("price %s: %s/%s vs %s/%s: %w",
+			op, a.quote, a.base, b.quote, b.base, ErrAssetMismatch)
+	}
+	return a.base, a.quote, nil
+}
+
+// Sub returns p - o, exactly, or an error if the difference leaves the range.
+//
+// Money.Sub's twin on the price axis, and it takes no RoundingMode for the same
+// reason: two values at the canonical scale subtract exactly, so the only way
+// out is overflow.
+//
+// The result is a Price and MAY be negative — the type documents that a price
+// can be — so a caller reading a difference as a distance must ask Sign. §7.1's
+// liq distance is this operation's first caller and does exactly that: for a
+// short, `liqPrice - mark` is positive while the position has headroom and turns
+// negative at the instant it does not, and collapsing the sign there would
+// report the most urgent state on the ladder as the safest.
+func (p Price) Sub(o Price) (Price, error) {
+	base, quote, err := binaryPair("sub", p, o)
+	if err != nil {
+		return Price{}, err
+	}
+	d, err := subMantissa(p.p, o.p)
+	if err != nil {
+		return Price{}, fmt.Errorf("price sub %s - %s: %w", p, o, err)
+	}
+	return Price{p: d, base: base, quote: quote}, nil
+}
+
+// Div returns p / o as a dimensionless Rate: dividing two prices of the same
+// pair cancels both units, exactly as Money.Div cancels one.
+//
+// Expressing a price difference against the price it is measured from is §7.1's
+// liq distance — "how far the mark must move, as a fraction of where it is" —
+// and it is this operation.
+//
+// A zero divisor is an error rather than an infinity, Money.Div's rule. It is
+// worth more here than there: the divisor §7.1 supplies is the venue's mark, and
+// every layer between the wire and this call already refuses a non-positive one
+// (venue.Mark.Validate, MarkReading's screening) — so reaching this branch means
+// one of those refusals was bypassed, and returning any number at all would give
+// the ladder a distance computed from a mark of nothing.
+func (p Price) Div(o Price, mode RoundingMode) (Rate, error) {
+	if _, _, err := binaryPair("div", p, o); err != nil {
+		return Rate{}, err
+	}
+	if o.p == 0 {
+		return Rate{}, fmt.Errorf("price div %s by zero: %w", p, ErrDivideByZero)
+	}
+	// Scale the numerator up before dividing so the quotient lands on the
+	// canonical scale rather than being truncated to whole units — Money.Div's
+	// comment, and the same helper.
+	v, err := mulDivMantissa(p.p, scaleFactor, o.p, mode)
+	if err != nil {
+		return Rate{}, fmt.Errorf("price div %s / %s: %w", p, o, err)
+	}
+	return Rate{r: v, set: true}, nil
+}
+
 // Sign reports -1, 0 or 1.
 //
 // Money.Sign's twin on the price axis, and fallible for Money.Sign's reason: 0

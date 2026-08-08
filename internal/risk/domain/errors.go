@@ -149,4 +149,58 @@ var (
 	// second must never read as the first. This is the guard that makes
 	// Verdict.Satisfied answerable rather than merely true.
 	ErrVerdictVacuous = errors.New("risk: verdict evaluated no checks")
+
+	// The §5.2 liq-distance policy's refusals (task #210). Separate sentinels
+	// because they send a reader to three different places: a bad side is a
+	// CALLER that did not say which way its position faces, a bad threshold set
+	// is a CONFIG document, and a non-positive price is an input that got past a
+	// codec's screening.
+
+	// ErrPositionSideInvalid reports a side that is the zero value or is not a
+	// declared member. See PositionSide for why the side is a parameter and why
+	// it cannot be recovered from the two prices.
+	ErrPositionSideInvalid = errors.New("risk: position side is not a declared value")
+
+	// ErrLiqBandInvalid reports a band value that is not a declared member —
+	// only reachable by a conversion from an integer, so it is a defect in a
+	// codec or a fixture rather than anything on the wire.
+	ErrLiqBandInvalid = errors.New("risk: liq band is not a declared value")
+
+	// ErrLiqThresholdNotPositive reports a liq-distance threshold that is unset,
+	// zero or negative.
+	//
+	// The zero is the one somebody produces by omission, and it is the reason
+	// this is refused rather than tolerated: a threshold of zero is one no
+	// distance can fall below, so the rung it names can never fire while every
+	// other rung keeps working — the shape §5.2 already refuses for the
+	// cross-leg skew limit, arriving from the other end of the range.
+	ErrLiqThresholdNotPositive = errors.New("risk: liq distance threshold is not positive")
+
+	// ErrLiqThresholdsNotDescending reports two adjacent thresholds that are
+	// equal or out of order, which leaves the band between them EMPTY — a rung
+	// no distance can occupy, so the escalation it names is unreachable with
+	// nothing reporting a fault.
+	ErrLiqThresholdsNotDescending = errors.New("risk: liq distance thresholds are not strictly descending")
+
+	// ErrLiqPoliciesEmpty reports a policy table with no rows. See
+	// LiqDistancePolicies.Validate: a monitor over an empty table reports every
+	// position unmonitorable, which reads as a conservative refusal and is a
+	// wiring defect.
+	ErrLiqPoliciesEmpty = errors.New("risk: liq distance policy table is empty")
+
+	// ErrLiqPolicyUnconfigured reports an instrument the policy table does not
+	// cover. There is deliberately no default — see LiqDistancePolicies.
+	ErrLiqPolicyUnconfigured = errors.New("risk: no liq distance policy for this instrument")
+
+	// ErrLiqMarkNotPositive reports a mark that cannot be a denominator. A zero
+	// divides and a negative one inverts the direction of the entire ladder
+	// while every number still validates.
+	ErrLiqMarkNotPositive = errors.New("risk: liq distance mark is not positive")
+
+	// ErrLiqPriceNotPositive reports a liquidation price that is zero or
+	// negative. Both venue codecs already refuse one (a zero is how a liq price
+	// would arrive if an absence were read as a number, which for a SHORT reads
+	// as maximum headroom), and it is restated here because this function is
+	// exported.
+	ErrLiqPriceNotPositive = errors.New("risk: liq distance liquidation price is not positive")
 )

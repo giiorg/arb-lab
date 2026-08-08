@@ -1,6 +1,79 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-08, session 123): **§4's `AccountSource.MarginStatus` IS BUILT ON BOTH VENUES — AND THE WORD §4 USED NAMES A QUANTITY NEITHER VENUE PUBLISHES PER POSITION. DOCS v0.9.60, 32 MUTANTS / 1 REAL SURVIVOR (FIXED), `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO.**
+## Status (2026-08-08, session 124): **§7.1's LIQ-DISTANCE TRIGGER IS BUILT — AND §5.2's FOUR THRESHOLDS ANSWER TWO QUESTIONS, NOT ONE LADDER. DOCS v0.9.61, 36 MUTANTS / 2 REAL SURVIVORS (BOTH FIXED, THE SECOND FOUND BY THE MIRROR), `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO.**
+
+**Read `docs/superpowers/specs/2026-08-08-m4-210-liq-distance-monitor.md` (§80)
+first** — the deleted band, #209's convergence argument, the side that cannot be
+inferred, the fence that did not object, and the survivor that turned out to be
+`Money.Div`'s.
+
+**THE CHAIN OF DEFERRALS TERMINATES.** §12's milestone-3 closure pass wrote that
+*"eight comments across seven packages defer liq-distance to a computation no
+package owns"*. `oms/application.LiqMonitor` is that computation, and it is the
+first consumer of BOTH read ports — so the doubled wiring deferral #207 and #208
+each recorded is discharged and both adapters are wirable into `oms.Module`.
+
+**THE HEADLINE: §5.2's FOUR NUMBERS PARTITION THE LINE INTO FIVE INTERVALS.**
+Read as four rungs of one ladder they delete **[25%, 30%)** — below the opening
+threshold, above the alert — where openings are withheld and nothing else
+happens, which is where a position spends most of its drift. The repair is not a
+fifth member: the members are points in a PRODUCT of two properties, so the
+policy answers `Band(d)` and `PermitsOpening(d)` **separately** and neither is
+derivable from the other. Without a fixture in that interval the two functions
+return the same answer on every input and the second axis is untestable.
+
+**#209 IS RULED, AND IT TURNS ON CONVERGENCE RATHER THAN CAUTION.** An unstated
+liquidation price **withholds** openings (never "far from liquidation") and does
+**not** escalate — because §7.1's remedy is a `PackageDelever` toward reduced
+notional, which RAISES headroom, which pushes the liq price further outside the
+band that made Bybit withhold it. **The trigger's own remedy strengthens the
+trigger**, so it has no fixed point except flat: escalating would de-risk every
+well-margined Bybit position to zero, one generation at a time, with the safety
+system appearing to work throughout. What would convert absence into a LOWER
+BOUND is the symbol's price band, which this system does not read.
+
+**A FLAT INSTRUMENT WITHHOLDS NOTHING, AND THAT ONE IS FORCED.** A uniform "no
+distance ⇒ veto" makes the permitted region unreachable from a flat book, because
+the evidence that lifts the veto — a position's liquidation price — is produced
+only BY opening. Its mark is still screened, so the staleness block does not
+become conditional on already holding the exposure it prevents acquiring. This is
+also why `OpeningWithheld` is a VETO and not a permission.
+
+**THE SIDE IS A PARAMETER AND CANNOT BE INFERRED.** `liq > mark` looks
+sufficient and misses the case that matters: a short at or past liquidation is
+indistinguishable from an ordinary long. Where it SHOULD come from is the venue
+row that states the liq price (Binance `positionAmt`'s sign — which #208's codec
+parses and discards; Bybit a `side` field the wire struct does not declare) —
+filed as **#211**, not absorbed, because #208's narrowing ruling is one day old
+and Bybit's flat-position `side` spelling is unverified.
+
+**THE CAMPAIGN'S SECOND SURVIVOR WAS SEVERAL MILESTONES OLD.** `Price.Div`'s
+zero-divisor guard is redundant with `mulDivMantissa`'s, so `o.p == 0` → `o.p < 0`
+survives — it only narrows the NEGATIVE divisor, which nothing in `fixedpoint`
+ever exercised. Carrying the mutant to its mirror found the identical hole in
+**`Money.Div`**. Both covered now, on both types.
+
+**`app/reconcile`'s IMPORT FENCE GAINED A SECOND EXEMPTION BECAUSE THE FIRST
+SILENTLY COVERED THIS EDGE.** `oms/application` now imports `risk/domain` (§5.2's
+policy is single-sourced with a second consumer in `risk` — §6 step 4's sizing),
+and `risk/domain` was already on the list, admitted for the account-posture gate.
+Nothing went red. Split in two now, each half with its own argument, so the
+gate-keyed lapse check names only the packages whose reason really is the gate.
+
+**NEXT:** B3 (`MarginOp`, first producer for `boot.GateMarginOpsResolved`), then
+B4 — the escalation that finally calls `Deleverer.Open`, drives this monitor, and
+brings the gate that refuses a trading process with no liq trigger (§7.5's
+checklist has no member for it, and adding one the reconcile root cannot produce
+would refuse the only binary there is).
+
+**Unchanged:** three standing operator decisions ($20/$55 live test, #171's
+credential, §38f); credentials deferred; capture **PID 8495**; never rebuild over
+`bin/arblab`; `make ci` runs `-race` AND the ka staleness gate (needs node); cap
+`TLC_WORKERS` at 4; docs/i18n parity is `bun test`. **#180 is untouched.**
+
+---
+
+## Status (2026-08-08, session 123 — HISTORICAL): **§4's `AccountSource.MarginStatus` IS BUILT ON BOTH VENUES — AND THE WORD §4 USED NAMES A QUANTITY NEITHER VENUE PUBLISHES PER POSITION. DOCS v0.9.60, 32 MUTANTS / 1 REAL SURVIVOR (FIXED), `make ci` GREEN UNCACHED BOTH MODULES, OWED GREP ZERO.**
 
 **Read `docs/superpowers/specs/2026-08-08-m4-208-margin-status.md` (§79) first**
 — the three readings of "available margin", the two documented spellings of "no

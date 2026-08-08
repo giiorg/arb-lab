@@ -279,6 +279,38 @@ func TestMoney_AssetDiscipline(t *testing.T) {
 	}
 }
 
+// TestMoneyDivByANegativeAmount closes a gap that Price.Div's mutation campaign
+// found here (task #210).
+//
+// The zero-divisor guard in Div is redundant with mulDivMantissa's — both return
+// ErrDivideByZero — so `o.m == 0` → `o.m < 0` SURVIVES every existing test: the
+// zero case is unchanged and the only behaviour that moves is the negative
+// divisor, which nothing in this package ever exercised on either type. That
+// mutant was aimed at Price.Div, and it was carrying it to its mirror that
+// showed the older operation had the same hole.
+//
+// A negative divisor is legal here: Money may be negative, and Div's own subject
+// — milestone 2's carry-over-capital number — is a ratio whose sign a caller is
+// entitled to read.
+func TestMoneyDivByANegativeAmount(t *testing.T) {
+	got, err := mustMoney(t, usdt, "10").Div(mustMoney(t, usdt, "-100"), fixedpoint.RoundFloor)
+	if err != nil {
+		t.Fatalf("Div by a negative amount: %v", err)
+	}
+	if got.Decimal() != "-0.1" {
+		t.Errorf("10 / -100 = %s, want -0.1", got.Decimal())
+	}
+	// The positive control beside it, so the assertion above is measuring the
+	// sign rather than an operation that returns the same thing either way.
+	pos, err := mustMoney(t, usdt, "10").Div(mustMoney(t, usdt, "100"), fixedpoint.RoundFloor)
+	if err != nil {
+		t.Fatalf("Div: %v", err)
+	}
+	if pos.Decimal() != "0.1" {
+		t.Errorf("10 / 100 = %s, want 0.1", pos.Decimal())
+	}
+}
+
 // String is what a log line or a wrapped error shows. An unset value must be
 // unmistakable there rather than printing as a plausible amount of nothing.
 func TestMoney_String(t *testing.T) {

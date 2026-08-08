@@ -62,12 +62,14 @@ import (
 
 	"github.com/giiorg/arb-lab/internal/engine/venue"
 	"github.com/giiorg/arb-lab/internal/oms/application"
+	"github.com/giiorg/arb-lab/internal/oms/application/ports"
 	"github.com/giiorg/arb-lab/internal/oms/domain"
 	"github.com/giiorg/arb-lab/internal/oms/infrastructure/baseline"
 	"github.com/giiorg/arb-lab/internal/oms/infrastructure/driven"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
+	riskdomain "github.com/giiorg/arb-lab/internal/risk/domain"
 )
 
 // Deps is what a composition root supplies.
@@ -231,6 +233,62 @@ type Deps struct {
 	// verified against the journal, and §3.6 rule 6 keeps the journal adapter
 	// out of every root's reach.
 	SpotBaselineDocument *SpotBaselineDocument
+
+	// LiqPolicies is §5.2's `liq_distance` policy per instrument, and it is the
+	// switch that decides whether this module builds §7.1's trigger at all
+	// (task #210).
+	//
+	// Empty is legal and is a deployment that MONITORS nothing — the
+	// reconcile-only root's shape, which reads a journal and asserts an
+	// invariant and never holds a mark stream. Non-empty makes VenueMargin,
+	// MarkRisk and MarkMaxAge all REQUIRED, on SpotBalances' precedent: a
+	// half-wired capability is a wiring error that names its missing half,
+	// never a capability that silently answers nothing.
+	//
+	// The type is `risk`'s and not this context's, and that is the §5.2
+	// single-sourcing rule arriving at the wiring: §7.1's opening sentence
+	// makes the policy one object with consumers in two contexts, so an ACL
+	// copy here would be the second source it forbids. See
+	// riskdomain.LiqDistancePolicies for why there is no default row.
+	LiqPolicies riskdomain.LiqDistancePolicies
+
+	// MarkMaxAge is §3.4's mark budget per venue — the age past which §7.1
+	// treats the mark as stale, blocks openings and escalates.
+	//
+	// A root's business because §5.2 makes it configuration, and per VENUE
+	// because that is the granularity §3.4 declares ("one per (data class,
+	// venue)"). Required for every venue LiqPolicies names, checked at
+	// construction: the gap it forecloses is a monitor that computes distances
+	// for one venue and silently never judges the other's mark age.
+	MarkMaxAge map[ids.Venue]time.Duration
+
+	// VenueMargin is the venue's per-position MARGIN surface — the same client
+	// again, a fifth capability, for VenuePositions' reason one surface over.
+	//
+	// §7.1's trigger must not be able to place an order or to re-enumerate
+	// positions: it reads one instrument's liquidation price and margin, and
+	// §7.5's net-delta invariant keeps its own single source for the position
+	// quantity (record §79). Five capabilities, five adapters, one client.
+	VenueMargin driven.VenueMarginStatusReader
+
+	// MarkRisk is the mark-risk read port ALREADY BUILT — the one adapter this
+	// module takes assembled rather than constructing, and a gate is the reason.
+	//
+	// Every other venue-backed field here is a client this file wraps, which is
+	// §4's rule that the ACL belongs to the context. The mark's adapter cannot
+	// follow it: `oms/infrastructure/markstate` reads engine/state, whose graph
+	// reaches marketdata and strategy, and app/reconcile's import fence refuses
+	// both in a §7.5 boot binary. A `markstate.Reader` field — or a
+	// `*state.Cache` this file wrapped — would put that graph in every binary
+	// constructing a Module, including the boot root that needs none of it.
+	//
+	// So the field is the PORT. This package names an interface it already
+	// imports, the adapter is constructed by the root that owns a market-data
+	// pipeline, and the reconcile-only root supplies nothing and drags nothing.
+	// The asymmetry is stated because it looks like an inconsistency and is the
+	// opposite: it is the one field whose adapter a root genuinely owns, and
+	// what makes that true is a dependency fence rather than a preference.
+	MarkRisk ports.MarkRiskReader
 
 	// RecoveryReadPriority is the §7.6 shed class the order-read surface
 	// (Resolve and the executions sweep) carries — a ROOT's statement since
@@ -416,11 +474,13 @@ type Module struct {
 	// isolated-margin liq distance breaches and the top-up path fails.
 	//
 	// It is exposed with NO trigger behind it yet, and the asymmetry is stated
-	// rather than left to be discovered: §7.1's liq-distance escalation is
-	// milestone 4's other workstream, so nothing in this build calls Open. What
-	// this field's existence buys today is the RECOVERY half — Reconcile
-	// reinstates a generation a previous process left live, and it does that
-	// through this value.
+	// rather than left to be discovered: nothing in this build calls Open.
+	// LiqMonitor below is now the field that WILL feed it — the trigger's
+	// assessment exists as of task #210 — and what is still missing between
+	// them is the top-up (B3) and the escalation that consumes a
+	// LiqBandEmergency (B4). What this field's existence buys today is the
+	// RECOVERY half — Reconcile reinstates a generation a previous process
+	// left live, and it does that through this value.
 	//
 	// A root that drives the ladder must call Reconcile FIRST, and the ordering
 	// is the same one Recover states for the projection with one extra edge: the
@@ -447,6 +507,31 @@ type Module struct {
 	// spans contexts and this one supplies three of its gates. See
 	// application.Reconciler.
 	Reconcile *application.Reconciler
+
+	// LiqMonitor is core §7.1's liq-distance trigger, and it is NIL on a
+	// deployment that configured no LiqPolicies (task #210).
+	//
+	// # It is the first consumer of both read ports, which is what unblocked it
+	//
+	// Tasks #207 and #208 each landed a read port with the same deferral
+	// attached: no consumer, so a root wiring the adapter would drag
+	// engine/state into every OMS binary for nothing. The deferral named its own
+	// trigger — "B2's liq-distance monitor, which needs both" — and this is it.
+	// Both are wired here now, by the two different routes Deps.MarkRisk
+	// explains.
+	//
+	// # A nil field is a REAL state and the refusal for it is not here
+	//
+	// A trading process without this monitor has no liq-distance trigger at all,
+	// which is the failure §7.1 is entirely about. What stops that is not this
+	// constructor — the reconcile-only root legitimately has no monitor and must
+	// still build — but the gate on the rung where trading is permitted. That
+	// gate does not exist yet: §7.5's checklist has no member for it, and adding
+	// one this root cannot produce would refuse the only binary there is. It
+	// lands with B4, which is also the first thing that would DRIVE this
+	// monitor, and it is stated here rather than left as an absence a reader has
+	// to notice.
+	LiqMonitor *application.LiqMonitor
 
 	// journal is held only so Close can release it, and it is unexported for
 	// the same reason ports.OrderWriteRepository never becomes a field here: a
@@ -690,24 +775,42 @@ func New(deps Deps) (*Module, error) {
 		return nil, errors.Join(fmt.Errorf("oms: reconciler: %w", err), journal.Close())
 	}
 
+	// §7.1's liq-distance trigger, built exactly when a policy table says this
+	// deployment monitors something (task #210). The margin adapter is
+	// constructed here like every other venue capability; the mark port arrives
+	// already built, for the fence Deps.MarkRisk states.
+	var liqMonitor *application.LiqMonitor
+	if len(deps.LiqPolicies) > 0 {
+		marginStatus, err := driven.NewVenueMarginStatus(deps.VenueMargin, deps.InstrumentAssets)
+		if err != nil {
+			return nil, errors.Join(fmt.Errorf("oms: venue margin status: %w", err), journal.Close())
+		}
+		liqMonitor, err = application.NewLiqMonitor(
+			deps.MarkRisk, marginStatus, deps.LiqPolicies, deps.MarkMaxAge, deps.Clock)
+		if err != nil {
+			return nil, errors.Join(fmt.Errorf("oms: liq monitor: %w", err), journal.Close())
+		}
+	}
+
 	return &Module{
-		Plan:      planner,
-		Dispatch:  dispatcher,
-		Execute:   executor,
-		Resolve:   resolver,
-		Classify:  classifier,
-		Recover:   replayer,
-		Join:      joiner,
-		Delever:   deleverer,
-		Reconcile: reconciler,
-		journal:   journal,
-		orders:    orders,
-		reader:    reader,
-		balances:  deps.SpotBalances,
-		venue:     moduleVenue,
-		account:   deps.Account,
-		roster:    spot.Roster,
-		baselines: baselines,
+		Plan:       planner,
+		Dispatch:   dispatcher,
+		Execute:    executor,
+		Resolve:    resolver,
+		Classify:   classifier,
+		Recover:    replayer,
+		Join:       joiner,
+		Delever:    deleverer,
+		Reconcile:  reconciler,
+		LiqMonitor: liqMonitor,
+		journal:    journal,
+		orders:     orders,
+		reader:     reader,
+		balances:   deps.SpotBalances,
+		venue:      moduleVenue,
+		account:    deps.Account,
+		roster:     spot.Roster,
+		baselines:  baselines,
 	}, nil
 }
 
