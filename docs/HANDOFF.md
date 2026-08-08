@@ -1,5 +1,18 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
+## ⏳ IN PROGRESS — #215's CODE is landed (`2d4cfbe`), its DOCS are not
+
+**Read `docs/superpowers/specs/2026-08-08-m4-215-marginop-dispatch.md` (§84)
+first, section 3.** §7.1's margin-op DISPATCH path is built, tested (19 mutants,
+0 survivors) and wired; `make ci` is green on both modules. What is NOT done is
+the docs commit — the §4 signature edit that discharges the one open
+`[SPEC EDIT OWED]` marker, §7.1's and §12's annotations, Profiles §4, this
+file's own status section, `adr-history` §84, and turning that record from a
+handoff note into a decision record. The status section below is therefore one
+slice STALE: it names #215 as next, and #215's code is in.
+
+---
+
 ## Status (2026-08-08, session 127): **BINANCE'S ACT HISTORY LANDS — AND TWO OF #212's CORRECT RULES TURNED OUT TO BE SCOPED TO A ONE-SOURCE WORLD. DOCS v0.9.64, 22 MUTANTS / 2 REAL SURVIVORS (BOTH FIXTURE COLLAPSES IN THE NEW TESTS, BOTH CLOSED), `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
 
 **Read `docs/superpowers/specs/2026-08-08-m4-214-marginop-act-history.md` (§83)
