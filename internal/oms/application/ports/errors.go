@@ -220,6 +220,26 @@ var (
 	// would sit unread until something copied the struct field by field.
 	ErrMarginReadingLiqPriceContradicts = errors.New("oms: margin reading states no liq price but carries one")
 
+	// ErrMarginReadingQuantityZero reports a reading that claims a held position
+	// and carries no position quantity (task #219).
+	//
+	// The adapters cannot produce one — a zero quantity is what their presence
+	// test reads as flat — so this exists for the DOUBLES. §7.1's two remedies
+	// both multiply by it: a zero sizes a top-up of zero and a delever toward
+	// nothing, so a use-case test built on a default-valued reading would show
+	// the ladder running its remedies and moving the position not at all.
+	ErrMarginReadingQuantityZero = errors.New("oms: margin reading carries no position quantity")
+
+	// ErrMarginReadingEntryPriceNotPositive reports an entry price at or below
+	// zero (task #219).
+	//
+	// Refused rather than flagged, unlike the liq price two entries up, because
+	// neither venue documents an absence spelling for a live position's entry
+	// and §85 §3's delever target has no branch that could take one: absorbed as
+	// zero it enlarges the denominator `(1+MMR)·L* − e` and delevers harder than
+	// asked.
+	ErrMarginReadingEntryPriceNotPositive = errors.New("oms: margin reading entry price is not positive")
+
 	// ErrMarginOpStatusNotConcluded reports an attempt to journal a `pending`
 	// margin-op resolution.
 	//

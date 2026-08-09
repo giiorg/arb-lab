@@ -147,7 +147,7 @@ func (c *BybitOrderCodec) DecodePositions(scope PositionScope, assets map[ids.Ve
 			report.Unrecognized = append(report.Unrecognized, row.Symbol)
 			continue
 		}
-		net, err := bybitPositionNet(a.Base, row)
+		net, err := bybitSignedSize(a.Base, row.Size, row.Side)
 		if err != nil {
 			return PositionReport{}, fmt.Errorf("bybit position %d on %s: %w", i, row.Symbol, err)
 		}
@@ -158,7 +158,7 @@ func (c *BybitOrderCodec) DecodePositions(scope PositionScope, assets map[ids.Ve
 	return report, nil
 }
 
-// bybitPositionNet applies the row's side to its unsigned size.
+// bybitSignedSize applies a row's side to its unsigned size.
 //
 // The empty-side arm is checked against the SIZE rather than trusted, because the
 // two fields can disagree and only one of the disagreements is safe to absorb: ""
@@ -166,14 +166,31 @@ func (c *BybitOrderCodec) DecodePositions(scope PositionScope, assets map[ids.Ve
 // direction this decoder does not have. Reading the second as flat would report a
 // live position as no position — the one answer that makes §7.5's net-delta
 // assertion pass over exposure nobody can see.
-func bybitPositionNet(base fixedpoint.Asset, row bybitPositionWire) (fixedpoint.Quantity, error) {
-	size, err := fixedpoint.ParseQuantity(base, row.Size)
+//
+// # Shared with the MARGIN codec, and what that costs the differential test
+//
+// Task #219 gave the margin surface its own signed quantity, and both Bybit
+// codecs now reach this. Taking the strings rather than a wire struct is what
+// makes that possible without either surface's narrowing picking up the other's
+// fields — the two wire types stay separate and each declares its own tags.
+//
+// The sharing is deliberate and it removes a failure mode rather than hiding
+// one: a rule stated once cannot drift into two readings of "Sell". What it DOES
+// remove is the shared-payload differential test's ability to see a sign
+// disagreement, because there is no longer a second sign rule to disagree. What
+// that test still covers on this venue is which JSON KEYS each narrowing
+// declares, which is the live hazard here — `size` sits on a row beside
+// `positionValue`, and `positionIM` beside `positionIMByMp`. The Binance half of
+// the same test remains genuinely differential: both codecs parse `positionAmt`
+// independently, with no helper between them.
+func bybitSignedSize(base fixedpoint.Asset, size, side string) (fixedpoint.Quantity, error) {
+	q, err := fixedpoint.ParseQuantity(base, size)
 	if err != nil {
-		return fixedpoint.Quantity{}, fmt.Errorf("size %q: %w", row.Size, err)
+		return fixedpoint.Quantity{}, fmt.Errorf("size %q: %w", size, err)
 	}
-	sign, err := size.Sign()
+	sign, err := q.Sign()
 	if err != nil {
-		return fixedpoint.Quantity{}, fmt.Errorf("size %q: %w", row.Size, err)
+		return fixedpoint.Quantity{}, fmt.Errorf("size %q: %w", size, err)
 	}
 	if sign < 0 {
 		// "Position size, always positive". A negative one means the venue has
@@ -181,22 +198,22 @@ func bybitPositionNet(base fixedpoint.Asset, row bybitPositionWire) (fixedpoint.
 		// a direction already in the number — and this decoder would then be
 		// applying it twice.
 		return fixedpoint.Quantity{}, fmt.Errorf("size %q is negative on a surface documented as always positive: %w",
-			row.Size, ErrPositionsUnreadable)
+			size, ErrPositionsUnreadable)
 	}
 
-	switch row.Side {
+	switch side {
 	case "Buy":
-		return size, nil
+		return q, nil
 	case "Sell":
-		return size.Neg()
+		return q.Neg()
 	case "":
 		if sign != 0 {
 			return fixedpoint.Quantity{}, fmt.Errorf("size %q carries no side: %w",
-				row.Size, ErrPositionSideUnreadable)
+				size, ErrPositionSideUnreadable)
 		}
-		return size, nil
+		return q, nil
 	}
-	return fixedpoint.Quantity{}, fmt.Errorf("side %q: %w", row.Side, ErrPositionSideUnreadable)
+	return fixedpoint.Quantity{}, fmt.Errorf("side %q: %w", side, ErrPositionSideUnreadable)
 }
 
 // Compile-time proof that the codec satisfies the position half too (§3.6

@@ -136,6 +136,8 @@ func (m *VenueMarginStatus) MarginStatus(instrument ids.VenueInstrument) (ports.
 		LiqPriceStated: status.LiqPriceStated,
 		Maintenance:    status.Maintenance,
 		PostedMargin:   status.PostedMargin,
+		SizingQuantity: status.SizingQuantity,
+		EntryPrice:     status.EntryPrice,
 	}
 	if err := reading.Validate(); err != nil {
 		// The PORT's checks, run here rather than inherited from the engine's.
@@ -151,6 +153,17 @@ func (m *VenueMarginStatus) MarginStatus(instrument ids.VenueInstrument) (ports.
 		// catch a transposition of the two money fields: both are non-negative
 		// and both in the margin asset, so each is legal in the other's slot,
 		// and the only thing that can see it is a test asserting the values.
+		//
+		// #219 added a SECOND such pair and it is worse, because its two halves
+		// are both live inputs to a remedy: LiqPrice and EntryPrice are both
+		// Price in the same pair, so a transposition validates here and moves
+		// every delever target. The guard a reader reaches for — a short
+		// liquidates above its entry — is deliberately not written, and
+		// engine/venue's marginstatus.go says why: solved out, that inequality
+		// IS "this position is not currently liquidatable", so enforcing it
+		// refuses exactly the readings §7.1 exists to act on. The pair is
+		// covered by value assertions in this package's tests instead, which is
+		// the same trade the money pair above already took.
 		return ports.MarginReading{}, false, err
 	}
 	return reading, true, nil

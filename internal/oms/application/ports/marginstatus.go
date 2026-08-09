@@ -85,6 +85,39 @@ type MarginReading struct {
 	// engine/venue.MarginStatus for why §4's "available margin" is a quantity
 	// neither venue publishes per position.
 	PostedMargin fixedpoint.Money
+
+	// SizingQuantity is the venue's SIGNED position quantity, in the
+	// instrument's base asset, and it is the input to §7.1's two remedy sizings
+	// (record §85 §1, task #219).
+	//
+	// # THE PROHIBITION IS THE POINT, and it binds in ONE direction
+	//
+	// This field MUST NOT be fed to §7.5's net-delta invariant, and no future
+	// consumer may substitute it for VenuePositions on cost or convenience
+	// grounds. VenuePositions costs a whole-account enumeration; this number is
+	// already in hand on the safety path and it will look free. It is not the
+	// same fact. The invariant's value is that it joins two authorities that CAN
+	// disagree — this system's own projection against the venue's enumeration —
+	// and a second decode of one venue field is not a second authority, so the
+	// substitution leaves the assertion comparing the venue with itself and
+	// passing forever, over exposure nobody can see. The name is what makes a
+	// call site doing it visible.
+	//
+	// Why this port carries the number at all, rather than the safety path
+	// reading VenuePositions: §7.1's escalation re-queries "margin + position
+	// ... target-state, not delta", so the two must describe ONE instant, and
+	// both venues publish them on one row. See engine/venue's file comment for
+	// the three arguments and the alternatives §85 rejected.
+	SizingQuantity fixedpoint.Quantity
+
+	// EntryPrice is the position's average entry, in the instrument's quote
+	// asset — `e` in §85 §3's delever target `q* = m/((1+MMR)·L* − e)`.
+	//
+	// It has no presence flag, unlike LiqPrice: no venue documents an absence
+	// spelling for a live position's entry and no consumer could proceed with
+	// one, so the adapters refuse rather than flag. A false on a flag nothing
+	// branches on is a sentinel that reads as handled.
+	EntryPrice fixedpoint.Price
 }
 
 // Validate reports whether the reading is one §7.1 may compute from.
@@ -114,6 +147,9 @@ func (m MarginReading) Validate() error {
 		return fmt.Errorf("margin reading %s: maintenance in %s, posted margin in %s: %w",
 			m.Instrument.Symbol, m.Maintenance.Asset(), m.PostedMargin.Asset(), ErrMarginReadingAssetsDisagree)
 	}
+	if err := m.validateSizing(); err != nil {
+		return err
+	}
 
 	if !m.LiqPriceStated {
 		if m.LiqPrice != (fixedpoint.Price{}) {
@@ -136,6 +172,52 @@ func (m MarginReading) Validate() error {
 	if m.LiqPrice.Quote() != m.Maintenance.Asset() {
 		return fmt.Errorf("margin reading %s: liq price quoted in %s, margin in %s: %w",
 			m.Instrument.Symbol, m.LiqPrice.Quote(), m.Maintenance.Asset(), ErrMarginReadingAssetsDisagree)
+	}
+	return nil
+}
+
+// validateSizing checks the two fields §7.1's remedies size from.
+//
+// The engine's checks, restated rather than trusted, for this file's standing
+// reason: a test double satisfies the PORT directly, so a use-case fixture that
+// never went near a codec is exactly what reaches here. A reading claiming a
+// held position with a zero quantity is the shape that matters — it is what a
+// hand-built double takes by default, it sizes a top-up of zero and a delever
+// toward nothing, and both remedies then run, change nothing, and are read by
+// the ladder as attempted.
+//
+// The entry price is required outright rather than flagged, mirroring the
+// adapters: there is no absence spelling and no consumer that could proceed
+// with one.
+func (m MarginReading) validateSizing() error {
+	if err := m.SizingQuantity.Validate(); err != nil {
+		return fmt.Errorf("margin reading %s sizing quantity: %w", m.Instrument.Symbol, err)
+	}
+	sign, err := m.SizingQuantity.Sign()
+	if err != nil {
+		return fmt.Errorf("margin reading %s sizing quantity: %w", m.Instrument.Symbol, err)
+	}
+	if sign == 0 {
+		return fmt.Errorf("margin reading %s: %w", m.Instrument.Symbol, ErrMarginReadingQuantityZero)
+	}
+	if err := m.EntryPrice.Validate(); err != nil {
+		return fmt.Errorf("margin reading %s entry price: %w", m.Instrument.Symbol, err)
+	}
+	entrySign, err := m.EntryPrice.Sign()
+	if err != nil {
+		return fmt.Errorf("margin reading %s entry price: %w", m.Instrument.Symbol, err)
+	}
+	if entrySign <= 0 {
+		return fmt.Errorf("margin reading %s entry price %s: %w",
+			m.Instrument.Symbol, m.EntryPrice, ErrMarginReadingEntryPriceNotPositive)
+	}
+	if m.EntryPrice.Quote() != m.Maintenance.Asset() {
+		return fmt.Errorf("margin reading %s: entry price quoted in %s, margin in %s: %w",
+			m.Instrument.Symbol, m.EntryPrice.Quote(), m.Maintenance.Asset(), ErrMarginReadingAssetsDisagree)
+	}
+	if m.SizingQuantity.Asset() != m.EntryPrice.Base() {
+		return fmt.Errorf("margin reading %s: sizing quantity in %s, entry price based in %s: %w",
+			m.Instrument.Symbol, m.SizingQuantity.Asset(), m.EntryPrice.Base(), ErrMarginReadingAssetsDisagree)
 	}
 	return nil
 }

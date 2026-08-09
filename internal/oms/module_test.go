@@ -1001,10 +1001,25 @@ func (s scriptedMargin) MarginStatus(_ context.Context, instrument ids.VenueInst
 	if err != nil {
 		return venue.MarginStatus{}, false, err
 	}
+	// The two sizing fields are populated even though this rig reads neither:
+	// since #219 a MarginStatus claiming a held position must carry a nonzero
+	// quantity and a positive entry price, and the adapter validates before the
+	// dispatcher sees it. A double that skipped them would fail at the seam
+	// rather than in the use case, which is the port's rule biting correctly.
+	qty, err := fixedpoint.ParseQuantity("BTC", "-0.25")
+	if err != nil {
+		return venue.MarginStatus{}, false, err
+	}
+	entry, err := fixedpoint.ParsePrice("BTC", "USDT", "64180.41")
+	if err != nil {
+		return venue.MarginStatus{}, false, err
+	}
 	return venue.MarginStatus{
-		Instrument:   instrument,
-		Maintenance:  maintenance,
-		PostedMargin: posted,
+		Instrument:     instrument,
+		Maintenance:    maintenance,
+		PostedMargin:   posted,
+		SizingQuantity: qty,
+		EntryPrice:     entry,
 	}, true, nil
 }
 

@@ -1,6 +1,58 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-09, session 129): **THE FIRST CREDENTIALED SESSION — AND §7.1's TERMINAL RUNG TURNS OUT TO RAISE NO LIQUIDATION HEADROOM. B4's SIZING RULING TAKEN (RECORD §85), #221 ANSWERED, #223 CONFIRMED, #224 OPENED. NO CODE CHANGED; DOCS ONLY.**
+## Status (2026-08-09, session 130): **#219 IS CLOSED — THE MARGIN READ CARRIES §7.1's TWO SIZING INPUTS, AND THE FENCE THAT PERMITS THE SECOND DECODE BINDS ONE WAY. DOCS v0.9.66, 16 MUTANTS / 0 SURVIVORS, `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
+
+**Read `docs/superpowers/specs/2026-08-09-m4-219-margin-read-sizing-fields.md`
+(§86) first** — four rulings, the alternatives each rejected, and one finding
+that changes what a later slice may safely assert.
+
+**WHAT LANDED.** `SizingQuantity` (signed, base asset) and `EntryPrice` (quote
+asset) on `venue.MarginStatus` and `ports.MarginReading`; both venue codecs
+decoding them; `driven.VenueMarginStatus` carrying them; both `Validate`s
+checking them; five new sentinels; and the shared-payload differential test
+record §85 owed. Normative edits landed in the same session: §4's declared
+`MarginStatus` line, a new §4 paragraph, and §7.1's bullet — which said the
+surface reads the amount as a **presence test only** and was thereby made false
+by this slice.
+
+**THE NORMATIVE HALF IS THE PROHIBITION, NOT THE PERMISSION.** The widened
+quantity **may never be fed to §7.5's net-delta invariant**, and no consumer may
+substitute it for `AccountSource.Positions` on cost grounds. That invariant's
+value is joining two authorities that CAN disagree; a second decode of one venue
+field is not a second authority, so the substitution leaves it comparing the
+venue with itself and passing forever. The field is **named for the use it is
+permitted** — that name is the only carrier the rule has at this seam, since the
+consumer that must not read it lives in another context.
+
+**THE FINDING WORTH CARRYING FORWARD: THE OBVIOUS CROSS-CHECK IS THE
+LIQUIDATION CONDITION ITSELF.** `EntryPrice` and `LiqPrice` are the same type in
+the same pair, so a transposition validates, and the guard that suggests itself
+is "a short liquidates above its entry". Solved out of §85's relation,
+`L > e ⟺ m/q > e·MMR` — which is exactly *"this position is not currently
+liquidatable"*. Enforcing it would refuse precisely the readings §7.1's ladder
+exists to act on, at the instant it needs them, and would return an error where
+ruling (iv) requires a ladder state. **Anything #220 or #222 writes that
+compares these two prices needs the same solve run against it first.** The
+transposition is covered by value assertions instead.
+
+**Bybit's margin wire gained `side`**, reversing a v0.9.60 note that was right
+when written — §85 changed what the consumer needs, and Bybit's `size` is
+documented always-positive. The sign rule is **shared** with §7.5's codec, which
+removes a failure mode and costs the differential test its ability to see a sign
+disagreement *on that venue*; what it covers there is key selection, and on
+Binance it stays genuinely differential (two independent parses of
+`positionAmt`, no helper between them).
+
+**NEXT, in this order:** **#224** (the escalation redesign — a decision record,
+and it changes what B4 is); **#220** (the `leverageBracket` codec and the
+now-unblocked inverse solve — #219 delivered its quantity half); **#223**
+(correct the weight constants and audit every other `Weight` literal against a
+measurement). **#222 (B4) is blocked on #220 and #224 only.** #216 stays open
+and independent.
+
+---
+
+## Status (2026-08-09, session 129 — HISTORICAL): **THE FIRST CREDENTIALED SESSION — AND §7.1's TERMINAL RUNG TURNS OUT TO RAISE NO LIQUIDATION HEADROOM. B4's SIZING RULING TAKEN (RECORD §85), #221 ANSWERED, #223 CONFIRMED, #224 OPENED. NO CODE CHANGED; DOCS ONLY.**
 
 **Read `docs/superpowers/specs/2026-08-08-m4-218-b4-sizing-inputs-design.md` (§85)
 first**, then this block — §85 is the ruling, and this session's measurements

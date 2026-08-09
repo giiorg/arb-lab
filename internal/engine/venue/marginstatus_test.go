@@ -47,18 +47,49 @@ import (
 //   - THE LIQ PRICE IS FIXTURED AT ALL THREE SPELLINGS — a real number, the
 //     documented empty string, and a degenerate zero — because the absence rule
 //     has three arms and two of them return the same pair.
+//
+// Task #219 added two decoded fields and three items to the list, the first of
+// which was a collapse ALREADY PRESENT and harmless only while the field went
+// undecoded:
+//
+//   - THE ENTRY PRICE DIFFERS BETWEEN THE VENUES. Both rows carried 64000.10,
+//     which was free while neither codec read it and is the third checklist item
+//     above the moment they both do: a test naming the wrong codec would agree
+//     on the one number it now asserts.
+//   - THE ENTRY PRICE DIFFERS FROM ITS NEIGHBOURS ON THE ROW, and those
+//     neighbours are the point of the full-shape fixture. Binance publishes
+//     `breakEvenPrice` — entry adjusted for fees — one key away from
+//     `entryPrice`, same magnitude, same character class; Bybit puts `avgPrice`
+//     beside `markPrice` and `positionValue`. Each would validate perfectly in
+//     the decoded slot.
+//   - BYBIT'S `side` IS VARIED, at Sell, at Buy and at the documented empty
+//     string. The codec now signs its size, and against a Sell-only fixture
+//     "apply the side" and "negate unconditionally" are the same function.
+//     Binance's amount is fixtured at both signs for the mirror of that reason,
+//     which is cheaper there and is taken anyway (record §56's rule: neither
+//     venue's row is readable with the other's rule).
 
 const (
-	// The Binance figures. A 0.5 BTC SHORT.
-	binMarginAmt   = "-0.500"
+	// The Binance figures. A 0.503 BTC SHORT.
+	//
+	// None of these ends in a trailing zero, and that is a constraint rather
+	// than a style: fixedpoint's Decimal() normalizes one away, so a fixture
+	// spelled "0.500" cannot be asserted against its own constant and the test
+	// would have to restate the expected number somewhere the fixture does not
+	// reach. Trailing-zero PARSING is fixedpoint's own claim and is checked
+	// there.
+	binMarginAmt   = "-0.503"
+	binMarginEntry = "64180.41"
 	binMarginLiq   = "71234.55"
 	binMarginMaint = "312.75"
 	binMarginPost  = "1850.25"
 
 	// The Bybit figures, deliberately different from Binance's. Bybit's size is
 	// documented "always positive" and the direction lives in `side`, which this
-	// codec does not read at all.
+	// codec reads since #219 through §7.5's own rule.
 	bybMarginSize  = "0.375"
+	bybMarginSide  = "Sell"
+	bybMarginEntry = "63105.61"
 	bybMarginLiq   = "68420.75"
 	bybMarginMaint = "298.65"
 	bybMarginPost  = "1420.85"
@@ -68,31 +99,56 @@ func marginAssets() venue.InstrumentAssets {
 	return venue.InstrumentAssets{Base: "BTC", Quote: "USDT"}
 }
 
-// binanceMarginRow renders one V3 row with every field Binance really publishes.
+// binMarginRow is the Binance fixture's varying fields.
+//
+// A struct rather than six positional strings, which is this file's own thesis
+// applied to its own fixtures: every field here is a decimal string of one
+// character class, and at six parameters a transposed ARGUMENT mints a
+// well-formed row exactly the way a transposed assignment mints a well-formed
+// struct. Each call site below names only what it varies from the healthy short.
+type binMarginRow struct {
+	Amt, Entry, Liq, Maint, Posted, MarginAsset string
+}
+
+// bybMarginRow is the Bybit fixture's varying fields. See binMarginRow.
+type bybMarginRow struct {
+	Size, Side, Entry, Liq, Maint, Posted string
+}
+
+// binanceMarginBody renders one V3 row with every field Binance really
+// publishes, edited by zero or more mutators.
 //
 // All twenty, per Profiles §9's dated transcription and the independent
-// confirmation from Binance's spec-generated connector. The six the codec
-// declares are interpolated; the other fourteen carry values that would be
+// confirmation from Binance's spec-generated connector. The seven the codec
+// declares are interpolated; the other thirteen carry values that would be
 // WRONG if they landed in a declared field — `markPrice` differs from
 // `liquidationPrice`, `initialMargin` and `maintMargin` differ, `isolatedMargin`
-// and `isolatedWallet` differ. A narrowing that picked up a neighbour therefore
-// fails on the value rather than only on the shape.
-func binanceMarginRow(amt, liq, maint, posted, marginAsset string) string {
+// and `isolatedWallet` differ, and `breakEvenPrice` differs from `entryPrice`.
+// A narrowing that picked up a neighbour therefore fails on the value rather
+// than only on the shape.
+func binanceMarginBody(edits ...func(*binMarginRow)) string {
+	r := binMarginRow{
+		Amt: binMarginAmt, Entry: binMarginEntry, Liq: binMarginLiq,
+		Maint: binMarginMaint, Posted: binMarginPost, MarginAsset: "USDT",
+	}
+	for _, edit := range edits {
+		edit(&r)
+	}
 	return `[{` +
 		`"symbol":"BTCUSDT",` +
 		`"positionSide":"BOTH",` +
-		`"positionAmt":"` + amt + `",` +
-		`"entryPrice":"64000.10",` +
+		`"positionAmt":"` + r.Amt + `",` +
+		`"entryPrice":"` + r.Entry + `",` +
 		`"breakEvenPrice":"64010.20",` +
 		`"markPrice":"65500.30",` +
 		`"unRealizedProfit":"-750.40",` +
-		`"liquidationPrice":"` + liq + `",` +
+		`"liquidationPrice":"` + r.Liq + `",` +
 		`"isolatedMargin":"1099.85",` +
 		`"notional":"-32750.15",` +
-		`"marginAsset":"` + marginAsset + `",` +
-		`"isolatedWallet":"` + posted + `",` +
+		`"marginAsset":"` + r.MarginAsset + `",` +
+		`"isolatedWallet":"` + r.Posted + `",` +
 		`"initialMargin":"1637.50",` +
-		`"maintMargin":"` + maint + `",` +
+		`"maintMargin":"` + r.Maint + `",` +
 		`"positionInitialMargin":"1637.50",` +
 		`"openOrderInitialMargin":"0",` +
 		`"adl":2,` +
@@ -102,21 +158,28 @@ func binanceMarginRow(amt, liq, maint, posted, marginAsset string) string {
 		`}]`
 }
 
-// bybitMarginRow renders one /v5/position/list row with every field Bybit really
-// publishes, including the three it documents as Deprecated.
+// bybitMarginBody renders one /v5/position/list row with every field Bybit
+// really publishes, including the three it documents as Deprecated.
 //
 // `positionBalance` is one of them ("Deprecated, can refer to positionIM"), and
 // it is given a value DIFFERENT from positionIM here: it is the field whose name
 // reads like §4's "available margin", so a codec that reached for it lands on a
 // number the assertions can see.
-func bybitMarginRow(size, liq, maint, posted string) string {
+func bybitMarginBody(edits ...func(*bybMarginRow)) string {
+	r := bybMarginRow{
+		Size: bybMarginSize, Side: bybMarginSide, Entry: bybMarginEntry,
+		Liq: bybMarginLiq, Maint: bybMarginMaint, Posted: bybMarginPost,
+	}
+	for _, edit := range edits {
+		edit(&r)
+	}
 	return `{"result":{"category":"linear","list":[{` +
 		`"positionIdx":0,` +
 		`"riskId":1,` +
 		`"symbol":"BTCUSDT",` +
-		`"side":"Sell",` +
-		`"size":"` + size + `",` +
-		`"avgPrice":"64000.10",` +
+		`"side":"` + r.Side + `",` +
+		`"size":"` + r.Size + `",` +
+		`"avgPrice":"` + r.Entry + `",` +
 		`"positionValue":"24000.05",` +
 		`"tradeMode":0,` +
 		`"positionStatus":"Normal",` +
@@ -125,11 +188,11 @@ func bybitMarginRow(size, liq, maint, posted string) string {
 		`"leverage":"10",` +
 		`"positionBalance":"1111.11",` +
 		`"markPrice":"65500.30",` +
-		`"liqPrice":"` + liq + `",` +
+		`"liqPrice":"` + r.Liq + `",` +
 		`"bustPrice":"",` +
-		`"positionMM":"` + maint + `",` +
+		`"positionMM":"` + r.Maint + `",` +
 		`"positionMMByMp":"999.99",` +
-		`"positionIM":"` + posted + `",` +
+		`"positionIM":"` + r.Posted + `",` +
 		`"positionIMByMp":"888.88",` +
 		`"tpslMode":"Full",` +
 		`"takeProfit":"0.00",` +
@@ -256,7 +319,7 @@ func TestBinanceMarginStatusDecodesAShort(t *testing.T) {
 	t.Parallel()
 
 	instrument := perpInstrument(testBinance)
-	body := binanceMarginRow(binMarginAmt, binMarginLiq, binMarginMaint, binMarginPost, "USDT")
+	body := binanceMarginBody()
 
 	status, held, err := binanceCodec(t).DecodeMarginStatus(instrument, marginAssets(), okResponse(body))
 	if err != nil {
@@ -265,14 +328,14 @@ func TestBinanceMarginStatusDecodesAShort(t *testing.T) {
 	if !held {
 		t.Fatal("held = false on a 0.5 BTC short — a NEGATIVE positionAmt is the leg §7.1 exists for, and a presence test written as `> 0` reports it flat")
 	}
-	assertMarginStatus(t, status, instrument, binMarginLiq, binMarginMaint, binMarginPost)
+	assertMarginStatus(t, status, instrument, binMarginLiq, binMarginMaint, binMarginPost, binMarginAmt, binMarginEntry)
 }
 
 func TestBybitMarginStatusDecodesAShort(t *testing.T) {
 	t.Parallel()
 
 	instrument := perpInstrument(testBybit)
-	body := bybitMarginRow(bybMarginSize, bybMarginLiq, bybMarginMaint, bybMarginPost)
+	body := bybitMarginBody()
 
 	status, held, err := bybitCodec(t).DecodeMarginStatus(instrument, marginAssets(), okResponse(body))
 	if err != nil {
@@ -281,22 +344,52 @@ func TestBybitMarginStatusDecodesAShort(t *testing.T) {
 	if !held {
 		t.Fatal("held = false on a live position")
 	}
-	assertMarginStatus(t, status, instrument, bybMarginLiq, bybMarginMaint, bybMarginPost)
+	// Bybit states an always-positive size beside `side: "Sell"`, so the
+	// expected quantity is the NEGATED fixture string — the one place the two
+	// venues' rows are not readable with each other's rule.
+	assertMarginStatus(t, status, instrument, bybMarginLiq, bybMarginMaint, bybMarginPost, "-"+bybMarginSize, bybMarginEntry)
 }
 
-// assertMarginStatus checks all four decoded fields by VALUE.
+// assertMarginStatus checks all six decoded fields by VALUE.
 //
-// By value rather than by "is populated", because the fixtures are four decimal
+// By value rather than by "is populated", because the fixtures are decimal
 // strings of one character class: a transposition produces a fully populated
 // struct, and the only assertion that can see it is one that names the expected
 // number. The asset tags are checked too — the substitution available at every
 // call site is InstrumentAssets.Base for .Quote, which every other quantity on
 // this client legitimately uses.
-func assertMarginStatus(t *testing.T, got venue.MarginStatus, instrument ids.VenueInstrument, liq, maint, posted string) {
+//
+// #219's two fields make that argument sharper rather than merely longer. The
+// entry price and the liq price are the SAME Go type in the same pair, so
+// nothing structural can tell them apart in each other's slots and Validate is
+// deliberately not asked to try (see engine/venue's marginstatus.go: the guard
+// a reader reaches for is the liquidation condition itself). These value
+// assertions are the whole defence, on both venues.
+//
+// `signedQty` is the expected SIGNED quantity, which on Bybit is not the string
+// the fixture puts on the wire: the row states an always-positive size beside a
+// side, so the caller states what the pair should MEAN rather than what either
+// field says.
+func assertMarginStatus(t *testing.T, got venue.MarginStatus, instrument ids.VenueInstrument, liq, maint, posted, signedQty, entry string) {
 	t.Helper()
 
 	if got.Instrument != instrument {
 		t.Errorf("instrument = %v, want %v", got.Instrument, instrument)
+	}
+	if got.SizingQuantity.Decimal() != signedQty {
+		t.Errorf("SizingQuantity = %s, want %s — the SIGN is the half a short depends on", got.SizingQuantity.Decimal(), signedQty)
+	}
+	if got.SizingQuantity.Asset() != "BTC" {
+		t.Errorf("SizingQuantity asset = %q, want BTC — the BASE, unlike every margin figure on this row", got.SizingQuantity.Asset())
+	}
+	if got.EntryPrice.Decimal() != entry {
+		t.Errorf("EntryPrice = %s, want %s — `breakEvenPrice` and `markPrice` are one key away and would validate here", got.EntryPrice.Decimal(), entry)
+	}
+	if got.EntryPrice.Quote() != "USDT" {
+		t.Errorf("EntryPrice quote = %q, want USDT", got.EntryPrice.Quote())
+	}
+	if got.EntryPrice.Base() != "BTC" {
+		t.Errorf("EntryPrice base = %q, want BTC", got.EntryPrice.Base())
 	}
 	if !got.LiqPriceStated {
 		t.Fatalf("LiqPriceStated = false, want true — the fixture states %s", liq)
@@ -350,7 +443,7 @@ func TestNoPositionIsSpelledDifferentlyOnEachVenue(t *testing.T) {
 	// and the one §7.5's enumeration did not train.
 	status, held, err = bybitCodec(t).DecodeMarginStatus(
 		perpInstrument(testBybit), marginAssets(),
-		okResponse(bybitMarginRow("0", bybMarginLiq, bybMarginMaint, bybMarginPost)))
+		okResponse(bybitMarginBody(func(r *bybMarginRow) { r.Size = "0" })))
 	if err != nil {
 		t.Fatalf("bybit DecodeMarginStatus(size 0): %v", err)
 	}
@@ -369,7 +462,9 @@ func TestBinanceReportsAnOpenOrderRowWithNoPositionAsFlat(t *testing.T) {
 	// order on a closed position produces a row whose positionAmt is 0. Its
 	// margin figures are the degenerate ones this surface exists to keep away
 	// from §7.1, and the row's mere PRESENCE is not a position.
-	body := binanceMarginRow("0.000", "0", "0", "0", "USDT")
+	body := binanceMarginBody(func(r *binMarginRow) {
+		r.Amt, r.Entry, r.Liq, r.Maint, r.Posted = "0.000", "0", "0", "0", "0"
+	})
 
 	_, held, err := binanceCodec(t).DecodeMarginStatus(perpInstrument(testBinance), marginAssets(), okResponse(body))
 	if err != nil {
@@ -390,7 +485,7 @@ func TestBybitEmptyLiqPriceIsAValueAndNotAZero(t *testing.T) {
 	// Verbatim: liqPrice "keeps \"\" when liqPrice <= minPrice or liqPrice >=
 	// maxPrice". That is the WELL-MARGINED case — a short whose liquidation sits
 	// above the symbol's price band — so it arrives on a healthy position.
-	body := bybitMarginRow(bybMarginSize, "", bybMarginMaint, bybMarginPost)
+	body := bybitMarginBody(func(r *bybMarginRow) { r.Liq = "" })
 
 	status, held, err := bybitCodec(t).DecodeMarginStatus(perpInstrument(testBybit), marginAssets(), okResponse(body))
 	if err != nil {
@@ -426,11 +521,11 @@ func TestADegenerateLiqPriceIsAbsenceRatherThanAPrice(t *testing.T) {
 	cases := map[string]func() (venue.MarginStatus, bool, error){
 		"binance": func() (venue.MarginStatus, bool, error) {
 			return binanceCodec(t).DecodeMarginStatus(perpInstrument(testBinance), marginAssets(),
-				okResponse(binanceMarginRow(binMarginAmt, "0", binMarginMaint, binMarginPost, "USDT")))
+				okResponse(binanceMarginBody(func(r *binMarginRow) { r.Liq = "0" })))
 		},
 		"bybit": func() (venue.MarginStatus, bool, error) {
 			return bybitCodec(t).DecodeMarginStatus(perpInstrument(testBybit), marginAssets(),
-				okResponse(bybitMarginRow(bybMarginSize, "0", bybMarginMaint, bybMarginPost)))
+				okResponse(bybitMarginBody(func(r *bybMarginRow) { r.Liq = "0" })))
 		},
 	}
 	for name, decode := range cases {
@@ -453,9 +548,253 @@ func TestAnUnreadableLiqPriceIsAnErrorRatherThanAnAbsence(t *testing.T) {
 	// The third arm, and the one that keeps the second from swallowing a venue
 	// that changed its format: an unreadable answer is not an absence (§5.3).
 	_, _, err := bybitCodec(t).DecodeMarginStatus(perpInstrument(testBybit), marginAssets(),
-		okResponse(bybitMarginRow(bybMarginSize, "not-a-price", bybMarginMaint, bybMarginPost)))
+		okResponse(bybitMarginBody(func(r *bybMarginRow) { r.Liq = "not-a-price" })))
 	if err == nil {
 		t.Fatal("DecodeMarginStatus accepted an unreadable liq price — a format change would decode as a healthy position with no liquidation price")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The sizing fields (#219) — the SIGN, and the entry price that has no absence
+// ---------------------------------------------------------------------------
+
+func TestBybitAppliesTheSideRatherThanNegatingUnconditionally(t *testing.T) {
+	t.Parallel()
+
+	// The margin fixture is a SHORT, so against it alone "apply the side" and
+	// "always negate" are the same function — and Bybit's size is documented
+	// "always positive", which means the sign lives nowhere else on the row. A
+	// codec that hardcoded the direction would report every long as a short and
+	// size a delever the wrong way past flat.
+	cases := map[string]struct {
+		side string
+		want string
+	}{
+		"Sell is the short §7.1 exists for":  {side: "Sell", want: "-" + bybMarginSize},
+		"Buy is the same magnitude POSITIVE": {side: "Buy", want: bybMarginSize},
+	}
+	for name, c := range cases {
+		status, held, err := bybitCodec(t).DecodeMarginStatus(perpInstrument(testBybit), marginAssets(),
+			okResponse(bybitMarginBody(func(r *bybMarginRow) { r.Side = c.side })))
+		if err != nil {
+			t.Fatalf("%s: DecodeMarginStatus: %v", name, err)
+		}
+		if !held {
+			t.Fatalf("%s: held = false on a nonzero size", name)
+		}
+		if status.SizingQuantity.Decimal() != c.want {
+			t.Errorf("%s: SizingQuantity = %s, want %s", name, status.SizingQuantity.Decimal(), c.want)
+		}
+	}
+}
+
+func TestBinanceCarriesTheSignTheRowStates(t *testing.T) {
+	t.Parallel()
+
+	// The mirror, and it is taken even though it is cheaper here: Binance signs
+	// the amount itself, so the failure this catches is a codec that negated or
+	// took an absolute value on the way out. "A fix applied in one place gets
+	// applied to its mirror" — and the two venues' rules are opposites, which is
+	// exactly the pair where one test standing in for both is tempting.
+	cases := map[string]string{"-0.503": "-0.503", "0.503": "0.503"}
+	for amt, want := range cases {
+		status, held, err := binanceCodec(t).DecodeMarginStatus(perpInstrument(testBinance), marginAssets(),
+			okResponse(binanceMarginBody(func(r *binMarginRow) { r.Amt = amt })))
+		if err != nil {
+			t.Fatalf("positionAmt %s: DecodeMarginStatus: %v", amt, err)
+		}
+		if !held {
+			t.Fatalf("positionAmt %s: held = false", amt)
+		}
+		if status.SizingQuantity.Decimal() != want {
+			t.Errorf("positionAmt %s: SizingQuantity = %s, want %s", amt, status.SizingQuantity.Decimal(), want)
+		}
+	}
+}
+
+func TestBybitDocumentedFlatRowIsFlatRatherThanUnreadable(t *testing.T) {
+	t.Parallel()
+
+	// The real flat row on Bybit is `side: ""` beside `size: "0"` beside an
+	// `avgPrice` of 0 — three degenerate fields at once, and it arrives for every
+	// symbol this system has closed. Since #219 the decode signs the size before
+	// testing presence and refuses an entry price of zero, so this fixture is the
+	// one that proves neither new rule fires on the ORDINARY answer. Refusing it
+	// would take §7.1's trigger off every settled instrument.
+	status, held, err := bybitCodec(t).DecodeMarginStatus(perpInstrument(testBybit), marginAssets(),
+		okResponse(bybitMarginBody(func(r *bybMarginRow) { r.Side, r.Size, r.Entry = "", "0", "0" })))
+	if err != nil {
+		t.Fatalf("DecodeMarginStatus on the documented flat row: %v", err)
+	}
+	if held {
+		t.Error("held = true on `side: \"\"` with size 0, which is the documented empty position")
+	}
+	if status != (venue.MarginStatus{}) {
+		t.Errorf("returned %+v beside held=false", status)
+	}
+}
+
+func TestBybitRefusesALivePositionWhoseDirectionIsUnreadable(t *testing.T) {
+	t.Parallel()
+
+	// `side: ""` beside a NONZERO size is the contradiction §7.5's codec already
+	// refuses, and #219 made it reachable here: before it, this codec read the
+	// size as a presence test and would have reported the row held with an
+	// unsigned quantity nobody could size a remedy from. The two fixtures differ
+	// in exactly the field the rule reads.
+	_, _, err := bybitCodec(t).DecodeMarginStatus(perpInstrument(testBybit), marginAssets(),
+		okResponse(bybitMarginBody(func(r *bybMarginRow) { r.Side = "" })))
+	if !errors.Is(err, venue.ErrPositionSideUnreadable) {
+		t.Errorf("empty side on a live position = %v, want ErrPositionSideUnreadable", err)
+	}
+}
+
+func TestAnEntryPriceIsREFUSEDWhereALiqPriceIsFlagged(t *testing.T) {
+	t.Parallel()
+
+	// The two fields are decoded by rules of different ARITY, deliberately: the
+	// liq price has a documented absence that arrives on the healthy path, and
+	// this one has none on either venue and no consumer that could proceed with
+	// one. Absorbed as zero it enlarges §85 §3's denominator `(1+MMR)·L* − e`,
+	// so the delever runs harder than asked off a number no venue stated.
+	//
+	// Fixtured on BOTH venues and at BOTH degenerate spellings, because the two
+	// arms return different sentinels and one fixture would leave the other arm
+	// an untested line.
+	cases := map[string]struct {
+		decode func() (venue.MarginStatus, bool, error)
+		want   error
+	}{
+		"binance empty": {binanceEntry(t, ""), venue.ErrMarginEntryPriceUnstated},
+		"bybit empty":   {bybitEntry(t, ""), venue.ErrMarginEntryPriceUnstated},
+		"binance zero":  {binanceEntry(t, "0"), venue.ErrMarginEntryPriceNotPositive},
+		"bybit zero":    {bybitEntry(t, "0"), venue.ErrMarginEntryPriceNotPositive},
+		"binance below": {binanceEntry(t, "-64180.41"), venue.ErrMarginEntryPriceNotPositive},
+		"bybit below":   {bybitEntry(t, "-63105.61"), venue.ErrMarginEntryPriceNotPositive},
+	}
+	for name, c := range cases {
+		if _, _, err := c.decode(); !errors.Is(err, c.want) {
+			t.Errorf("%s: DecodeMarginStatus = %v, want %v", name, err, c.want)
+		}
+	}
+}
+
+func binanceEntry(t *testing.T, entry string) func() (venue.MarginStatus, bool, error) {
+	return func() (venue.MarginStatus, bool, error) {
+		return binanceCodec(t).DecodeMarginStatus(perpInstrument(testBinance), marginAssets(),
+			okResponse(binanceMarginBody(func(r *binMarginRow) { r.Entry = entry })))
+	}
+}
+
+func bybitEntry(t *testing.T, entry string) func() (venue.MarginStatus, bool, error) {
+	return func() (venue.MarginStatus, bool, error) {
+		return bybitCodec(t).DecodeMarginStatus(perpInstrument(testBybit), marginAssets(),
+			okResponse(bybitMarginBody(func(r *bybMarginRow) { r.Entry = entry })))
+	}
+}
+
+func TestAnUnreadableEntryPriceIsNeitherOfTheTwoRefusals(t *testing.T) {
+	t.Parallel()
+
+	// §5.3's rule, the same one that keeps marginLiqPrice's conservative arm from
+	// swallowing a format change: a value that will not parse is a PARSE error
+	// and must not be reported as either degenerate spelling, because those two
+	// sentinels name diagnoses ("the venue sent nothing", "the venue sent a flat
+	// row's value") that a format change does not match.
+	_, _, err := binanceCodec(t).DecodeMarginStatus(perpInstrument(testBinance), marginAssets(),
+		okResponse(binanceMarginBody(func(r *binMarginRow) { r.Entry = "not-a-price" })))
+	if err == nil {
+		t.Fatal("DecodeMarginStatus accepted an unreadable entry price")
+	}
+	if errors.Is(err, venue.ErrMarginEntryPriceUnstated) || errors.Is(err, venue.ErrMarginEntryPriceNotPositive) {
+		t.Errorf("unreadable entry price = %v, want a parse error rather than either absence sentinel", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The differential test — one payload, both codecs, one quantity (record §85)
+// ---------------------------------------------------------------------------
+
+func TestBothCodecsReadTheSameQuantityFromOneVenueAnswer(t *testing.T) {
+	t.Parallel()
+
+	// Record §85 owes this test, and it is free: `marginstatus.go` records that
+	// the margin surface and §7.5's enumeration read the SAME endpoint on both
+	// venues, so one captured payload is a legal answer to both calls.
+	//
+	// What it covers, stated exactly, because the two venues are not symmetric
+	// here. On BINANCE it is genuinely differential: the two codecs declare two
+	// narrowings of one row and each parses `positionAmt` independently, with no
+	// shared helper between them. On BYBIT the sign rule is shared
+	// (bybitSignedSize), so a sign DISAGREEMENT is not a thing that can happen —
+	// what is still covered there is which JSON keys each narrowing declares,
+	// which is the live hazard on a row carrying `size` beside `positionValue`
+	// and `positionIM` beside `positionIMByMp`.
+	//
+	// One row, not two: the margin codec refuses a second row on a symbol-scoped
+	// call, so the payload cannot carry one. The position is therefore looked up
+	// BY INSTRUMENT rather than taken at index 0 — with a single-element report
+	// those are the same value, and naming the instrument is what keeps the
+	// assertion honest if the report ever grows.
+	type sharedPayload struct {
+		v      ids.Venue
+		body   string
+		margin func(ids.VenueInstrument, string) (venue.MarginStatus, bool, error)
+		posns  func(string) (venue.PositionReport, error)
+	}
+	cases := map[string]sharedPayload{
+		"binance": {
+			v: testBinance, body: binanceMarginBody(),
+			margin: func(i ids.VenueInstrument, b string) (venue.MarginStatus, bool, error) {
+				return binanceCodec(t).DecodeMarginStatus(i, marginAssets(), okResponse(b))
+			},
+			posns: func(b string) (venue.PositionReport, error) {
+				return binanceCodec(t).DecodePositions(perpScope(), perpAssets(t, testBinance), okResponse(b))
+			},
+		},
+		"bybit": {
+			v: testBybit, body: bybitMarginBody(),
+			margin: func(i ids.VenueInstrument, b string) (venue.MarginStatus, bool, error) {
+				return bybitCodec(t).DecodeMarginStatus(i, marginAssets(), okResponse(b))
+			},
+			posns: func(b string) (venue.PositionReport, error) {
+				return bybitCodec(t).DecodePositions(perpScope(), perpAssets(t, testBybit), okResponse(b))
+			},
+		},
+	}
+	for name, c := range cases {
+		instrument := perpInstrument(c.v)
+
+		status, held, err := c.margin(instrument, c.body)
+		if err != nil {
+			t.Fatalf("%s DecodeMarginStatus: %v", name, err)
+		}
+		if !held {
+			t.Fatalf("%s held = false on the shared payload", name)
+		}
+
+		report, err := c.posns(c.body)
+		if err != nil {
+			t.Fatalf("%s DecodePositions on the SAME payload: %v", name, err)
+		}
+		var net string
+		var found bool
+		for _, p := range report.Positions {
+			if p.Instrument == instrument {
+				net, found = p.Net.Decimal(), true
+			}
+		}
+		if !found {
+			t.Fatalf("%s: the position codec found no row for %s in the payload the margin codec read", name, instrument.Symbol)
+		}
+
+		if status.SizingQuantity.Decimal() != net {
+			t.Errorf("%s: margin codec reads %s, position codec reads %s from ONE payload — the two narrowings disagree about which field the quantity is",
+				name, status.SizingQuantity.Decimal(), net)
+		}
+		if status.SizingQuantity.Asset() != "BTC" {
+			t.Errorf("%s: margin codec types the quantity in %q, want the base BTC", name, status.SizingQuantity.Asset())
+		}
 	}
 }
 
@@ -545,7 +884,7 @@ func TestBinanceMarginStatusChecksTheStatedMarginAsset(t *testing.T) {
 	// (margin asset == quote asset) is falsifiable against the venue rather than
 	// asserted from it. Bybit's codec has nothing to check against, which is why
 	// this check is worth keeping even though only one codec can make it.
-	body := binanceMarginRow(binMarginAmt, binMarginLiq, binMarginMaint, binMarginPost, "BNFCR")
+	body := binanceMarginBody(func(r *binMarginRow) { r.MarginAsset = "BNFCR" })
 
 	_, _, err := binanceCodec(t).DecodeMarginStatus(perpInstrument(testBinance), marginAssets(), okResponse(body))
 	if !errors.Is(err, venue.ErrMarginAssetsDisagree) {
@@ -565,8 +904,8 @@ func TestBybitRefusesEachPortfolioMarginFigureSeparately(t *testing.T) {
 	// Fixtured ONE AT A TIME. Emptying both makes `||` and `&&` the same
 	// predicate, so a decoder checking only one field would pass.
 	cases := map[string]string{
-		"positionMM empty": bybitMarginRow(bybMarginSize, bybMarginLiq, "", bybMarginPost),
-		"positionIM empty": bybitMarginRow(bybMarginSize, bybMarginLiq, bybMarginMaint, ""),
+		"positionMM empty": bybitMarginBody(func(r *bybMarginRow) { r.Maint = "" }),
+		"positionIM empty": bybitMarginBody(func(r *bybMarginRow) { r.Posted = "" }),
 	}
 	for name, body := range cases {
 		_, _, err := bybitCodec(t).DecodeMarginStatus(perpInstrument(testBybit), marginAssets(), okResponse(body))
@@ -601,7 +940,7 @@ func TestMarginStatusClientReadsThePerpFamily(t *testing.T) {
 	t.Parallel()
 
 	client, paths := marginClient(t,
-		binanceMarginRow(binMarginAmt, binMarginLiq, binMarginMaint, binMarginPost, "USDT"))
+		binanceMarginBody())
 
 	status, held, err := client.MarginStatus(context.Background(),
 		perpInstrument(testBinance), marginAssets(), ratelimit.PrioritySafety)
@@ -713,12 +1052,22 @@ func liveMarginStatus(t *testing.T) venue.MarginStatus {
 	if err != nil {
 		t.Fatalf("ParseMoney: %v", err)
 	}
+	qty, err := fixedpoint.ParseQuantity("BTC", binMarginAmt)
+	if err != nil {
+		t.Fatalf("ParseQuantity: %v", err)
+	}
+	entry, err := fixedpoint.ParsePrice("BTC", "USDT", binMarginEntry)
+	if err != nil {
+		t.Fatalf("ParsePrice: %v", err)
+	}
 	return venue.MarginStatus{
 		Instrument:     perpInstrument(testBinance),
 		LiqPrice:       liq,
 		LiqPriceStated: true,
 		Maintenance:    maint,
 		PostedMargin:   posted,
+		SizingQuantity: qty,
+		EntryPrice:     entry,
 	}
 }
 
@@ -809,6 +1158,19 @@ func TestMarginStatusValidateRefusesEachAssetDisagreement(t *testing.T) {
 		t.Fatalf("ParsePrice: %v", err)
 	}
 
+	// #219 added two arms. The entry price is the liq price's shape one field
+	// over; the sizing quantity is the ONLY field on this struct typed in the
+	// base, which makes it the one place the habitual substitution runs the other
+	// way — a codec passing assets.Quote where every neighbour takes assets.Base.
+	foreignQty, err := fixedpoint.ParseQuantity("USDT", binMarginAmt)
+	if err != nil {
+		t.Fatalf("ParseQuantity: %v", err)
+	}
+	foreignEntry, err := fixedpoint.ParsePrice("BTC", "USDC", binMarginEntry)
+	if err != nil {
+		t.Fatalf("ParsePrice: %v", err)
+	}
+
 	cases := map[string]func(venue.MarginStatus) venue.MarginStatus{
 		"posted margin in another asset": func(s venue.MarginStatus) venue.MarginStatus {
 			s.PostedMargin = foreignMoney
@@ -822,11 +1184,87 @@ func TestMarginStatusValidateRefusesEachAssetDisagreement(t *testing.T) {
 			s.LiqPrice = foreignPrice
 			return s
 		},
+		"entry price quoted in another asset": func(s venue.MarginStatus) venue.MarginStatus {
+			s.EntryPrice = foreignEntry
+			return s
+		},
+		"sizing quantity in the QUOTE asset": func(s venue.MarginStatus) venue.MarginStatus {
+			s.SizingQuantity = foreignQty
+			return s
+		},
 	}
 	for name, mutate := range cases {
 		if err := mutate(liveMarginStatus(t)).Validate(); !errors.Is(err, venue.ErrMarginAssetsDisagree) {
 			t.Errorf("%s: Validate() = %v, want ErrMarginAssetsDisagree", name, err)
 		}
+	}
+}
+
+func TestMarginStatusValidateRefusesAHeldPositionOfZeroSize(t *testing.T) {
+	t.Parallel()
+
+	// Unreachable from either codec — both read the quantity as their presence
+	// test — and reachable from a status built directly, which is what a hand
+	// written fixture is. Both of §7.1's remedies multiply by this number: a zero
+	// sizes a top-up of zero and a delever toward nothing, so the ladder would
+	// see two remedies run, change nothing, and count as attempted.
+	zero, err := fixedpoint.ParseQuantity("BTC", "0")
+	if err != nil {
+		t.Fatalf("ParseQuantity: %v", err)
+	}
+	s := liveMarginStatus(t)
+	s.SizingQuantity = zero
+	if err := s.Validate(); !errors.Is(err, venue.ErrMarginQuantityZero) {
+		t.Errorf("Validate() = %v, want ErrMarginQuantityZero", err)
+	}
+
+	// The positive control for the SIGN: a long validates. Without it a rule
+	// written as "must be negative" — which the short-only fixtures above would
+	// all agree with — reads as correct, and it would refuse every long this
+	// system holds while §7.1 watched only shorts.
+	long, err := fixedpoint.ParseQuantity("BTC", "0.500")
+	if err != nil {
+		t.Fatalf("ParseQuantity: %v", err)
+	}
+	s = liveMarginStatus(t)
+	s.SizingQuantity = long
+	if err := s.Validate(); err != nil {
+		t.Errorf("Validate() on a LONG = %v, want nil — the sign is data, not a constraint", err)
+	}
+}
+
+func TestMarginStatusValidateRefusesANonPositiveEntryPrice(t *testing.T) {
+	t.Parallel()
+
+	// Refused at both spellings a Price can take, unlike the liq price one field
+	// over, which flags absence instead. See engine/venue's marginstatus.go for
+	// the arity argument and for the cross-check that is deliberately NOT made:
+	// "a short liquidates above its entry" solves out to "this position is not
+	// currently liquidatable", so a validator enforcing it refuses exactly the
+	// readings §7.1's ladder exists to act on.
+	for name, raw := range map[string]string{"zero": "0", "negative": "-64180.41"} {
+		bad, err := fixedpoint.ParsePrice("BTC", "USDT", raw)
+		if err != nil {
+			t.Fatalf("%s ParsePrice: %v", name, err)
+		}
+		s := liveMarginStatus(t)
+		s.EntryPrice = bad
+		if err := s.Validate(); !errors.Is(err, venue.ErrMarginEntryPriceNotPositive) {
+			t.Errorf("%s entry price: Validate() = %v, want ErrMarginEntryPriceNotPositive", name, err)
+		}
+	}
+
+	// And the control that keeps the paragraph above honest: an entry price
+	// ABOVE the liq price is a long's ordinary shape and must validate, so the
+	// refused cross-check stays refused rather than creeping back in.
+	above, err := fixedpoint.ParsePrice("BTC", "USDT", "99999.99")
+	if err != nil {
+		t.Fatalf("ParsePrice: %v", err)
+	}
+	s := liveMarginStatus(t)
+	s.EntryPrice = above
+	if err := s.Validate(); err != nil {
+		t.Errorf("Validate() with entry above the liq price = %v, want nil — that ordering is a POSITION's direction, not an error", err)
 	}
 }
 

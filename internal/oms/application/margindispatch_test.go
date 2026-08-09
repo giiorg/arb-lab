@@ -127,9 +127,11 @@ func newDispatchRig(t *testing.T) *dispatchRig {
 func marginReadingOfInstrument(t *testing.T, vi ids.VenueInstrument, posted string) ports.MarginReading {
 	t.Helper()
 	return ports.MarginReading{
-		Instrument:   vi,
-		Maintenance:  marginTestMoney(t, "10"),
-		PostedMargin: marginTestMoney(t, posted),
+		Instrument:     vi,
+		Maintenance:    marginTestMoney(t, "10"),
+		PostedMargin:   marginTestMoney(t, posted),
+		SizingQuantity: marginTestQuantity(t, "-0.25"),
+		EntryPrice:     marginTestEntry(t, "64180.41"),
 	}
 }
 

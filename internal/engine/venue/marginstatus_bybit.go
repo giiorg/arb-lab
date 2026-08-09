@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/giiorg/arb-lab/internal/engine/venue/transport"
-	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
 )
@@ -100,14 +99,31 @@ func (c *BybitOrderCodec) EncodeMarginStatus(instrument ids.VenueInstrument) (tr
 // bybitMarginStatusWire is one position row, narrowed to what §7.1 asks for.
 //
 // A second narrowing of the row bybitPositionWire narrows, for the reason
-// marginstatus.go states. `size` is read as a PRESENCE test only — §7.5's
-// net-delta invariant keeps the single source for the quantity — and `side` is
-// deliberately absent, because a direction is exactly what this consumer does not
-// need and declaring it would put a second reading of the position one field
-// away from the first.
+// marginstatus.go states.
+//
+// # `side` IS declared now, and the note it replaces was right when written
+//
+// Until #219 this struct deliberately omitted `side`, on the argument that "a
+// direction is exactly what this consumer does not need". Record §85 §1 changed
+// what the consumer needs: §7.1's remedies size from a SIGNED quantity, Bybit
+// states an always-positive `size`, and the sign therefore lives in `side` and
+// nowhere else on the row. Omitting it now would leave this codec able to
+// report a short and a long as the same number — which is the defect
+// positions_bybit.go's file comment names in as many words.
+//
+// The old note's underlying worry is answered by the prohibition in
+// marginstatus.go rather than by the omission: what must not happen is §7.5's
+// invariant acquiring a second source, and that is a rule about who may READ
+// SizingQuantity, not about which keys this struct declares.
+//
+// `avgPrice` is §85 §3's `e`. It sits on a row beside `positionValue` and
+// `markPrice`, both of the same magnitude and character class, which is why the
+// fixture carries the full row rather than the declared keys.
 type bybitMarginStatusWire struct {
 	Symbol      string `json:"symbol"`
+	Side        string `json:"side"`
 	Size        string `json:"size"`
+	AvgPrice    string `json:"avgPrice"`
 	PositionIdx int    `json:"positionIdx"`
 	LiqPrice    string `json:"liqPrice"`
 	PositionMM  string `json:"positionMM"`
@@ -175,11 +191,17 @@ func (c *BybitOrderCodec) DecodeMarginStatus(instrument ids.VenueInstrument, ass
 			row.Symbol, row.PositionIdx, bybitOneWayPositionIdx, ErrPositionModeNotOneWay)
 	}
 
-	// Presence, never a quantity carried out of here. See bybitMarginStatusWire.
-	size, err := fixedpoint.ParseQuantity(assets.Base, row.Size)
+	// Presence AND the sizing quantity, through §7.5's own rule rather than a
+	// second one (bybitSignedSize). Signing before the presence test rather than
+	// after is what makes the contradiction reachable here: `side: ""` beside a
+	// NONZERO size is a live position whose direction is unreadable, and a
+	// presence test that looked only at the size would report it held and then
+	// size a remedy off an unsigned number. The documented flat row — `side: ""`
+	// with size 0 — passes through this helper unchanged and is caught by the
+	// zero check below, so the ordinary flat answer is not disturbed.
+	size, err := bybitSignedSize(assets.Base, row.Size, row.Side)
 	if err != nil {
-		return MarginStatus{}, false, fmt.Errorf("bybit margin status on %s size %q: %w",
-			row.Symbol, row.Size, err)
+		return MarginStatus{}, false, fmt.Errorf("bybit margin status on %s: %w", row.Symbol, err)
 	}
 	sign, err := size.Sign()
 	if err != nil {
@@ -216,6 +238,10 @@ func (c *BybitOrderCodec) DecodeMarginStatus(instrument ids.VenueInstrument, ass
 	if err != nil {
 		return MarginStatus{}, false, fmt.Errorf("bybit margin status on %s: %w", row.Symbol, err)
 	}
+	entry, err := marginEntryPrice(assets.Base, assets.Quote, row.AvgPrice)
+	if err != nil {
+		return MarginStatus{}, false, fmt.Errorf("bybit margin status on %s: %w", row.Symbol, err)
+	}
 
 	return MarginStatus{
 		Instrument:     instrument,
@@ -223,6 +249,8 @@ func (c *BybitOrderCodec) DecodeMarginStatus(instrument ids.VenueInstrument, ass
 		LiqPriceStated: stated,
 		Maintenance:    maintenance,
 		PostedMargin:   posted,
+		SizingQuantity: size,
+		EntryPrice:     entry,
 	}, true, nil
 }
 

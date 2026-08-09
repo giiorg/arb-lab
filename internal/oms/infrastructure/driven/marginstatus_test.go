@@ -59,6 +59,16 @@ const (
 	marginLiqFixture    = "71234.55"
 	marginMaintFixture  = "312.75"
 	marginPostedFixture = "1850.25"
+
+	// #219's two fields, and the ENTRY is deliberately a different number from
+	// the liq price on a different scale. The two are the same Go type in the
+	// same pair, so nothing structural can tell them apart in each other's slots
+	// and the port's Validate is deliberately not asked to try — see
+	// driven/marginstatus.go for why the obvious guard must not be written. The
+	// value assertion below is the whole defence, which makes "these two
+	// constants differ" load-bearing rather than tidy.
+	marginQtyFixture   = "-0.503"
+	marginEntryFixture = "64180.41"
 )
 
 func liveVenueMarginStatus(t *testing.T) venue.MarginStatus {
@@ -75,12 +85,22 @@ func liveVenueMarginStatus(t *testing.T) venue.MarginStatus {
 	if err != nil {
 		t.Fatalf("ParseMoney: %v", err)
 	}
+	qty, err := fixedpoint.ParseQuantity("BTC", marginQtyFixture)
+	if err != nil {
+		t.Fatalf("ParseQuantity: %v", err)
+	}
+	entry, err := fixedpoint.ParsePrice("BTC", "USDT", marginEntryFixture)
+	if err != nil {
+		t.Fatalf("ParsePrice: %v", err)
+	}
 	return venue.MarginStatus{
 		Instrument:     perpInstrument(),
 		LiqPrice:       liq,
 		LiqPriceStated: true,
 		Maintenance:    maint,
 		PostedMargin:   posted,
+		SizingQuantity: qty,
+		EntryPrice:     entry,
 	}
 }
 
@@ -119,6 +139,22 @@ func TestVenueMarginStatusTranslatesEveryFieldAndPinsTheSafetyClass(t *testing.T
 	}
 	if reading.PostedMargin.Decimal() != marginPostedFixture {
 		t.Errorf("PostedMargin = %s, want %s", reading.PostedMargin.Decimal(), marginPostedFixture)
+	}
+	// The two sizing fields, by value and by tag. EntryPrice and LiqPrice are
+	// interchangeable to every structural check the adapter makes, so this pair
+	// of assertions is the only thing standing between a transposed copy and a
+	// delever target computed from the liquidation price.
+	if reading.SizingQuantity.Decimal() != marginQtyFixture {
+		t.Errorf("SizingQuantity = %s, want %s", reading.SizingQuantity.Decimal(), marginQtyFixture)
+	}
+	if reading.SizingQuantity.Asset() != "BTC" {
+		t.Errorf("SizingQuantity asset = %q, want BTC", reading.SizingQuantity.Asset())
+	}
+	if reading.EntryPrice.Decimal() != marginEntryFixture {
+		t.Errorf("EntryPrice = %s, want %s — a copy that swapped it with LiqPrice validates and moves every delever target", reading.EntryPrice.Decimal(), marginEntryFixture)
+	}
+	if reading.EntryPrice.Quote() != "USDT" {
+		t.Errorf("EntryPrice quote = %q, want USDT", reading.EntryPrice.Quote())
 	}
 
 	// §7.1 names this a Safety read twice: the stale-mark failover polls it
@@ -303,6 +339,8 @@ func TestMarginReadingValidateIsPositivelyControlled(t *testing.T) {
 		LiqPriceStated: s.LiqPriceStated,
 		Maintenance:    s.Maintenance,
 		PostedMargin:   s.PostedMargin,
+		SizingQuantity: s.SizingQuantity,
+		EntryPrice:     s.EntryPrice,
 	}
 	if err := live.Validate(); err != nil {
 		t.Fatalf("Validate() on a real reading = %v, want nil", err)
@@ -338,5 +376,88 @@ func TestMarginReadingValidateIsPositivelyControlled(t *testing.T) {
 	mismatched.PostedMargin = foreign
 	if err := mismatched.Validate(); !errors.Is(err, ports.ErrMarginReadingAssetsDisagree) {
 		t.Errorf("mixed assets = %v, want ErrMarginReadingAssetsDisagree", err)
+	}
+}
+
+// TestMarginReadingValidateRefusesTheSizingDefaults checks the two fields #219
+// added, on the port rather than on the engine.
+//
+// The restatement earns its keep HERE and nowhere else: no adapter can produce
+// either shape, because both codecs report a zero quantity as a flat instrument
+// and refuse a non-positive entry price at the decode. What reaches these lines
+// is a DOUBLE — a use-case fixture that satisfied the interface directly — and
+// the default-valued one is exactly the shape a fixture takes when its author is
+// thinking about some other field. Both of §7.1's remedies multiply by the
+// quantity, so a zero runs a top-up of nothing and a delever toward nothing
+// while the ladder counts two remedies as attempted.
+func TestMarginReadingValidateRefusesTheSizingDefaults(t *testing.T) {
+	t.Parallel()
+
+	s := liveVenueMarginStatus(t)
+	live := ports.MarginReading{
+		Instrument:     s.Instrument,
+		LiqPrice:       s.LiqPrice,
+		LiqPriceStated: s.LiqPriceStated,
+		Maintenance:    s.Maintenance,
+		PostedMargin:   s.PostedMargin,
+		SizingQuantity: s.SizingQuantity,
+		EntryPrice:     s.EntryPrice,
+	}
+
+	zeroQty, err := fixedpoint.ParseQuantity("BTC", "0")
+	if err != nil {
+		t.Fatalf("ParseQuantity: %v", err)
+	}
+	flat := live
+	flat.SizingQuantity = zeroQty
+	if err := flat.Validate(); !errors.Is(err, ports.ErrMarginReadingQuantityZero) {
+		t.Errorf("zero quantity = %v, want ErrMarginReadingQuantityZero", err)
+	}
+
+	zeroEntry, err := fixedpoint.ParsePrice("BTC", "USDT", "0")
+	if err != nil {
+		t.Fatalf("ParsePrice: %v", err)
+	}
+	noEntry := live
+	noEntry.EntryPrice = zeroEntry
+	if err := noEntry.Validate(); !errors.Is(err, ports.ErrMarginReadingEntryPriceNotPositive) {
+		t.Errorf("zero entry price = %v, want ErrMarginReadingEntryPriceNotPositive", err)
+	}
+
+	// The base/quote arms, one each. The quantity is the only field on this type
+	// typed in the BASE, which makes it the one place the habitual substitution
+	// runs the other way — an adapter passing the quote where every neighbour
+	// takes the base.
+	quoteQty, err := fixedpoint.ParseQuantity("USDT", marginQtyFixture)
+	if err != nil {
+		t.Fatalf("ParseQuantity: %v", err)
+	}
+	wrongBase := live
+	wrongBase.SizingQuantity = quoteQty
+	if err := wrongBase.Validate(); !errors.Is(err, ports.ErrMarginReadingAssetsDisagree) {
+		t.Errorf("quantity in the quote asset = %v, want ErrMarginReadingAssetsDisagree", err)
+	}
+
+	foreignEntry, err := fixedpoint.ParsePrice("BTC", "USDC", marginEntryFixture)
+	if err != nil {
+		t.Fatalf("ParsePrice: %v", err)
+	}
+	wrongQuote := live
+	wrongQuote.EntryPrice = foreignEntry
+	if err := wrongQuote.Validate(); !errors.Is(err, ports.ErrMarginReadingAssetsDisagree) {
+		t.Errorf("entry price in another quote = %v, want ErrMarginReadingAssetsDisagree", err)
+	}
+
+	// The positive control for the SIGN, which the fixtures above cannot give:
+	// every one of them is a short, so a rule written as "must be negative" would
+	// agree with all of them and refuse every long this system holds.
+	long, err := fixedpoint.ParseQuantity("BTC", "0.503")
+	if err != nil {
+		t.Fatalf("ParseQuantity: %v", err)
+	}
+	isLong := live
+	isLong.SizingQuantity = long
+	if err := isLong.Validate(); err != nil {
+		t.Errorf("a LONG reading = %v, want nil — the sign is data, not a constraint", err)
 	}
 }

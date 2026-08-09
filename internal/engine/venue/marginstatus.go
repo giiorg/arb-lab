@@ -96,6 +96,65 @@ import (
 // Both venues' margin figures live on their derivatives position surfaces —
 // Binance's is /fapi, Bybit's rejects category=spot — so a spot instrument gets
 // ErrPositionSurfaceAbsent rather than an empty status.
+//
+// # THE POSITION QUANTITY AND THE ENTRY PRICE ARE DECODED HERE, and the fence
+// # that permits it binds in ONE direction only (record §85 §1, task #219)
+//
+// Until v0.9.60 the position amount on this row was read as a PRESENCE test and
+// never carried out of the codec. §7.1's two remedies both take a quantity —
+// the top-up's `Δ = (L*−L)·q·(1+MMR)` and the delever's target
+// `q* = m/((1+MMR)·L* − e)` — and nothing in this system computes one. Record
+// §85 rules that it comes from this row, on three independent arguments, of
+// which the third is the one that decides it: §7.1 requires the escalation to
+// re-query "margin + position ... target-state, not delta", and margin and
+// quantity must therefore describe ONE instant. They are on one row. Taking the
+// margin from here and the quantity from §7.5's enumeration is two calls at two
+// instants, which is v0.9.60's own objection — "a ratio whose numerator and
+// denominator came from two different producers is one nothing compares" —
+// pointed at this slice.
+//
+// Widening the margin consumer's OWN codec is v0.9.60's rule working rather than
+// breached: "the two consumers get two narrowed codecs over one venue answer,
+// each projecting its own fields". What must be stated, because it is now the
+// load-bearing half of that rule, is the prohibition in the OTHER direction:
+//
+//	SizingQuantity MUST NOT be fed to §7.5's net-delta invariant, and no future
+//	consumer may substitute it for ports.VenuePositions on cost or convenience
+//	grounds.
+//
+// The invariant's entire value is that it joins two authorities that CAN
+// disagree — a local projection against a venue enumeration. A second decode of
+// one venue field is not a second authority, so substituting it would leave the
+// assertion comparing the venue with itself and passing forever. The field is
+// named for the use it is permitted rather than for the number it holds, so a
+// call site doing this is visibly doing it.
+//
+// The corollary above about the mark still stands and is NOT weakened by this:
+// the mark has its own producer, its own §5.2 budget and its own silence timer,
+// so a second decode here would create a rival. The position quantity had no
+// producer on this path at all. That asymmetry is the whole ruling.
+//
+// # A ZERO ENTRY PRICE IS REFUSED, and the tempting cross-check is refused with
+// # it for a sharper reason
+//
+// Neither venue documents an absence spelling for the entry price on a LIVE
+// position, and no consumer can proceed without one, so it is decoded like a
+// margin figure rather than like the liq price: empty or non-positive is an
+// ERROR, not a flag. There is no `EntryPriceStated`, because a false on such a
+// flag would have no defined behaviour anywhere — an unreachable sentinel that
+// reads as handled.
+//
+// What is deliberately NOT enforced is the relation a reader reaches for next.
+// EntryPrice and LiqPrice are both Price in the same pair, so a transposed
+// assignment produces a status that validates, and the obvious guard is that a
+// SHORT liquidates above its entry. Solving §85's relation shows why that guard
+// must not be written: `L = (m/q + e)/(1 + MMR)` gives `L > e` exactly when
+// `m/q > e·MMR` — margin per unit above the maintenance requirement per unit,
+// which is the condition "this position is not currently liquidatable". A
+// validator enforcing it would refuse precisely the readings §7.1's ladder
+// exists to act on, at the moment it needs them. The transposition is caught by
+// tests asserting the values instead, which is the same trade v0.9.60 already
+// took for the two money fields.
 
 // MarginStatus is one perpetual position's margin state at the venue,
 // normalized: what the venue would liquidate it at, what it requires to keep it,
@@ -147,6 +206,37 @@ type MarginStatus struct {
 	// with price as well, so evidence taken from it is confounded by exactly the
 	// market move that provoked the op.
 	PostedMargin fixedpoint.Money
+
+	// SizingQuantity is the venue's SIGNED position quantity on this row —
+	// negative for the short §7.1 exists to watch — in the instrument's base
+	// asset. Binance signs `positionAmt`; Bybit states an always-positive `size`
+	// beside a `side`, and this codec applies the same rule §7.5's does.
+	//
+	// It is named for the use it is PERMITTED rather than for the number it
+	// holds, and the name is the carrier of a prohibition (record §85 §1): it is
+	// the input to §7.1's two remedy sizings — `Δ = (L*−L)·q·(1+MMR)` and
+	// `q* = m/((1+MMR)·L* − e)` — and it MUST NOT be fed to §7.5's net-delta
+	// invariant, which keeps ports.VenuePositions as its single source. See the
+	// file comment: substituting it there leaves the invariant comparing the
+	// venue with itself.
+	//
+	// A status this codec reports as held always carries a nonzero one, because
+	// zero is what the presence test reads as flat.
+	SizingQuantity fixedpoint.Quantity
+
+	// EntryPrice is the position's average entry — Binance `entryPrice`, Bybit
+	// `avgPrice` — in the instrument's quote asset.
+	//
+	// It is `e` in §85 §3's delever target `q* = m/((1+MMR)·L* − e)`, which is
+	// the one place it does NOT cancel: the top-up's inverse solve differences
+	// two states of the same position and loses it, and that is exactly why the
+	// delever target needs it read rather than derived.
+	//
+	// Unlike the liq price this has no absence flag — see the file comment. Both
+	// venues publish it for every live position, no absence spelling is
+	// documented, and no consumer can size anything without it, so an empty or
+	// non-positive value is refused at the decode.
+	EntryPrice fixedpoint.Price
 }
 
 // Validate reports whether the status is one a caller may reason from.
@@ -182,6 +272,9 @@ func (m MarginStatus) Validate() error {
 	if err := m.requireNonNegative("posted margin", m.PostedMargin); err != nil {
 		return err
 	}
+	if err := m.validateSizing(); err != nil {
+		return err
+	}
 
 	if !m.LiqPriceStated {
 		// A price beside a cleared flag is a reading whose two halves say
@@ -213,6 +306,61 @@ func (m MarginStatus) Validate() error {
 	if m.LiqPrice.Quote() != m.Maintenance.Asset() {
 		return fmt.Errorf("margin status %s: liq price quoted in %s, margin in %s: %w",
 			m.Instrument.Symbol, m.LiqPrice.Quote(), m.Maintenance.Asset(), ErrMarginAssetsDisagree)
+	}
+	return nil
+}
+
+// validateSizing checks the two fields §7.1's remedies size from.
+//
+// # A zero quantity is REFUSED, and that is not the same check the codecs make
+//
+// Both codecs read the quantity as their presence test and report a zero one as
+// "no position", so a decoded status never carries zero here. This function is
+// reached by a status built DIRECTLY — the ports mirror restates it for exactly
+// this reason, since a test double satisfies the port without going near a
+// codec. A held position of size zero sizes a top-up of zero and a delever
+// toward nothing, both of which are remedies that run and change nothing while
+// the ladder reads them as attempted.
+//
+// # The asset checks are the BASE/QUOTE pair, which is the substitution
+// # available at every call site
+//
+// The quantity is in the base and the entry price is quoted in the margin
+// asset. Every other quantity on this client is typed in the base, so a codec
+// reaching for InstrumentAssets.Base out of habit types the entry price in BTC
+// — a Price whose own Validate passes and whose figures are silently in the
+// wrong currency until they meet a USDT number inside the consumer. Checked
+// against Maintenance.Asset() rather than against LiqPrice, because the liq
+// price is the field that may legitimately be absent.
+func (m MarginStatus) validateSizing() error {
+	if err := m.SizingQuantity.Validate(); err != nil {
+		return fmt.Errorf("margin status %s sizing quantity: %w", m.Instrument.Symbol, err)
+	}
+	sign, err := m.SizingQuantity.Sign()
+	if err != nil {
+		return fmt.Errorf("margin status %s sizing quantity: %w", m.Instrument.Symbol, err)
+	}
+	if sign == 0 {
+		return fmt.Errorf("margin status %s: %w", m.Instrument.Symbol, ErrMarginQuantityZero)
+	}
+	if err := m.EntryPrice.Validate(); err != nil {
+		return fmt.Errorf("margin status %s entry price: %w", m.Instrument.Symbol, err)
+	}
+	entrySign, err := m.EntryPrice.Sign()
+	if err != nil {
+		return fmt.Errorf("margin status %s entry price: %w", m.Instrument.Symbol, err)
+	}
+	if entrySign <= 0 {
+		return fmt.Errorf("margin status %s entry price %s: %w",
+			m.Instrument.Symbol, m.EntryPrice, ErrMarginEntryPriceNotPositive)
+	}
+	if m.EntryPrice.Quote() != m.Maintenance.Asset() {
+		return fmt.Errorf("margin status %s: entry price quoted in %s, margin in %s: %w",
+			m.Instrument.Symbol, m.EntryPrice.Quote(), m.Maintenance.Asset(), ErrMarginAssetsDisagree)
+	}
+	if m.SizingQuantity.Asset() != m.EntryPrice.Base() {
+		return fmt.Errorf("margin status %s: sizing quantity in %s, entry price based in %s: %w",
+			m.Instrument.Symbol, m.SizingQuantity.Asset(), m.EntryPrice.Base(), ErrMarginAssetsDisagree)
 	}
 	return nil
 }
@@ -364,6 +512,41 @@ func marginLiqPrice(base, quote fixedpoint.Asset, raw string) (fixedpoint.Price,
 		return fixedpoint.Price{}, false, nil
 	}
 	return p, true, nil
+}
+
+// marginEntryPrice applies the shared rule for reading a live position's entry
+// price — Binance `entryPrice`, Bybit `avgPrice`.
+//
+// Shared by both codecs for marginLiqPrice's reason: the question "may §7.1's
+// delever target be sized from this" has one answer, and a rule stated once
+// cannot drift into two readings. What differs from marginLiqPrice is the
+// ARITY, and deliberately so — that one has three arms because absence is a
+// documented value on one venue and a legal state for the consumer, and this
+// one has two, because there is no such thing as a live position with no entry
+// price and no consumer that could proceed with one. Empty and non-positive are
+// therefore both refusals rather than an absence flag.
+//
+// The direction that decides it: absorbed as zero, the delever target
+// `q* = m/((1+MMR)·L* − e)` gains a LARGER denominator, so it computes a
+// smaller target and delevers harder than asked, on a number the venue never
+// stated. A refusal instead puts the position on §7.1's stale-input rung, which
+// is where an unreadable margin answer already belongs.
+func marginEntryPrice(base, quote fixedpoint.Asset, raw string) (fixedpoint.Price, error) {
+	if raw == "" {
+		return fixedpoint.Price{}, fmt.Errorf("entry price: %w", ErrMarginEntryPriceUnstated)
+	}
+	p, err := fixedpoint.ParsePrice(base, quote, raw)
+	if err != nil {
+		return fixedpoint.Price{}, fmt.Errorf("entry price %q: %w", raw, err)
+	}
+	sign, err := p.Sign()
+	if err != nil {
+		return fixedpoint.Price{}, fmt.Errorf("entry price %q: %w", raw, err)
+	}
+	if sign <= 0 {
+		return fixedpoint.Price{}, fmt.Errorf("entry price %q: %w", raw, ErrMarginEntryPriceNotPositive)
+	}
+	return p, nil
 }
 
 // marginFigure parses one of the two margin amounts.

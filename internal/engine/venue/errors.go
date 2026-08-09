@@ -466,6 +466,39 @@ var (
 	// zero maintenance is a position requiring nothing, and a zero posted margin
 	// is one whose top-up size would be computed from nothing.
 	ErrMarginFigureUnstated = errors.New("venue: margin status figure is unstated")
+
+	// ErrMarginQuantityZero reports a margin status that claims a held position
+	// and carries no position quantity (task #219).
+	//
+	// Unreachable from either codec — both read the quantity as their presence
+	// test and report a zero one as flat — and reachable from a status built
+	// directly, which is what a test double satisfying the port is. The zero
+	// value is unusable here in the literal sense §7.1 cares about: it sizes a
+	// top-up of zero and a delever toward nothing, so both remedies execute,
+	// change nothing, and are read by the ladder as attempted.
+	ErrMarginQuantityZero = errors.New("venue: margin status carries no position quantity")
+
+	// ErrMarginEntryPriceUnstated reports an empty entry price on a live
+	// position (task #219).
+	//
+	// Refused rather than flagged, which is the OPPOSITE of the liq price one
+	// field over, and the asymmetry is the point: Bybit documents an empty
+	// `liqPrice` as an ordinary healthy state, and neither venue documents any
+	// absence spelling for the entry. So an empty one is a venue that changed
+	// its format or a row that is not the position it claims to be, and §5.3's
+	// rule applies — an unreadable answer is not an absence.
+	ErrMarginEntryPriceUnstated = errors.New("venue: margin status states no entry price")
+
+	// ErrMarginEntryPriceNotPositive reports an entry price at or below zero on
+	// a live position (task #219).
+	//
+	// Its own sentinel rather than the unstated one because the diagnoses differ:
+	// an empty field is a shape change, and a zero is a value — the value a flat
+	// row carries, which means the presence test above it let a flat row through.
+	// Absorbed instead of refused, it enlarges §85 §3's delever denominator
+	// `(1+MMR)·L* − e` and so delevers harder than asked, off a number no venue
+	// stated.
+	ErrMarginEntryPriceNotPositive = errors.New("venue: margin status entry price is not positive")
 )
 
 // There is deliberately no sentinel here for "funding asked of a spot

@@ -128,15 +128,45 @@ func marginOpAged(t *testing.T, id domain.MarginOpID, age time.Duration) domain.
 	}
 }
 
-// marginReadingOf builds the live margin answer, which for this use case is one
-// field: §7.1's evidence is the POSTED figure and nothing else on the row.
+// marginReadingOf builds the live margin answer.
+//
+// §7.1's evidence for THIS use case is the POSTED figure and nothing else on the
+// row, and the other fields are here because the reading must be a legal one:
+// since #219 a MarginReading carries the two quantities §7.1's remedies size
+// from, and Validate refuses a held position with no size (ports/errors.go).
+// Populating them keeps the double a shape a real venue could produce, which is
+// the whole reason the port restates the engine's checks.
 func marginReadingOf(t *testing.T, posted string) ports.MarginReading {
 	t.Helper()
 	return ports.MarginReading{
-		Instrument:   perp(),
-		Maintenance:  marginTestMoney(t, "10"),
-		PostedMargin: marginTestMoney(t, posted),
+		Instrument:     perp(),
+		Maintenance:    marginTestMoney(t, "10"),
+		PostedMargin:   marginTestMoney(t, posted),
+		SizingQuantity: marginTestQuantity(t, "-0.25"),
+		EntryPrice:     marginTestEntry(t, "64180.41"),
 	}
+}
+
+// marginTestQuantity and marginTestEntry are the sizing half of a legal reading.
+//
+// A SHORT by default, because that is the leg §7.1 exists for and the sign is
+// the half every remedy consumes.
+func marginTestQuantity(t *testing.T, raw string) fixedpoint.Quantity {
+	t.Helper()
+	q, err := fixedpoint.ParseQuantity("BTC", raw)
+	if err != nil {
+		t.Fatalf("ParseQuantity(%q): %v", raw, err)
+	}
+	return q
+}
+
+func marginTestEntry(t *testing.T, raw string) fixedpoint.Price {
+	t.Helper()
+	p, err := fixedpoint.ParsePrice("BTC", "USDT", raw)
+	if err != nil {
+		t.Fatalf("ParsePrice(%q): %v", raw, err)
+	}
+	return p
 }
 
 // fakeMarginActs is ports.VenueMarginActs.

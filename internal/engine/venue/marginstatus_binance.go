@@ -110,10 +110,18 @@ func binanceMarginStatusRoute(p ids.ProductCategory) (string, ratelimit.Cost, er
 //
 // A SECOND narrowing of the same twenty-field row that binancePositionWire
 // narrows, and deliberately not a widening of it (marginstatus.go). The overlap
-// is the three fields that identify the row — symbol, side and amount — and
-// every one of them is read here for a different purpose than there: the amount
-// is a PRESENCE test, never a quantity this system reasons from, because §7.5's
-// net-delta invariant must keep a single source for the position.
+// is the three fields that identify the row — symbol, side and amount.
+//
+// `positionAmt` is read TWICE from here on, once by each codec, and record §85
+// §1 is what permits it: §7.1's remedies size from a quantity that must describe
+// the same instant as the margin figures, and the two are on one row. It is
+// still not a second authority — see marginstatus.go for the prohibition that
+// makes the permission safe, which binds in the other direction only.
+//
+// `entryPrice` joins it (§85 §3's `e`), and the field NEXT to it is why the
+// full-row fixture matters: `breakEvenPrice` is entry adjusted for fees, a
+// number of the same magnitude and character class that would validate
+// perfectly in this slot and quietly move every delever target.
 //
 // `markPrice` is on this row and is deliberately not declared: the mark has its
 // own class, its own budget and its own port (record §78).
@@ -121,6 +129,7 @@ type binanceMarginStatusWire struct {
 	Symbol           string `json:"symbol"`
 	PositionSide     string `json:"positionSide"`
 	PositionAmt      string `json:"positionAmt"`
+	EntryPrice       string `json:"entryPrice"`
 	LiquidationPrice string `json:"liquidationPrice"`
 	MaintMargin      string `json:"maintMargin"`
 	IsolatedWallet   string `json:"isolatedWallet"`
@@ -163,11 +172,13 @@ func (c *BinanceOrderCodec) DecodeMarginStatus(instrument ids.VenueInstrument, a
 			row.Symbol, row.PositionSide, binanceOneWayPositionSide, ErrPositionModeNotOneWay)
 	}
 
-	// The amount decides PRESENCE and is never carried out of this function.
-	// V3 returns a row for a symbol with open orders and no position, so a row
-	// is not by itself a position — and a zero-amount row's liquidation price
-	// and maintenance are the degenerate figures this surface exists to keep
-	// away from §7.1.
+	// The amount decides PRESENCE, and since #219 it is also carried out as the
+	// sizing quantity. V3 returns a row for a symbol with open orders and no
+	// position, so a row is not by itself a position — and a zero-amount row's
+	// liquidation price, maintenance and ENTRY are the degenerate figures this
+	// surface exists to keep away from §7.1. The presence test therefore still
+	// runs first and returns before anything else on the row is parsed, which is
+	// what keeps the entry price's refusal off the ordinary flat answer.
 	amt, err := fixedpoint.ParseQuantity(assets.Base, row.PositionAmt)
 	if err != nil {
 		return MarginStatus{}, false, fmt.Errorf("binance margin status on %s positionAmt %q: %w",
@@ -205,6 +216,10 @@ func (c *BinanceOrderCodec) DecodeMarginStatus(instrument ids.VenueInstrument, a
 	if err != nil {
 		return MarginStatus{}, false, fmt.Errorf("binance margin status on %s: %w", row.Symbol, err)
 	}
+	entry, err := marginEntryPrice(assets.Base, assets.Quote, row.EntryPrice)
+	if err != nil {
+		return MarginStatus{}, false, fmt.Errorf("binance margin status on %s: %w", row.Symbol, err)
+	}
 
 	return MarginStatus{
 		Instrument:     instrument,
@@ -212,6 +227,14 @@ func (c *BinanceOrderCodec) DecodeMarginStatus(instrument ids.VenueInstrument, a
 		LiqPriceStated: stated,
 		Maintenance:    maintenance,
 		PostedMargin:   posted,
+
+		// Binance signs the amount, so the presence test's own parse IS the
+		// signed quantity and no side field is consulted — the exact mirror of
+		// Bybit, where the number is always positive and the direction is a
+		// second field (record §56's "neither venue's row is readable with the
+		// other's rule").
+		SizingQuantity: amt,
+		EntryPrice:     entry,
 	}, true, nil
 }
 
