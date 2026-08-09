@@ -1,63 +1,125 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-09, session 138): **#225's PORT IS DESIGNED AND NOT BUILT — THE ANSWER ON BINANCE IS THE VENUE'S OWN FIGURE, WHICH AMENDS §93 §8. DOCS ONLY, NO ENGINE CODE. `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
+## Status (2026-08-09, session 138): **#225's PORT IS DESIGNED, REVIEWED THREE TIMES, AND NOT BUILT — ALL THREE ROUNDS RETURNED NO-SHIP ON DIFFERENT SHAPES, SO THE STOPPING RULE NEVER FIRED. DOCS ONLY, NO ENGINE CODE. `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
 
-**Read `docs/superpowers/specs/2026-08-09-m4-225-available-balance-port.md` (§94).**
+**Read `docs/superpowers/specs/2026-08-09-m4-225-available-balance-port.md` (§94), and read its §10
+first — that is the review log and it decides what the next action is.**
 
-**THE NEXT ACTION IS A REVIEW, NOT A BUILD.** §94 is a design record that **reverses recorded
-decisions**, and the plan is 2–3 `codex-copilot` rounds against it looking for *blocking* issues
-before `writing-plans` runs. **The stopping rule is part of the plan**, on record §87's lesson: that
-review ran six rounds, converged at three, and rounds 4–6 each returned exactly **one** missing case
-in a prose state machine — which was read as the yield curve naming a different instrument, not as a
-reason for a seventh round. If each round here returns one finding of the same shape, stop.
+**⚠ THE NEXT ACTION IS A DECISION, THEN EITHER A FOURTH ROUND OR `writing-plans`.** The plan was 2–3
+`codex-copilot` rounds on record §87's stopping rule — *stop when successive rounds return findings
+of the same shape*. Three ran. **All three returned NO-SHIP, and no two shared a shape**, so the rule
+never became applicable and "three rounds ran" is **not** evidence the review converged.
 
-**WHAT §94 RULES.** The port lives in `oms/application/ports` on the rule that **placement follows
-the CONSUMER** — `SpotBalances`' precedent, against core §4 line 435's literal assignment of this
-quantity to a `treasury` that has no directory; the read is **keyed by settlement asset** while the
-venue call stays **unscoped**; and the answer is Binance's **published per-asset `availableBalance`**
-versus Bybit's derived `walletBalance − totalPositionIM − totalOrderIM`, with the provenance
-difference carried in the type as an `AbsenceSemantics`-shaped enum-like.
+| Round | Finding | Shape | Section |
+|---|---|---|---|
+| 1 | Bybit's derivation short `locked` + `bonus` | a **missing term** | §4 (Bybit) |
+| 2 | source chosen by appeal to **order-admission**; the consumer is `positionMargin` | an **invalid justification** | §4 (Binance) |
+| 3 | absent asset refused on both venues; on Bybit absence is a valid **zero** | an **inverted venue semantic** | §5 |
 
-**WHAT IT AMENDS, AND THIS IS THE FIRST THING TO ATTACK.** §93 §8 point 2 left Binance's source open
-and points 3–4 read as though the derivation were the answer on both venues. §94 makes the venue's
-published figure the answer on three grounds: available balance is what Binance's **order-admission
-engine itself evaluates** (`MarginStatus.LiqPrice`'s standing ruling, same shape); the derivation
-**as measured spans TWO responses** (`probe225_pass3_separate.py:332-341` takes `isolatedWallet` from
-a separate `positionRisk` call), which is §85 §3(iii)'s two-instant objection; and its per-asset
-attribution of `isolatedWallet` fails by **dropping a subtrahend**, which overstates available — F3's
-direction. **The counter-argument a reviewer should press:** F3 rejected a published field for
-answering a different question, and this ruling accepts a different published field — the distinction
-rests on per-asset versus aggregate, and if that distinction is wrong the ruling inverts.
+**The pattern is positional and that is the uncomfortable part:** each round found its blocker in a
+section the previous round had not examined, and found exactly one there. That is a review bound by
+**coverage**, not by depth. §6 (fixtures) and §3 (signature) have had one pass each.
+
+**RECOMMENDATION, not a ruling — the budget is this session's to spend:** one more round scoped
+**only to §6 and §3**, then `writing-plans`. §6 is where this project's eleven-instance
+fixture-collapse history lives. If that round returns nothing, the curve has flattened *with evidence
+behind the claim*; if it returns a blocker, the positional reading was right and the review continues
+until a round re-examines an examined section and finds nothing. Skipping straight to
+`writing-plans` is defensible — the three findings are fixed and verified against the tree — but it
+should be a decision taken knowingly, not by treating the count as the criterion.
+
+**WHAT §94 RULES, AS AMENDED.** The port lives in `oms/application/ports` on the rule that
+**placement follows the CONSUMER** — `SpotBalances`' precedent, against core §4 line 435's literal
+assignment of this quantity to a `treasury` that has no directory, and `singlewriter` makes that
+placement **self-enforcing** because a future `treasury` consumer trips rule 6 rather than merely
+looking wrong. The read is **keyed by settlement asset** while the venue call stays **unscoped**. The
+answers are now:
+
+| | Binance | Bybit |
+|---|---|---|
+| Answer | `min(availableBalance, maxWithdrawAmount)`, both off the `assets[]` row | `walletBalance − totalPositionIM − totalOrderIM − locked − bonus` |
+| Absent asset | **refusal** | a valid asset-tagged **zero** |
+| `Provenance` | `AvailabilityVenueStated` | `AvailabilityLocallyDerived` |
+
+**One rule produced three of those cells and it is the session's most portable result:** when a
+question is open and both readings can be satisfied at once, take the reading that is
+**correct-or-understating under both**, and file the measurement. Bybit's `locked`, Bybit's `bonus`
+and Binance's unrealized-profit exclusion were each unmeasured; deferring them would have blocked the
+port on three separate credential-gated probes.
+
+**WHAT IT AMENDS — and the attack the last handoff named was ANSWERED, in a direction nobody
+predicted.** That handoff said to press "F3 rejected a published field and this ruling accepts a
+different published field — the distinction rests on per-asset vs aggregate, and if that distinction
+is wrong the ruling inverts." Checked: **F3 is about the other venue** (`totalAvailableBalance` is
+Bybit's, on `collateralSwitch`/`usdValue`/`totalEquity`), so the symmetry never held. And the
+Binance-side analogue turned out **stranger than either reading** — the captured account holds
+**three funded assets** and the top-level `availableBalance` still equals the **USDT row exactly**,
+because Binance's top-level figures are USDT-only outside multi-assets mode, not a converted
+aggregate. §6(b)'s stated *cause* was false and §9 point 3's *hazard* was inverted while both
+conclusions stood. The lesson is the one worth carrying: **the named attack was productive, but not
+by confirming or refuting the thing it named.**
+
+§93 §8 point 2 left Binance's source open
+and points 3–4 read as though the derivation were the answer on both venues. §94 rules that a
+published figure answers, on grounds **(ii)** the derivation **as measured spans TWO responses**
+(`probe225_pass3_separate.py:332-341` takes `isolatedWallet` from a separate `positionRisk` call),
+which is §85 §3(iii)'s two-instant objection, and **(iii)** its per-asset attribution of
+`isolatedWallet` fails by **dropping a subtrahend**, which overstates available.
+
+**Ground (i) was NARROWED by round 2 and this is the correction most likely to be re-broken.** It
+said available balance is what Binance's **order-admission** engine evaluates. §7.1's re-post **is
+not an order** — `marginwrite.go:14-17`: *"the one state-changing call this system makes that is not
+an order"*, `POST /fapi/v1/positionMargin`. True sentence, wrong engine. (i) still says a published
+figure beats our subtraction; it can no longer **select** among the published figures, and §93 §7(a)
+records `availableBalance` and `maxWithdrawAmount` as unseparated because every phase had unrealized
+profit ≤ 0. Hence `min(...)`.
 
 **THE LIVE CROSS-CHECK IS DROPPED, and that is a ruling rather than an omission.** An earlier form
 ran the derivation as a live oracle against the published field, refusing on disagreement. The only
-**single-response** derivation reads `account.positions[]`, an array **no capture contains**, so a
-wrong assumption about its shape produces a spurious refusal — which escalates §7.1's ladder into a
-**delever of a healthy position**. A refusal gate on an unmeasured shape trades a measured hazard for
-an unmeasured one. It also removes a `Corroborated` field nothing would have set.
+**single-response** derivation reads `account.positions[]`, an array **captured only EMPTY** (pass-1
+holds it as `[]` from a flat account; the pass-3 captures project it away), so a wrong assumption
+about its shape produces a spurious refusal — which escalates §7.1's ladder into a **delever of a
+healthy position**. A refusal gate on an unmeasured shape trades a measured hazard for an unmeasured
+one. It also removes a `Corroborated` field nothing would have set.
 
-**THREE COLLAPSES IN THE CAPTURED EVIDENCE — the first set found in EVIDENCE rather than in a test,
-and checklist entries 13–15.** (a) `posIM` and `orderIM` are **never both non-zero on either venue**,
-so **sum and max are the same function**: Bybit's combining rule ships **unverified** on the
-conservative reading, and on Binance it makes §93 §8's formula and a `crossWalletBalance − openOrderIM`
-alternative agree in all five phases. (b) The per-asset and top-level `availableBalance` are
-**byte-identical in all five Binance phases** (USDT is the only funded asset), so reading F3's
-aggregate is **invisible in the evidence §93 produced**. (c) The asked-for asset is always the only
-row, so "this asset's row" and "the first row" are one predicate. Separating fixtures are specified
-in §94 §6.
+**FOUR COLLAPSES IN THE CAPTURED EVIDENCE — the first set found in EVIDENCE rather than in a test,
+and checklist entries 13–16.** (a) `posIM` and `orderIM` are **never both non-zero on either venue**,
+so **sum and max are the same function**. (b) The per-asset and top-level `availableBalance` are
+**byte-identical in all five Binance phases** — but **NOT** for the reason the first draft gave: the
+account holds **three funded assets** and the top-level figure equals the **USDT row**, so Binance's
+top-level is USDT-only, and the hazard is a **wrong-coin** read rather than an aggregation. (c) The
+asked-for asset is always the only row, so "this asset's row" and "the first row" are one predicate.
+**(d) `locked` and `bonus` are zero in every Bybit phase**, so a three-term and a five-term
+subtraction are one function — which is how the missing subtrahends survived §93, §93 §8, §94's first
+draft *and its own three-collapse audit*. **An audit for collapses looks at the terms that are
+present; a missing term has no fixture to collapse.** Separating fixtures in §94 §6, and (b)'s was
+rebuilt because the first one modelled a venue that does not exist.
 
-**A THIRD SPEC EDIT, FOUND BY VERIFYING A LINE NUMBER.** Core §4 line 435 points a reader at the
+**A SPEC EDIT FOUND BY VERIFYING A LINE NUMBER.** Core §4 line 435 points a reader at the
 **top-level** `availableBalance` — a locator defect inside a correct argument, and precisely the
 field collapse (b) conceals. A port built by following that sentence would have passed against every
-capture and been wrong by the whole second leg the first time the account held one.
+capture and returned **USDT's** availability for a USDC-settled perp the first time one existed.
 
-**STILL OPEN.** **#225 (port, now designed) and #226 remain the only B4 blockers.** #235 gains two
-items from §94 §7 — Binance single-response corroboration, and the separating phase holding a
-position **and** a resting order simultaneously (cheap, one extra probe phase, needs credentials) —
-so it now carries **four**. Three `[SPEC EDIT OWED]` markers are owed **with the code**, listed in
-§94 §9; none is in the tree yet, so the grep is correctly zero. Five `knownStale` markers remain, all
-#229's — **no tracked section was edited**, so `make formal-fresh` is untouched. #220, #227, #228
-unchanged.
+**STILL OPEN, AND THE COUNTS MOVED.** **#225 (port, now designed and thrice reviewed) and #226 remain
+the only B4 blockers.** **#235 now carries SEVEN** — it held two, §94's first draft made four, round
+1 added the `locked`/`bonus` inclusion question, round 2 added *which figure `positionMargin`
+admission reads* and *Binance's unrecorded multi-assets mode*. **The count changed three times in one
+session, which is the finding rather than an accident: a debt list written before review is a lower
+bound, and any handoff quoting its number is stale the moment a round lands.** `[SPEC EDIT OWED]`
+markers are now **five**, listed in §94 §9 — the two new ones are Venue Profiles §4 (state Bybit's
+derivation with five terms, and cite §196's open `locked` question *at the formula*, not two entries
+away) and `analyze225.py`'s printed CONCLUSION, which asserts a completeness its own experiment never
+established. None is in the tree yet, so the grep is correctly zero. Five `knownStale` markers
+remain, all #229's — **no tracked section was edited**, so `make formal-fresh` is untouched. #220,
+#227, #228 unchanged.
+
+**ONE METHOD NOTE FOR THE NEXT REVIEWER, worth more than any single finding above.** Eight defects
+landed this session and **every one was a claim about EVIDENCE, not a logic error** — none would have
+been caught by re-reading the argument. Five of the eight came from re-deriving *this record's own
+citations* rather than from the review rounds. So the productive question was never "is this argument
+sound?" but **"does the thing it cites say what it says it says?"** — and the reviewer must be told
+explicitly not to trust the artifact's summary, because the summary's author and the record's author
+are the same.
 
 ---
 
