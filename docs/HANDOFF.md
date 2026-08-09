@@ -1,6 +1,70 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-09, session 136): **#231 AND #232 ARE CLOSED — THE `TerminalFlatten` RETIREMENT HAD LEFT EIGHT SITES BEHIND, ONE OF THEM SHORT A PRODUCER RATHER THAN CARRYING A DEAD ONE. DOCS ONLY, NO ENGINE CODE. `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
+## Status (2026-08-09, session 137): **#225's MEASUREMENT HALF IS CLOSED — THE ⚠ ANSWERS "POSTURE", AND THEN THE ANSWER STOPS MATTERING. THE PORT IS NOT BUILT. DOCS + MEASUREMENT, NO ENGINE CODE. `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
+
+**Read `docs/superpowers/specs/2026-08-09-m4-225-available-balance.md` (§93).** Probes and verbatim
+captures: `research/venue-probes/225-available-balance/`.
+
+**THE ⚠ IS DISCHARGED.** Record §89 F5 observed Bybit serving empty availability strings under
+§4.1's `UNIFIED` + `ISOLATED_MARGIN`, and #225 carried a ⚠ blocking design until the cause was known:
+**demo limitation or posture?** The two imply different ports. One observation cannot separate them,
+so the experiment is a `set-margin-mode` flip on the same flat demo account — and **the flip back is
+the control, not cleanup**: seven account-level fields go `"" → populated → ""`, where a one-way
+trace would have been equally consistent with a lazy first computation. **Posture.** So they are
+absent in **production** too.
+
+**AND THEN IT IS OVERTAKEN, WHICH IS THE REAL RESULT.** `totalAvailableBalance` is a **USD,
+multi-coin, collateral-filtered aggregate** — exactly `Σ usdValue` over `collateralSwitch: true`
+coins, **residual `0E-8`**, from a single response. Sizing a USDT re-post from it would overstate
+available USDT by the whole USDC leg (`49992.10` on a `49995.60` wallet, **≈2×**), in the direction
+that funds an order the account cannot pay for. **The derivation is required under ANY posture**, so
+F1's answer changes nothing about the design. A field read as a property it does not carry.
+
+**THE TWO THINGS THE TASK'S DESCRIPTION HAD MERGED.** `availableToWithdraw` stayed empty under
+**both** modes — a different cause from the seven account-level fields, and undetermined. One
+sentence naming two fields invites one cause.
+
+**`walletBalance` IS GROSS, AND THE PROBE'S OWN FIRST VERDICT SAID THE OPPOSITE.** `add-margin +50`
+moves `totalPositionIM` exactly `+50.00000000` and `walletBalance` `0E-7`; a resting order moves
+`walletBalance` `0E-8`. So `A = walletBalance − totalPositionIM − totalOrderIM` and the subtraction
+is **required**. The market-fill phase is **not** evidence — its `−0.07171582` is the taker fee to a
+residual of `−3.30E-8`, so that fixture moves two quantities and attributes nothing to margin, while
+producing a confident opposite answer. `add-margin` is the isolating operation *and* the one §7.1
+issues — motivating case and isolating fixture are the same one again.
+
+**⚠ THE NAME-MATCH IS WRONG BY THE WHOLE POSTED MARGIN.** Binance publishes the same construction
+(`availableBalance = walletBalance − (isolatedWallet + openOrderInitialMargin)`, residual `0E-8`
+every phase) — but Bybit's `totalPositionIM` **absorbs** added margin (it is **posted**) while
+Binance's `positionInitialMargin` **does not** (it is the **requirement**; the posted figure is
+`isolatedWallet`). Pairing them by name overstates available balance by **`49.98010570`**. Record
+§89 F2's same-word-different-quantities trap, in a second place, and the name-match is the natural
+implementation.
+
+**THE THIRD METHOD FINDING, AND IT IS AGAINST THIS SESSION'S OWN GUARD (§93 §9).** The README's
+redaction check — "re-run the consumer and confirm it reaches the same number" — **ran, passed, and
+proved nothing**: the redactor changed only the pass-1 capture and the analyzer read only the pass-3
+ones, so the clean diff was guaranteed by construction. The consumer now reads every capture the
+redactor writes and asserts on the marker. **The rule now sits in the probes README: a reproduction
+check must name the file the mutation touched.** Twelfth collapse-checklist entry, first one found in
+a harness whose job is keeping another harness honest.
+
+**WHAT IS LEFT OF #225 — THE PORT, and §93 §8 fixes its design and its rejected alternatives so the
+next slice does not re-derive them.** Per settlement asset, never an aggregate; one construction with
+**two provenances visible in the type**; Binance's inputs are `isolatedWallet` + `openOrderIM`, *not*
+`positionInitialMargin`; tests assert on wallet and margin because **the identity has no independent
+witness on either venue**; and Bybit's `""` must be a refusal naming the field, not a decoded zero.
+
+**STILL OPEN.** **#225 (port) and #226 remain the only B4 blockers.** **#235 is new**: the two things
+these runs could not separate — Binance's `availableBalance` vs `maxWithdrawAmount` never split
+because every phase had unrealized profit ≤ 0, so the separating state is a position in **profit**;
+and `availableToWithdraw`'s cause. #220 carries #233's table-validation requirement; #227, #228, #229
+unchanged. Five `knownStale` markers remain, all #229's — **no tracked section was edited**, so
+`make formal-fresh` is untouched. Both demo accounts left flat, no open orders, Bybit posture
+restored to `ISOLATED_MARGIN` and verified.
+
+---
+
+## Status (2026-08-09, session 136 — HISTORICAL): **#231 AND #232 ARE CLOSED — THE `TerminalFlatten` RETIREMENT HAD LEFT EIGHT SITES BEHIND, ONE OF THEM SHORT A PRODUCER RATHER THAN CARRYING A DEAD ONE. DOCS ONLY, NO ENGINE CODE. `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
 
 **Read `docs/superpowers/specs/2026-08-09-m4-231-232-terminal-flatten-errata.md` (§92).**
 

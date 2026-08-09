@@ -1,0 +1,184 @@
+{
+ "binance": [
+  {
+   "asset": {
+    "availableBalance": "4908.71304740",
+    "crossWalletBalance": "4908.71304740",
+    "initialMargin": "0.00000000",
+    "marginBalance": "4908.71304740",
+    "maxWithdrawAmount": "4908.71304740",
+    "openOrderInitialMargin": "0.00000000",
+    "positionInitialMargin": "0.00000000",
+    "unrealizedProfit": "0.00000000",
+    "walletBalance": "4908.71304740"
+   },
+   "bal": {
+    "availableBalance": "4908.71304740",
+    "balance": "4908.71304740",
+    "crossUnPnl": "0.00000000",
+    "crossWalletBalance": "4908.71304740",
+    "maxWithdrawAmount": "4908.71304740"
+   },
+   "label": "A. baseline (flat, no orders)",
+   "position": null,
+   "top": {
+    "availableBalance": "4908.71304740",
+    "maxWithdrawAmount": "4908.71304740",
+    "totalInitialMargin": "0.00000000",
+    "totalMarginBalance": "4908.71304740",
+    "totalOpenOrderInitialMargin": "0.00000000",
+    "totalPositionInitialMargin": "0.00000000",
+    "totalUnrealizedProfit": "0.00000000",
+    "totalWalletBalance": "4908.71304740"
+   }
+  },
+  {
+   "asset": {
+    "availableBalance": "4896.19072740",
+    "crossWalletBalance": "4908.71304740",
+    "initialMargin": "12.52232000",
+    "marginBalance": "4908.71304740",
+    "maxWithdrawAmount": "4896.19072740",
+    "openOrderInitialMargin": "12.52232000",
+    "positionInitialMargin": "0.00000000",
+    "unrealizedProfit": "0.00000000",
+    "walletBalance": "4908.71304740"
+   },
+   "bal": {
+    "availableBalance": "4896.19072740",
+    "balance": "4908.71304740",
+    "crossUnPnl": "0.00000000",
+    "crossWalletBalance": "4908.71304740",
+    "maxWithdrawAmount": "4896.19072740"
+   },
+   "label": "B. resting order live (ORDER margin only)",
+   "position": null,
+   "top": {
+    "availableBalance": "4896.19072740",
+    "maxWithdrawAmount": "4896.19072740",
+    "totalInitialMargin": "12.52232000",
+    "totalMarginBalance": "4908.71304740",
+    "totalOpenOrderInitialMargin": "12.52232000",
+    "totalPositionInitialMargin": "0.00000000",
+    "totalUnrealizedProfit": "0.00000000",
+    "totalWalletBalance": "4908.71304740"
+   }
+  },
+  {
+   "asset": {
+    "availableBalance": "4895.63626545",
+    "crossWalletBalance": "4895.63626545",
+    "initialMargin": "13.04441781",
+    "marginBalance": "4908.63143601",
+    "maxWithdrawAmount": "4895.63626545",
+    "openOrderInitialMargin": "0.00000000",
+    "positionInitialMargin": "13.04441781",
+    "unrealizedProfit": "-0.02942195",
+    "walletBalance": "4908.66085796"
+   },
+   "bal": {
+    "availableBalance": "4895.63626545",
+    "balance": "4908.66085796",
+    "crossUnPnl": "0.00000000",
+    "crossWalletBalance": "4895.63626545",
+    "maxWithdrawAmount": "4895.63626545"
+   },
+   "label": "C. isolated position open",
+   "position": {
+    "entryPrice": "65236.8",
+    "initialMargin": "13.04448566",
+    "isolated": null,
+    "isolatedMargin": "12.99584906",
+    "isolatedWallet": "13.02459251",
+    "liquidationPrice": "58960.34512550",
+    "maintMargin": "0.52177942",
+    "positionAmt": "0.0020",
+    "unRealizedProfit": "-0.02874345"
+   },
+   "top": {
+    "availableBalance": "4895.63626545",
+    "maxWithdrawAmount": "4895.63626545",
+    "totalInitialMargin": "13.04441781",
+    "totalMarginBalance": "4908.63143601",
+    "totalOpenOrderInitialMargin": "0.00000000",
+    "totalPositionInitialMargin": "13.04441781",
+    "totalUnrealizedProfit": "-0.02942195",
+    "totalWalletBalance": "4908.66085796"
+   }
+  },
+  {
+   "asset": {
+    "availableBalance": "4845.63626545",
+    "crossWalletBalance": "4845.63626545",
+    "initialMargin": "13.04448681",
+    "marginBalance": "4908.63212601",
+    "maxWithdrawAmount": "4845.63626545",
+    "openOrderInitialMargin": "0.00000000",
+    "positionInitialMargin": "13.04448681",
+    "unrealizedProfit": "-0.02873195",
+    "walletBalance": "4908.66085796"
+   },
+   "bal": {
+    "availableBalance": "4845.63626545",
+    "balance": "4908.66085796",
+    "crossUnPnl": "0.00000000",
+    "crossWalletBalance": "4845.63626545",
+    "maxWithdrawAmount": "4845.63626545"
+   },
+   "label": "D. after add-margin (7.1's actual operation)",
+   "position": {
+    "entryPrice": "65236.8",
+    "initialMargin": "13.04447620",
+    "isolated": null,
+    "isolatedMargin": "62.99575443",
+    "isolatedWallet": "63.02459251",
+    "liquidationPrice": "33859.94351908",
+    "maintMargin": "0.52177904",
+    "positionAmt": "0.0020",
+    "unRealizedProfit": "-0.02883808"
+   },
+   "top": {
+    "availableBalance": "4845.63626545",
+    "maxWithdrawAmount": "4845.63626545",
+    "totalInitialMargin": "13.04448681",
+    "totalMarginBalance": "4908.63212601",
+    "totalOpenOrderInitialMargin": "0.00000000",
+    "totalPositionInitialMargin": "13.04448681",
+    "totalUnrealizedProfit": "-0.02873195",
+    "totalWalletBalance": "4908.66085796"
+   }
+  },
+  {
+   "asset": {
+    "availableBalance": "4908.60187124",
+    "crossWalletBalance": "4908.60187124",
+    "initialMargin": "0.00000000",
+    "marginBalance": "4908.60187124",
+    "maxWithdrawAmount": "4908.60187124",
+    "openOrderInitialMargin": "0.00000000",
+    "positionInitialMargin": "0.00000000",
+    "unrealizedProfit": "0.00000000",
+    "walletBalance": "4908.60187124"
+   },
+   "bal": {
+    "availableBalance": "4908.60187124",
+    "balance": "4908.60187124",
+    "crossUnPnl": "0.00000000",
+    "crossWalletBalance": "4908.60187124",
+    "maxWithdrawAmount": "4908.60187124"
+   },
+   "label": "E. final (must be back to flat)",
+   "position": null,
+   "top": {
+    "availableBalance": "4908.60187124",
+    "maxWithdrawAmount": "4908.60187124",
+    "totalInitialMargin": "0.00000000",
+    "totalMarginBalance": "4908.60187124",
+    "totalOpenOrderInitialMargin": "0.00000000",
+    "totalPositionInitialMargin": "0.00000000",
+    "totalUnrealizedProfit": "0.00000000",
+    "totalWalletBalance": "4908.60187124"
+   }
+  }
+ ]
+}

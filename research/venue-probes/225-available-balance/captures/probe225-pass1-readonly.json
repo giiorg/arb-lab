@@ -1,0 +1,414 @@
+{
+ "binance": {
+  "account": {
+   "assets": [
+    {
+     "asset": "FDUSD",
+     "availableBalance": "0.00000000",
+     "crossUnPnl": "0.00000000",
+     "crossWalletBalance": "0.00000000",
+     "initialMargin": "0.00000000",
+     "maintMargin": "0.00000000",
+     "marginBalance": "0.00000000",
+     "maxWithdrawAmount": "0.00000000",
+     "openOrderInitialMargin": "0.00000000",
+     "positionInitialMargin": "0.00000000",
+     "unrealizedProfit": "0.00000000",
+     "updateTime": 0,
+     "walletBalance": "0.00000000"
+    },
+    {
+     "asset": "U",
+     "availableBalance": "0.00000000",
+     "crossUnPnl": "0.00000000",
+     "crossWalletBalance": "0.00000000",
+     "initialMargin": "0.00000000",
+     "maintMargin": "0.00000000",
+     "marginBalance": "0.00000000",
+     "maxWithdrawAmount": "0.00000000",
+     "openOrderInitialMargin": "0.00000000",
+     "positionInitialMargin": "0.00000000",
+     "unrealizedProfit": "0.00000000",
+     "updateTime": 0,
+     "walletBalance": "0.00000000"
+    },
+    {
+     "asset": "BNB",
+     "availableBalance": "0.00000000",
+     "crossUnPnl": "0.00000000",
+     "crossWalletBalance": "0.00000000",
+     "initialMargin": "0.00000000",
+     "maintMargin": "0.00000000",
+     "marginBalance": "0.00000000",
+     "maxWithdrawAmount": "0.00000000",
+     "openOrderInitialMargin": "0.00000000",
+     "positionInitialMargin": "0.00000000",
+     "unrealizedProfit": "0.00000000",
+     "updateTime": 0,
+     "walletBalance": "0.00000000"
+    },
+    {
+     "asset": "ETH",
+     "availableBalance": "0.00000000",
+     "crossUnPnl": "0.00000000",
+     "crossWalletBalance": "0.00000000",
+     "initialMargin": "0.00000000",
+     "maintMargin": "0.00000000",
+     "marginBalance": "0.00000000",
+     "maxWithdrawAmount": "0.00000000",
+     "openOrderInitialMargin": "0.00000000",
+     "positionInitialMargin": "0.00000000",
+     "unrealizedProfit": "0.00000000",
+     "updateTime": 0,
+     "walletBalance": "0.00000000"
+    },
+    {
+     "asset": "BTC",
+     "availableBalance": "0.01000000",
+     "crossUnPnl": "0.00000000",
+     "crossWalletBalance": "0.01000000",
+     "initialMargin": "0.00000000",
+     "maintMargin": "0.00000000",
+     "marginBalance": "0.01000000",
+     "maxWithdrawAmount": "0.01000000",
+     "openOrderInitialMargin": "0.00000000",
+     "positionInitialMargin": "0.00000000",
+     "unrealizedProfit": "0.00000000",
+     "updateTime": 1786259209061,
+     "walletBalance": "0.01000000"
+    },
+    {
+     "asset": "USDT",
+     "availableBalance": "4908.71304740",
+     "crossUnPnl": "0.00000000",
+     "crossWalletBalance": "4908.71304740",
+     "initialMargin": "0.00000000",
+     "maintMargin": "0.00000000",
+     "marginBalance": "4908.71304740",
+     "maxWithdrawAmount": "4908.71304740",
+     "openOrderInitialMargin": "0.00000000",
+     "positionInitialMargin": "0.00000000",
+     "unrealizedProfit": "0.00000000",
+     "updateTime": 1786281145755,
+     "walletBalance": "4908.71304740"
+    },
+    {
+     "asset": "USD1",
+     "availableBalance": "0.00000000",
+     "crossUnPnl": "0.00000000",
+     "crossWalletBalance": "0.00000000",
+     "initialMargin": "0.00000000",
+     "maintMargin": "0.00000000",
+     "marginBalance": "0.00000000",
+     "maxWithdrawAmount": "0.00000000",
+     "openOrderInitialMargin": "0.00000000",
+     "positionInitialMargin": "0.00000000",
+     "unrealizedProfit": "0.00000000",
+     "updateTime": 0,
+     "walletBalance": "0.00000000"
+    },
+    {
+     "asset": "USDC",
+     "availableBalance": "5000.00000000",
+     "crossUnPnl": "0.00000000",
+     "crossWalletBalance": "5000.00000000",
+     "initialMargin": "0.00000000",
+     "maintMargin": "0.00000000",
+     "marginBalance": "5000.00000000",
+     "maxWithdrawAmount": "5000.00000000",
+     "openOrderInitialMargin": "0.00000000",
+     "positionInitialMargin": "0.00000000",
+     "unrealizedProfit": "0.00000000",
+     "updateTime": 1786259209029,
+     "walletBalance": "5000.00000000"
+    }
+   ],
+   "availableBalance": "4908.71304740",
+   "maxWithdrawAmount": "4908.71304740",
+   "positions": [],
+   "totalCrossUnPnl": "0.00000000",
+   "totalCrossWalletBalance": "4908.71304740",
+   "totalInitialMargin": "0.00000000",
+   "totalMaintMargin": "0.00000000",
+   "totalMarginBalance": "4908.71304740",
+   "totalOpenOrderInitialMargin": "0.00000000",
+   "totalPositionInitialMargin": "0.00000000",
+   "totalUnrealizedProfit": "0.00000000",
+   "totalWalletBalance": "4908.71304740"
+  },
+  "balance": [
+   {
+    "accountAlias": "<redacted>",
+    "asset": "FDUSD",
+    "availableBalance": "0.00000000",
+    "balance": "0.00000000",
+    "crossUnPnl": "0.00000000",
+    "crossWalletBalance": "0.00000000",
+    "marginAvailable": true,
+    "maxWithdrawAmount": "0.00000000",
+    "updateTime": 0
+   },
+   {
+    "accountAlias": "<redacted>",
+    "asset": "U",
+    "availableBalance": "0.00000000",
+    "balance": "0.00000000",
+    "crossUnPnl": "0.00000000",
+    "crossWalletBalance": "0.00000000",
+    "marginAvailable": true,
+    "maxWithdrawAmount": "0.00000000",
+    "updateTime": 0
+   },
+   {
+    "accountAlias": "<redacted>",
+    "asset": "BNB",
+    "availableBalance": "0.00000000",
+    "balance": "0.00000000",
+    "crossUnPnl": "0.00000000",
+    "crossWalletBalance": "0.00000000",
+    "marginAvailable": true,
+    "maxWithdrawAmount": "0.00000000",
+    "updateTime": 0
+   },
+   {
+    "accountAlias": "<redacted>",
+    "asset": "ETH",
+    "availableBalance": "0.00000000",
+    "balance": "0.00000000",
+    "crossUnPnl": "0.00000000",
+    "crossWalletBalance": "0.00000000",
+    "marginAvailable": true,
+    "maxWithdrawAmount": "0.00000000",
+    "updateTime": 0
+   },
+   {
+    "accountAlias": "<redacted>",
+    "asset": "BTC",
+    "availableBalance": "0.01000000",
+    "balance": "0.01000000",
+    "crossUnPnl": "0.00000000",
+    "crossWalletBalance": "0.01000000",
+    "marginAvailable": true,
+    "maxWithdrawAmount": "0.01000000",
+    "updateTime": 1786259209061
+   },
+   {
+    "accountAlias": "<redacted>",
+    "asset": "USDT",
+    "availableBalance": "4908.71304740",
+    "balance": "4908.71304740",
+    "crossUnPnl": "0.00000000",
+    "crossWalletBalance": "4908.71304740",
+    "marginAvailable": true,
+    "maxWithdrawAmount": "4908.71304740",
+    "updateTime": 1786281145755
+   },
+   {
+    "accountAlias": "<redacted>",
+    "asset": "USD1",
+    "availableBalance": "0.00000000",
+    "balance": "0.00000000",
+    "crossUnPnl": "0.00000000",
+    "crossWalletBalance": "0.00000000",
+    "marginAvailable": true,
+    "maxWithdrawAmount": "0.00000000",
+    "updateTime": 0
+   },
+   {
+    "accountAlias": "<redacted>",
+    "asset": "USDC",
+    "availableBalance": "5000.00000000",
+    "balance": "5000.00000000",
+    "crossUnPnl": "0.00000000",
+    "crossWalletBalance": "5000.00000000",
+    "marginAvailable": true,
+    "maxWithdrawAmount": "5000.00000000",
+    "updateTime": 1786259209029
+   }
+  ],
+  "positionRisk": []
+ },
+ "bybit": {
+  "coins_balance": {
+   "result": {},
+   "retCode": 10032,
+   "retExtInfo": {},
+   "retMsg": "Demo trading are not supported.",
+   "time": 1786295500866
+  },
+  "contract": {
+   "result": {},
+   "retCode": 10001,
+   "retExtInfo": {},
+   "retMsg": "accountType only support UNIFIED.",
+   "time": 1786295500587
+  },
+  "info": {
+   "result": {
+    "dcpStatus": "OFF",
+    "isMasterTrader": false,
+    "marginMode": "ISOLATED_MARGIN",
+    "smpGroup": 0,
+    "spotHedgingStatus": "OFF",
+    "timeWindow": 0,
+    "unifiedMarginStatus": 3,
+    "updatedTime": "1786260698000"
+   },
+   "retCode": 0,
+   "retMsg": "OK"
+  },
+  "orders": {
+   "result": {
+    "category": "linear",
+    "list": [],
+    "nextPageCursor": ""
+   },
+   "retCode": 0,
+   "retExtInfo": {},
+   "retMsg": "OK",
+   "time": 1786295502035
+  },
+  "positions": {
+   "result": {
+    "category": "linear",
+    "list": [],
+    "nextPageCursor": ""
+   },
+   "retCode": 0,
+   "retExtInfo": {},
+   "retMsg": "OK",
+   "time": 1786295501757
+  },
+  "transfer_coins": {
+   "result": {},
+   "retCode": 10032,
+   "retExtInfo": {},
+   "retMsg": "Demo trading are not supported.",
+   "time": 1786295501420
+  },
+  "unified": {
+   "result": {
+    "list": [
+     {
+      "accountIMRate": "",
+      "accountIMRateByMp": "",
+      "accountLTV": "",
+      "accountMMRate": "",
+      "accountMMRateByMp": "",
+      "accountType": "UNIFIED",
+      "coin": [
+       {
+        "accruedInterest": "0",
+        "availableToBorrow": "",
+        "availableToWithdraw": "",
+        "bonus": "0",
+        "borrowAmount": "0",
+        "coin": "USDC",
+        "colRes": "-1",
+        "collateralSwitch": true,
+        "cumRealisedPnl": "0",
+        "equity": "50000",
+        "locked": "0",
+        "marginCollateral": true,
+        "spotBorrow": "0",
+        "spotHedgingQty": "0",
+        "totalOrderIM": "0",
+        "totalPositionIM": "0",
+        "totalPositionMM": "0",
+        "unrealisedPnl": "0",
+        "usdValue": "49993.05",
+        "walletBalance": "50000"
+       },
+       {
+        "accruedInterest": "0",
+        "availableToBorrow": "",
+        "availableToWithdraw": "",
+        "bonus": "0",
+        "borrowAmount": "0",
+        "coin": "BTC",
+        "colRes": "0",
+        "collateralSwitch": false,
+        "cumRealisedPnl": "0",
+        "equity": "1",
+        "locked": "0",
+        "marginCollateral": true,
+        "spotBorrow": "0",
+        "spotHedgingQty": "0",
+        "totalOrderIM": "0",
+        "totalPositionIM": "0",
+        "totalPositionMM": "0",
+        "unrealisedPnl": "0",
+        "usdValue": "65204.544601",
+        "walletBalance": "1"
+       },
+       {
+        "accruedInterest": "0",
+        "availableToBorrow": "",
+        "availableToWithdraw": "",
+        "bonus": "0",
+        "borrowAmount": "0",
+        "coin": "ETH",
+        "colRes": "0",
+        "collateralSwitch": false,
+        "cumRealisedPnl": "0",
+        "equity": "1",
+        "locked": "0",
+        "marginCollateral": true,
+        "spotBorrow": "0",
+        "spotHedgingQty": "0",
+        "totalOrderIM": "0",
+        "totalPositionIM": "0",
+        "totalPositionMM": "0",
+        "unrealisedPnl": "0",
+        "usdValue": "1923.981448",
+        "walletBalance": "1"
+       },
+       {
+        "accruedInterest": "0",
+        "availableToBorrow": "",
+        "availableToWithdraw": "",
+        "bonus": "0",
+        "borrowAmount": "0",
+        "coin": "USDT",
+        "colRes": "-1",
+        "collateralSwitch": true,
+        "cumRealisedPnl": "-4.40429968",
+        "equity": "49995.59570032",
+        "locked": "0",
+        "marginCollateral": true,
+        "spotBorrow": "0",
+        "spotHedgingQty": "0",
+        "totalOrderIM": "0",
+        "totalPositionIM": "0",
+        "totalPositionMM": "0",
+        "unrealisedPnl": "0",
+        "usdValue": "49959.6988626",
+        "walletBalance": "49995.59570032"
+       }
+      ],
+      "totalAvailableBalance": "",
+      "totalEquity": "167081.2749116",
+      "totalInitialMargin": "",
+      "totalInitialMarginByMp": "",
+      "totalMaintenanceMargin": "",
+      "totalMaintenanceMarginByMp": "",
+      "totalMarginBalance": "",
+      "totalPerpUPL": "0",
+      "totalWalletBalance": "167081.2749116"
+     }
+    ]
+   },
+   "retCode": 0,
+   "retExtInfo": {},
+   "retMsg": "OK",
+   "time": 1786295500287
+  },
+  "withdrawable": {
+   "result": {},
+   "retCode": 10032,
+   "retExtInfo": {},
+   "retMsg": "Demo trading are not supported.",
+   "time": 1786295501142
+  }
+ }
+}

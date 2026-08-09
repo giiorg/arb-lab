@@ -69,3 +69,17 @@ Reproduces §89 F3's four rows to `5.59E-10` / `3.23E-9` off the redacted captur
 and prints `ALL CHECKS PASS`. If a future redaction breaks a field the oracle
 reads, this is what says so — a scrub that silently removed an input would
 otherwise look identical to one that removed metadata.
+
+```
+python3 research/venue-probes/225-available-balance/redact225.py     # idempotent
+python3 research/venue-probes/225-available-balance/analyze225.py    # the consumer
+```
+
+**And the rule the second entry had to learn (record §93 §9): the check must
+name the file the mutation touched.** #225's redactor changed exactly one
+capture; its analyzer, at that moment, read only the *other* three. The diff was
+clean by construction — a scrub that deleted every monetary field from that file
+would have produced the same clean diff. "Re-run the consumer" is a check only
+when the consumer's inputs and the redactor's targets are **the same set**, and
+a passing run says nothing about whether they were. Before believing a
+reproduction check, list both sets and intersect them.

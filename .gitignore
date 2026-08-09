@@ -65,3 +65,8 @@ go.work.sum
 logger.log
 /capture.log
 /screening-run.log
+
+# Python bytecode from the venue probes (research/venue-probes/*.py are run
+# directly; importing one for a check writes a __pycache__ beside it).
+__pycache__/
+*.pyc
