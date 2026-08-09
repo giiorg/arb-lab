@@ -1,6 +1,93 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-08, session 128): **§7.1's MARGIN TOP-UP DISPATCHES — AND A RETURNED CALL MUST CONCLUDE, OR THE REMEDY'S SUCCESS IS INDISTINGUISHABLE FROM ITS FAILURE. DOCS v0.9.65, 19 MUTANTS / 0 SURVIVORS, `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
+## Status (2026-08-09, session 129): **THE FIRST CREDENTIALED SESSION — AND §7.1's TERMINAL RUNG TURNS OUT TO RAISE NO LIQUIDATION HEADROOM. B4's SIZING RULING TAKEN (RECORD §85), #221 ANSWERED, #223 CONFIRMED, #224 OPENED. NO CODE CHANGED; DOCS ONLY.**
+
+**Read `docs/superpowers/specs/2026-08-08-m4-218-b4-sizing-inputs-design.md` (§85)
+first**, then this block — §85 is the ruling, and this session's measurements
+confirmed one of its derivations exactly and refuted the premise of another.
+
+**VENUE CREDENTIALS NOW EXIST, AND THEY ARE DEMO ON BOTH VENUES.** `.env` is
+populated and gitignored; `.env.example` is the tracked template and carries the
+hosts, the caveats and the provenance of every fact in it. **Demo, not testnet,
+and the reason reaches the spec:** Binance demo is ONE account with Spot and
+Futures as tabs, so §4.1's spot≠futures wallet split is observable, where testnet
+is two unrelated deployments in which the split is not a split. Binance's own
+docs say demo's *"IP Limits, Unfilled Order Count, Exchange Filters are **exactly**
+the same as the live exchange"*. **What demo is NOT for is economics** — Binance
+states plainly that realistic market data is not real market data, so milestone
+2's kill gate keeps running off the unauthenticated capture.
+`BINANCE_DEMO_*` covers both legs on one key (Reading + Spot&Margin + Futures);
+`BYBIT_DEMO_*` likewise. **Neither venue serves the TRANSFER path on demo** —
+Bybit omits it by documentation, Binance by routing (`/sapi/v1/asset/transfer`
+answers an **HTML** 404, i.e. the whole namespace is absent, not a rejected
+request). `TransferCollateral` therefore needs Bybit testnet when its slice comes.
+
+**§7.1's `PackageDelever` RAISES NO LIQUIDATION HEADROOM, AND THIS IS MEASURED
+RATHER THAN ARGUED `[task #224, from #221]`.** Both venues release isolated
+margin **pro rata** on a partial reduce-only close, so margin-per-unit `m/q` is
+invariant and the liquidation price does not move:
+
+| Venue | quantity | posted margin | liquidation price |
+|---|---|---|---|
+| Binance | −0.0020 → −0.0010 | `isolatedWallet` 6.43067264 → 3.21533632 | 67753.52223108 → **67753.52223108** |
+| Bybit | 0.002 → 0.001 | `positionIM` 13.0395549 → 6.51977745 | 70931.6 → **70931.6** |
+
+**The reasoning that made the rung look right is CROSS semantics, and §4.1 pins
+Isolated** — under cross the wallet backs the position and `m` does not scale
+down with `q`. §7.1 warns about exactly that confusion two paragraphs earlier,
+about `auto-add-margin`. **And the defect is CONDITIONAL, which is the part worth
+carrying:** of the three failure causes §7.1 names, *insufficient staged margin*
+has a working escalation (delever, then re-post the released margin — halving `q`
+while restoring `m` doubles `m/q`, and the released margin does return to
+available balance), while *rate-limit* and *venue lag* have none, because the
+re-post travels the path that just failed. One verb, three causes, one remedy
+that fits one of them. §7.1's bullet now carries a ⚠ block; the redesign is #224
+and it wants a decision record, not a patch.
+
+**RECORD §85 TOOK B4's SIZING RULING, AND ONE OF ITS DERIVATIONS IS NOW EXACT.**
+`L = (m/q + e + cum/q)/(1+MMR)` predicted Binance's published `liquidationPrice`
+to **eight decimals** (m=6.43067264, q=0.002, e=64809.2, MMR=0.004, cum=0 →
+67753.52223108). So #220's inverse solve `Δ = (L*−L)·q·(1+MMR)` rests on a
+verified relation, and Binance's `cum` **is** the tier deduction the derivation
+cancels. It is exact only with `isolatedWallet`; `isolatedMargin` is that plus
+unrealized PnL and moves with the mark, which would put the mark back into a
+figure §7.1 ruling (iv) requires to exclude — `marginstatus_binance.go:200`
+already decodes the right one, now measured rather than assumed.
+
+**#223: THE WEIGHT CONSTANTS ARE 4–20× TOO HIGH, CONFIRMED AUTHENTICATED.**
+Measured deltas on `x-mbx-used-weight-1m`: `/fapi/v3/positionRisk` **5** (code
+charges 20, `positions_binance.go:115`), `/fapi/v1/positionMargin/history` **1**
+(#217 recorded 20), `/fapi/v1/leverageBracket` **1**. Authenticated and
+unauthenticated deltas are identical, which closes the confound. Positive control
+passed: `/fapi/v1/depth?limit=5` charged 2 and `limit=1000` charged 20, matching
+documentation. **The error direction is the unsafe one** — over-charging cannot
+cause a ban, so nothing fails loudly, but §7.6 sizes the **Safety reserve** from
+these constants, so an inflated weight manufactures spurious refusals on the
+incident path. Retires the browser-confirmation halves of **#180** and **#217**:
+the weight is a response header, and it is readable on the very endpoints whose
+docs answer a fetcher with HTTP 202 and zero bytes.
+
+**NEXT, in this order:** **#219** (widen the margin read — signed quantity +
+entry price; unblocked, pure fixture work, and both fields are already sitting in
+`marginstatus_test.go`'s own fixtures decoded by nobody); **#224** (the
+escalation redesign — a decision record, and it changes what B4 is); **#220**
+(the `leverageBracket` codec + the now-verified inverse solve); **#223** (correct
+the weight constants and audit every other `Weight` literal against a
+measurement). **#222 (B4) is blocked on all of #219/#220/#224.** #216 stays open
+and independent.
+
+**Task-store numbering:** the store was reset by a crash on 2026-08-08 and the
+#150–#217 roster was lost, so live IDs are offset from the documentary numbering
+every record uses; the documentary number is written into each task's subject.
+
+**Unchanged:** three standing operator decisions ($20/$55 live test, #171's
+credential, §38f); capture **PID 8495**; never rebuild over `bin/arblab`;
+`make ci` runs `-race` AND the ka staleness gate (needs node); cap `TLC_WORKERS`
+at 4; docs/i18n parity is `bun test`.
+
+---
+
+## Status (2026-08-08, session 128 — HISTORICAL): **§7.1's MARGIN TOP-UP DISPATCHES — AND A RETURNED CALL MUST CONCLUDE, OR THE REMEDY'S SUCCESS IS INDISTINGUISHABLE FROM ITS FAILURE. DOCS v0.9.65, 19 MUTANTS / 0 SURVIVORS, `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
 
 **Read `docs/superpowers/specs/2026-08-08-m4-215-marginop-dispatch.md` (§84)
 first** — the six rulings, the alternatives each rejected, and what B4 inherits.
