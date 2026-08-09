@@ -1,6 +1,60 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-09, session 132): **MODEL STALENESS IS NOW A BUILD GATE, AND TRACKING PREMISES FOUND A MISSED NORMATIVE EDIT. `make ci` GREEN BOTH MODULES, OWED GREP ZERO. TOOLING + DOCS, NO ENGINE CODE.**
+## Status (2026-08-09, session 133): **#230 IS CLOSED — §87 R1a's IDENTITY IS CONFIRMED TO THE LAST PUBLISHED DIGIT ON BOTH VENUES, AND THE RUN FOUND FOUR THINGS IT WAS NOT LOOKING FOR. ONE IS A NEW NORMATIVE BLOCKER (#233). DOCS + MEASUREMENT, NO ENGINE CODE.**
+
+**Read `docs/superpowers/specs/2026-08-09-m4-230-adverse-close-measurement.md` (§89)** — the
+method, the seven runs, six findings, and the limits.
+
+**THE HEADLINE.** `ΔA = (1−α)·m + r·(e−P) − fees` holds **exactly** — R1a error `0E-9` on the
+engineered 1.5% adverse close and on both 0.1% market-drift closes. #221's reading is wrong by
+**14.8%** of released margin in the adverse run, in the direction that **overstates** the cash
+available to re-post. The positive control reproduces #221 byte-for-byte (`liquidationPrice`
+65919.93470120 unchanged across the close), so the harness distinguishes "the formula is right" from
+"nothing moved".
+
+**THE FOUR IT WAS NOT LOOKING FOR — and the first two are method, not venue:**
+
+- **#233 (NEW, BLOCKS B4's sizing) — §87 R1b's bracket criterion is a FIXED POINT.** Binance selects
+  the maintenance bracket for `liquidationPrice` at the **liquidation** notional, not the current
+  one, and the chosen bracket is the self-consistent one: bracket `i` whose own `L*` puts `q·L*` back
+  inside bracket `i`. Measured both legs — a short reaches **up** a bracket (5.6E-10 vs the
+  current-notional bracket's 1.0E-5), a long reaches **down** (3.2E-9 vs 9.8E-6) — so it is not
+  directional. `maintMargin` on the same row uses the **current**-notional bracket, so two published
+  fields sit on two bases. R1b's enumeration is right; its **acceptance criterion** is not.
+- **`α = 0.5` made every partial close this project ever took VACUOUS on the pro-rata claim**,
+  #221's included: at a half close `(1−α)·m` and `α·m` are the same number, so "releases the closed
+  fraction" and "releases the remaining fraction" predicted an identical observation for four
+  sessions. `α = 0.6` separates them 1.5×; both venues release the **closed** fraction. This is the
+  collapse checklist's **tenth** entry and the first found against a live venue rather than a test —
+  CLAUDE.md now says the checklist applies to measurements, where nothing fails and the number is
+  real.
+- **`realizedPnl` and `closedPnl` are the same word for different quantities** — Binance's is
+  per-fill and **gross**, Bybit's is per-closed-position and **net of BOTH fees**. Reading the
+  name-matching field on each venue double-charges Bybit's opening fee (measured: **0.357** on one
+  0.005 BTC close) and errs by *understating* cash returned, which is the direction nothing alarms on.
+- **Bybit serves NO available balance under §4.1's posture** — `totalAvailableBalance` and
+  `availableToWithdraw` are **empty strings**, the asset-transfer family answers demo `10032`, so `A`
+  can only be **derived** there. #225 is updated: its Bybit half is harder than its description
+  assumed, and any test asserting the identity against that derived `A` is **tautological**.
+
+**WHAT THE FEE FINDING CHANGES.** At the mark where a rebalance actually fires — near entry — the
+**fee** is the dominant error in #221's reading and the realized term is a correction on it
+(0.1298 vs 0.013 in the control). The realized term only overtakes it past `δ = f`. So a fee-only
+patch would look right in every quiet-market test and fail exactly when the rung matters.
+
+**METHOD NOTE FOR THE NEXT CREDENTIALED SESSION.** An adverse fill can be **manufactured** on Binance
+demo via the spread (it matches against the published book) and **cannot** be on Bybit demo (single-price
+fills better than the displayed opposite side, at any size) — there, only real mark drift works.
+Leverage does not help either venue: `δ/f` is leverage-independent.
+
+**STILL OPEN, UNCHANGED.** #227 now has evidence rather than an answer (two candidate coefficients
+survive, and every point shares one `e` and `q`). #225/#226 remain the hard B4 blockers; #229 is the
+model revision; #231/#232 are the freshness gate's two findings. **#233 joins the B4 blockers.**
+`make formal-fresh` is untouched by this session — no tracked section was edited.
+
+---
+
+## Status (2026-08-09, session 132 — HISTORICAL): **MODEL STALENESS IS NOW A BUILD GATE, AND TRACKING PREMISES FOUND A MISSED NORMATIVE EDIT. `make ci` GREEN BOTH MODULES, OWED GREP ZERO. TOOLING + DOCS, NO ENGINE CODE.**
 
 **Read `docs/superpowers/specs/2026-08-09-formal-freshness-gate.md` (§88)** —
 the design, the seven rejected alternatives, and the limits.

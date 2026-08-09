@@ -241,12 +241,20 @@ These are not style preferences. Each one was paid for.
   "one constant is a set" and "one constant is not a set" give the same answer —
   and the mirror of it, `within()`'s `pkgPath == dir` arm, was untested in
   **both** `hexboundary` and the `kernelpurity` it was copied from, because
-  every fixture in either imported a SUBpackage. **Nine times now**,
+  every fixture in either imported a SUBpackage. Then — the first one found
+  against a **live venue** rather than a test — every partial-close measurement
+  this project had ever taken, #221's included, closed **half** a position, and
+  at `α = 0.5` the two readings `(1−α)·m` and `α·m` are the *same number*: so
+  "the venue releases the margin backing the CLOSED fraction" and "…the REMAINING
+  fraction" predicted an identical observation, on both venues, for four
+  sessions. `α = 0.6` separates them 1.5× (record §89). **Ten times now**,
   which makes it a checklist item and not a war story: before believing a suite,
   find the fixture parameter pinned to the value that collapses the distinction
   the code makes, and vary it. The tell is that the fixture does not contain the
   thing under test. Run the checklist **before** the mutations rather than after
-  — in `boot` it changed five fixtures for free.
+  — in `boot` it changed five fixtures for free. **It applies to measurements as
+  well as to tests**, and a venue measurement is the harder case: nothing fails,
+  the number is real, and the reading you did not take looks like the one you did.
 - **A test that hangs is not a test that fails.** A mutation can make a test
   *block* rather than break, so the harness reports `TIMEOUT!!` instead of a
   kill and the claim was never checked while looking covered. `clock` found it
