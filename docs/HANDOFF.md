@@ -1,6 +1,67 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-09, session 137): **#225's MEASUREMENT HALF IS CLOSED — THE ⚠ ANSWERS "POSTURE", AND THEN THE ANSWER STOPS MATTERING. THE PORT IS NOT BUILT. DOCS + MEASUREMENT, NO ENGINE CODE. `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
+## Status (2026-08-09, session 138): **#225's PORT IS DESIGNED AND NOT BUILT — THE ANSWER ON BINANCE IS THE VENUE'S OWN FIGURE, WHICH AMENDS §93 §8. DOCS ONLY, NO ENGINE CODE. `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
+
+**Read `docs/superpowers/specs/2026-08-09-m4-225-available-balance-port.md` (§94).**
+
+**THE NEXT ACTION IS A REVIEW, NOT A BUILD.** §94 is a design record that **reverses recorded
+decisions**, and the plan is 2–3 `codex-copilot` rounds against it looking for *blocking* issues
+before `writing-plans` runs. **The stopping rule is part of the plan**, on record §87's lesson: that
+review ran six rounds, converged at three, and rounds 4–6 each returned exactly **one** missing case
+in a prose state machine — which was read as the yield curve naming a different instrument, not as a
+reason for a seventh round. If each round here returns one finding of the same shape, stop.
+
+**WHAT §94 RULES.** The port lives in `oms/application/ports` on the rule that **placement follows
+the CONSUMER** — `SpotBalances`' precedent, against core §4 line 435's literal assignment of this
+quantity to a `treasury` that has no directory; the read is **keyed by settlement asset** while the
+venue call stays **unscoped**; and the answer is Binance's **published per-asset `availableBalance`**
+versus Bybit's derived `walletBalance − totalPositionIM − totalOrderIM`, with the provenance
+difference carried in the type as an `AbsenceSemantics`-shaped enum-like.
+
+**WHAT IT AMENDS, AND THIS IS THE FIRST THING TO ATTACK.** §93 §8 point 2 left Binance's source open
+and points 3–4 read as though the derivation were the answer on both venues. §94 makes the venue's
+published figure the answer on three grounds: available balance is what Binance's **order-admission
+engine itself evaluates** (`MarginStatus.LiqPrice`'s standing ruling, same shape); the derivation
+**as measured spans TWO responses** (`probe225_pass3_separate.py:332-341` takes `isolatedWallet` from
+a separate `positionRisk` call), which is §85 §3(iii)'s two-instant objection; and its per-asset
+attribution of `isolatedWallet` fails by **dropping a subtrahend**, which overstates available — F3's
+direction. **The counter-argument a reviewer should press:** F3 rejected a published field for
+answering a different question, and this ruling accepts a different published field — the distinction
+rests on per-asset versus aggregate, and if that distinction is wrong the ruling inverts.
+
+**THE LIVE CROSS-CHECK IS DROPPED, and that is a ruling rather than an omission.** An earlier form
+ran the derivation as a live oracle against the published field, refusing on disagreement. The only
+**single-response** derivation reads `account.positions[]`, an array **no capture contains**, so a
+wrong assumption about its shape produces a spurious refusal — which escalates §7.1's ladder into a
+**delever of a healthy position**. A refusal gate on an unmeasured shape trades a measured hazard for
+an unmeasured one. It also removes a `Corroborated` field nothing would have set.
+
+**THREE COLLAPSES IN THE CAPTURED EVIDENCE — the first set found in EVIDENCE rather than in a test,
+and checklist entries 13–15.** (a) `posIM` and `orderIM` are **never both non-zero on either venue**,
+so **sum and max are the same function**: Bybit's combining rule ships **unverified** on the
+conservative reading, and on Binance it makes §93 §8's formula and a `crossWalletBalance − openOrderIM`
+alternative agree in all five phases. (b) The per-asset and top-level `availableBalance` are
+**byte-identical in all five Binance phases** (USDT is the only funded asset), so reading F3's
+aggregate is **invisible in the evidence §93 produced**. (c) The asked-for asset is always the only
+row, so "this asset's row" and "the first row" are one predicate. Separating fixtures are specified
+in §94 §6.
+
+**A THIRD SPEC EDIT, FOUND BY VERIFYING A LINE NUMBER.** Core §4 line 435 points a reader at the
+**top-level** `availableBalance` — a locator defect inside a correct argument, and precisely the
+field collapse (b) conceals. A port built by following that sentence would have passed against every
+capture and been wrong by the whole second leg the first time the account held one.
+
+**STILL OPEN.** **#225 (port, now designed) and #226 remain the only B4 blockers.** #235 gains two
+items from §94 §7 — Binance single-response corroboration, and the separating phase holding a
+position **and** a resting order simultaneously (cheap, one extra probe phase, needs credentials) —
+so it now carries **four**. Three `[SPEC EDIT OWED]` markers are owed **with the code**, listed in
+§94 §9; none is in the tree yet, so the grep is correctly zero. Five `knownStale` markers remain, all
+#229's — **no tracked section was edited**, so `make formal-fresh` is untouched. #220, #227, #228
+unchanged.
+
+---
+
+## Status (2026-08-09, session 137 — HISTORICAL): **#225's MEASUREMENT HALF IS CLOSED — THE ⚠ ANSWERS "POSTURE", AND THEN THE ANSWER STOPS MATTERING. THE PORT IS NOT BUILT. DOCS + MEASUREMENT, NO ENGINE CODE. `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
 
 **Read `docs/superpowers/specs/2026-08-09-m4-225-available-balance.md` (§93).** Probes and verbatim
 captures: `research/venue-probes/225-available-balance/`.
