@@ -1,6 +1,59 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-09, session 130): **#219 IS CLOSED — THE MARGIN READ CARRIES §7.1's TWO SIZING INPUTS, AND THE FENCE THAT PERMITS THE SECOND DECODE BINDS ONE WAY. DOCS v0.9.66, 16 MUTANTS / 0 SURVIVORS, `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
+## Status (2026-08-09, session 131): **#224 IS CLOSED AS A DESIGN RECORD — §7.1's TERMINAL RUNG IS A *FUNDING* STEP, NOT A HEADROOM STEP, AND THE LADDER RE-ENTERS THE TOP-UP. DOCS v0.9.67, NO CODE, `make ci` GREEN BOTH MODULES, OWED GREP ZERO. B4 IS NOW BEHIND FIVE PREREQUISITES, FOUR OF WHICH THIS RECORD DISCOVERED.**
+
+**Read `docs/superpowers/specs/2026-08-09-m4-224-escalation-rung-redesign.md`
+(§87) first** — it is the whole design, and §5 is the prerequisite list that
+changes the plan.
+
+**THE FINDING IN ONE LINE.** A `PackageDelever` raises no liquidation headroom,
+but it releases **exactly** the margin the failed top-up was short of
+(`Δ = (1−α)·m`), so rung 3 exists to make rung 2's precondition true. The ladder
+**re-enters the top-up** instead of escalating past it. §7.1's parenthetical was
+not merely dated; it was doing load-bearing work on the safety kernel's terminal
+rung and it was false.
+
+**THE REASON NOW REACHES FURTHER THAN THE MEASUREMENT.** Maintenance margin is
+one **continuous convex piecewise-linear function of notional**
+(`MM(N) = N·MMR_i − cum_i`, `MM(0) = 0`), so `MM(αN) ≤ α·MM(N)` and a pro-rata
+reduction leaves `L` *exactly* unchanged **iff the bracket's deduction is zero** —
+bracket 1, which §7.2's small-size posture makes the bracket we trade in. #221
+measured 0.002 BTC, ≈$130, i.e. bracket 1: the exact-inertness case. Measured at
+three boundaries across both venues, continuity holding to the cent.
+
+**TWO NORMATIVE DOCUMENTS WERE FOUND WRONG, NOT DATED.** `venue-profiles.md`
+named `instruments-info` for Bybit's tier table — an endpoint carrying **no**
+risk-limit field; the answer is `GET /v5/market/risk-limit` (corrected from a
+live call, and `mmDeduction` is `""` in tier 1, its value *established* by
+continuity rather than assumed). And **record §85's `Deleverer.Open` row
+described its argument backwards** — "target position" where the code bounds the
+executed **reduction**. §85 carries an erratum; §87 renames the two quantities
+(`q_final`, `r`) so they cannot be spelled the same way again.
+
+**WHAT B4 IS NOW WAITING ON — five, and two are hard blockers:** **#225**
+available-balance read both venues (released *posted margin* ≠ returned *cash*,
+because an adverse close realises a loss and a fee under exactly the rally that
+fired the trigger); **#226** `EmergencyClosePackage`'s both-leg close, **which
+does not exist** — only its supersession half does; **#227** Bybit's isolated
+liquidation formula, verified (§85 verified Binance only); **#228** the verified
+insufficient-margin error code per venue, now a blocker because an
+undistinguished venue rejection defaults to terminal; **#229** formal-model
+revision, because removing SM §7's `Complete → Planned` invalidates
+`AmbiguousOrder.tla`'s `MAX_GEN = 2` premise and `PC20`'s coverage directly.
+**#230** is the adverse-close measurement §87 owes.
+
+**HOW THE RECORD WAS PRODUCED IS PART OF WHAT IT ASSERTS.** Six adversarial
+review rounds against a second model family, every one NO-SHIP. The arithmetic
+converged at round 3 and never moved again; rounds 4–6 found only **missing cases
+in a prose state machine** — one per round. That is the class the TLA+ models
+exist to find, so review was stopped there **deliberately**: the remedy episode
+is recorded as **specified-but-unmodelled** and #229 is a blocking prerequisite
+rather than a follow-up. Do not re-review §3's episode in prose; model it.
+
+---
+
+
+## Status (2026-08-09, session 130 — HISTORICAL): **#219 IS CLOSED — THE MARGIN READ CARRIES §7.1's TWO SIZING INPUTS, AND THE FENCE THAT PERMITS THE SECOND DECODE BINDS ONE WAY. DOCS v0.9.66, 16 MUTANTS / 0 SURVIVORS, `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
 
 **Read `docs/superpowers/specs/2026-08-09-m4-219-margin-read-sizing-fields.md`
 (§86) first** — four rulings, the alternatives each rejected, and one finding

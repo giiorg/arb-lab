@@ -629,6 +629,25 @@ func (d *Deleverer) ParkSpotLeg(group domain.HedgeGroup) error {
 // for the reason every leg here is: §6 step 5 owns order creation. What this
 // records is that the generation has ended that way, which retires its ledger
 // entry — and the retirement is the part nothing else would do.
+//
+// THE SPEC RETIRED THIS STATE AND THIS CODE HAS NOT CAUGHT UP YET — SM §7's
+// states table, v0.9.67, task #224, record §87 §3 R6. The sentence above is
+// exactly why: this method records an ending and issues nothing, so a machine
+// entering it has asserted a flatten the venue has not performed, and the state
+// was never reachable from `Complete`, which is where the redesigned ladder
+// takes its terminal decision. The terminal rung is core §5.3's
+// `EmergencyClosePackage`, owned by §7.1's remedy episode and recorded only on
+// perp-flat evidence — and its both-leg close does not exist yet (record §87
+// §5b). Slice B4 (task #222) removes or redefines this along with the incoming
+// edges.
+//
+// Deliberately carries NO slice-close deviation marker, and the reason is that
+// the marker points the other way: it names code that departed from the spec and
+// owes a spec edit before the slice closes. Here the spec moved first, by
+// decision, and the code owes the change — recorded in §87 rather than
+// discovered later, which is the property the marker exists to buy. Spelling the
+// marker here would also have minted one: the gate is a grep over this tree, so
+// a comment ABOUT the marker is indistinguishable from a marker.
 func (d *Deleverer) TerminalFlatten(group domain.HedgeGroup) error {
 	g, err := d.liveGeneration(group)
 	if err != nil {

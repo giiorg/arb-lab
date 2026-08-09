@@ -17,7 +17,19 @@ both of the acts B4 must perform take a quantity nothing in this system computes
 | Rung | Signature | Wants |
 |---|---|---|
 | Top-up | `MarginOpDispatcher.Dispatch(instrument, amount fixedpoint.Money)` | how much margin to add now |
-| Escalation | `Deleverer.Open(id, group, reservation, target fixedpoint.Quantity)` | an absolute, strictly positive target position |
+| Escalation | `Deleverer.Open(id, group, reservation, target fixedpoint.Quantity)` | an absolute, strictly positive **reduction quantity** — ⚠ **ERRATUM, see below** |
+
+> **ERRATUM `[2026-08-09, task #224, record §87 §3 R1c]`.** This row read *"an
+> absolute, strictly positive **target position**"*, and that is **backwards**.
+> `Generation.target` bounds the cumulative **executed reduction** —
+> `generation.go:487-503` refuses `perpDone > target` — so the argument is the
+> quantity to close, not the quantity to keep. The two are complements, and the
+> error is not cosmetic: this record's own delever formula solves for the
+> quantity **retained**, so a reader following both would have passed
+> `q_final` where `q_now − q_final` was meant, under-delevering the safety
+> kernel's escalation by exactly the position it intended to keep. Record §87
+> fixes the notation (`q_final` for the remainder, `r` for the generation's
+> target) precisely so the two can never again be spelled the same way.
 
 `Dispatch`'s own doc says so in as many words — *"the amount is the caller's, and
 this method does not size it"* — and names §6 step 4's
