@@ -57,21 +57,16 @@
           "sha256": "122949fce3c8c7b880578bb1f90f2093f882bc5f83d7003b9ec1a44520e1a20a",
           "knownStale": {
             "task": "#229",
-            "note": "#224 rewrote SM §7 (Complete -> Planned removed, TerminalFlatten retired). This model cites §7 ONLY as a stated omission — 'PackageDelever-supersession: OOS (SM §7 / model (a))' — so no run of model (b) rests on its content; what the change can invalidate is the OOS boundary itself, which #229 re-draws when it revises model (a).",
-            "sha256Actual": "0051149c0cad2cba6e6f3583c39d4c1578beea8f75d11362e95adc6d233d5626"
+            "note": "This model cites §7 ONLY as a stated omission — 'PackageDelever-supersession: OOS (SM §7 / model (a))' — so no run of model (b) rests on its content; what a change can invalidate is the OOS boundary itself, which #229 re-draws when it revises model (a). TWO deltas now, and the marker is RE-PINNED rather than widened. (1) #224 rewrote SM §7 (Complete -> Planned removed, TerminalFlatten retired). (2) #231 (v0.9.70, record §92) corrected the FIVE places in this section the v0.9.67 edit did not reach — the two ledger invariants, the quiesce TERMINATION argument (which enumerated `TerminalFlatten` among the park's exits) and the FLAG-4 ruling: `TerminalFlatten` removed from both, and the FM-6 re-classification trigger enumeration corrected from 'either supersession row' — written at slice E, when there were two — to all THREE, the premise-lost row [-> FM-8, FM-9] having joined at slice F. Delta (2) CHANGES THE TRIGGER SET the model's ledger encodes, so it is squarely inside the re-run #229 owes rather than beside it.",
+            "sha256Actual": "c79d29230ce7a20a4f794051c3c2daba5e5a6f72380797fcfb46b966e025c164"
           }
         },
         {
           "doc": "build-spec.md",
           "section": "6",
           "role": "premise",
-          "why": "cited as core §6.7 — trade lifecycle step 7; §6 carries no subsections, so the step lives in this section's text",
-          "sha256": "a647c201f46dd4e3e4aec0c7449837bfcae7630a45aecb1ca0ef6cfd28667a20",
-          "knownStale": {
-            "task": "#232",
-            "note": "§6 went 18 -> 29 lines and step 7 gained the FM-5-family projection refuse-to-trade clause. This model's SUBJECT sections (SM §3/§4/§6) are byte-identical, so its 14 runs stand; what is owed is a RE-DERIVATION, not a re-run — the liveness fairness set encodes step 7's 'obligated <=5 s naked-reduce (core §6.7)' and the FM-2 lasso analysis rests on it. Exactly the FM-7 class. Reading this delta is also what found #231.",
-            "sha256Actual": "b0d6f49a98722d989077d621c9b6bc93609886828622df49dc4cc5eda6c85e98"
-          }
+          "why": "cited as core §6.7 — trade lifecycle step 7; §6 carries no subsections, so the step lives in this section's text. RE-DERIVED 2026-08-09 for #231/#232 (record §92), NOT re-run: step 7's whole delta since 310e854 is the FM-5-family refuse-to-trade clause plus #231's producer-list correction, and the sentence this model's fairness set encodes — 'immediately (<=5 s, §9) issues an ExposureReduction ... for a determined residual' — is BYTE-IDENTICAL. The new clause is a guard, not a weakening: 'holds new trading' is ruled STOP-OPENING with the safety verbs still available at core §7.5, and the <=5 s determined flatten is a safety verb. FM-2's lasso is untouched twice over — its bot is healthy by construction, so the guard's antecedent is false in that trace. THE JUSTIFICATION NOW CONSUMES core §7.5, which is why that section is tracked below.",
+          "sha256": "322aba32c1194a5ca4846a14dac35b1fb2b1d7045881989284b53c7154bff18c"
         },
         {
           "doc": "build-spec.md",
@@ -79,6 +74,13 @@
           "role": "premise",
           "why": "kill-switch modes & pre-authorized escalation — the normative owner of what the fence permits",
           "sha256": "8cb26f4e5f7bfdc50c03f3a25030476350ea19cdd19d7d483a3338d86f8a55ba"
+        },
+        {
+          "doc": "build-spec.md",
+          "section": "7.5",
+          "role": "premise",
+          "why": "added 2026-08-09 by #232's re-derivation (record §92). §6 step 7's 'holds new trading' is what could have weakened the <=5 s naked-reduce obligation this model puts WF on; §7.5 is where that phrase is ruled STOP-OPENING rather than halted, 'because the order may be executing, so the safety verbs must stay available'. An edit here that widened the hold to a full halt would make the fairness set assume progress the spec no longer obligates — silently, since the model has no projection layer and no run would change. FM-7 is the evidence for tracking the section a justification CONSUMES and not only the one it is about.",
+          "sha256": "f09ade1ebb91959037078a149879afa3097795f2efe99d1871322b2139f0fd0c"
         }
       ]
     },
@@ -101,8 +103,8 @@
           "sha256": "f142d0a756f2514d721650e8fc8cfec59d15a24090cc8e5835e16493c4148399",
           "knownStale": {
             "task": "#229",
-            "note": "3 lines changed since slice F. #229 re-runs this model and restamps every subject with it.",
-            "sha256Actual": "5f62d9fc612c6ace892acb33bbf54470add173f4da3998377d70da58d8e05781"
+            "note": "3 lines changed since slice F; #229 re-runs this model and restamps every subject with it. RE-PINNED by #231 (v0.9.70, record §92): §2 carries its OWN copy of the FM-6 producer list and it still named the retired terminal-flattening producer — corrected here and at core §6 step 7 in the same edit. This is a SUBJECT section and the producer set is what the model's ledger encodes, so the delta is inside the re-run, not beside it.",
+            "sha256Actual": "20e17759262bea815a7b5a5210a94aaa89d19de33acdf01d5898ae0e99ba2b48"
           }
         },
         {
@@ -113,8 +115,8 @@
           "sha256": "122949fce3c8c7b880578bb1f90f2093f882bc5f83d7003b9ec1a44520e1a20a",
           "knownStale": {
             "task": "#229",
-            "note": "THE staleness this gate was built around. #224 removed Complete -> Planned, and AmbiguousOrder.tla sets MAX_GEN = 2 BECAUSE that edge would otherwise be unreachable; PC20 (gens < 2) is its coverage probe. SM §7 v0.9.59's own header says revising the models is a blocking prerequisite rather than a follow-up. 23 lines changed.",
-            "sha256Actual": "0051149c0cad2cba6e6f3583c39d4c1578beea8f75d11362e95adc6d233d5626"
+            "note": "TWO deltas now, and the marker is RE-PINNED rather than widened. (1) #224 rewrote SM §7 (Complete -> Planned removed, TerminalFlatten retired). (2) #231 (v0.9.70, record §92) corrected the FIVE places in this section the v0.9.67 edit did not reach — the two ledger invariants, the quiesce TERMINATION argument (which enumerated `TerminalFlatten` among the park's exits) and the FLAG-4 ruling: `TerminalFlatten` removed from both, and the FM-6 re-classification trigger enumeration corrected from 'either supersession row' — written at slice E, when there were two — to all THREE, the premise-lost row [-> FM-8, FM-9] having joined at slice F. Delta (2) CHANGES THE TRIGGER SET the model's ledger encodes, so it is squarely inside the re-run #229 owes rather than beside it.",
+            "sha256Actual": "c79d29230ce7a20a4f794051c3c2daba5e5a6f72380797fcfb46b966e025c164"
           }
         },
         {
@@ -139,8 +141,8 @@
           "sha256": "5757512e2dff079ffac42e8f69ef6ee0f88031e865ec5fd63b36fc9b21654697",
           "knownStale": {
             "task": "#229",
-            "note": "the model's state vocabulary comes from here; re-read the correspondence map's §2 rows against the current text as part of the revision.",
-            "sha256Actual": "a53865ac9246944112ac4950d2dfbaa025f1388b275a9bf1e7b9fb41cd597ab3"
+            "note": "the model's state vocabulary comes from here; re-read the correspondence map's §2 rows against the current text as part of the revision. RE-PINNED by #231 (v0.9.70, record §92), which corrected the generation-mechanics pointer: it sent a reader to SM §7 for a terminal flatten SM §7 no longer has, and the terminal rung is now this section's own EmergencyClosePackage.",
+            "sha256Actual": "f54a53f97a36f393c3a945e0184b7bcd1934ec826da9f94d90a8b1719ae2c0bc"
           }
         },
         {
@@ -151,8 +153,8 @@
           "sha256": "a647c201f46dd4e3e4aec0c7449837bfcae7630a45aecb1ca0ef6cfd28667a20",
           "knownStale": {
             "task": "#229",
-            "note": "step 7 gained the FM-5-family projection clause and still lists the retired terminal-flattening producer (#231). The producer set is exactly what the model's ledger encodes, so this is re-read with the revision, not after it.",
-            "sha256Actual": "b0d6f49a98722d989077d621c9b6bc93609886828622df49dc4cc5eda6c85e98"
+            "note": "step 7 gained the FM-5-family projection clause; the producer set is exactly what this model's ledger encodes, so this is re-read with the revision, not after it. RE-PINNED by #231 (v0.9.70, record §92): the retired terminal-flattening producer is GONE and the enumeration now states its count (three supersession rows). #231 discharges the producer-list half of this marker; what remains for #229 is the FM-5-family clause, which is this model's own FM-5 one layer out.",
+            "sha256Actual": "322aba32c1194a5ca4846a14dac35b1fb2b1d7045881989284b53c7154bff18c"
           }
         },
         {

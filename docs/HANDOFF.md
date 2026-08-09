@@ -1,6 +1,61 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-09, session 135): **#234 IS CLOSED — THE FRESHNESS GATE NOW PRINTS THE DIGEST IT DEMANDS, AND THE DURABLE HALF IS THAT ITS MESSAGES HAVE A NAME. TOOLING ONLY, NO NORMATIVE DOCUMENT CHANGED. `make ci` GREEN BOTH MODULES.**
+## Status (2026-08-09, session 136): **#231 AND #232 ARE CLOSED — THE `TerminalFlatten` RETIREMENT HAD LEFT EIGHT SITES BEHIND, ONE OF THEM SHORT A PRODUCER RATHER THAN CARRYING A DEAD ONE. DOCS ONLY, NO ENGINE CODE. `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
+
+**Read `docs/superpowers/specs/2026-08-09-m4-231-232-terminal-flatten-errata.md` (§92).**
+
+**THE PAIR, AND THE ORDER IS FORCED.** #231 edits `build-spec.md` §6; #232
+re-derives a justification against it and restamps that section. Done the other
+way round, #232's restamp lands on a digest #231 immediately invalidates — a
+marker covers exactly one delta, and it would have covered the wrong one.
+
+**#231 — EIGHT SITES, NOT ONE.** v0.9.67 retired `TerminalFlatten` from SM §7's
+state table and transition rows and did not reach anything that **enumerates** it
+or **points at** it: core §6 step 7, **SM §2's own copy of the same producer
+list**, SM §7's two ledger invariants, SM §7's quiesce **termination** argument,
+SM §7's FLAG-4 ruling, core §5.3's mechanics pointer and core §9's chaos row. All
+eight are corrected and tagged `[v0.9.70, task #231]`. core §7.1's lowercase "a
+terminal flatten closes the perp first" was inspected and **left** — it describes
+the act, and it is correct of `EmergencyClosePackage`.
+
+**THE FINDING THAT WAS NOT THE TASK.** SM §7's ledger invariant also said the
+entry moves on *either* supersession row — **two**. `git log -S` dates the phrase
+to slice E, when there were two; **slice F added a third**, the premise-lost row
+`[→ FM-8, FM-9]`, which ends a generation and retires its entry exactly as the
+external two do. So one sentence carried a **dead** member and was missing a
+**live** one, and only the dead one is findable: nothing in the document states
+how many supersession rows there are, and `FM-6`'s failure runs one way — the
+classifier that does not re-run keeps a stale verdict. The producer lists now
+state their **count**.
+
+**#232 — THE PREMISE HOLDS, AND IT MOVED.** Step 7's whole delta since 310e854 is
+three opcodes: two are #231's, the third is the FM-5-family clause, and the
+sentence the fairness set encodes (*"immediately (≤5 s, §9) issues an
+`ExposureReduction` … for a determined residual"*) is **byte-identical**. The new
+clause adds a *"holds new trading"* state, which could have made the WF stronger
+than the spec grants — it does not, because **core §7.5** rules that hold
+**stop-opening** with "the safety verbs must stay available". So the
+justification now consumes §7.5, and **`build-spec.md` §7.5 is tracked as a
+`FenceTakeover` premise from today**. `build-spec.md` §6 is **restamped** for that
+model; its marker is gone.
+
+**A METHOD NOTE WORTH MORE THAN THE ERRATA.** The first sweep found five sites and
+stopped — it grepped the identifier (15 lines) and read only the ones the task and
+the mirror rule made salient. The second pass, a case-insensitive `flatten` sweep
+over both documents (58 lines) read one hit at a time, found the two lowercase
+prose sites the identifier grep **cannot** match **and three it DID match and
+nobody had read**. Counting matches is not reading them.
+
+**STILL OPEN.** **#225/#226 remain the only B4 blockers**, unchanged. #229 is
+widened by one item, recorded in §92: the trigger set its revision must encode is
+three supersession rows, and SM §2 — a **subject** section — changed, so that
+re-pin sits inside the re-run rather than beside it. Five `knownStale` markers
+remain, all #229's. #220 carries #233's table-validation requirement; #227
+unchanged.
+
+---
+
+## Status (2026-08-09, session 135 — HISTORICAL): **#234 IS CLOSED — THE FRESHNESS GATE NOW PRINTS THE DIGEST IT DEMANDS, AND THE DURABLE HALF IS THAT ITS MESSAGES HAVE A NAME. TOOLING ONLY, NO NORMATIVE DOCUMENT CHANGED. `make ci` GREEN BOTH MODULES.**
 
 **Read `docs/superpowers/specs/2026-08-09-m4-234-freshness-digest-transcription.md` (§91).**
 
