@@ -29,6 +29,23 @@ behaviour. Each has a companion artifact (`fence-takeover-model.md`,
 `ambiguous-order-model.md`) mapping every spec clause to a construct or to a
 stated omission; **read the companion before the `.tla`.**
 
+**A model can go stale without anything failing, so staleness is now a build
+gate** (record §88). The models are companions and the spec is normative, so a
+normative edit can void a model's coverage while its companion still reports 75
+passing runs — the runs were real, they were just run against a *different
+document*. `make formal-fresh` hashes each tracked section and compares it
+against `docs/formal/freshness.json`; **TLC cannot catch this class at all**,
+because a drifted model is still internally consistent and checks green. Each
+tracked section carries a role: `subject` (the model encodes this machine — a
+change can invalidate the runs) or `premise` (the correspondence map cites it to
+justify an encoding — a change can invalidate a recorded justification without
+touching a run, which is `FM-7`'s lesson). A changed section needs either a
+re-run plus `make formal-restamp MODEL=<name>`, or a `knownStale` marker naming
+the task that owns it — **marked, not absorbed**, and the marker pins the digest
+it is stale against, so it covers one delta rather than granting an exemption.
+Tracking premises rather than only subjects found two things in its first
+session (#231, #232).
+
 Three of model (a)'s five are **one family**, and knowing the family is what
 makes the next one findable: `FM-5` — a ledger entry read **before its backing
 exists**; `FM-8` — an entry's **premise outliving it**; `FM-9` — a rule
@@ -70,9 +87,11 @@ a prefix, so it carried zero enforcement value.
 ## Build
 
 ```
-make ci        # what CI runs: fmt-check, vet, custom gates, race tests — both modules
-make test      # race tests, pinned rapid seed
-make fuzz      # bounded fuzz run of the decimal parser
+make ci            # what CI runs: fmt-check, tutorial-ka-check, formal-fresh,
+                   #   vet, custom gates, race tests — both modules
+make test          # race tests, pinned rapid seed
+make fuzz          # bounded fuzz run of the decimal parser
+make formal-fresh  # are the TLA+ models still checked against today's spec text?
 ```
 
 **Two Go modules on purpose.** The root module is the engine; `tools/lint` is

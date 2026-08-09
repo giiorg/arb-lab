@@ -1,0 +1,180 @@
+{
+  "comment": [
+    "Staleness stamps for the TLA+ models. Checked by tools/formalfresh (go test ./tools/formalfresh),",
+    "which runs inside `make test` and therefore inside `make ci`. It does NOT run TLC — it asserts that",
+    "the document sections each model was verified against are byte-identical to what they were at the",
+    "recorded run. TLC itself is `cd docs/formal && ./run.sh`, ~32 min and a JVM, which is why it is not in CI.",
+    "",
+    "role=subject: the model ENCODES this section's machine. A change can invalidate the runs. Re-run ./run.sh.",
+    "role=premise: the correspondence map CITES this section to justify an encoding or a stated omission.",
+    "  A change can invalidate a recorded justification without touching a single run. Re-read the row.",
+    "  FM-7 is this repo's evidence for what a never-re-derived justification costs.",
+    "",
+    "knownStale marks a section that HAS changed, with the task that owns re-verifying it — the",
+    "`[SPEC EDIT OWED]` pattern: marked, not absorbed. It is not an exemption. It pins the digest it is",
+    "stale AGAINST, so it covers exactly one known delta: a further edit to the same section fails again,",
+    "and a marker whose section matches its stamp once more is itself an error.",
+    "",
+    "To restamp after a real re-run: make formal-restamp MODEL=<name>"
+  ],
+  "models": [
+    {
+      "name": "FenceTakeover",
+      "modules": [
+        "FenceTakeover.tla"
+      ],
+      "companion": "fence-takeover-model.md",
+      "verifiedAt": "2026-08-02",
+      "verifiedCommit": "310e854",
+      "verifiedNote": "slice F, single unfiltered ./run.sh — ALL 75 RUNS MATCH PREDICTIONS, covering this model's 14 runs (3 nominals, 5 negative controls, 6 control-witness probes)",
+      "subjects": [
+        {
+          "doc": "state-machines.md",
+          "section": "3",
+          "role": "subject",
+          "why": "FenceReadyLost arbitration — one of the three machines this model composes",
+          "sha256": "e53604a184663f1c149297d2f0e1d40ab40783970dbcdbdf2967b6c4a7eb0e31"
+        },
+        {
+          "doc": "state-machines.md",
+          "section": "4",
+          "role": "subject",
+          "why": "Actuator takeover protocol — composed machine; FM-4 and Cx8-2 are findings against it",
+          "sha256": "e08925b827298a17ceeebfc6f8e1f61b96c2ac2483d9258464a8bbe28c6e54f4"
+        },
+        {
+          "doc": "state-machines.md",
+          "section": "6",
+          "role": "subject",
+          "why": "EmergencyPlan lifecycle — composed machine; FM-1 is a finding against it",
+          "sha256": "b724c02839bb0e45392f1c333666f6f8e1c93c26da3f8461d707315b6e07d0cd"
+        },
+        {
+          "doc": "state-machines.md",
+          "section": "7",
+          "role": "premise",
+          "why": "cited by the correspondence map; the fence's interaction with PackageDelever generations",
+          "sha256": "122949fce3c8c7b880578bb1f90f2093f882bc5f83d7003b9ec1a44520e1a20a",
+          "knownStale": {
+            "task": "#229",
+            "note": "#224 rewrote SM §7 (Complete -> Planned removed, TerminalFlatten retired). This model cites §7 ONLY as a stated omission — 'PackageDelever-supersession: OOS (SM §7 / model (a))' — so no run of model (b) rests on its content; what the change can invalidate is the OOS boundary itself, which #229 re-draws when it revises model (a).",
+            "sha256Actual": "0051149c0cad2cba6e6f3583c39d4c1578beea8f75d11362e95adc6d233d5626"
+          }
+        },
+        {
+          "doc": "build-spec.md",
+          "section": "6",
+          "role": "premise",
+          "why": "cited as core §6.7 — trade lifecycle step 7; §6 carries no subsections, so the step lives in this section's text",
+          "sha256": "a647c201f46dd4e3e4aec0c7449837bfcae7630a45aecb1ca0ef6cfd28667a20",
+          "knownStale": {
+            "task": "#232",
+            "note": "§6 went 18 -> 29 lines and step 7 gained the FM-5-family projection refuse-to-trade clause. This model's SUBJECT sections (SM §3/§4/§6) are byte-identical, so its 14 runs stand; what is owed is a RE-DERIVATION, not a re-run — the liveness fairness set encodes step 7's 'obligated <=5 s naked-reduce (core §6.7)' and the FM-2 lasso analysis rests on it. Exactly the FM-7 class. Reading this delta is also what found #231.",
+            "sha256Actual": "b0d6f49a98722d989077d621c9b6bc93609886828622df49dc4cc5eda6c85e98"
+          }
+        },
+        {
+          "doc": "build-spec.md",
+          "section": "7.4",
+          "role": "premise",
+          "why": "kill-switch modes & pre-authorized escalation — the normative owner of what the fence permits",
+          "sha256": "8cb26f4e5f7bfdc50c03f3a25030476350ea19cdd19d7d483a3338d86f8a55ba"
+        }
+      ]
+    },
+    {
+      "name": "AmbiguousOrder",
+      "modules": [
+        "AmbiguousOrder.tla",
+        "AmbiguousOrderCoverage.tla"
+      ],
+      "companion": "ambiguous-order-model.md",
+      "verifiedAt": "2026-08-02",
+      "verifiedCommit": "310e854",
+      "verifiedNote": "slice F, single unfiltered ./run.sh — ALL 75 RUNS MATCH PREDICTIONS, covering this model's 61 runs (27 nominals + negative controls, 29 positive controls, 5 control-witness probes)",
+      "subjects": [
+        {
+          "doc": "state-machines.md",
+          "section": "2",
+          "role": "subject",
+          "why": "ambiguous-order classifier & finality contract — the SS2 half of the composition",
+          "sha256": "f142d0a756f2514d721650e8fc8cfec59d15a24090cc8e5835e16493c4148399",
+          "knownStale": {
+            "task": "#229",
+            "note": "3 lines changed since slice F. #229 re-runs this model and restamps every subject with it.",
+            "sha256Actual": "5f62d9fc612c6ace892acb33bbf54470add173f4da3998377d70da58d8e05781"
+          }
+        },
+        {
+          "doc": "state-machines.md",
+          "section": "7",
+          "role": "subject",
+          "why": "PackageDelever generations & reserved reductions — the SS7 half; FM-5, FM-8 and FM-9 are findings against this composition",
+          "sha256": "122949fce3c8c7b880578bb1f90f2093f882bc5f83d7003b9ec1a44520e1a20a",
+          "knownStale": {
+            "task": "#229",
+            "note": "THE staleness this gate was built around. #224 removed Complete -> Planned, and AmbiguousOrder.tla sets MAX_GEN = 2 BECAUSE that edge would otherwise be unreachable; PC20 (gens < 2) is its coverage probe. SM §7 v0.9.59's own header says revising the models is a blocking prerequisite rather than a follow-up. 23 lines changed.",
+            "sha256Actual": "0051149c0cad2cba6e6f3583c39d4c1578beea8f75d11362e95adc6d233d5626"
+          }
+        },
+        {
+          "doc": "state-machines.md",
+          "section": "3",
+          "role": "premise",
+          "why": "cited by the correspondence map at the fence boundary",
+          "sha256": "e53604a184663f1c149297d2f0e1d40ab40783970dbcdbdf2967b6c4a7eb0e31"
+        },
+        {
+          "doc": "state-machines.md",
+          "section": "5",
+          "role": "premise",
+          "why": "protective-order disarm — named as a refinement candidate (the protective leg as a fourth ledger producer) and cited twice in the correspondence map",
+          "sha256": "f3ff591acacaafc12a50c11bb5dd748f2cfc5ff0468135bf5a4067fa525b9571"
+        },
+        {
+          "doc": "build-spec.md",
+          "section": "5.3",
+          "role": "premise",
+          "why": "OMS order & fill identity, states and commands — the finality contract's normative vocabulary",
+          "sha256": "5757512e2dff079ffac42e8f69ef6ee0f88031e865ec5fd63b36fc9b21654697",
+          "knownStale": {
+            "task": "#229",
+            "note": "the model's state vocabulary comes from here; re-read the correspondence map's §2 rows against the current text as part of the revision.",
+            "sha256Actual": "a53865ac9246944112ac4950d2dfbaa025f1388b275a9bf1e7b9fb41cd597ab3"
+          }
+        },
+        {
+          "doc": "build-spec.md",
+          "section": "6",
+          "role": "premise",
+          "why": "FM-5's normative resolution landed in core §6 step 7 (every ledger entry carries outstanding net intent, not its target) — the model's ledger semantics rest on this text",
+          "sha256": "a647c201f46dd4e3e4aec0c7449837bfcae7630a45aecb1ca0ef6cfd28667a20",
+          "knownStale": {
+            "task": "#229",
+            "note": "step 7 gained the FM-5-family projection clause and still lists the retired terminal-flattening producer (#231). The producer set is exactly what the model's ledger encodes, so this is re-read with the revision, not after it.",
+            "sha256Actual": "b0d6f49a98722d989077d621c9b6bc93609886828622df49dc4cc5eda6c85e98"
+          }
+        },
+        {
+          "doc": "build-spec.md",
+          "section": "7.1",
+          "role": "premise",
+          "why": "sizing for survival & the margin top-up protocol — the normative owner of the escalation ladder SM §7 implements",
+          "sha256": "af808b6c564f2c9f30336b95392d7546aa5fe349461d049145ebf97592ee3202",
+          "knownStale": {
+            "task": "#229",
+            "note": "#224 rewrote §7.1 wholesale — the terminal rung is now a FUNDING step, the ladder re-enters the top-up, and the remedy is a durable episode recorded as specified-but-unmodelled. This is the section whose false parenthetical started #224.",
+            "sha256Actual": "0c04d3c3be90b59dffb89dde531d3d4bf080d8763e4511b3a72d1ff3535b770b"
+          }
+        },
+        {
+          "doc": "build-spec.md",
+          "section": "7.4",
+          "role": "premise",
+          "why": "kill-switch modes & pre-authorized escalation — cited by the correspondence map",
+          "sha256": "8cb26f4e5f7bfdc50c03f3a25030476350ea19cdd19d7d483a3338d86f8a55ba"
+        }
+      ]
+    }
+  ]
+}

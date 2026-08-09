@@ -1,6 +1,74 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-09, session 131): **#224 IS CLOSED AS A DESIGN RECORD — §7.1's TERMINAL RUNG IS A *FUNDING* STEP, NOT A HEADROOM STEP, AND THE LADDER RE-ENTERS THE TOP-UP. DOCS v0.9.67, NO CODE, `make ci` GREEN BOTH MODULES, OWED GREP ZERO. B4 IS NOW BEHIND FIVE PREREQUISITES, FOUR OF WHICH THIS RECORD DISCOVERED.**
+## Status (2026-08-09, session 132): **MODEL STALENESS IS NOW A BUILD GATE, AND TRACKING PREMISES FOUND A MISSED NORMATIVE EDIT. `make ci` GREEN BOTH MODULES, OWED GREP ZERO. TOOLING + DOCS, NO ENGINE CODE.**
+
+**Read `docs/superpowers/specs/2026-08-09-formal-freshness-gate.md` (§88)** —
+the design, the seven rejected alternatives, and the limits.
+
+**WHY IT EXISTS.** The TLA+ models are companion artifacts and the spec is
+normative, so a normative edit can void a model's coverage while its companion
+still reports 75 passing runs — the runs were real, they were just run against a
+**different document**. Nothing detected that but memory. `make formal-fresh`
+now hashes each tracked section against `docs/formal/freshness.json` and fails
+the build. **TLC cannot catch this class**: a drifted model is still internally
+consistent and checks green, which is why "just run the model checker in CI" is
+not the answer.
+
+**THE MEASUREMENT THAT SHAPED IT.** Both models were last verified at `310e854`
+(slice F, 2026-08-02, the one unfiltered 75-run invocation). Model (b)
+`FenceTakeover`'s subject sections — SM §3/§4/§6 — are **byte-identical across
+43 commits to `state-machines.md`**, so it is not stale; model (a)
+`AmbiguousOrder`'s are not (SM §2 +3 lines, §7 +23), which is #229. A
+whole-document hash would have cried wolf 43 times and taught the reader to
+restamp without looking.
+
+**TWO FINDINGS, BOTH FROM `premise` ROWS RATHER THAN `subject` ROWS** — the
+role split earned itself in its first session:
+
+- **#231 — core §6 step 7 still names the RETIRED `TerminalFlatten`.** SM §7
+  retired it under #224 (`[v0.9.67, record §87 §3 R6]`), but build-spec §6 step
+  7's producer list — the normative enumeration of what re-triggers §2
+  classification `[→ FM-6]` — still lists `terminal-flattening`. **Record §87
+  §4's normative-edit list does not name core §6 step 7**, so this is a missed
+  edit, not a deliberate retention. Declared-member-nothing-emits, at the spec
+  layer.
+- **#232 — model (b)'s core §6 premise is un-re-derived.** Its fairness set
+  encodes step 7's "obligated ≤5 s naked-reduce (core §6.7)"; §6 went 18 → 29
+  lines. Its **runs stand** (subjects unchanged) — what is owed is a
+  re-derivation, not a re-run. `FM-7` exactly, and cheap.
+
+**HOW A STALE SECTION IS HANDLED.** Either re-run `cd docs/formal && ./run.sh`
+and `make formal-restamp MODEL=<name>`, or record a `knownStale` marker naming
+the owning task — **marked, not absorbed**. The marker pins the digest it is
+stale against, so it covers **one** delta: a further edit fires again, and a
+marker whose section matches again is itself an error. Seven markers are live
+today (five owned by #229, one by #232, one by #231's neighbourhood).
+
+**EVIDENCE IT BITES:** 8 mutants / 0 survivors, plus three reverted end-to-end
+controls — an unmarked edit to SM §3 (reported against both models), a renamed
+heading (reported as unresolvable, not as a silent pass), and an untracked
+`.tla` dropped into `docs/formal/`.
+
+**NEXT IS UNCHANGED — this session did not touch the #229/#230 track.** #230
+(the adverse-close measurement) is still the cheapest thing with real
+information in it; #225/#226 are the hard B4 blockers; #229 is the model
+revision. #231 is a small normative edit that should ride along with whoever
+next opens build-spec §6.
+
+**ON THE BROADER QUESTION THIS CAME FROM.** The remaining gap after this gate is
+**not** formal-methods coverage of the control flow — TLA+ is earning its keep
+there. It is that the **economic algebra has no machine-checked layer**: §87's
+`MM(αN) ≤ α·MM(N)`, strict iff `cum_i > 0`, is a theorem verified by six review
+rounds and three boundary measurements. The models exclude money by construction
+("sizing de-minimis needs a magnitude threshold, **which is money**"). The
+cheapest close is rapid property tests over `fixedpoint` for the §87
+derivations — and §87 already contains a worked counterexample (closed form
+selects `q ≈ 0.472` needing margin 10 against 7.36 available; the inequality
+gives `q ≤ 0.309`) that is a test case sitting in a document.
+
+---
+
+## Status (2026-08-09, session 131 — HISTORICAL): **#224 IS CLOSED AS A DESIGN RECORD — §7.1's TERMINAL RUNG IS A *FUNDING* STEP, NOT A HEADROOM STEP, AND THE LADDER RE-ENTERS THE TOP-UP. DOCS v0.9.67, NO CODE, `make ci` GREEN BOTH MODULES, OWED GREP ZERO. B4 IS NOW BEHIND FIVE PREREQUISITES, FOUR OF WHICH THIS RECORD DISCOVERED.**
 
 **Read `docs/superpowers/specs/2026-08-09-m4-224-escalation-rung-redesign.md`
 (§87) first** — it is the whole design, and §5 is the prerequisite list that

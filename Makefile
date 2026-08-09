@@ -32,7 +32,7 @@ help: ## list targets
 		| awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: ci
-ci: fmt-check tutorial-ka-check vet lint test ## everything CI runs
+ci: fmt-check tutorial-ka-check formal-fresh vet lint test ## everything CI runs
 
 .PHONY: test
 test: ## race-enabled tests, both modules (pinned rapid seed)
@@ -114,6 +114,32 @@ tutorial-ka: ## regenerate docs/tutorial.ka.md from the Georgian fragments
 .PHONY: tutorial-ka-check
 tutorial-ka-check: ## fail if docs/tutorial.ka.md is stale against its fragments
 	@node docs/i18n/tools/assemble.mjs --verify
+
+# The TLA+ models are companion artifacts and the spec is normative, so a
+# normative edit can void a model's coverage while every run recorded in its
+# companion still reads as green — the runs were real, they were just run
+# against a different document. TLC itself is `cd docs/formal && ./run.sh`:
+# ~32 min on 18 cores and a JVM, which is why CI checks STALENESS instead,
+# the same shape as tutorial-ka-check.
+#
+# It is a plain Go test, so `make test` already runs it; it is named in `ci`
+# as well, ahead of the race suite, because a stale model should report in a
+# second rather than after the full run. Stamps live in docs/formal/freshness.json.
+.PHONY: formal-fresh
+formal-fresh: ## fail if a model's verified doc sections have changed under it
+	$(GO) test ./tools/formalfresh/
+
+# Restamping asserts the suite was RE-RUN. It takes a model NAME rather than a
+# flag on purpose: re-running ./run.sh filtered to one model and then
+# restamping both would relabel the other model's staleness as verified with
+# nothing having verified it.
+.PHONY: formal-restamp
+formal-restamp: ## restamp one model after a real ./run.sh (MODEL=FenceTakeover|AmbiguousOrder|all)
+	@test -n "$(MODEL)" || { \
+		echo "MODEL= is required, e.g. make formal-restamp MODEL=AmbiguousOrder"; \
+		echo "names: $$(sed -n 's/.*\"name\": \"\(.*\)\",/\1/p' docs/formal/freshness.json | tr '\n' ' ')or 'all'"; \
+		exit 1; }
+	FORMALFRESH_RESTAMP=$(MODEL) $(GO) test -count=1 -v -run TestFormalModelsAreFresh ./tools/formalfresh/
 
 .PHONY: tidy
 tidy: ## go mod tidy, both modules
