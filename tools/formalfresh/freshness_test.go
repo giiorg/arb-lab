@@ -1,7 +1,6 @@
 package formalfresh
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -54,7 +53,7 @@ func TestFormalModelsAreFresh(t *testing.T) {
 			}
 			for j := range model.Subjects {
 				s := &model.Subjects[j]
-				label := fmt.Sprintf("%s §%s", s.Doc, s.Section)
+				label := s.Label()
 
 				text, err := s.SectionText(repoRoot)
 				if err != nil {
@@ -77,33 +76,18 @@ func TestFormalModelsAreFresh(t *testing.T) {
 					continue
 				}
 
-				switch v := s.Check(actual); v {
-				case Fresh:
-					// The negative control for this gate, and it is a real one:
-					// model (b)'s sections have been unchanged across dozens of
-					// commits to the same file, so a green here is not the
-					// gate declining to look.
-				case MarkedStale:
-					t.Logf("%s: marked stale, owned by %s — %s", label, s.KnownStale.Task, s.KnownStale.Note)
-				case MarkerStale:
-					t.Errorf("%s: changed AGAIN since %s recorded it.\n"+
-						"  marker describes: %s\n  document is now:   %s\n"+
-						"  the recorded delta is not the actual delta — re-read the change and update the marker",
-						label, s.KnownStale.Task, short(s.KnownStale.SHA256), short(actual))
-				case MarkerObsolete:
-					t.Errorf("%s: carries a %s staleness marker but matches its stamp again.\n"+
-						"  remove the marker — left in place it would suppress the next real change",
-						label, s.KnownStale.Task)
-				case Stale:
-					t.Errorf("%s CHANGED since %s was verified (%s, %s), and nothing owns it.\n"+
-						"  stamped: %s\n  actual:  %s\n"+
-						"  role: %s — %s\n"+
-						"  Either re-run `cd docs/formal && ./run.sh` and restamp with "+
-						"`make formal-restamp MODEL=%s`, or record a knownStale marker naming the task that will.",
-						label, model.Name, model.VerifiedAt, model.VerifiedCommit,
-						short(s.SHA256), short(actual), s.Role, s.Why, model.Name)
-				default:
-					t.Errorf("%s: unhandled verdict %v", label, v)
+				// The verdict's wording lives in Explain so that it can be
+				// asserted on; what stays here is only the decision to fail the
+				// build or merely narrate. A Fresh section reports nothing, and
+				// that silence is a real negative control: model (b)'s sections
+				// have been unchanged across dozens of commits to the same file,
+				// so a green here is the gate agreeing rather than declining to
+				// look.
+				switch r := Explain(s.Check(actual), model, s, actual); {
+				case r.Fails:
+					t.Error(r.Text)
+				case r.Text != "":
+					t.Log(r.Text)
 				}
 			}
 		})
@@ -210,11 +194,4 @@ func TestManifestSubjectsAreWellFormed(t *testing.T) {
 			}
 		}
 	}
-}
-
-func short(sha string) string {
-	if len(sha) > 12 {
-		return sha[:12]
-	}
-	return sha
 }

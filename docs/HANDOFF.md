@@ -1,6 +1,40 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-09, session 134): **#233 IS CLOSED — THE BRACKET CRITERION IS NORMATIVE, AND ITS UNIQUENESS TURNED OUT TO BELONG TO THE FETCHED TABLE RATHER THAN TO THE RULE. DOCS ONLY, NO ENGINE CODE. `make ci` GREEN BOTH MODULES.**
+## Status (2026-08-09, session 135): **#234 IS CLOSED — THE FRESHNESS GATE NOW PRINTS THE DIGEST IT DEMANDS, AND THE DURABLE HALF IS THAT ITS MESSAGES HAVE A NAME. TOOLING ONLY, NO NORMATIVE DOCUMENT CHANGED. `make ci` GREEN BOTH MODULES.**
+
+**Read `docs/superpowers/specs/2026-08-09-m4-234-freshness-digest-transcription.md` (§91).**
+
+**THE FIX.** `TestManifestSubjectsAreWellFormed` refuses a `knownStale` marker whose `sha256Actual`
+is not 64 characters, and the `Stale` verdict that tells you to write one printed **12**. Same on
+`MarkerStale`, which says "update the marker" and means "write the current digest". Both sites now
+print the current digest in full. The rule, and it is deliberate rather than an inconsistency: **a
+digest you must TRANSCRIBE is printed whole; a digest you only COMPARE stays short**, because the
+comparison values are already in `freshness.json` — the file you are about to edit — and four
+64-character lines bury the one that has to be copied.
+
+**THE DURABLE HALF.** The messages were format strings inside `t.Errorf` calls, so nothing could
+assert on them and `tools/mutate.sh` had no line to aim at — a claim that cannot be mutated wants a
+name. They now live in `Explain(verdict, model, subject, actual) Report` in
+`tools/formalfresh/advice.go`; the gate keeps only the decision to fail or narrate. **Fix the strings
+in place and skip the extraction** was the rejected alternative, and it is rejected in §91 §5: it
+lands the right bytes and leaves the next edit with exactly the protection this one had.
+
+**HOW IT WAS CHECKED.** 8 mutants / 0 survivors, including **both argument swaps** — the first draft
+of the test asserted only `Contains(text, fullDigest)`, which a swap satisfies by printing the full
+digest under `stamped:`, so the assertions are positional by line label. Fixture digests are 64
+characters and `init()` panics if that stops holding, because at ≤12 "full" and "truncated" are the
+same string. And an **end-to-end control on the live manifest**: §7.4 perturbed, digest copied
+verbatim from the failure into a marker on both models, gate green with both reporting `marked
+stale`, then reverted. That loop is the actual claim — the value in the message is the value the
+manifest wants — and no unit test reaches it.
+
+**STILL OPEN.** **#225/#226 remain the only B4 blockers.** #220 carries #233's table-validation
+requirement. #227 unchanged. #229 is the model revision that owns the two `knownStale` markers;
+#231/#232 are §88's two findings. Nothing in this session touched what the gate *tracks*.
+
+---
+
+## Status (2026-08-09, session 134 — HISTORICAL): **#233 IS CLOSED — THE BRACKET CRITERION IS NORMATIVE, AND ITS UNIQUENESS TURNED OUT TO BELONG TO THE FETCHED TABLE RATHER THAN TO THE RULE. DOCS ONLY, NO ENGINE CODE. `make ci` GREEN BOTH MODULES.**
 
 **Read `docs/superpowers/specs/2026-08-09-m4-233-bracket-fixed-point.md` (§90)** — the
 derivation, the negative control that produced the normative half, four checks and their limits.
