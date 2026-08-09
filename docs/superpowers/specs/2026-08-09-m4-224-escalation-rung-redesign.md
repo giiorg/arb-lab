@@ -187,6 +187,17 @@ adverse** close for this reason.
 
 ### R1b. The sizing is a PIECEWISE solve, per venue, verified against the venue
 
+> **STEP 2's ACCEPTANCE CRITERION IS SUPERSEDED — read record §90 before
+> implementing this `[v0.9.69, task #233, measured under #230, record §89 F3]`.**
+> The enumeration below stands. "Classify `q_final` into its **actual** bracket"
+> reads as *the bracket containing `q_final·e`*, and the venue does not do that:
+> the bracket is the one containing the **liquidation** notional, which makes
+> step 5 a **fixed point** (bracket `i` whose own `L` puts `q·L` back inside `i`).
+> Step 2 also conflates two selections on two bases — step 4's feasibility test
+> classifies at the *target* notional `q·L*`, step 5 at the *achieved* `q·L`.
+> The open ambiguity this ruling names below is therefore **closed for Binance**
+> and still ruled-around for Bybit.
+
 `MMR` and `cum` are functions of the notional being solved for. `MM` is
 continuous and strictly increasing, so the solution is unique and is found by
 enumeration over the brackets task #220's read supplies:

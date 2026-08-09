@@ -1,0 +1,40 @@
+{
+ "openT0": 1786280442897,
+ "open": {
+  "tag": "after-open",
+  "t": 1786280446760,
+  "position": null,
+  "wallet": {
+   "account": {
+    "totalEquity": "166781.54765326",
+    "totalAvailableBalance": "",
+    "totalMarginBalance": "",
+    "totalInitialMargin": "",
+    "totalMaintenanceMargin": "",
+    "accountIMRate": ""
+   },
+   "usdt": {
+    "spotBorrow": "0",
+    "availableToBorrow": "",
+    "bonus": "0",
+    "accruedInterest": "0",
+    "availableToWithdraw": "",
+    "totalOrderIM": "0",
+    "equity": "49999.21301946",
+    "totalPositionMM": "1.80537283",
+    "usdValue": "49961.61361126",
+    "unrealisedPnl": "-0.1095",
+    "collateralSwitch": true,
+    "spotHedgingQty": "0",
+    "borrowAmount": "0",
+    "totalPositionIM": "10.90308284",
+    "walletBalance": "49999.32251946",
+    "cumRealisedPnl": "-0.67748054",
+    "locked": "0",
+    "marginCollateral": true,
+    "colRes": "-1",
+    "coin": "USDT"
+   }
+  }
+ }
+}

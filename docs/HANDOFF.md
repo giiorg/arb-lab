@@ -1,6 +1,54 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-09, session 133): **#230 IS CLOSED — §87 R1a's IDENTITY IS CONFIRMED TO THE LAST PUBLISHED DIGIT ON BOTH VENUES, AND THE RUN FOUND FOUR THINGS IT WAS NOT LOOKING FOR. ONE IS A NEW NORMATIVE BLOCKER (#233). DOCS + MEASUREMENT, NO ENGINE CODE.**
+## Status (2026-08-09, session 134): **#233 IS CLOSED — THE BRACKET CRITERION IS NORMATIVE, AND ITS UNIQUENESS TURNED OUT TO BELONG TO THE FETCHED TABLE RATHER THAN TO THE RULE. DOCS ONLY, NO ENGINE CODE. `make ci` GREEN BOTH MODULES.**
+
+**Read `docs/superpowers/specs/2026-08-09-m4-233-bracket-fixed-point.md` (§90)** — the
+derivation, the negative control that produced the normative half, four checks and their limits.
+
+**THE HEADLINE.** core §7.1 now states the criterion §87 R1b got wrong: **the maintenance bracket is
+the one containing the LIQUIDATION notional, and the fixed point is what that rule becomes when the
+liquidation price is the unknown.** Closed form for a short, `N_i = q·L_i = (m + q·e + cum_i)/(1 +
+MMR_i)`. R1b's **enumeration** survives untouched; only step 2's acceptance test changes, and §87 R1b
+now carries a forward pointer so a reader of that record cannot implement the superseded rule.
+
+**THE PART THAT WAS NOT IN THE TASK, and it is the normative half.** Existence and uniqueness follow
+from `N_{i+1} − N_i = (MMR_{i+1} − MMR_i)·(1 + MMR_i)·(b_i − N_i)` — which **consumes `cum`'s
+continuity relation**, a claim about a *fetched response*. Encoding the rejected reading as a control:
+with `cum` zeroed the criterion admits **two** self-consistent brackets in some configurations and
+**none** in others (494 / 2 904). So **"exactly one qualifies" is a property of the TABLE**, and
+#220's read now MUST assert contiguity-from-zero and continuity, with a failing table
+**refuse-to-size** — never a nearest-bracket fallback, whose error is silent and lands on the incident
+path. Verified on the live table: continuity residual **exactly 0** at all eight boundaries, top cap
+**finite**, so "no bracket qualifies" is reachable from size as well as from a malformed table.
+
+**A SECOND R1b DEFECT, found while making the first precise.** Step 2 conflates **two** selections on
+**two** bases — step 4's feasibility test classifies at the *target* notional `q·L*`, step 5's
+reconstruction at the *achieved* `q·L` — and since the enumeration accepts the first on-grid candidate
+with `L ≥ L*`, they straddle a boundary in **7 of 960** sweep candidates.
+
+**AND A UNITS TRAP FOR WHOEVER SIZES.** A short's liquidation notional exceeds its current notional by
+`(1 + 1/λ)/(1 + MMR)`, so bracket 1 ends at **61–76% of the published cap** across §7.1's leverage
+range. A cap check in current-notional terms crosses the boundary while **reading as compliant**.
+
+**METHOD NOTES.** The oracle (`research/venue-probes/233-bracket-fixed-point/`) reproduces §89 F3's
+four rows to 5.59E-10 / 3.23E-9 in `Decimal`, off the raw capture's own bracket table — **#230's probe
+scripts and captures are now preserved** under `research/venue-probes/230-adverse-close/` (redacted),
+which is what made an exhaustive check possible instead of a two-row hand-check. Two harness lessons:
+the step-identity check first failed on a **`Decimal.copy_sign` misuse** (it returns `|x|`), caught as
+a harness fault only because the other checks passed; and the uniqueness sweep first passed
+**vacuously** — its grid step was wider than bracket 1 itself, so it never entered the brackets §89
+measured. It now prints per-bracket coverage.
+
+**STILL OPEN.** **#225/#226 are now the only B4 blockers** — #233 is discharged. #220 gained a
+requirement (table validation) rather than a new task. #227 unchanged, two candidate coefficients
+still alive. #229 is the model revision; #231/#232 are the freshness gate's two findings. **#234 is
+new and small**: `formalfresh` prints truncated digests in the very message telling you to record a
+marker, found by being its first re-pinner. `docs/formal/freshness.json`'s build-spec §7.1 marker was
+**re-pinned**, not widened.
+
+---
+
+## Status (2026-08-09, session 133 — HISTORICAL): **#230 IS CLOSED — §87 R1a's IDENTITY IS CONFIRMED TO THE LAST PUBLISHED DIGIT ON BOTH VENUES, AND THE RUN FOUND FOUR THINGS IT WAS NOT LOOKING FOR. ONE IS A NEW NORMATIVE BLOCKER (#233). DOCS + MEASUREMENT, NO ENGINE CODE.**
 
 **Read `docs/superpowers/specs/2026-08-09-m4-230-adverse-close-measurement.md` (§89)** — the
 method, the seven runs, six findings, and the limits.

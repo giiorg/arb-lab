@@ -163,8 +163,8 @@
           "sha256": "af808b6c564f2c9f30336b95392d7546aa5fe349461d049145ebf97592ee3202",
           "knownStale": {
             "task": "#229",
-            "note": "#224 rewrote §7.1 wholesale — the terminal rung is now a FUNDING step, the ladder re-enters the top-up, and the remedy is a durable episode recorded as specified-but-unmodelled. This is the section whose false parenthetical started #224.",
-            "sha256Actual": "0c04d3c3be90b59dffb89dde531d3d4bf080d8763e4511b3a72d1ff3535b770b"
+            "note": "TWO deltas now, and the marker is RE-PINNED rather than widened. (1) #224 rewrote §7.1 wholesale — the terminal rung is now a FUNDING step, the ladder re-enters the top-up, and the remedy is a durable episode recorded as specified-but-unmodelled. This is the section whose false parenthetical started #224. (2) #233 (v0.9.69, record §90) corrected the maintenance-bracket acceptance criterion to the fixed point at the LIQUIDATION notional, split R1b step 2's two bases, and added a refuse-to-size condition on a tier table failing continuity/contiguity. Delta (2) is sizing arithmetic over MONEY, which this model excludes by construction (see the companion's stated omissions), so it does not touch the correspondence map's §7.1 rows and the re-read #229 owes is unchanged in scope by it — recorded rather than absorbed, because 'it does not affect the model' is exactly the judgement this gate exists to make somebody write down.",
+            "sha256Actual": "c615555bce9f530d4fef17dc3ab806e659f2c988a8aa313fd4006b5d400bad0a"
           }
         },
         {

@@ -1,0 +1,213 @@
+{
+ "openT0": 1786280974778,
+ "open": {
+  "tag": "after-open",
+  "serverTime": 1786280980108,
+  "position": {
+   "symbol": "DRIFTUSDT",
+   "positionSide": "BOTH",
+   "positionAmt": "400000",
+   "entryPrice": "0.0132",
+   "breakEvenPrice": "0.0132066",
+   "markPrice": "0.01310000",
+   "unRealizedProfit": "-40.00000000",
+   "liquidationPrice": "0.01057232",
+   "isolatedMargin": "1053.36000000",
+   "notional": "5240",
+   "marginAsset": "USDT",
+   "isolatedWallet": "1093.36000000",
+   "initialMargin": "1048",
+   "maintMargin": "53.60000000",
+   "positionInitialMargin": "1048",
+   "openOrderInitialMargin": "0",
+   "adl": 0,
+   "bidNotional": "0",
+   "askNotional": "0",
+   "updateTime": 1786280977283
+  },
+  "balance": {
+   "accountAlias": "<redacted>",
+   "asset": "USDT",
+   "balance": "4951.79024610",
+   "crossWalletBalance": "3848.88667390",
+   "crossUnPnl": "0.00000000",
+   "availableBalance": "3848.88667390",
+   "maxWithdrawAmount": "3848.88667390",
+   "marginAvailable": true,
+   "updateTime": 1786280977283
+  }
+ },
+ "brackets": [
+  {
+   "bracket": 1,
+   "initialLeverage": 75,
+   "notionalCap": 5000,
+   "notionalFloor": 0,
+   "maintMarginRatio": 0.01,
+   "cum": 0.0
+  },
+  {
+   "bracket": 2,
+   "initialLeverage": 50,
+   "notionalCap": 10000,
+   "notionalFloor": 5000,
+   "maintMarginRatio": 0.015,
+   "cum": 25.0
+  },
+  {
+   "bracket": 3,
+   "initialLeverage": 25,
+   "notionalCap": 30000,
+   "notionalFloor": 10000,
+   "maintMarginRatio": 0.02,
+   "cum": 75.0
+  },
+  {
+   "bracket": 4,
+   "initialLeverage": 20,
+   "notionalCap": 60000,
+   "notionalFloor": 30000,
+   "maintMarginRatio": 0.025,
+   "cum": 225.0
+  },
+  {
+   "bracket": 5,
+   "initialLeverage": 10,
+   "notionalCap": 300000,
+   "notionalFloor": 60000,
+   "maintMarginRatio": 0.05,
+   "cum": 1725.0
+  },
+  {
+   "bracket": 6,
+   "initialLeverage": 5,
+   "notionalCap": 600000,
+   "notionalFloor": 300000,
+   "maintMarginRatio": 0.1,
+   "cum": 16725.0
+  },
+  {
+   "bracket": 7,
+   "initialLeverage": 4,
+   "notionalCap": 750000,
+   "notionalFloor": 600000,
+   "maintMarginRatio": 0.125,
+   "cum": 31725.0
+  },
+  {
+   "bracket": 8,
+   "initialLeverage": 2,
+   "notionalCap": 1500000,
+   "notionalFloor": 750000,
+   "maintMarginRatio": 0.25,
+   "cum": 125475.0
+  },
+  {
+   "bracket": 9,
+   "initialLeverage": 1,
+   "notionalCap": 3000000,
+   "notionalFloor": 1500000,
+   "maintMarginRatio": 0.5,
+   "cum": 500475.0
+  }
+ ],
+ "pre_half": {
+  "tag": "before-half",
+  "serverTime": 1786280322006,
+  "position": {
+   "symbol": "DRIFTUSDT",
+   "positionSide": "BOTH",
+   "positionAmt": "-15000",
+   "entryPrice": "0.013",
+   "breakEvenPrice": "0.012993499999999998",
+   "markPrice": "0.01310000",
+   "unRealizedProfit": "-1.50000000",
+   "liquidationPrice": "0.01425099",
+   "isolatedMargin": "19.40250000",
+   "notional": "-196.50000000",
+   "marginAsset": "USDT",
+   "isolatedWallet": "20.90250000",
+   "initialMargin": "19.65000000",
+   "maintMargin": "1.96500000",
+   "positionInitialMargin": "19.65000000",
+   "openOrderInitialMargin": "0",
+   "adl": 1,
+   "bidNotional": "0",
+   "askNotional": "0",
+   "updateTime": 1786280302046
+  },
+  "balance": {
+   "accountAlias": "<redacted>",
+   "asset": "USDT",
+   "balance": "4999.39474607",
+   "crossWalletBalance": "4968.94867387",
+   "crossUnPnl": "0.00000000",
+   "availableBalance": "4968.94867387",
+   "maxWithdrawAmount": "4968.94867387",
+   "marginAvailable": true,
+   "updateTime": 1786280302046
+  }
+ },
+ "half_order": {
+  "orderId": "<redacted>",
+  "symbol": "DRIFTUSDT",
+  "status": "NEW",
+  "clientOrderId": "<redacted>",
+  "price": "0.0000000",
+  "origQty": "7500",
+  "executedQty": "0",
+  "cumQty": "0",
+  "timeInForce": "GTC",
+  "type": "MARKET",
+  "reduceOnly": true,
+  "closePosition": false,
+  "side": "BUY",
+  "positionSide": "BOTH",
+  "stopPrice": "0.0000000",
+  "workingType": "CONTRACT_PRICE",
+  "priceProtect": false,
+  "origType": "MARKET",
+  "priceMatch": "NONE",
+  "selfTradePreventionMode": "EXPIRE_MAKER",
+  "goodTillDate": 0,
+  "updateTime": 1786280325706
+ },
+ "post_half": {
+  "tag": "after-half",
+  "serverTime": 1786280329561,
+  "position": {
+   "symbol": "DRIFTUSDT",
+   "positionSide": "BOTH",
+   "positionAmt": "-7500",
+   "entryPrice": "0.013",
+   "breakEvenPrice": "0.012780399999999997",
+   "markPrice": "0.01310000",
+   "unRealizedProfit": "-0.75000000",
+   "liquidationPrice": "0.01425099",
+   "isolatedMargin": "9.70125000",
+   "notional": "-98.25000000",
+   "marginAsset": "USDT",
+   "isolatedWallet": "10.45125000",
+   "initialMargin": "9.82500000",
+   "maintMargin": "0.98250000",
+   "positionInitialMargin": "9.82500000",
+   "openOrderInitialMargin": "0",
+   "adl": 1,
+   "bidNotional": "0",
+   "askNotional": "0",
+   "updateTime": 1786280325706
+  },
+  "balance": {
+   "accountAlias": "<redacted>",
+   "asset": "USDT",
+   "balance": "4997.84524607",
+   "crossWalletBalance": "4977.85042387",
+   "crossUnPnl": "0.00000000",
+   "availableBalance": "4977.85042387",
+   "maxWithdrawAmount": "4977.85042387",
+   "marginAvailable": true,
+   "updateTime": 1786280325706
+  }
+ },
+ "r": "7500"
+}

@@ -247,7 +247,14 @@ These are not style preferences. Each one was paid for.
   at `α = 0.5` the two readings `(1−α)·m` and `α·m` are the *same number*: so
   "the venue releases the margin backing the CLOSED fraction" and "…the REMAINING
   fraction" predicted an identical observation, on both venues, for four
-  sessions. `α = 0.6` separates them 1.5× (record §89). **Ten times now**,
+  sessions. `α = 0.6` separates them 1.5× (record §89). Then #233's own
+  *verification harness* did it in the checklist's **resolution** dimension: a
+  uniqueness sweep stepped by `top_cap/400` = 7 500 over a bracket table whose
+  first bracket is `[0, 5000)`, so 2 904 configurations passed while **never
+  entering the two brackets the defect had been measured in** (record §90 §6).
+  Boundary-relative sampling plus a printed per-region coverage count is the fix,
+  and it is the same rule one layer out — a sweep that cannot say which regions
+  it entered is reporting executions, not coverage. **Eleven times now**,
   which makes it a checklist item and not a war story: before believing a suite,
   find the fixture parameter pinned to the value that collapses the distinction
   the code makes, and vary it. The tell is that the fixture does not contain the
