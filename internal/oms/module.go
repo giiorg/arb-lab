@@ -638,6 +638,19 @@ type Module struct {
 	account   string
 	roster    []application.SpotInstrument
 	baselines []application.SpotBaseline
+
+	// The two capabilities LegState and VenuePosition project through, RETAINED
+	// rather than reconstructed: the position adapter is the one the joiner
+	// holds, and the instrument table is the one that adapter already validated.
+	// A second adapter over the same client would be a second §7.6 shed class
+	// and a second place the table can be wrong, and a second table would be a
+	// copy of the fact able to disagree with the first.
+	//
+	// The port type is deliberate for the same reason the fields above are
+	// unexported: a *driven.VenuePositions handed to a root is a value the gate
+	// cannot see, and what a root gets from this package is a projection.
+	venuePositions   ports.VenuePositions
+	instrumentAssets map[ids.VenueInstrument]venue.InstrumentAssets
 }
 
 // New assembles the context, refusing an incomplete one.
@@ -987,6 +1000,9 @@ func New(deps Deps) (*Module, error) {
 		account:     deps.Account,
 		roster:      spot.Roster,
 		baselines:   baselines,
+
+		venuePositions:   positions,
+		instrumentAssets: deps.InstrumentAssets,
 	}, nil
 }
 
