@@ -1,6 +1,6 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-15, session 142): **#242 IS CLOSED — A PLACED ORDER NOW REACHES A TERMINAL, AND THE FINDING WAS A MISSING SM §1 *ROW* RATHER THAN A MISSING *CALL*. TEN COMMITS, `make ci` GREEN BOTH MODULES. **#236 IS UNBLOCKED** AND IS THE NEXT ACTION.**
+## Status (2026-08-15, session 142): **#242 IS CLOSED — A PLACED ORDER NOW REACHES A TERMINAL, AND THE FINDING WAS A MISSING SM §1 *ROW* RATHER THAN A MISSING *CALL*. THE SLICE IS `e581831..6449b43`, MERGED TO `main`, `make ci` GREEN BOTH MODULES. **#236 IS UNBLOCKED** AND IS THE NEXT ACTION.**
 
 **Read `docs/superpowers/specs/2026-08-15-m4-242-order-finality-decisions.md`** —
 it holds the sharpened finding, the one departure from the parent record and the
