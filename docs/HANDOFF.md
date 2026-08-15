@@ -1,6 +1,112 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-15, session 140): **#236's THREE UNKNOWNS ARE MEASURED AND TWO CAME BACK THE OTHER WAY ROUND — AND VERIFYING THEM FOUND THAT THE SAFETY KERNEL CANNOT SEE A CROSS-VENUE PAIR. DOCS ONLY, NO CODE. THE NEXT ACTION IS `writing-plans` FOR THE CROSS-VENUE COMPOSITION ROOT.**
+## Status (2026-08-15, session 141): **#236 IS PLANNED, REVIEWED TWICE AND NOW BLOCKED — THE ORDER LIFECYCLE STOPS AT `Submitted` AND NOTHING IN THE REPOSITORY ADVANCES IT, SO THE PLAN'S FILL GATE CAN NEVER OPEN. DOCS ONLY, NO CODE. THE NEXT ACTION IS `writing-plans` FOR THE FINALITY TASK, NOT FOR #236.**
+
+**Read `docs/superpowers/specs/2026-08-15-m4-236-order-finality-gap.md` — it holds the finding, the
+evidence chain link by link, the two rejected alternatives and what the remedy must deliver.** The
+#236 plan (`docs/superpowers/plans/2026-08-15-m4-236-crossvenue-pair-root.md`, 14 tasks) is written
+and opens with a `BLOCKED` block naming the dependency. No `make ci` run: nothing under `internal/`
+or `tools/` was touched, and the `SPEC EDIT OWED` grep is correctly zero.
+
+**⚠ THE FINDING: A LEG THIS SYSTEM PLACES REACHES `domain.StateSubmitted` AND STAYS THERE.** Not the
+join — its only repository writes are `Load` (`join.go:777`) and `ApplyFill` (`join.go:881`), and
+**neither `ApplyFill` nor `ApplyAck` touches `rec.state`** (`driven/orders.go:313, 466`). Not the
+resolver — `resolve.go:397` derives its resolvable set from *"proved absence is one of the answers the
+domain would accept"*, which is `DispatchAuthorized` and `SubmissionUnknown` **and nothing else**. The
+only `ApplyState` callers are `resolve.go:741`, `dispatch.go:503` (which *sets* Submitted) and
+`replay.go:521` (journal replay). `StateSubmitted` is non-terminal (`orderstate.go:146`) and may
+advance only to `{Acknowledged, Rejected, SubmissionUnknown}` (`transition.go:186`). **The fill ledger
+moves and the state does not.**
+
+**WHAT IT WOULD HAVE COST, as the run rather than as a risk.** #236's D4 establishes exposure only on
+a terminal state. Leg A fills 60; the join admits the 60; `Establish` returns **not established** on
+every settle attempt; leg B is **never sent**; D8 permits an unwind only on an *established*
+`VerdictHalfOpen`, so the compensation is **refused**; the run exits 4 with a real naked 60-unit
+position. **The happy path produces the outcome the slice exists to prevent.** Second-order: task 7
+re-uses `establish` to confirm the unwind, so **even a successful reduce-only close could not be
+recognised as closed.**
+
+**WHY IT WAS INVISIBLE, and this is the durable half.** `arblab exercise run` treats `StateSubmitted`
+**as its success state** and exits on it (`exercise/app.go:142` — a leg *below* `StateSubmitted` is the
+failure). The single-venue root is a one-shot proof of wire contract, transport and journal; **it never
+needed to know whether a leg filled.** #236 is the first thing that does, because a hedge sized to a
+partner's fill is the first computation whose input is the fill itself. So the shape is: **a declared
+state nothing drives is invisible while every consumer's success condition stops short of it** —
+compiler green, `exhaustiveswitch` green (every switch names the member), coverage green, because
+fixtures that *seed* a terminal record exercise the reading code perfectly. Only a consumer that must
+**arrive** at the state from a real `Place` can tell. This is `[[declared-enum-member-nothing-emits]]`
+one layer out: not a member with no producer, a **transition** with no driver.
+
+**THE REMEDY IS SMALLER THAN IT LOOKS, and this fact sizes the next plan.** `ports.VenueOrder` already
+carries `State domain.OrderState` — its own comment says *"the venue's lifecycle reading, **already
+translated into SM §1's**"* vocabulary — and the joiner **already fetches it**, at `join.go:801`
+(`status, err := j.venue.Resolve(rec.Order)`), using it today for fill attribution and the
+`Unattributed` comparison. The venue's terminal state is **in hand, in the domain's own words, and
+simply never journaled.** The task is to journal it, walking the intermediate hops `transition.go`
+requires rather than inventing a direct edge, exposed to roots through `oms.Module` only
+(`singlewriter` keeps `ports` unnameable from every `app/` root).
+
+**⚠ THE NEXT ACTION: `superpowers:writing-plans` FOR THE FINALITY TASK.** Not for #236 — it is blocked
+and its plan already says so. Four requirements are in the record's §5: the OMS-owned transition
+operation; a decision about whether it runs inside the existing join or as a sibling use case; **tests
+that start from a real successful `Place`** and walk to each terminal (full fill, partial-then-canceled,
+zero-fill canceled, rejection, unresolved status) — **a seeded terminal record proves nothing, because
+the defect is that the path to it does not exist**; and a `make formal-fresh` check, since a transition
+change is exactly the class that can void a model's coverage while its companion still reports passing
+runs.
+
+**WHY IT IS SPLIT OUT RATHER THAN FOLDED INTO #236 (operator, 2026-08-15).** The remedy edits SM §1,
+one of the seven normative state machines. Record §95 ruling 3 already declined exactly this bundling
+for §5.1/§6.7, and the argument transfers unchanged: **a slice that places real orders against real
+venues should not also be the slice that edits the state machine those orders move through**, because
+the two failure classes need different reviewers and different evidence. The re-scoped-D4 alternative
+— establish from fills plus join completeness alone, arguing an IOC cannot rest — is rejected at the
+record's §4: it replaces a guarantee the system can prove with an unverified claim about venue
+behaviour, which is `docs/venue-profiles.md`'s class. The gap is **finality, not amount**: the join's
+`Unattributed` check already compares the venue's cumulative against the attributed fills.
+
+**THE #236 PLAN IS SOUND AND INHERITS A DEPENDENCY, NOT A REDESIGN.** D4, D5, D7 and D8 were written
+against SM §1 *as specified*, and SM §1 is not wrong — it was unimplemented. Two tasks change when the
+finality task lands: `drive.establish` (task 6) calls the new operation in place of its
+`Join` + `LegState` polling loop, and `venueDouble` (task 5) gains the venue-status responses that walk
+consumes. **Everything else stands.**
+
+**WHAT THE TWO REVIEW ROUNDS COST AND BOUGHT.** Both returned **NO-SHIP**, on different shapes, so the
+stopping rule never fired — the same curve as #225's three rounds. Round 1: 2 blockers, 5 majors. The
+sharpest was `drive.open` checking only `Execute`'s **aggregate** error and never `ex.Legs[0].Err`,
+which is *the exact reflex* `execute.go:134`'s split signature exists to make inexpressible (*"an
+aggregate error here would invite `if err != nil { return }` over live orders"*) — and the single
+half-open test used `rejectPlace()`, which is a **third** path (terminal `StateRejected`,
+`dispatch.go:679`), so neither broken path was covered. Round 2: the finality blocker above. **Six
+further findings were the primary agent's**, including one **in its own round-1 fix**:
+`filepath.EvalSymlinks` lstats the *final* component, so on a not-yet-created journal it returns
+`IsNotExist` and the canonicalization silently did not happen — **the symlink refusal could never fire
+on a clean first boot**, which is the only boot where the journal is absent. Measured with an
+eight-line probe, not reasoned about.
+
+**STILL OPEN, unchanged from session 140 except where noted.** The capture is **still down** by the
+2026-08-15 decision (~9 GiB/day accepted, pending the Hetzner host) — #239 and #240 unmoved. #237
+(post-cutoff funding fetch) is still cheap, still deadline-free, still the thing most likely to be
+forgotten. #225 and #226 remain the only B4 blockers; **neither blocks #236, but the new finality task
+now does.** §94 §10's deferred review round still reopens when #225's port is next picked up. #241
+(re-scope §5.1/§6.7, twin of #238) unchanged and still blocks nothing today. #235 carries seven; #220,
+#227, #228, #229 unchanged; five `knownStale` markers, all #229's; **no tracked section edited, so
+`make formal-fresh` is untouched.** **One task is new:**
+
+| Task | What |
+|---|---|
+| **#242** | The order finality transition: journal the venue's already-fetched, already-translated `State` as legal SM §1 transitions from `Submitted` through to a terminal. **Blocks #236 entirely** — and B4 needs it too, for the same reason: any consumer that must know whether a leg filled. Record: `2026-08-15-m4-236-order-finality-gap.md`. |
+
+**ONE METHOD NOTE, and it is about the review instrument rather than the subject.** Both rounds' worst
+findings needed **the code, not the document**. "The plan contradicts D5" was readable from the plan
+alone; "the unwind is unreachable because `establish` waits on a state nothing advances" needed
+`dispatch.go`, `transition.go`, `join.go`, `resolve.go` and `driven/orders.go` read *together*. A plan
+review that only reads the plan can confirm internal consistency and nothing else — and this plan was
+internally consistent throughout, which is exactly why two rounds of it were worth the cost.
+
+---
+
+## Status (2026-08-15, session 140 — HISTORICAL): **#236's THREE UNKNOWNS ARE MEASURED AND TWO CAME BACK THE OTHER WAY ROUND — AND VERIFYING THEM FOUND THAT THE SAFETY KERNEL CANNOT SEE A CROSS-VENUE PAIR. DOCS ONLY, NO CODE. THE NEXT ACTION IS `writing-plans` FOR THE CROSS-VENUE COMPOSITION ROOT.**
 
 **Read `docs/superpowers/specs/2026-08-15-m4-236-crossvenue-root-scoping.md` (§95) — it holds the
 measurements, the two findings, three rulings and five rejected alternatives.** No `make ci` run:
