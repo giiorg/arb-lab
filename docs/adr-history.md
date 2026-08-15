@@ -254,6 +254,32 @@ Draft v0.7.1 (2026-07-19) — Codex adversarial rounds 1–4 (11 → 6 → 4 →
 | **`marketdata` does not publish `MarketView`; `engine/state` builds it.** §3.2's row said `marketdata` publishes an immutable `MarketView` while §3.3 and §3.2's own next row give that translation to `engine/state`. §3.3 wins: a context publishing a strategy-owned type would have to know cross-leg skew and the strategy's view shape, coupling the two across exactly the boundary §3.6 rule 1 and the read ports exist to keep — and it also needs the book path, which does not exist. Rejected: §3.2 winning, which would additionally reduce `engine/state` to a cache | core §3.2 |
 | **Rules 1 and 10 are enforced; rule 6 is the only deferral left, and rule 10's deferral named the wrong trigger.** `hexboundary` and `exhaustiveswitch` landed the session their subjects appeared rather than after the code they police. Rule 10 had waited on a **state machine**, while what actually made it buildable was the shared kernel's **eleven enum-likes**, which had existed for several slices — it found **13 silent fallthroughs** on its first real run, every one of them reachable the whole time. A deferral must name the *construct the analyzer reads*, not the feature that motivated it, and rule 6's was re-checked against that. Separately, and normative for any future gate: **rule 1's obvious positive control is an import cycle** — `application/` importing `infrastructure/` is refused by the type-checker before the analyzer runs, so the gate scores a pass without executing. Within one context Go's no-cycles rule already covers most of rule 1; where it earns its place is the edge Go cannot see (`engine/`, another context's infrastructure) | core §3.6 |
 
+**Milestone 4 task #242 step 1 is landed: SM §1's `Submitted` GAINS THE
+QUERY-RESOLUTION ROW ITS TWO NEIGHBORS ALREADY CARRY (v0.9.61, 2026-08-15).**
+Design record **§96** (the finding is
+`docs/superpowers/specs/2026-08-15-m4-236-order-finality-gap.md`; the
+edge-vs-walk ruling is the plan's own §0,
+`docs/superpowers/plans/2026-08-15-m4-242-order-finality-transition.md`); task
+**#242** step 1 of 7 closed, six remain — the application join that must
+actually WRITE the state this row now permits.
+
+**The gap is the same shape a third time, and it is the MOST reachable of the
+three.** v0.9.11 gave `DispatchAuthorized` the query-resolution row because the
+crash-recovery invariant named an exit the table never targeted; v0.9.34
+carried `Canceled` onto both recovery rows because the fix from the live
+states had stopped one axis short. `Submitted` sat in both blind spots at
+once — its own row is where the same crash-recovery invariant ("`DispatchAuthorized`
+or beyond") and the same venue-initiated-termination argument (§6 sends
+nothing but marketable IOCs) both point — and neither closed it, because the
+one caller that existed, `arblab exercise run`, treats `Submitted` **as its
+success state**. The fix carries the identical six targets and the identical
+evidence rules the other two rows already enforce; it adds no new evidence
+class and no new state.
+
+| Decision → resolution | Where |
+|---|---|
+| **SM §1's `Submitted` gains the query-resolution row**, with the same six targets and the same evidence rules `DispatchAuthorized` and `SubmissionUnknown` carry. The requirement is stated twice outside the table — SM §1's own "`DispatchAuthorized` **or beyond** is resolved only by query" invariant, and core §6.7's ambiguous-residual list, which names `Submitted` — and neither statement reached a row. This is v0.9.11's finding on its third axis, and the **most reachable** one: the other two states are entered by a crash or a transport failure, this one by every successful `Place`. §6 step 6 sends only marketable IOCs and §2 step 1 makes an IOC immediately terminal at the venue, so the ordinary answer to a resolving query about a `Submitted` order is `Filled` or `Canceled` — three of the five readings §4's ACL produces had no legal target, and the order stayed `Submitted` for the life of the process with every gate green. Survived four slices because the only consumer, `arblab exercise run`, treats `Submitted` **as its success state**. | SM §1 transitions |
+
 **Milestone 4 task #231 is landed as ERRATA: THE `TerminalFlatten` RETIREMENT'S
 FIVE MISSED SITES, AND A PRODUCER ENUMERATION THAT WAS SHORT A MEMBER (v0.9.70,
 2026-08-09).** Design record **§92**; task **#231** closed; **no code.**

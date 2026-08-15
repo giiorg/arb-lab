@@ -19,7 +19,7 @@ import (
 // list of `from->to` strings, so a transposed pair or a state written into the
 // wrong case does not survive in both.
 //
-// Every entry cites the row it came from. The four groups marked OWED are the
+// Every entry cites the row it came from. The five groups marked OWED are the
 // ones no row states — see transition.go for what each costs when absent.
 var specEdges = []string{
 	// | Planned | authorize dispatch | DispatchAuthorized |
@@ -53,6 +53,20 @@ var specEdges = []string{
 	"submitted->acknowledged",
 	"submitted->rejected",
 	"submitted->submission_unknown",
+
+	// OWED — the query-resolution row on the THIRD axis. SM §1's invariants say
+	// an order at "DispatchAuthorized OR BEYOND" is resolved only by
+	// OrderByClientID/Fills, and core §6.7 lists Submitted among the states that
+	// must be quiesced to finality by that same contract. Neither statement made
+	// it into the table, which is v0.9.11's sentence about DispatchAuthorized
+	// arriving one state later. §6 step 6 sends nothing but marketable IOCs and
+	// SM §2 step 1 makes an IOC immediately terminal at the venue, so the single
+	// most likely thing a query finds about a Submitted order is a TERMINAL one —
+	// and three of the five readings the ACL can produce had no legal target.
+	"submitted->partially_filled",
+	"submitted->filled",
+	"submitted->canceled",
+	"submitted->absent_after_finality",
 
 	// | SubmissionUnknown | query | Acknowledged / PartiallyFilled / Filled / Rejected / AbsentAfterFinality |
 	"submission_unknown->acknowledged",
@@ -110,8 +124,8 @@ func TestCanTransitionMatrix(t *testing.T) {
 		}
 		legal[e] = true
 	}
-	if got := len(legal); got != 32 {
-		t.Fatalf("transcribed %d edges, want 32 — the count is a check on the transcription", got)
+	if got := len(legal); got != 36 {
+		t.Fatalf("transcribed %d edges, want 36 — the count is a check on the transcription", got)
 	}
 
 	permitted, refused := 0, 0
@@ -141,9 +155,9 @@ func TestCanTransitionMatrix(t *testing.T) {
 	// Positive control on the matrix itself. A predicate that objected to
 	// everything would satisfy every assertion above if `permitted` were zero,
 	// and one that permitted everything would if `refused` were.
-	if permitted != 32 || refused != 12*12-12-32 {
-		t.Errorf("walked %d permitted and %d refused pairs, want 32 and %d",
-			permitted, refused, 12*12-12-32)
+	if permitted != 36 || refused != 12*12-12-36 {
+		t.Errorf("walked %d permitted and %d refused pairs, want 36 and %d",
+			permitted, refused, 12*12-12-36)
 	}
 }
 

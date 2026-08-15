@@ -184,7 +184,38 @@ func successors(from OrderState) ([]OrderState, error) {
 		return append([]OrderState{StateSubmitted, StateSubmissionUnknown}, resolved...), nil
 
 	case StateSubmitted:
-		return []OrderState{StateAcknowledged, StateRejected, StateSubmissionUnknown}, nil
+		// [SPEC EDIT LANDED — v0.9.61] This row carried the three LIVE-path
+		// answers — an ack, a rejection, a transport timeout — and no
+		// query-resolution row at all, while the two states either side of it
+		// carry one. It is v0.9.11's finding on a third axis and v0.9.34's
+		// sentence applies unchanged: the fix was carried across the states it
+		// was noticed on.
+		//
+		// The requirement is stated twice elsewhere and neither statement made it
+		// into the table. SM §1's own invariants: "an order at DispatchAuthorized
+		// OR BEYOND is resolved only by OrderByClientID/Fills under the
+		// venue-specific stable-not-found rule" — "or beyond" is this state.
+		// Core §6.7 lists Submitted among the states whose residual is ambiguous
+		// and which must be QUIESCED TO FINALITY through that same contract.
+		//
+		// What its absence cost is not a wrong number, it is a lifecycle with no
+		// exit. §6 step 6 sends nothing but marketable-IOC limits and SM §2 step 1
+		// makes an IOC "immediately terminal at the venue", so a query about a
+		// successfully-placed order ordinarily finds it FILLED or CANCELED — and
+		// three of the five readings §4's ACL can produce had no legal target
+		// here. The order stayed Submitted for the life of the process,
+		// ContributesPossibleDelta answered true for it for ever, and every
+		// consumer whose success condition required finality was unsatisfiable
+		// while nothing reported an error. The one consumer that existed —
+		// `arblab exercise run` — treats Submitted AS its success state, which is
+		// why four slices passed over this.
+		//
+		// The evidence rules are the other two rows' and this row does not weaken
+		// them: an explicit venue rejection → Rejected; an explicit venue-terminal
+		// record PLUS the final executions sweep → Canceled (SM §2 step 3, never a
+		// status read alone); the stable-not-found rule COMPLETING →
+		// AbsentAfterFinality, never mapped onto Rejected.
+		return append([]OrderState{StateSubmissionUnknown}, resolved...), nil
 
 	case StateSubmissionUnknown:
 		return resolved, nil
