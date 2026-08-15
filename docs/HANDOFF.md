@@ -1,6 +1,282 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-09, session 138): **#225's PORT IS DESIGNED, REVIEWED THREE TIMES, AND NOT BUILT — ALL THREE ROUNDS RETURNED NO-SHIP ON DIFFERENT SHAPES, SO THE STOPPING RULE NEVER FIRED. DOCS ONLY, NO ENGINE CODE. `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
+## Status (2026-08-15, session 140): **#236's THREE UNKNOWNS ARE MEASURED AND TWO CAME BACK THE OTHER WAY ROUND — AND VERIFYING THEM FOUND THAT THE SAFETY KERNEL CANNOT SEE A CROSS-VENUE PAIR. DOCS ONLY, NO CODE. THE NEXT ACTION IS `writing-plans` FOR THE CROSS-VENUE COMPOSITION ROOT.**
+
+**Read `docs/superpowers/specs/2026-08-15-m4-236-crossvenue-root-scoping.md` (§95) — it holds the
+measurements, the two findings, three rulings and five rejected alternatives.** No `make ci` run:
+nothing under `internal/` or `tools/` was touched. Read-only venue probes plus one
+`POST /fapi/v1/order/test`; **nothing was placed on either venue.**
+
+**⚠ #236 IS NOT A CONFIGURATION, AND THAT IS SETTLED BY THE ARCHITECTURE RATHER THAN BY OPINION.**
+`internal/app/reconcile/config.go:58` — *"Venue is §5.2's per-venue block. **ONE, singular** … `oms.Deps`
+takes one venue client … **A deployment trading two venues runs two of these, against two journals.**"*
+`exercise/config.go:82` carries it downstream and `ErrVenueMismatch` enforces it. **No document can
+express a two-venue package.** Session 139's inventory ("all of it built and mutation-tested") is
+accurate **per venue** and silent about the join.
+
+**⚠ THE FINDING THAT SHAPES EVERYTHING AFTER IT: §6.7's CLASSIFIER CANNOT SEE A CROSS-VENUE PAIR, AND
+ITS FAILURE DIRECTION CONCLUDES.** `domain.HedgeGroup` is `(Account, Venue, Symbol)` —
+`hedgegroup.go:62` — and §6.7 computes its residual **per hedge group**, so a cross-venue pair sits in
+**two groups and no group holds both**. Inside each venue's own group a correctly-hedged pair reads as
+a filled leg with no pending counter-order: §6 step 7's ***determined*** residual, the branch that
+compensates **≤5 s** with an `ExposureReduction`. Driven naively the kernel flattens both halves of a
+healthy position, once per venue, in opposite directions. **§2.3's claim that strategy #2 "inherits the
+full two-venue execution/one-leg-failure machinery (§6)" is ASSERTED, NOT BUILT** — true of the dispatch
+half, false of the classification half. **Nothing acts on the verdict today and this was VERIFIED, not
+assumed:** `Module.Classify` is constructed at `module.go:975` and has **no production caller** (the
+only `.Classify(` sites are `transport/stream.go`'s and `strategy`'s, unrelated). The driver is B4.
+
+**WHY IT WAS ON NO LIST — the 2026-08-01 fork reached the roster's prose and not the objects it names.**
+§5.1's hedge group was designed to group *"a trade's spot + perp legs"* — two legs, one venue, correct
+for cash-and-carry. The gate killed cash-and-carry; §41r ruled strategy #2 (perp-perp, **two venues**)
+early; §47 then admitted milestone 3 pre-gate *"regardless of strategy"* — true of the order path, false
+of the grouping — and slice E built the classifier on the dead strategy's key. §47 **did** hard-gate
+*"milestone 4's leg-shape-dependent half"* and named three members; **the hedge group is not among
+them**, and §12 item 7's whole entry is one sentence reading *"live wiring"*. **This is task #238's
+shape one layer deeper** — #238 found milestone 6's canary spec still fixing BTC-only scope and a spot
+IOC leg. Two sites now.
+
+**THE THREE RULINGS (operator, 2026-08-15).** **(1) #236 is the FULL cross-venue composition root** —
+two `reconcile.Runner`s, two journals, two OMS modules, a package spanning venues with paired dispatch
+and fan-in; the two smaller options are rejected at §95 §7 with their objections kept. **(2) The
+cross-venue residual lives in a NEW concept ABOVE the hedge group; §5.1's key is NOT touched** —
+because the venue key is right for margin/liquidation/ADL, because §5.1 keys **remedy episodes** by
+hedge group so §7.1's whole ladder rides the same object, and because what is needed is not a merged
+number but the fact that **a leg has a partner elsewhere**. **(3) The normative re-scope is task #241,
+NOT #236** — #236 states which model it follows; §5.1/§6.7's edits land in #241 beside #238.
+
+**⚠ THE NEXT ACTION: `superpowers:writing-plans` FOR THE CROSS-VENUE ROOT, under ruling 2.** The
+brainstorm is done and its design decisions are §95 §6. **Do not re-verify the three unknowns — they
+are measured and dated below.** Write the plan so that §95 §7's rejected alternative (ii) — venue A,
+gate on verdict, venue B, reduce-only unwind of A on B's failure — is its **first phase**, because it
+is the smallest runnable increment of the same root.
+
+**THE THREE UNKNOWNS, CLOSED.** **(1) Symbols: seven of the eight shortlist alts are TRADING with
+five levels of two-sided book on BOTH demo venues**, at prices tracking each other, min notional
+**5 USDT** against BTCUSDT's 50 on Binance — so an alt run is *cheaper* than BTC. **MMTUSDT is
+`PENDING_TRADING` on Binance with an empty book and is out of scope.** Session 139's named trap — "the
+fixture will not contain the thing under test" — is **refuted**. **(2) Credentials: both keys
+authenticate and can trade today.** Binance demo 4 908.60 USDT available and `order/test` for
+**LABUSDT SELL MARKET 100** → HTTP 200; Bybit demo `readOnly=0`, `ContractTrade:[Order,Position]`,
+164 776 USDT equity, **key expires 2026-11-10T07:03:17Z** (pinned here, held by no prior record).
+**(3) `chaos_test.go` drives a FAKE venue** and says why at its line 51 (§59e) — **zero overlap** with
+#236.
+
+**SAY "DEMO", NOT "TESTNET".** Every credential in `.env` is `*_DEMO_*` and every probe targets
+`demo-fapi.binance.com` / `api-demo.bybit.com`. On **Binance** the distinction is empty (demo and
+testnet returned identical 733-symbol sets, zero status disagreements). On **Bybit they are different
+environments** — 821 demo symbols against 809 testnet, 29 demo-only, 17 testnet-only.
+
+**WHAT IS NOT CLAIMED, because a snapshot is not a guarantee:** that demo books persist at other
+hours, that an IOC fills on a demo alt, that demo funding matches mainnet intervals, or that
+`order/test`'s 200 predicts a real `Place` acceptance — it validates a request and deliberately never
+reaches the engine that checks margin, position mode and leverage.
+
+**STILL OPEN, unchanged from session 139 except where noted.** The capture is **still down** by the
+2026-08-15 decision (~9 GiB/day accepted, pending the Hetzner host) — #239 and #240 unmoved. #237
+(post-cutoff funding fetch) is still cheap, still deadline-free, still the thing most likely to be
+forgotten. #225 and #226 remain the only B4 blockers and **neither blocks #236**. §94 §10's deferred
+review round still reopens when #225's port is next picked up. #235 carries seven; #220, #227, #228,
+#229 unchanged; five `knownStale` markers, all #229's; **no tracked section edited, so `make
+formal-fresh` is untouched**; the `SPEC EDIT OWED` grep is correctly zero. **One task is new:**
+
+| Task | What |
+|---|---|
+| **#241** | Re-scope §5.1 and §6.7 for strategy #2's leg shape: the pair concept above the hedge group, its residual composition rule, and whether it is §5.1's **fifth** journal record scope. Twin of #238. **Blocks nothing today** — the classifier has no caller — and blocks B4's monitor when that lands. |
+
+**ONE METHOD NOTE, and it is about this session's own instrument.** The first depth probe reported an
+empty book for **every** symbol including BTCUSDT. The uniformity was the tell: `urllib` failing TLS
+with no CA bundle — **the exact trap `probe230.py`'s own header comment documents**, in a script
+written without reading it. A probe that fails identically everywhere reads as a finding about the
+venues. The positive control was free and was not run first: a symbol that certainly has a book.
+
+---
+
+## Status (2026-08-15, session 139 — HISTORICAL): **AN INVENTORY SESSION, AND IT FOUND THE CAPTURE DEAD FOR SEVEN DAYS. NO CODE, NO NORMATIVE DOC CHANGED — THIS BLOCK AND THE TASK LIST ARE THE SESSION'S OUTPUT. THE NEXT ACTION IS A TWO-LEG DEMO SMOKE TEST ON BOTH TESTNETS.**
+
+**No `make ci` run this session — nothing was edited that it covers.** Tree was clean at `185a724`
+on entry. Everything below is a measurement of the working tree and the archive, not a build result.
+
+**⚠ THE CAPTURE STOPPED AT 2026-08-08T11Z AND IS STILL DOWN. THIS IS NOW A DECISION RATHER THAN A
+FAULT, AND THE LOSS IS ACCEPTED IN THE OPEN.** `archive/v1/_manifest/` ends at `2026-08-08.json`;
+the newest `.arbcap` is hour `2026-08-08T11`. `capture.log`'s last line is `capture run: 40 sources
+… interrupt to stop` **with no `stopped cleanly` after it** — every prior run in that file has one,
+so the process was killed or the host slept. **Nothing noticed for seven days**, because sessions
+133–138 were docs-only and no gate, alarm or check sits above a process whose only product is
+elapsed time. The operator ruled on 2026-08-15 to **leave it down until the Hetzner host is
+verified** rather than restart on the laptop, on the ground that the laptop cannot hold a long-running
+process and would fail the same silent way again. **The accepted cost is ~9 GiB/day of
+unrecoverable book data for the length of the verification wait, on top of the seven days already
+gone.** The alternative offered and declined was a laptop restart with a crude liveness check; a
+third option — restart the alt tier only, dropping BTC's eight streams to halve the burn — was
+also declined. **Recorded so that a later reader does not read the gap as an accident.**
+
+**WHAT THE ARCHIVE HOLDS — measured 2026-08-15, and the shape of it is the argument for treating
+the outage as expensive.** `archive/` is **71.34 GiB** over **7,118 `.arbcap` files**, spanning
+2026-07-30 → 2026-08-08T11Z.
+
+| Cut | Size | Recoverable? |
+|---|---|---|
+| **Books** | **67.07 GiB (94.0%)** | **Never.** Not backfillable at any price, by anyone. |
+| Funding | 4.27 GiB (6.0%) | Yes — REST history, any time. |
+
+BTCUSDT is **34.96 GiB — 49% of the archive on 20% of the sources** (eight streams to each alt's
+four, and the only symbol with spot legs and the diff-evidence stream). The seven alts run 2.14 GiB
+(SOON) to 8.85 GiB (BEAT). `research/` is a further 376 MiB (venue probes), `datasets/` 14 MiB (the
+milestone-2 BTC corpus). **§44e's "books are 93.6% of the burn" reproduces at 94.0% on ten days
+rather than one** — a rare case in this repo of a measured figure surviving re-measurement.
+
+**THE BURN RATE MOVED, AND §44e WAS NOT WRONG — IT WAS MEASURED ON ONE DAY OF AN ACTIVITY-DRIVEN
+STREAM.** Whole days now measure **8.54–8.82 GiB** (08-03, 08-05, 08-07) against §44e's `11.165`.
+The partial 08-08 day is 4.84 GiB over 11 hours — **10.6 GiB/day-equivalent**, close to §44e. So the
+spread is real day-to-day variance and **§44e's own conclusion is what explains it**: the venues'
+documented update speed is a **ceiling, not a cadence**, books are activity-driven, and no
+symbol-independent floor exists. **The consequence is for §38f's clock, which was derived from the
+single-day figure:** 921 GiB free reads as **~82 days at 11.165, ~102 days at ~9**. Treat this as
+*widen the estimate to a range*, not *move the deadline out* — a volatility spike returns it to the
+fast figure, and the direction that hurts is believing the slow one.
+
+**THE REST STORE HAS NO POST-CUTOFF ROWS AT ALL, AND THIS WAS NOT PREVIOUSLY RECORDED ANYWHERE.**
+`research/crossvenue/rest/{binance,bybit}/` holds exactly 18 files, every one named
+`funding.<SYM>.2026-08-01.json` — the cutoff-day fetch, run 2026-08-01 and never since. **The clean
+window has been accumulating for two weeks and none of its settled funding has been pulled down.**
+This is recoverable whenever `arblab crossvenue fetch` is run with a later cutoff (task **#237**),
+but it means the honest answer to *"have we analysed the clean data"* is that **the clean data is
+not on this machine.**
+
+**WHAT ANALYSIS HAS ACTUALLY BEEN RUN — the answer is "two things, and neither decides anything",
+and a fresh session should not mistake either for a verdict.**
+
+*(1) The screening* (`research/screening/shortlist.json`, 2026-08-01) **is** an `edge − cost`
+computation over 466 pairs, and it produced the shortlist:
+
+| Symbol | Net/yr | Entry | Eps | Wins | Win rate | Interval changes |
+|---|---:|---:|---:|---:|---:|---:|
+| LABUSDT | 71.6% | 0.001 | 71 | 29 | 41% | 454 |
+| BEATUSDT | 26.4% | 0.002 | 15 | 8 | 53% | 449 |
+| KAITOUSDT | 17.0% | 0.0005 | 55 | 23 | 42% | 1 |
+| MMTUSDT | 9.6% | 0.001 | 22 | 10 | 45% | 1 |
+| MUSDT | 8.1% | 0.001 | 75 | 19 | 25% | 1240 |
+| SOONUSDT | 5.6% | 0.002 | 33 | 12 | 36% | 1445 |
+| ESPORTSUSDT | 2.6% | 0.002 | 19 | 9 | 47% | 420 |
+| BCHUSDT | 1.5% | 0.001 | 39 | 16 | 41% | — |
+
+Six of eight clear the 4.6% hurdle on these numbers. **Four reasons none of it is evidence**, three
+of them already recorded and the first one not: **(a) the cost is the constant
+`params.round_trip_cost: "0.0021"` — a flat 21bp for all eight symbols, so the 67 GiB of books has
+never been consulted for a cost figure at all**, which is §41r's no-BTC-figure-transfers caveat
+failing in a stronger form than the caveat describes; (b) §43b's selection contamination — these
+same numbers picked the top 8 of 466, so the 8 necessarily look good *on this score*; (c) every row
+ends 2026-07-31, one day before the clean window opens; (d) §43g states in terms that nothing in
+step 1 is gate evidence.
+
+*(2) The simulator has exactly one run*, `research/crossvenue/sims/s61-smoke-btc.json`: 9 episodes,
+BTCUSDT, two pre-cutoff days, **`Net: "0"` and `Return: "-0.0021"` on every single episode**, all
+four depth p90s `"0"`, `PortfolioLCB: "-0.0049"`. It is a **smoke test** — it proves the pipeline
+decodes, pairs and scores end to end, and nothing else. Every episode captured zero funding because
+none spanned a settlement, and BTC is permanently sealed out of this strategy by §42e's H1 seal.
+
+**THE NUMBER MOST WORTH CARRYING FORWARD IS THE WIN RATE: 25–53%, median ~42%. Most episodes lose.**
+LABUSDT's 71.6% is 29 winners carrying 42 losers over nine months, and **every loser costs exactly
+the round trip** — which is the constant in (a). A strategy whose return is carried by a minority of
+episodes against a uniform per-episode cost is one where a wrong cost figure flips the sign, not one
+where it moves the margin. **An untested hypothesis sits beside it and is recorded AS a hypothesis:**
+the two symbols with the most funding-interval churn (MUSDT 1240, SOONUSDT 1445) are two of the three
+with the worst win rates, and §2.4 warns that Bybit flips an alt's interval without notice. That is
+an eyeball correlation over eight points. **Nobody has tested it.**
+
+**MILESTONE 6's CANARY SPEC WAS NEVER RE-SCOPED AFTER THE 2026-08-01 FORK RULING (task #238).**
+§12 item 6 still fixes **"BTC-only scope"** and describes a **"spot IOC leg"** — cash-and-carry's
+leg shape, for a strategy the gate killed. It carries no dated annotation, unlike items 2, 2b, 3 and
+4. Nothing is broken: `2026-08-02-milestone-3-pre-gate-ruling.md:94` noticed the same thing and used
+it as a *reason to gate* milestone 6. But the canary's six mandatory figures (max notional, max
+collateral, scope, RTO, monitoring, signed acceptance) are written against a two-leg spot+perp trade
+on BTC, and strategy #2's canary is a **four-leg perp-perp trade across two venues**. The re-scope is
+owed and was on no list before this session.
+
+**⚠ THE NEXT ACTION: A TWO-LEG DEMO SMOKE TEST ACROSS BOTH TESTNETS (task #236), RULED BY THE
+OPERATOR 2026-08-15.** Open a perp position on Binance testnet and the opposite leg on Bybit
+testnet, confirm both, close both. **Rejected: a single-leg one-venue probe** (smaller, but it never
+exercises the two-leg failure case the entire safety kernel exists for) **and two-leg-plus-chaos**
+(the right eventual bar, but `app/exercise/chaos_test.go` may already cover part of it and the file
+was not opened this session — read it before sizing the slice).
+
+**Why this is the right work now, and it is not "something to do while we wait":** it is
+**gate-independent** — §3.1 runs every Intent through the same risk-gate → OMS pipeline regardless
+of strategy, which is the ground §47 admitted milestone 3 on pre-gate — and it is **B4's
+prerequisite**, since B4 is the loop that drives the order path and proving the path belongs before
+writing its caller. It would be on the list even if the gate scored tomorrow.
+
+**What it can use, all of it built and mutation-tested:** the signed REST transport
+(`engine/venue/transport/`), `Place` on both venues (`engine/venue/order_{binance,bybit}.go`), the
+read path (`orderquery*.go`), plan→journal→dispatch (`oms/application/`), parallel-IOC (slice G3),
+reconcile-only boot and `arblab reconcile` (slice G2), and the boot posture gate (`risk/` slice A).
+**What it does NOT need, despite each being unbuilt:** sizing-by-live-tier (`planning.go` takes
+`Quantity` as an input *by design*), B4 itself, the milestone-7 strategy→OMS wiring, §6.3's
+pre-trade posture caller, and **#225's available-balance port** — that port sizes a margin re-post,
+not a fixed-size entry, **so #225 does not block this and a fresh session should not treat it as if
+it did.**
+
+**⚠ THE TRAP, NAMED BEFORE THE SLICE RATHER THAN AFTER — and it is this repo's own eleven-instance
+shape in new clothing.** The testnets are unlikely to list LAB, BEAT, KAITO, MMT, M, SOON or
+ESPORTS, so **the smoke test will realistically run on BTCUSDT** — a symbol permanently sealed out
+of this strategy, with a liquidity profile no shortlist alt shares. **The fixture will not contain
+the thing under test.** That does not make the test worthless: wire formats against a real server,
+journal replay, two-leg recovery and both venues' response shapes are exactly what it *can* prove,
+and `risk/` slice A's own note says every codec there is fixture-tested and a wrong field name would
+be invisible to every test until first contact. It means **the design record must state the
+uncovered half up front** — alt-specific behaviour stays owed until a shortlist symbol is run
+against a live venue — rather than let a green run read as broader coverage than it is.
+
+**THREE THINGS TO VERIFY BEFORE PROMISING THE SLICE WORKS**, none checked this session: which
+symbols each testnet actually lists (the one most likely to bite); whether the demo credentials used
+from session 129 carry **trade** permission and not only the read scopes the probes needed; and
+whether `app/exercise/chaos_test.go` drives a live testnet or a local fake — the roster says testnet,
+the file was not opened.
+
+**INFRASTRUCTURE IS NOW ON THE BOARD (task #239).** The operator registered a Hetzner account
+2026-08-15; verification is pending. On verification, two decisions follow that nothing in the docs
+has ever considered: **cloud vs dedicated**, and **where 71 GiB and growing lives** — object storage,
+an S3-compatible target, or local disk. §38f's destination decision has been open since 2026-08-02
+on a measured clock and this is the session it acquires a real candidate. The capture moves there;
+**a liveness gate above the capture process moves with it (task #240)**, because the failure this
+session found was silence, not error, and the same host change does not fix it.
+
+**DEFERRED, NOT RESOLVED — and the trigger is named because this repo's rule is that a deferral
+names one.** §94 §10's open decision — a fourth `codex-copilot` round scoped to §94 §6 and §3, or
+straight to `writing-plans` for #225's port — **was not taken this session and is not abandoned.**
+It reopens **when #225's port is next picked up**, which is when B4 is next unblocked, which is
+after the smoke test and the infrastructure move. The reasoning in §94 §10 stands unchanged and
+nothing this session bears on it.
+
+**STILL OPEN.** **#225 (port, designed and thrice reviewed) and #226 remain the only B4 blockers** —
+unchanged, and **neither blocks task #236**. #235 carries seven. #220 carries #233's
+table-validation requirement; #227, #228, #229 unchanged. Five `knownStale` markers remain, all
+#229's; **no tracked section was edited this session**, so `make formal-fresh` is untouched. Five
+`[SPEC EDIT OWED]` markers are listed in §94 §9 and **none is in the tree**, so the grep is
+correctly zero. **Five tasks are new this session:**
+
+| Task | What |
+|---|---|
+| **#236** | **The two-leg demo smoke test across both testnets — THE NEXT ACTION.** Ruled 2026-08-15; verify the three unknowns above before sizing. |
+| **#237** | Fetch post-cutoff settled funding — the REST store holds nothing after 2026-08-01. Backfillable, so no deadline; but the gate cannot score without it. |
+| **#238** | Re-scope §12 milestone 6's canary spec for strategy #2 — it still says BTC-only and names a spot IOC leg. |
+| **#239** | Hetzner: cloud vs dedicated, and the storage target for the archive. Feeds §38f's open destination decision. |
+| **#240** | A liveness gate above the capture process. The 2026-08-08 outage went seven days unnoticed because nothing watches a process whose only product is elapsed time. |
+
+**ONE METHOD NOTE, and it is the session's most portable result.** Every finding above came from
+**opening an artifact and measuring it**, not from reading what the records said about it — the
+archive's own bytes, `capture.log`'s missing line, the REST store's filenames, the sim's actual
+`Net` field, the screening's `params` block. **Four of the six contradicted or materially qualified
+a documented figure, and none of the documents was lying**: §44e's burn rate was measured honestly
+on one day, the screening's cost constant is visible in its own params file, milestone 6's stale
+scope is plain text. The records were accurate about what they did and silent about what they did
+not do. **The productive question for the next session is the same one §94 arrived at from the other
+direction: not "is this record right?" but "what would I see if I opened the thing it describes?"**
+
+---
+
+## Status (2026-08-09, session 138 — HISTORICAL): **#225's PORT IS DESIGNED, REVIEWED THREE TIMES, AND NOT BUILT — ALL THREE ROUNDS RETURNED NO-SHIP ON DIFFERENT SHAPES, SO THE STOPPING RULE NEVER FIRED. DOCS ONLY, NO ENGINE CODE. `make ci` GREEN BOTH MODULES, OWED GREP ZERO.**
 
 **Read `docs/superpowers/specs/2026-08-09-m4-225-available-balance-port.md` (§94), and read its §10
 first — that is the review log and it decides what the next action is.**
