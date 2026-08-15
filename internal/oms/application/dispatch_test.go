@@ -178,6 +178,82 @@ func (j *fakeJournal) ackedBeforeState(id ids.ClientOrderID) bool {
 	return false
 }
 
+// recorded reports whether one order reached a state in the log — the membership
+// question the finality walks ask, which states() cannot answer because it
+// flattens every order's records into one slice.
+func (j *fakeJournal) recorded(id ids.ClientOrderID, s domain.OrderState) bool {
+	return j.recordCountFor(id, s) > 0
+}
+
+func (j *fakeJournal) recordCountFor(id ids.ClientOrderID, s domain.OrderState) int {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	n := 0
+	for _, c := range j.calls {
+		if c.id == id && c.state == s {
+			n++
+		}
+	}
+	return n
+}
+
+// stateRecordsFor returns ONE order's state records in the order they were
+// written.
+//
+// It is what a "nothing further was journaled" claim needs and a count of one
+// target state cannot give: a count answers "not this state", and the assertion
+// the no-advance walk actually wants is "not ANY state past the dispatch path's
+// own two". An advance that journaled the wrong terminal would satisfy every
+// count aimed at the right one.
+func (j *fakeJournal) stateRecordsFor(id ids.ClientOrderID) []domain.OrderState {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	var out []domain.OrderState
+	for _, c := range j.calls {
+		if c.id != id || c.venueOrderID != "" {
+			continue
+		}
+		out = append(out, c.state)
+	}
+	return out
+}
+
+// replayScript turns what this run durably recorded into the entry list
+// ports.JournalReplay hands a visitor.
+//
+// It exists because NewReplayer takes ports.JournalReplay and fakeJournal is a
+// ports.Journal — the two halves of the same log, split so a writer cannot replay
+// and a replayer cannot append. Bridging through the RECORDS rather than handing
+// the same object over is what makes the round-trip a claim about what was
+// written instead of about which object wrote it.
+//
+// The planned intents come first because they are held in their own slice and a
+// state record for an unknown order is refused; within calls, the recorded order
+// is preserved, which is the property the replay is being asked about.
+func (j *fakeJournal) replayScript() []journalEntry {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	script := make([]journalEntry, 0, len(j.planned)+len(j.calls))
+	for _, o := range j.planned {
+		script = append(script, journalEntry{kind: "planned", order: o})
+	}
+	for _, c := range j.calls {
+		switch {
+		case c.venueOrderID != "":
+			script = append(script, journalEntry{kind: "acked", id: c.id, venueOrderID: c.venueOrderID})
+		case c.state == domain.StateDispatchAuthorized:
+			script = append(script, journalEntry{kind: "authorized", id: c.id, at: c.at})
+		default:
+			script = append(script, journalEntry{kind: "state", id: c.id, state: c.state})
+		}
+	}
+	for i := range script {
+		script[i].seq = uint64(i + 1)
+	}
+	return script
+}
+
 // plannedIDs returns the ids of the intents recorded, in order.
 func (j *fakeJournal) plannedIDs() []ids.ClientOrderID {
 	out := make([]ids.ClientOrderID, len(j.planned))
