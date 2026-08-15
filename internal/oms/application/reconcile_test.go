@@ -89,7 +89,7 @@ func newReconcileFixture(t *testing.T, now time.Time, entries ...journalEntry) *
 	if err != nil {
 		t.Fatalf("NewReplayer: %v", err)
 	}
-	joiner, err := application.NewJoiner(joinVenue, positions, orders, clk, joinAccount, application.SpotLeg{}, perpScopeFor())
+	joiner, err := application.NewJoiner(joinVenue, positions, orders, journal, clk, joinAccount, application.SpotLeg{}, perpScopeFor())
 	if err != nil {
 		t.Fatalf("NewJoiner: %v", err)
 	}

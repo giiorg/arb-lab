@@ -56,7 +56,7 @@ func newSpotReconcileFixture(t *testing.T, leg application.SpotLeg, wired bool, 
 	if err != nil {
 		t.Fatalf("NewReplayer: %v", err)
 	}
-	joiner, err := application.NewJoiner(f.joinVenue, newFakePositions(), orders, clk, joinAccount, leg)
+	joiner, err := application.NewJoiner(f.joinVenue, newFakePositions(), orders, journal, clk, joinAccount, leg)
 	if err != nil {
 		t.Fatalf("NewJoiner: %v", err)
 	}

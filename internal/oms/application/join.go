@@ -52,10 +52,18 @@ type Joiner struct {
 	venue     ports.OrderResolver
 	positions ports.VenuePositions
 	orders    ports.OrderWriteRepository
-	clk       clock.Clock
-	account   string
-	scopes    []ports.PositionScope
-	spot      SpotLeg
+
+	// journal is the durable half of §6's journal-then-apply. It arrived with
+	// #242: until then this use case only ADMITTED FILLS, and ApplyFill has no
+	// journal counterpart at all (ports.Journal is "narrowed to what the dispatch
+	// path writes"). Writing a STATE is the first thing the join does that §7.5
+	// replays, so it is the first thing that needs the log.
+	journal ports.Journal
+
+	clk     clock.Clock
+	account string
+	scopes  []ports.PositionScope
+	spot    SpotLeg
 }
 
 // SpotLeg is the spot half of §7.5's assertion: the configured spot roster,
@@ -140,7 +148,8 @@ type SpotBaseline struct {
 // NOTHING here knows about, and a scope computed from what we know cannot widen
 // past it. An empty list is legal and means "assert nothing", which the report
 // says out loud — see Join.Unasserted.
-func NewJoiner(v ports.OrderResolver, p ports.VenuePositions, orders ports.OrderWriteRepository, clk clock.Clock, account string, spot SpotLeg, scopes ...ports.PositionScope) (*Joiner, error) {
+func NewJoiner(v ports.OrderResolver, p ports.VenuePositions, orders ports.OrderWriteRepository,
+	jr ports.Journal, clk clock.Clock, account string, spot SpotLeg, scopes ...ports.PositionScope) (*Joiner, error) {
 	if v == nil {
 		return nil, ErrResolverMissing
 	}
@@ -149,6 +158,9 @@ func NewJoiner(v ports.OrderResolver, p ports.VenuePositions, orders ports.Order
 	}
 	if orders == nil {
 		return nil, ErrOrdersMissing
+	}
+	if jr == nil {
+		return nil, ErrJournalMissing
 	}
 	if clk == nil {
 		return nil, ErrClockMissing
@@ -168,6 +180,7 @@ func NewJoiner(v ports.OrderResolver, p ports.VenuePositions, orders ports.Order
 		venue:     v,
 		positions: p,
 		orders:    orders,
+		journal:   jr,
 		clk:       clk,
 		account:   account,
 		scopes:    append([]ports.PositionScope(nil), scopes...),
@@ -313,6 +326,26 @@ type Join struct {
 	Orders     int
 	Fills      int
 	Duplicates int
+
+	// Advanced is how many orders' lifecycle STATE this join moved to the
+	// venue's own reading.
+	//
+	// It counts writes, not orders: a re-read whose stored state already equals
+	// the venue's is not an advance, which matters because that is the ordinary
+	// case on every boot after the first. A run reporting advances equal to
+	// Orders on a warm boot means the projection lost its states.
+	Advanced int
+
+	// Contradicted are the orders whose venue reading SM §1 has no edge to from
+	// the state this system holds — a venue reporting Rejected about an order we
+	// watched reach Acknowledged, say.
+	//
+	// It is a REPORT entry rather than an error because it is a fact about ONE
+	// order's two histories, and aborting the join over it would leave every
+	// later order unqueried. It is not retryable and must not be: the same
+	// account answers the same way, so the reconciliation seam maps it to
+	// NeedsOperator beside Unattributed — see Reconciler.joinOutcome.
+	Contradicted []ids.ClientOrderID
 
 	// Absent are the orders the venue says it does not hold. They are NOT a
 	// failure and NOT a resolution: §5.3's stable-not-found rule is what decides
@@ -810,6 +843,12 @@ func (j *Joiner) joinOne(rec ports.OrderRecord, report *Join) (ports.OrderRecord
 		// answer this use case must not act on: it is the input to the four-gate
 		// stable-not-found contract, and reading it as "no executions" would be
 		// the inference §5.3 forbids in as many words.
+		//
+		// It returns SHORT of advance, and that is the same refusal stated about
+		// the state write: the terminal an absence resolves to is
+		// AbsentAfterFinality, which the four gates alone can license — see
+		// ErrVenueStateNotAnAbsence, which refuses the mirror case where the
+		// venue hands us the order and calls it absent.
 		report.Absent = append(report.Absent, id)
 		return rec, nil
 	}
@@ -851,6 +890,19 @@ func (j *Joiner) joinOne(rec ports.OrderRecord, report *Join) (ports.OrderRecord
 		return rec, fmt.Errorf("join order %q: %w", id, err)
 	}
 	if sweep.ProvenThrough.Before(until.Earliest()) {
+		// Short of advance as well, and deliberately: SM §2 step 3's final
+		// executions sweep is what closes a terminal, and the contract is "the ONE
+		// canonical boundary … never a weaker cancel-ack-only variant" — which a
+		// state written from a status read alone would be.
+		//
+		// It is STRICTER than SM §2 requires, in the safe direction, and the
+		// asymmetry with Resolver is worth naming rather than leaving to be found:
+		// Resolver.present skips the sweep for a NON-terminal reading ("the order
+		// is live, its interval has not collapsed, and there is no finality to
+		// prove"), while here the gate precedes every target including
+		// Acknowledged. A state not advanced HOLDS the possible-delta interval,
+		// which is the direction that costs nothing but a retry, and a short sweep
+		// is retryable on the next poll.
 		report.Incomplete = append(report.Incomplete, id)
 		return rec, nil
 	}
@@ -900,7 +952,97 @@ func (j *Joiner) joinOne(rec ports.OrderRecord, report *Join) (ports.OrderRecord
 	if agree != 0 {
 		report.Unattributed = append(report.Unattributed, id)
 	}
-	return rec, nil
+
+	// LAST, after the executions are admitted and cross-checked. The order is not
+	// arithmetic — nothing in advance reads a quantity — it is what the record
+	// MEANS: the reading is complete before its finality is journaled.
+	//
+	// It runs even when the cross-check disagreed. §5.3 keeps state and ledger
+	// orthogonal ("nothing relates State to Cumulative"), the disagreement is
+	// about AMOUNT and this is about FINALITY, and refusing to advance would
+	// leave the order in the state this slice exists to move it out of in order
+	// to punish a number the report already carries. The consumer that needs both
+	// gates on both.
+	return j.advance(rec, status, report)
+}
+
+// advance journals and applies the venue's own lifecycle reading. It is the step
+// that moves an order this system placed off StateSubmitted.
+//
+// # The reading was in hand for four slices and was never written
+//
+// ports.VenueOrder.State is "the venue's lifecycle reading, already translated
+// into SM §1's vocabulary by the ACL", and joinOne has fetched it since slice F2
+// to attribute fills and run the Unattributed cross-check. Nothing wrote it, and
+// nothing noticed, because every consumer's success condition stopped short of
+// finality: `arblab exercise run` treats StateSubmitted AS its success state
+// (exercise/app.go), so the single-venue root never needed to know whether a leg
+// filled. #236 is the first thing that does.
+//
+// # Legality is established BEFORE the journal, and the ordering is forced
+//
+// Resolver.record's argument, unchanged: ports.Journal is append-only and
+// "refuses to hold a second copy of the edge set", while the write repository
+// checks domain.CanTransition and would refuse. Journaling first and discovering
+// the refusal second would leave the durable log holding a transition the
+// projection rejected — and §7.5 replays the log.
+//
+// # A store's refusal is an ERROR here, and a VALUE in Resolver. Both follow
+// # from their own contract
+//
+// Resolver promises "err != nil means NOTHING was written", so a half-written
+// resolution has to leave as a Resolution with Journaled/Applied. Join promises
+// the reverse — "err != nil means the projection is PART-REBUILT and must not be
+// traded on" — and the boot posture is what stops trading. A log that did not
+// take the record is exactly that condition, so it leaves by the error return.
+func (j *Joiner) advance(rec ports.OrderRecord, status ports.VenueOrder, report *Join) (ports.OrderRecord, error) {
+	id := rec.Order.ClientOrderID
+
+	if err := status.State.Validate(); err != nil {
+		// A malformed reading is a broken translation, not a disagreement about
+		// this order's history, so it leaves by the error return rather than
+		// joining Contradicted — whose members are two WELL-FORMED readings SM §1
+		// has no edge between. Filing them together would put an adapter defect
+		// and a venue disagreement in one bucket an operator has one response for.
+		return rec, fmt.Errorf("join order %q: venue state: %w", id, err)
+	}
+
+	if status.State == domain.StateAbsentAfterFinality {
+		// The venue HAS this order, so proved absence is not among the answers
+		// available here whatever the reading says. §5.3 gives that terminal four
+		// gates and Resolver is what runs them; recording it from a present order
+		// is the evidence-class conflation FLAG-2 exists to prevent. The guard is
+		// not hypothetical bookkeeping: Submitted -> AbsentAfterFinality became a
+		// legal edge in this same slice, so the domain would now permit precisely
+		// the write this refuses.
+		return rec, fmt.Errorf("join order %q: venue reports %s: %w",
+			id, status.State, ErrVenueStateNotAnAbsence)
+	}
+
+	if rec.State == status.State {
+		// The ordinary case on every boot after the first. Checked here rather
+		// than by inspecting CanTransition's ErrTransitionNoOp, for replay.State's
+		// reason one layer over: the two are not the same claim — that sentinel is
+		// about a self-edge, this is about whether the READING advances the
+		// history — and they part company the moment anything else can write
+		// between the load and this line.
+		return rec, nil
+	}
+
+	if err := domain.CanTransition(rec.State, status.State); err != nil {
+		report.Contradicted = append(report.Contradicted, id)
+		return rec, nil
+	}
+
+	if err := j.journal.AppendState(id, status.State); err != nil {
+		return rec, fmt.Errorf("join order %q: journal %s: %w", id, status.State, err)
+	}
+	applied, err := j.orders.ApplyState(id, rec.Version, status.State)
+	if err != nil {
+		return rec, fmt.Errorf("join order %q: apply %s: %w", id, status.State, err)
+	}
+	report.Advanced++
+	return applied, nil
 }
 
 // assert compares each configured scope's positions against what the join

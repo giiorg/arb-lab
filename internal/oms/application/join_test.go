@@ -141,11 +141,78 @@ func newJoiner(t *testing.T, scopes ...ports.PositionScope) (*application.Joiner
 	if err != nil {
 		t.Fatalf("NewTestClock: %v", err)
 	}
-	j, err := application.NewJoiner(v, p, orders, clk, joinAccount, application.SpotLeg{}, scopes...)
+	// The journal is constructed and dropped: the tests reached through this
+	// helper are the pre-#242 ones, whose claims are about fills and the
+	// net-delta assertion. The finality half needs to READ it, and takes
+	// newJoinerWithJournal instead.
+	j, err := application.NewJoiner(v, p, orders, newFakeJournal(), clk, joinAccount, application.SpotLeg{}, scopes...)
 	if err != nil {
 		t.Fatalf("NewJoiner: %v", err)
 	}
 	return j, orders, v, p
+}
+
+// newJoinerWithJournal is newJoiner plus the journal the state write goes to.
+//
+// The journal is a separate return rather than a field on the joiner's fakes
+// because every claim in this file's finality half is a claim about TWO stores
+// agreeing — a mutation that deletes the AppendState leaves the projection
+// exactly right, so a test reading only the record cannot see it.
+func newJoinerWithJournal(t *testing.T, scopes ...ports.PositionScope) (
+	*application.Joiner, *fakeOrders, *fakeJoinVenue, *fakePositions, *fakeJournal) {
+	t.Helper()
+	orders := newFakeOrders()
+	v := newFakeJoinVenue()
+	p := newFakePositions()
+	j := newFakeJournal()
+	clk, err := clock.NewTestClock(joinNow, []clock.Calibration{
+		{Venue: perp().Venue, Offset: testVenueOffset, Uncertainty: testUncertainty},
+	})
+	if err != nil {
+		t.Fatalf("NewTestClock: %v", err)
+	}
+	joiner, err := application.NewJoiner(v, p, orders, j, clk, joinAccount, application.SpotLeg{}, scopes...)
+	if err != nil {
+		t.Fatalf("NewJoiner: %v", err)
+	}
+	return joiner, orders, v, p, j
+}
+
+// venueSays is the ordinary present reading: the venue holds the order, states a
+// lifecycle and a cumulative.
+func venueSays(t *testing.T, state domain.OrderState, venueOrderID, executed string) ports.VenueOrder {
+	t.Helper()
+	return ports.VenueOrder{
+		Presence:     ports.VenueHasOrder,
+		State:        state,
+		Executed:     qty(t, executed),
+		VenueOrderID: venueOrderID,
+	}
+}
+
+// stateOf reads one order's state out of the projection.
+func stateOf(t *testing.T, r *fakeOrders, id ids.ClientOrderID) domain.OrderState {
+	t.Helper()
+	rec, err := r.Load(id)
+	if err != nil {
+		t.Fatalf("Load(%q): %v", id, err)
+	}
+	return rec.State
+}
+
+// lastApply returns the final recorded write for one order, which is where the
+// version arithmetic is observable.
+func (r *fakeOrders) lastApply(t *testing.T, id ids.ClientOrderID) applyCall {
+	t.Helper()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := len(r.applied) - 1; i >= 0; i-- {
+		if r.applied[i].id == id {
+			return r.applied[i]
+		}
+	}
+	t.Fatalf("no apply recorded for %q", id)
+	return applyCall{}
 }
 
 // plantJoinable puts an order in the repository at a chosen state, with an
@@ -698,23 +765,31 @@ func TestNewJoinerRefusals(t *testing.T) {
 		t.Fatalf("NewTestClock: %v", err)
 	}
 
-	if _, err := application.NewJoiner(nil, p, orders, clk, joinAccount, application.SpotLeg{}); !errors.Is(err, application.ErrResolverMissing) {
+	jr := newFakeJournal()
+
+	if _, err := application.NewJoiner(nil, p, orders, jr, clk, joinAccount, application.SpotLeg{}); !errors.Is(err, application.ErrResolverMissing) {
 		t.Errorf("NewJoiner(no venue) = %v, want ErrResolverMissing", err)
 	}
-	if _, err := application.NewJoiner(v, nil, orders, clk, joinAccount, application.SpotLeg{}); !errors.Is(err, application.ErrVenuePositionsMissing) {
+	if _, err := application.NewJoiner(v, nil, orders, jr, clk, joinAccount, application.SpotLeg{}); !errors.Is(err, application.ErrVenuePositionsMissing) {
 		t.Errorf("NewJoiner(no positions) = %v, want ErrVenuePositionsMissing", err)
 	}
-	if _, err := application.NewJoiner(v, p, nil, clk, joinAccount, application.SpotLeg{}); !errors.Is(err, application.ErrOrdersMissing) {
+	if _, err := application.NewJoiner(v, p, nil, jr, clk, joinAccount, application.SpotLeg{}); !errors.Is(err, application.ErrOrdersMissing) {
 		t.Errorf("NewJoiner(no repository) = %v, want ErrOrdersMissing", err)
 	}
-	if _, err := application.NewJoiner(v, p, orders, nil, joinAccount, application.SpotLeg{}); !errors.Is(err, application.ErrClockMissing) {
+	// Refused at construction rather than at the first call, for the reason
+	// ErrJournalMissing already states: the call that would discover it is the
+	// one whose whole purpose is a durable record.
+	if _, err := application.NewJoiner(v, p, orders, nil, clk, joinAccount, application.SpotLeg{}); !errors.Is(err, application.ErrJournalMissing) {
+		t.Errorf("NewJoiner(no journal) = %v, want ErrJournalMissing", err)
+	}
+	if _, err := application.NewJoiner(v, p, orders, jr, nil, joinAccount, application.SpotLeg{}); !errors.Is(err, application.ErrClockMissing) {
 		t.Errorf("NewJoiner(no clock) = %v, want ErrClockMissing", err)
 	}
-	if _, err := application.NewJoiner(v, p, orders, clk, "", application.SpotLeg{}); !errors.Is(err, application.ErrJoinAccountUnset) {
+	if _, err := application.NewJoiner(v, p, orders, jr, clk, "", application.SpotLeg{}); !errors.Is(err, application.ErrJoinAccountUnset) {
 		t.Errorf("NewJoiner(no account) = %v, want ErrJoinAccountUnset", err)
 	}
 	bad := ports.PositionScope{Venue: perp().Venue, Product: perp().Product}
-	if _, err := application.NewJoiner(v, p, orders, clk, joinAccount, application.SpotLeg{}, bad); !errors.Is(err, ports.ErrPositionScopeSettleUnset) {
+	if _, err := application.NewJoiner(v, p, orders, jr, clk, joinAccount, application.SpotLeg{}, bad); !errors.Is(err, ports.ErrPositionScopeSettleUnset) {
 		t.Errorf("NewJoiner(scope with no settlement asset) = %v, want ErrPositionScopeSettleUnset", err)
 	}
 }
@@ -791,5 +866,366 @@ func TestJoinAttributesByThePersistedIdWhenTheSurfaceReturnsNone(t *testing.T) {
 	}
 	if len(report.Unattributed) != 0 {
 		t.Errorf("Unattributed = %v, want none", report.Unattributed)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// the venue's lifecycle reading becomes the projection's (task #242)
+// ---------------------------------------------------------------------------
+
+// TestJoinAdvancesEachOrderToItsOwnVenueReading is the core claim, and the
+// fixture carries checklist items 1, 2, 3 and 6 in one run.
+//
+//   - TWO orders with DIFFERENT readings (1): one the venue reports Filled, one
+//     still Acknowledged. "advances every order" and "advances the first" are
+//     different answers here, and so are "writes the venue's reading" and
+//     "writes a terminal" (2).
+//   - The filled one carries a swept EXECUTION (3), so ApplyFill bumps its
+//     version before the state write. A fixture with no fills makes "threads the
+//     post-fill version" and "threads the loaded version" the same number.
+//   - Both stores are asserted (6): a mutation deleting the AppendState leaves
+//     the projection correct and only the journal assertion falls.
+func TestJoinAdvancesEachOrderToItsOwnVenueReading(t *testing.T) {
+	t.Parallel()
+
+	j, orders, v, _, jr := newJoinerWithJournal(t)
+	filled := joinOrder(t, 1, perp(), domain.SideSell, "0.5")
+	live := joinOrder(t, 2, perp(), domain.SideBuy, "0.2")
+	plantJoinable(t, orders, filled, domain.StateSubmitted)
+	plantJoinable(t, orders, live, domain.StateSubmitted)
+
+	v.status[filled.ClientOrderID] = venueSays(t, domain.StateFilled, "v-1", "0.5")
+	v.status[live.ClientOrderID] = venueSays(t, domain.StateAcknowledged, "v-2", "0")
+	v.sweeps[perp()] = ports.ExecutionSweep{
+		Executions: []ports.VenueExecution{
+			execution(t, "e-1", filled.ClientOrderID, "v-1", "0.5"),
+		},
+	}
+
+	report, err := j.Join([]ids.ClientOrderID{filled.ClientOrderID, live.ClientOrderID})
+	if err != nil {
+		t.Fatalf("Join = %v, want nil", err)
+	}
+	if report.Advanced != 2 {
+		t.Errorf("Advanced = %d, want 2", report.Advanced)
+	}
+	if len(report.Contradicted) != 0 {
+		t.Errorf("Contradicted = %v, want none", report.Contradicted)
+	}
+
+	if got := stateOf(t, orders, filled.ClientOrderID); got != domain.StateFilled {
+		t.Errorf("projection holds %s for the filled order, want filled", got)
+	}
+	if got := stateOf(t, orders, live.ClientOrderID); got != domain.StateAcknowledged {
+		t.Errorf("projection holds %s for the live order, want acknowledged", got)
+	}
+
+	// The journal, separately. Order is not asserted — Join walks the ids in the
+	// order it was given, but the claim here is membership, and pinning the
+	// sequence would make this test fail for a reason it is not about.
+	want := map[domain.OrderState]int{domain.StateFilled: 1, domain.StateAcknowledged: 1}
+	got := map[domain.OrderState]int{}
+	for _, s := range jr.states() {
+		got[s]++
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("journal holds %v, want %v", got, want)
+	}
+}
+
+// TestJoinAdvancesAgainstThePostFillVersion is checklist item 3 stated as its own
+// claim, because the test above would still pass if the version were read from
+// the record as loaded: ApplyState would then be handed a stale version and the
+// repository would refuse with ErrVersionConflict — which Join reports as an
+// ERROR, so the failure is loud but its cause is one line away from the fixture.
+func TestJoinAdvancesAgainstThePostFillVersion(t *testing.T) {
+	t.Parallel()
+
+	j, orders, v, _, _ := newJoinerWithJournal(t)
+	o := joinOrder(t, 1, perp(), domain.SideSell, "0.5")
+	plantJoinable(t, orders, o, domain.StateSubmitted) // planted at version 7
+	v.status[o.ClientOrderID] = venueSays(t, domain.StateFilled, "v-1", "0.5")
+	v.sweeps[perp()] = ports.ExecutionSweep{
+		Executions: []ports.VenueExecution{execution(t, "e-1", o.ClientOrderID, "v-1", "0.5")},
+	}
+
+	if _, err := j.Join([]ids.ClientOrderID{o.ClientOrderID}); err != nil {
+		t.Fatalf("Join = %v, want nil", err)
+	}
+
+	// The fill bumped 7 to 8, so the state write must claim 8. The applied-call
+	// log is what makes this an assertion rather than an inference from the end
+	// state.
+	last := orders.lastApply(t, o.ClientOrderID)
+	if last.expected != 8 {
+		t.Errorf("ApplyState claimed version %d, want 8 (the fill bumped 7)", last.expected)
+	}
+	if last.to != domain.StateFilled {
+		t.Errorf("ApplyState target = %s, want filled", last.to)
+	}
+}
+
+// TestJoinRereadsATerminalOrderWithoutWriting is checklist item 4: the ORDINARY
+// case on every boot after the first, and the one that makes the no-op
+// short-circuit observable. Without it the record's state equals the venue's,
+// CanTransition answers ErrTransitionNoOp, and a joiner that inspected that error
+// instead of comparing first would file a healthy re-read under Contradicted and
+// hold the boot posture at NeedsOperator for ever.
+func TestJoinRereadsATerminalOrderWithoutWriting(t *testing.T) {
+	t.Parallel()
+
+	j, orders, v, _, jr := newJoinerWithJournal(t)
+	o := joinOrder(t, 1, perp(), domain.SideSell, "0.5")
+	plantJoinable(t, orders, o, domain.StateFilled)
+	v.status[o.ClientOrderID] = venueSays(t, domain.StateFilled, "v-1", "0")
+
+	report, err := j.Join([]ids.ClientOrderID{o.ClientOrderID})
+	if err != nil {
+		t.Fatalf("Join = %v, want nil", err)
+	}
+	if report.Advanced != 0 {
+		t.Errorf("Advanced = %d, want 0 — a re-read is not an advance", report.Advanced)
+	}
+	if len(report.Contradicted) != 0 {
+		t.Errorf("Contradicted = %v, want none — the states AGREE", report.Contradicted)
+	}
+	if states := jr.states(); len(states) != 0 {
+		t.Errorf("journal holds %v, want nothing", states)
+	}
+}
+
+// TestJoinReportsAContradictoryVenueReading is checklist item 5, and the fixture
+// is the ISOLATING one: both states are declared and valid, the venue HAS the
+// order, and the sweep is complete — so the only thing in the function that can
+// object is the edge check. A malformed state would trip Validate instead, and a
+// probe two gates can see shows that something objected rather than that this
+// rule did.
+//
+// Acknowledged -> Rejected is also the realistic accident: a rejection is a
+// submission-time verdict, so a venue reporting one about an order we watched go
+// live means the two readings are about different histories.
+func TestJoinReportsAContradictoryVenueReading(t *testing.T) {
+	t.Parallel()
+
+	j, orders, v, _, jr := newJoinerWithJournal(t)
+	bad := joinOrder(t, 1, perp(), domain.SideSell, "0.5")
+	good := joinOrder(t, 2, perp(), domain.SideBuy, "0.2")
+	plantJoinable(t, orders, bad, domain.StateAcknowledged)
+	plantJoinable(t, orders, good, domain.StateSubmitted)
+	v.status[bad.ClientOrderID] = venueSays(t, domain.StateRejected, "v-1", "0")
+	v.status[good.ClientOrderID] = venueSays(t, domain.StateFilled, "v-2", "0")
+
+	report, err := j.Join([]ids.ClientOrderID{bad.ClientOrderID, good.ClientOrderID})
+	if err != nil {
+		t.Fatalf("Join = %v, want nil — a contradiction on ONE order is a report entry", err)
+	}
+	if want := []ids.ClientOrderID{bad.ClientOrderID}; !reflect.DeepEqual(report.Contradicted, want) {
+		t.Errorf("Contradicted = %v, want %v", report.Contradicted, want)
+	}
+	// The positive control in the same run: the healthy order advanced, so this
+	// is not a joiner that refused everything.
+	if report.Advanced != 1 {
+		t.Errorf("Advanced = %d, want 1 — the second order is the positive control", report.Advanced)
+	}
+	if got := stateOf(t, orders, bad.ClientOrderID); got != domain.StateAcknowledged {
+		t.Errorf("the contradicted order moved to %s, want acknowledged (unchanged)", got)
+	}
+	if states := jr.states(); len(states) != 1 || states[0] != domain.StateFilled {
+		t.Errorf("journal holds %v, want only the healthy order's filled record", states)
+	}
+}
+
+// TestJoinRefusesProvedAbsenceFromAPresentOrder guards an edge this very slice
+// made legal. Submitted -> AbsentAfterFinality is now a domain edge, so nothing
+// in CanTransition would stop the join writing "proved stable absence" from a
+// venue that is holding the order in its hand. That is FLAG-2's evidence-class
+// conflation, and §5.3 gives that terminal four gates the Resolver runs.
+func TestJoinRefusesProvedAbsenceFromAPresentOrder(t *testing.T) {
+	t.Parallel()
+
+	j, orders, v, _, jr := newJoinerWithJournal(t)
+	o := joinOrder(t, 1, perp(), domain.SideSell, "0.5")
+	plantJoinable(t, orders, o, domain.StateSubmitted)
+	v.status[o.ClientOrderID] = venueSays(t, domain.StateAbsentAfterFinality, "v-1", "0")
+
+	_, err := j.Join([]ids.ClientOrderID{o.ClientOrderID})
+	if !errors.Is(err, application.ErrVenueStateNotAnAbsence) {
+		t.Fatalf("Join = %v, want ErrVenueStateNotAnAbsence", err)
+	}
+	if got := stateOf(t, orders, o.ClientOrderID); got != domain.StateSubmitted {
+		t.Errorf("projection holds %s, want submitted (unchanged)", got)
+	}
+	if states := jr.states(); len(states) != 0 {
+		t.Errorf("journal holds %v, want nothing", states)
+	}
+}
+
+// TestJoinDoesNotAdvanceAnAbsentOrder — checklist item 7. An absence is the one
+// answer this use case must not act on: it is the INPUT to §5.3's four-gate rule,
+// and the Resolver is what runs them. Asserting the journal is empty rather than
+// only that Absent is populated is the point: the report field would be right
+// even if a state had been written.
+func TestJoinDoesNotAdvanceAnAbsentOrder(t *testing.T) {
+	t.Parallel()
+
+	j, orders, v, _, jr := newJoinerWithJournal(t)
+	o := joinOrder(t, 1, perp(), domain.SideSell, "0.5")
+	plantJoinable(t, orders, o, domain.StateSubmitted)
+	v.status[o.ClientOrderID] = ports.VenueOrder{Presence: ports.VenueHasNoOrder}
+
+	report, err := j.Join([]ids.ClientOrderID{o.ClientOrderID})
+	if err != nil {
+		t.Fatalf("Join = %v, want nil", err)
+	}
+	if len(report.Absent) != 1 || report.Advanced != 0 {
+		t.Errorf("Absent=%v Advanced=%d, want one absence and no advance", report.Absent, report.Advanced)
+	}
+	if states := jr.states(); len(states) != 0 {
+		t.Errorf("journal holds %v, want nothing — an absence is the resolver's input", states)
+	}
+}
+
+// TestJoinDoesNotAdvanceOnAnIncompleteSweep — checklist item 8, and the fixture
+// is built so the two readings differ: the venue reports FILLED, which WOULD
+// advance. A short-sweep fixture whose venue reading was already the record's
+// would make "gated by the sweep" and "nothing to advance" the same answer.
+//
+// SM §2 calls the four-step contract "the ONE canonical boundary … never a
+// weaker cancel-ack-only variant", and step 3 is the sweep. A terminal recorded
+// from a status read alone collapses the possible-delta interval EARLY, which is
+// exactly what SM §1's venue-initiated-termination row warns about.
+func TestJoinDoesNotAdvanceOnAnIncompleteSweep(t *testing.T) {
+	t.Parallel()
+
+	j, orders, v, _, jr := newJoinerWithJournal(t)
+	o := joinOrder(t, 1, perp(), domain.SideSell, "0.5")
+	plantJoinable(t, orders, o, domain.StateSubmitted)
+	v.status[o.ClientOrderID] = venueSays(t, domain.StateFilled, "v-1", "0")
+	v.sweeps[perp()] = ports.ExecutionSweep{ProvenThrough: joinNow.Add(-time.Hour)}
+
+	report, err := j.Join([]ids.ClientOrderID{o.ClientOrderID})
+	if err != nil {
+		t.Fatalf("Join = %v, want nil", err)
+	}
+	if len(report.Incomplete) != 1 || report.Advanced != 0 {
+		t.Errorf("Incomplete=%v Advanced=%d, want one incomplete and no advance",
+			report.Incomplete, report.Advanced)
+	}
+	if got := stateOf(t, orders, o.ClientOrderID); got != domain.StateSubmitted {
+		t.Errorf("projection holds %s, want submitted — the sweep proved nothing", got)
+	}
+	if states := jr.states(); len(states) != 0 {
+		t.Errorf("journal holds %v, want nothing", states)
+	}
+}
+
+// TestJoinAdvancesDespiteAnUnattributedCumulative pins the ORTHOGONALITY §5.3
+// requires, which is a decision rather than an accident. The cross-check
+// disagreed about the AMOUNT; the venue's reading is about FINALITY, and §5.3
+// keeps the two orthogonal ("nothing relates State to Cumulative"). Refusing to
+// advance would leave the order in the state this slice exists to move it out
+// of, to punish a number the report already carries — and the consumer that
+// gates on both (#236's D4) already refuses on the report.
+func TestJoinAdvancesDespiteAnUnattributedCumulative(t *testing.T) {
+	t.Parallel()
+
+	j, orders, v, _, _ := newJoinerWithJournal(t)
+	o := joinOrder(t, 1, perp(), domain.SideSell, "0.5")
+	plantJoinable(t, orders, o, domain.StateSubmitted)
+	// The venue states 0.5 executed and the sweep attributes nothing.
+	v.status[o.ClientOrderID] = venueSays(t, domain.StateFilled, "v-1", "0.5")
+
+	report, err := j.Join([]ids.ClientOrderID{o.ClientOrderID})
+	if err != nil {
+		t.Fatalf("Join = %v, want nil", err)
+	}
+	if len(report.Unattributed) != 1 {
+		t.Fatalf("Unattributed = %v, want one", report.Unattributed)
+	}
+	if report.Advanced != 1 {
+		t.Errorf("Advanced = %d, want 1 — state and ledger are orthogonal", report.Advanced)
+	}
+}
+
+// TestJoinErrorsWhenAStoreRefusesTheState pins Join's contract, which is the
+// OPPOSITE of Resolver's and deliberately so. Resolver promises "err != nil means
+// NOTHING was written", so it must report a partial write as a value. Join
+// promises "err != nil means the projection is PART-REBUILT and must not be
+// traded on", and the posture is what stops trading. A journal that did not take
+// the record, or a projection that refused the version, IS that condition.
+func TestJoinErrorsWhenAStoreRefusesTheState(t *testing.T) {
+	t.Parallel()
+
+	boom := errors.New("store refused")
+
+	t.Run("journal", func(t *testing.T) {
+		t.Parallel()
+		j, orders, v, _, jr := newJoinerWithJournal(t)
+		o := joinOrder(t, 1, perp(), domain.SideSell, "0.5")
+		plantJoinable(t, orders, o, domain.StateSubmitted)
+		v.status[o.ClientOrderID] = venueSays(t, domain.StateFilled, "v-1", "0")
+		jr.failOn[domain.StateFilled] = boom
+
+		if _, err := j.Join([]ids.ClientOrderID{o.ClientOrderID}); !errors.Is(err, boom) {
+			t.Fatalf("Join = %v, want the journal's error", err)
+		}
+		// The apply is NOT attempted: legality is established before the journal
+		// and the journal is what §7.5 replays, so a projection ahead of the log
+		// is the one ordering this must never produce.
+		if got := stateOf(t, orders, o.ClientOrderID); got != domain.StateSubmitted {
+			t.Errorf("projection holds %s, want submitted — the log did not take it", got)
+		}
+	})
+
+	t.Run("projection", func(t *testing.T) {
+		t.Parallel()
+		j, orders, v, _, _ := newJoinerWithJournal(t)
+		o := joinOrder(t, 1, perp(), domain.SideSell, "0.5")
+		plantJoinable(t, orders, o, domain.StateSubmitted)
+		v.status[o.ClientOrderID] = venueSays(t, domain.StateFilled, "v-1", "0")
+		orders.failApplyState[domain.StateFilled] = boom
+
+		if _, err := j.Join([]ids.ClientOrderID{o.ClientOrderID}); !errors.Is(err, boom) {
+			t.Fatalf("Join = %v, want the repository's error", err)
+		}
+	})
+}
+
+// TestJoinRefusesAMalformedVenueState is the branch above the edge check, and it
+// exists because the two refusals are one line apart and produce DIFFERENT
+// outcomes from the same-looking input. Without Validate the empty reading still
+// stops the write — CanTransition refuses an undeclared target — but it stops it
+// as a Contradicted entry, which files an ACL that returned presence without a
+// lifecycle beside a venue that genuinely disagrees with us about an order's
+// history. One is a translation defect and one is a venue fact, and an operator
+// has one response for the bucket.
+//
+// The reading is otherwise complete — the venue HAS the order, the cumulative
+// agrees, the sweep is whole — so the state is the only thing that can object.
+func TestJoinRefusesAMalformedVenueState(t *testing.T) {
+	t.Parallel()
+
+	j, orders, v, _, jr := newJoinerWithJournal(t)
+	o := joinOrder(t, 1, perp(), domain.SideSell, "0.5")
+	plantJoinable(t, orders, o, domain.StateSubmitted)
+	// The zero OrderState: what an ACL that read a presence and no lifecycle
+	// would hand over.
+	v.status[o.ClientOrderID] = ports.VenueOrder{
+		Presence: ports.VenueHasOrder, Executed: qty(t, "0"), VenueOrderID: "v-1",
+	}
+
+	report, err := j.Join([]ids.ClientOrderID{o.ClientOrderID})
+	if !errors.Is(err, domain.ErrOrderStateUnset) {
+		t.Fatalf("Join = %v, want ErrOrderStateUnset", err)
+	}
+	if len(report.Contradicted) != 0 {
+		t.Errorf("Contradicted = %v, want none — a broken translation is not a disagreement",
+			report.Contradicted)
+	}
+	if got := stateOf(t, orders, o.ClientOrderID); got != domain.StateSubmitted {
+		t.Errorf("projection holds %s, want submitted (unchanged)", got)
+	}
+	if states := jr.states(); len(states) != 0 {
+		t.Errorf("journal holds %v, want nothing", states)
 	}
 }

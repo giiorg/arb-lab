@@ -128,7 +128,7 @@ func newSpotJoiner(t *testing.T, leg application.SpotLeg) (*application.Joiner, 
 	if err != nil {
 		t.Fatalf("NewTestClock: %v", err)
 	}
-	j, err := application.NewJoiner(newFakeJoinVenue(), newFakePositions(), orders, clk, joinAccount, leg)
+	j, err := application.NewJoiner(newFakeJoinVenue(), newFakePositions(), orders, newFakeJournal(), clk, joinAccount, leg)
 	if err != nil {
 		t.Fatalf("NewJoiner: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestAssertSpotExplainsTheWalletThroughTheBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTestClock: %v", err)
 	}
-	j, err := application.NewJoiner(newFakeJoinVenue(), positions, orders, clk, joinAccount, leg, perpScopeFor())
+	j, err := application.NewJoiner(newFakeJoinVenue(), positions, orders, newFakeJournal(), clk, joinAccount, leg, perpScopeFor())
 	if err != nil {
 		t.Fatalf("NewJoiner: %v", err)
 	}
@@ -595,7 +595,7 @@ func TestNewJoinerSpotLegRefusals(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := application.NewJoiner(newFakeJoinVenue(), newFakePositions(), newFakeOrders(), clk, joinAccount, tc.leg)
+			_, err := application.NewJoiner(newFakeJoinVenue(), newFakePositions(), newFakeOrders(), newFakeJournal(), clk, joinAccount, tc.leg)
 			if !errors.Is(err, tc.want) {
 				t.Errorf("NewJoiner = %v, want %v", err, tc.want)
 			}
@@ -604,7 +604,7 @@ func TestNewJoinerSpotLegRefusals(t *testing.T) {
 
 	// The positive control for item 24's sharper half: the SAME overlapping
 	// roster with no baseline constructs — the deny is the baseline's.
-	if _, err := application.NewJoiner(newFakeJoinVenue(), newFakePositions(), newFakeOrders(), clk, joinAccount,
+	if _, err := application.NewJoiner(newFakeJoinVenue(), newFakePositions(), newFakeOrders(), newFakeJournal(), clk, joinAccount,
 		application.SpotLeg{Roster: overlap}); err != nil {
 		t.Errorf("NewJoiner(overlapping roster, no baseline) = %v, want nil", err)
 	}

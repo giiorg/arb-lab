@@ -4,14 +4,20 @@ import "errors"
 
 // The use-case layer's refusals.
 var (
-	// ErrJournalMissing and ErrPlacerMissing report a Dispatcher constructed
-	// without one of its ports.
+	// ErrJournalMissing reports a use case constructed without the journal it
+	// writes to, and ErrPlacerMissing a Dispatcher constructed without its
+	// placer.
 	//
 	// Refused at construction rather than at the first call, because the call
-	// that would discover it is the one that submits an order. A nil journal
-	// found there means the crash boundary silently did not exist for an order
-	// already on its way to a venue.
-	ErrJournalMissing    = errors.New("oms: dispatcher has no journal")
+	// that would discover it is the one whose whole purpose is a durable
+	// record. On the dispatch path that call is the one that submits an order,
+	// so a nil journal found there means the crash boundary silently did not
+	// exist for an order already on its way to a venue.
+	//
+	// The message names no use case: Dispatcher, Planner and Resolver have
+	// raised it since their own slices and Joiner is the fourth (#242). Every
+	// consumer compares with errors.Is, so the string is free to be accurate.
+	ErrJournalMissing    = errors.New("oms: use case has no journal")
 	ErrPlacerMissing     = errors.New("oms: dispatcher has no order placer")
 	ErrReserverMissing   = errors.New("oms: executor has no capacity reserver")
 	ErrHoldVectorInvalid = errors.New("oms: capacity reserver returned an invalid hold vector")
@@ -285,6 +291,22 @@ var (
 	// wins — and the loser decides which sweep rows become this order's
 	// fills — so the join refuses the order rather than picking.
 	ErrVenueOrderIDMismatch = errors.New("oms: venue reports a different venue order id than the store persisted")
+
+	// ErrVenueStateNotAnAbsence reports a venue that HANDED US THE ORDER and
+	// described it as proved absence.
+	//
+	// StateAbsentAfterFinality is §5.3's four-gate conclusion and FLAG-2's whole
+	// point: proved absence and a venue-terminal record are different evidence
+	// classes, and recording one as the other tells §7.5's reconcile-only boot
+	// that we never found an order we in fact found. The join runs no gates —
+	// Resolver does — so it may never reach that terminal on any reading.
+	//
+	// It is a REFUSAL rather than a Contradicted entry because it is not two
+	// histories disagreeing: the transition may well be legal (Submitted ->
+	// AbsentAfterFinality became an edge in this same slice), and it is the
+	// EVIDENCE that is unavailable. A guard that let it through would be
+	// checking the domain's edge set for a rule the domain does not hold.
+	ErrVenueStateNotAnAbsence = errors.New("oms: the venue holds the order and reports proved absence")
 
 	// ErrResolutionPolicyUnset reports a resolution policy with a non-positive
 	// duration in it.

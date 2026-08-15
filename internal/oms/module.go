@@ -820,7 +820,7 @@ func New(deps Deps) (*Module, error) {
 		}
 		spot.Balances = balances
 	}
-	joiner, err := application.NewJoiner(reader, positions, orders, deps.Clock, deps.Account, spot, deps.PositionScopes...)
+	joiner, err := application.NewJoiner(reader, positions, orders, journal, deps.Clock, deps.Account, spot, deps.PositionScopes...)
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("oms: joiner: %w", err), journal.Close())
 	}
