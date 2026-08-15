@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/giiorg/arb-lab/internal/app/reconcile"
 	"github.com/giiorg/arb-lab/internal/oms/application"
@@ -41,12 +42,18 @@ import (
 // frame, so an uncalibrated side resolves its orders against this host's clock.
 func Run(ctx context.Context, snap config.Snapshot[Config], newRegistry func() *observability.Registry,
 	stderr io.Writer) (Report, error) {
-	return runWithWait(ctx, snap, newRegistry, stderr)
+	return runWithWait(ctx, snap, newRegistry, stderr, time.Sleep)
 }
 
-// runWithWait is Run with the drive's blocking wait injected. See Run.
+// runWithWait is Run with the settle loop's blocking wait injected.
+//
+// The wait is a PARAMETER and lands on this run's own drive — oms.Deps.
+// SettleWait's precedent — rather than on a package variable a parallel test
+// could be mutating while another run reads it. This layer owns no ambient
+// time, which is also why nothing here calls time.Now.
 func runWithWait(ctx context.Context, snap config.Snapshot[Config],
-	newRegistry func() *observability.Registry, stderr io.Writer) (Report, error) {
+	newRegistry func() *observability.Registry, stderr io.Writer,
+	wait func(time.Duration)) (Report, error) {
 
 	cfg := snap.Value
 
@@ -151,6 +158,16 @@ func runWithWait(ctx context.Context, snap config.Snapshot[Config],
 	}
 
 	rep.Drove = true
+	d := &drive{cfg: cfg, runners: runners, rep: &rep, stderr: stderr, wait: wait}
+	d.run()
+
+	// Re-snapshot AFTER the drive, on internal/app/exercise/app.go's argument:
+	// bans and throttles are monotone, the drive and the unwind are this
+	// binary's only venue traffic, and a snapshot taken beside Boot's would miss
+	// the one §7.6 alert this run can newly earn.
+	for i := range rep.Sides {
+		rep.Sides[i].RateLimit = runners[i].RateLimit()
+	}
 	return rep, nil
 }
 

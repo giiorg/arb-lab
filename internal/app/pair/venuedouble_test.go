@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -181,6 +182,23 @@ func (v *venueDouble) holdOrderNonTerminal() {
 	v.holdNonTerminal = true
 }
 
+// holdOrderNonTerminalWithFills is the same live order with REAL exposure
+// against it: the venue publishes executions and still reports the order as
+// working.
+//
+// It is the fixture that separates "not established" from "filled nothing".
+// With a zero cumulative the two guards are one predicate — the leg is
+// unestablished AND flat — so a drive that had lost its Established check would
+// still stop, and the mutation proving that SURVIVED. Here the leg carries a
+// non-zero, unfinished quantity, which is the most dangerous reading in this
+// whole root: real exposure that has not been measured.
+func (v *venueDouble) holdOrderNonTerminalWithFills(quantity string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.holdNonTerminal = true
+	v.fills["*"] = quantity
+}
+
 // rejectPlace refuses the order ON ITS MERITS at the venue: the request
 // crossed the wire and the order is terminally Rejected. It is NOT the same as
 // a dispatch refused before Place, which never reaches here at all.
@@ -216,6 +234,17 @@ func (v *venueDouble) firstPlace() (placedOrder, bool) {
 		return placedOrder{}, false
 	}
 	return v.places[0], true
+}
+
+// lastPlaceQuantity is the size the venue was last ASKED for — the quantity
+// D5's assertion is about, which is the order this system SENT and not what
+// came back.
+func (v *venueDouble) lastPlaceQuantity() string {
+	last, ok := v.lastPlace()
+	if !ok {
+		return ""
+	}
+	return last.Quantity
 }
 
 // sawPlaceBefore reports whether this venue's first Place arrived before the
@@ -292,7 +321,7 @@ func (v *venueDouble) serveBinance(w http.ResponseWriter, r *http.Request) {
 			v.symbol, id, status, filled)
 
 	case r.Method == http.MethodGet && r.URL.Path == "/fapi/v1/userTrades":
-		fmt.Fprint(w, v.binanceTrades())
+		fmt.Fprint(w, v.binanceTrades(sweptAt(r)))
 
 	default:
 		v.unexpected(w, r)
@@ -373,7 +402,7 @@ func (v *venueDouble) serveBybit(w http.ResponseWriter, r *http.Request) {
 			id, v.symbol, bybitStatus(status), filled))
 
 	case r.Method == http.MethodGet && r.URL.Path == "/v5/execution/list":
-		bybitOK(w, v.bybitExecutions())
+		bybitOK(w, v.bybitExecutions(sweptAt(r)))
 
 	default:
 		v.unexpected(w, r)
@@ -381,12 +410,28 @@ func (v *venueDouble) serveBybit(w http.ResponseWriter, r *http.Request) {
 }
 
 // record files an arriving order and reports whether the venue rejects it.
+//
+// # It takes a couple of milliseconds ON PURPOSE, and that is not padding
+//
+// The join sweeps executions over [AuthorizedAt−uncertainty, now−uncertainty].
+// Both ends shift by the same clock uncertainty, so the window's WIDTH is just
+// the real time between the dispatch and the sweep — and in an in-process test
+// against a local server that is a fraction of a millisecond. Venues stamp
+// executions in whole milliseconds, so a sub-millisecond window contains a
+// representable instant only sometimes: the fixture would pass or fail by how
+// fast the machine was, which is a coin flip in the harness rather than a test.
+//
+// A venue round trip is tens of milliseconds in reality. Two here is enough to
+// make the window at least a millisecond wide, which makes `startTime + 1ms`
+// always inside it — see sweptAt.
 func (v *venueDouble) record(o placedOrder) bool {
 	o.At = time.Now()
 	v.mu.Lock()
-	defer v.mu.Unlock()
 	v.places = append(v.places, o)
-	return v.rejectOnPlace
+	reject := v.rejectOnPlace
+	v.mu.Unlock()
+	time.Sleep(2 * time.Millisecond)
+	return reject
 }
 
 func (v *venueDouble) noteEnumeration() {
@@ -407,8 +452,13 @@ func (v *venueDouble) outcome(id string) (string, string) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if v.holdNonTerminal {
-		// Live, nothing attributed. The SAME zero cumulative as "terminal and
-		// filled nothing", which is exactly why this control exists.
+		// Live. The cumulative is whatever has been executed so far — zero
+		// unless holdOrderNonTerminalWithFills said otherwise, which is the
+		// SAME zero as "terminal and filled nothing" and exactly why this
+		// control exists.
+		if filled, ok := v.fills["*"]; ok {
+			return "NEW", filled
+		}
 		return "NEW", "0"
 	}
 	if v.rejectOnPlace {
@@ -428,7 +478,7 @@ func (v *venueDouble) outcome(id string) (string, string) {
 }
 
 // fullyFilled reports whether the recorded order asked for exactly what was
-// filled.
+// filled. A held order is never fully filled — it is still working.
 func (v *venueDouble) fullyFilled(id, filled string) bool {
 	for _, p := range v.places {
 		if p.ID == id {
@@ -467,9 +517,32 @@ func (v *venueDouble) bybitSide() string {
 
 func (v *venueDouble) bybitSize() string { return strings.TrimPrefix(v.net(), "-") }
 
+// sweptAt is the instant the executions this sweep asks for must fall on.
+//
+// The sweep sends its own [startTime, endTime] window and the decoder REFUSES a
+// row outside it — an execution page that does not match the sweep requested.
+// So the double answers inside the window it was given rather than stamping
+// wall-clock time: a fixture that stamped "now" would be refused whenever the
+// join ran a millisecond after the fill, which is every time.
+func sweptAt(r *http.Request) int64 {
+	start, err := strconv.ParseInt(r.Form.Get("startTime"), 10, 64)
+	if err != nil {
+		return 0
+	}
+	// The parameter is the window's start FLOORED to a millisecond, so the true
+	// lower bound sits somewhere inside [start, start+1ms). One millisecond on
+	// is therefore always at or after it, and — because record() makes the
+	// window at least a millisecond wide — always at or before the upper bound.
+	return start + 1
+}
+
 // binanceTrades and bybitExecutions publish one execution row per filled order,
 // so the join's attribution sweep can account for the cumulative it reads.
-func (v *venueDouble) binanceTrades() string {
+//
+// The Binance row carries `side` and NOT `isBuyer`: those are the USDⓈ-M and
+// the spot spellings of one fact, and the decoder refuses a row stating both —
+// a fixture carrying each venue's whole vocabulary at once is not a venue.
+func (v *venueDouble) binanceTrades(at int64) string {
 	rows := v.executionRows()
 	if len(rows) == 0 {
 		return `[]`
@@ -477,20 +550,20 @@ func (v *venueDouble) binanceTrades() string {
 	out := make([]string, 0, len(rows))
 	for i, e := range rows {
 		out = append(out, fmt.Sprintf(
-			`{"id":%d,"orderId":22542179,"symbol":%q,"price":%q,"qty":%q,"commission":"0","commissionAsset":"USDT","time":%d,"side":%q,"isBuyer":%t}`,
-			i+1, v.symbol, e.Price, e.Quantity, e.At.UnixMilli(), strings.ToUpper(e.Side), strings.EqualFold(e.Side, "buy")))
+			`{"id":%d,"orderId":22542179,"symbol":%q,"price":%q,"qty":%q,"commission":"0","commissionAsset":"USDT","time":%d,"side":%q}`,
+			i+1, v.symbol, e.Price, e.Quantity, at, strings.ToUpper(e.Side)))
 	}
 	return "[" + strings.Join(out, ",") + "]"
 }
 
-func (v *venueDouble) bybitExecutions() string {
+func (v *venueDouble) bybitExecutions(at int64) string {
 	rows := v.executionRows()
 	out := make([]string, 0, len(rows))
 	for i, e := range rows {
 		out = append(out, fmt.Sprintf(
 			`{"execId":%q,"orderId":"77","orderLinkId":%q,"symbol":%q,"side":%q,"execQty":%q,"execPrice":%q,"execFee":"0","feeCurrency":"USDT","execTime":%q}`,
 			fmt.Sprintf("x-%d", i+1), e.ID, v.symbol, bybitSideWord(e.Side), e.Quantity, e.Price,
-			fmt.Sprintf("%d", e.At.UnixMilli())))
+			fmt.Sprintf("%d", at)))
 	}
 	return `{"list":[` + strings.Join(out, ",") + `],"nextPageCursor":""}`
 }
@@ -500,7 +573,7 @@ func (v *venueDouble) executionRows() []placedOrder {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	filled, ok := v.fills["*"]
-	if !ok || filled == "0" || v.holdNonTerminal || v.rejectOnPlace {
+	if !ok || filled == "0" || v.rejectOnPlace {
 		return nil
 	}
 	out := make([]placedOrder, 0, len(v.places))
