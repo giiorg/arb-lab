@@ -236,6 +236,12 @@ func bybitSide(t *testing.T, journal string) reconcile.Config {
 	// request budget it really has and writes §7.6's waiver for the dimension
 	// the venue does not publish. A copied weight_1m here would be a fixture
 	// asserting an external fact that is false.
+	//
+	// The eight ENDPOINT-scoped rows are not padding either: Bybit's transport
+	// reader declares a closed endpoint roster and refuses construction when a
+	// document leaves any of it unbudgeted, precisely so a restart's fallback
+	// query cannot spend the primary query's allowance. Every one is metered at
+	// 50/s per UID (profiles §4/§5).
 	cfg.Venue.Limits = []reconcile.LimitConfig{
 		{Name: "ip_requests", Scope: "venue", Dimension: "requests", Interval: dur(t, "5s"),
 			OpeningCeiling: 300, RoutineCeiling: 400, Capacity: 500},
@@ -243,6 +249,24 @@ func bybitSide(t *testing.T, journal string) reconcile.Config {
 			Interval: dur(t, "1s"), OpeningCeiling: 35, RoutineCeiling: 45, Capacity: 50},
 		{Name: "spot_orders_1s", Scope: "family", Product: ids.ProductSpot, Dimension: "orders",
 			Interval: dur(t, "1s"), OpeningCeiling: 14, RoutineCeiling: 18, Capacity: 20},
+	}
+	for _, ep := range []struct {
+		name      string
+		dimension string
+	}{
+		{"order_create", "orders"},
+		{"order_realtime", "requests"},
+		{"order_history", "requests"},
+		{"execution_list", "requests"},
+		{"position_list", "requests"},
+		{"wallet_balance", "requests"},
+		{"account_info", "requests"},
+		{"spot_margin_status", "requests"},
+	} {
+		cfg.Venue.Limits = append(cfg.Venue.Limits, reconcile.LimitConfig{
+			Name: ep.name, Scope: "endpoint", Dimension: ep.dimension, Interval: dur(t, "1s"),
+			OpeningCeiling: 35, RoutineCeiling: 45, Capacity: 50,
+		})
 	}
 	cfg.Venue.Uncounted = []reconcile.UncountedConfig{
 		{Product: ids.ProductLinearPerp, Dimension: "weight",
