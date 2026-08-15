@@ -69,13 +69,22 @@ type venueDouble struct {
 	// above is for.
 	enumerations int
 
+	// rejected are the orders this venue refused ON ITS MERITS, by id. Per
+	// order rather than a flag, because rejectPlaceAfter refuses the SECOND
+	// order while the first stands — and the order query has to answer for both.
+	rejected map[string]bool
+
 	// Controls.
 	refuseJoin      bool
 	holdNonTerminal bool
 	rejectOnPlace   bool
-	fills           map[string]string // clientOrderID -> cumulative executed
-	positions       map[string]string // symbol -> signed net, "" meaning flat
-	leverage        string
+
+	// rejectFrom is the number of orders this venue accepts before it starts
+	// refusing; negative means it never refuses on that ground.
+	rejectFrom int
+	fills      map[string]string // clientOrderID -> cumulative executed
+	positions  map[string]string // symbol -> signed net, "" meaning flat
+	leverage   string
 
 	// afterBoot is a net that appears only once the boot's own enumeration has
 	// been answered — see positionAppearingAfterBoot.
@@ -97,9 +106,11 @@ func newVenueDouble(t *testing.T, dialect, symbol, base string) *venueDouble {
 	t.Helper()
 	v := &venueDouble{
 		t: t, dialect: dialect, symbol: symbol, base: base,
-		fills:     map[string]string{},
-		positions: map[string]string{},
-		leverage:  "5",
+		fills:      map[string]string{},
+		positions:  map[string]string{},
+		rejected:   map[string]bool{},
+		rejectFrom: -1,
+		leverage:   "5",
 	}
 	v.server = httptest.NewServer(http.HandlerFunc(v.serve))
 	t.Cleanup(v.server.Close)
@@ -208,6 +219,17 @@ func (v *venueDouble) rejectPlace() {
 	v.rejectOnPlace = true
 }
 
+// rejectPlaceAfter accepts the first n orders and refuses every one after them.
+//
+// It is what separates "the open worked and the UNWIND was refused" from "this
+// venue refuses everything" — two fixtures that produce the same Place count on
+// a one-order test and completely different reports on a two-order one.
+func (v *venueDouble) rejectPlaceAfter(n int) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.rejectFrom = n
+}
+
 // ---------------------------------------------------------------------------
 // Reads
 // ---------------------------------------------------------------------------
@@ -311,14 +333,14 @@ func (v *venueDouble) serveBinance(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprint(w, `{"code":-2019,"msg":"Margin is insufficient."}`)
 			return
 		}
-		fmt.Fprintf(w, `{"orderId":22542179,"clientOrderId":%q,"status":"NEW"}`, id)
+		fmt.Fprintf(w, `{"orderId":%d,"clientOrderId":%q,"status":"NEW"}`, v.venueOrderID(id), id)
 
 	case r.Method == http.MethodGet && r.URL.Path == "/fapi/v1/order":
 		id := r.Form.Get("origClientOrderId")
 		v.noteJoin()
 		status, filled := v.outcome(id)
-		fmt.Fprintf(w, `{"symbol":%q,"orderId":22542179,"clientOrderId":%q,"status":%q,"executedQty":%q}`,
-			v.symbol, id, status, filled)
+		fmt.Fprintf(w, `{"symbol":%q,"orderId":%d,"clientOrderId":%q,"status":%q,"executedQty":%q}`,
+			v.symbol, v.venueOrderID(id), id, status, filled)
 
 	case r.Method == http.MethodGet && r.URL.Path == "/fapi/v1/userTrades":
 		fmt.Fprint(w, v.binanceTrades(sweptAt(r)))
@@ -391,15 +413,15 @@ func (v *venueDouble) serveBybit(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprint(w, `{"retCode":110007,"retMsg":"Insufficient available balance","result":{}}`)
 			return
 		}
-		bybitOK(w, fmt.Sprintf(`{"orderId":"77","orderLinkId":%q}`, body.OrderLinkID))
+		bybitOK(w, fmt.Sprintf(`{"orderId":"%d","orderLinkId":%q}`, v.venueOrderID(body.OrderLinkID), body.OrderLinkID))
 
 	case r.Method == http.MethodGet && (r.URL.Path == "/v5/order/realtime" || r.URL.Path == "/v5/order/history"):
 		id := r.Form.Get("orderLinkId")
 		v.noteJoin()
 		status, filled := v.outcome(id)
 		bybitOK(w, fmt.Sprintf(`{"category":"linear","list":[`+
-			`{"orderId":"77","orderLinkId":%q,"symbol":%q,"orderStatus":%q,"cumExecQty":%q}],"nextPageCursor":""}`,
-			id, v.symbol, bybitStatus(status), filled))
+			`{"orderId":"%d","orderLinkId":%q,"symbol":%q,"orderStatus":%q,"cumExecQty":%q}],"nextPageCursor":""}`,
+			v.venueOrderID(id), id, v.symbol, bybitStatus(status), filled))
 
 	case r.Method == http.MethodGet && r.URL.Path == "/v5/execution/list":
 		bybitOK(w, v.bybitExecutions(sweptAt(r)))
@@ -428,7 +450,10 @@ func (v *venueDouble) record(o placedOrder) bool {
 	o.At = time.Now()
 	v.mu.Lock()
 	v.places = append(v.places, o)
-	reject := v.rejectOnPlace
+	reject := v.rejectOnPlace || (v.rejectFrom >= 0 && len(v.places) > v.rejectFrom)
+	if reject {
+		v.rejected[o.ID] = true
+	}
 	v.mu.Unlock()
 	time.Sleep(2 * time.Millisecond)
 	return reject
@@ -451,6 +476,9 @@ func (v *venueDouble) noteJoin() {
 func (v *venueDouble) outcome(id string) (string, string) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	if v.rejected[id] {
+		return "REJECTED", "0"
+	}
 	if v.holdNonTerminal {
 		// Live. The cumulative is whatever has been executed so far — zero
 		// unless holdOrderNonTerminalWithFills said otherwise, which is the
@@ -460,9 +488,6 @@ func (v *venueDouble) outcome(id string) (string, string) {
 			return "NEW", filled
 		}
 		return "NEW", "0"
-	}
-	if v.rejectOnPlace {
-		return "REJECTED", "0"
 	}
 	filled, ok := v.fills["*"]
 	if !ok || filled == "0" {
@@ -550,8 +575,8 @@ func (v *venueDouble) binanceTrades(at int64) string {
 	out := make([]string, 0, len(rows))
 	for i, e := range rows {
 		out = append(out, fmt.Sprintf(
-			`{"id":%d,"orderId":22542179,"symbol":%q,"price":%q,"qty":%q,"commission":"0","commissionAsset":"USDT","time":%d,"side":%q}`,
-			i+1, v.symbol, e.Price, e.Quantity, at, strings.ToUpper(e.Side)))
+			`{"id":%d,"orderId":%d,"symbol":%q,"price":%q,"qty":%q,"commission":"0","commissionAsset":"USDT","time":%d,"side":%q}`,
+			i+1, v.venueOrderID(e.ID), v.symbol, e.Price, e.Quantity, at, strings.ToUpper(e.Side)))
 	}
 	return "[" + strings.Join(out, ",") + "]"
 }
@@ -561,8 +586,8 @@ func (v *venueDouble) bybitExecutions(at int64) string {
 	out := make([]string, 0, len(rows))
 	for i, e := range rows {
 		out = append(out, fmt.Sprintf(
-			`{"execId":%q,"orderId":"77","orderLinkId":%q,"symbol":%q,"side":%q,"execQty":%q,"execPrice":%q,"execFee":"0","feeCurrency":"USDT","execTime":%q}`,
-			fmt.Sprintf("x-%d", i+1), e.ID, v.symbol, bybitSideWord(e.Side), e.Quantity, e.Price,
+			`{"execId":%q,"orderId":"%d","orderLinkId":%q,"symbol":%q,"side":%q,"execQty":%q,"execPrice":%q,"execFee":"0","feeCurrency":"USDT","execTime":%q}`,
+			fmt.Sprintf("x-%d", i+1), v.venueOrderID(e.ID), e.ID, v.symbol, bybitSideWord(e.Side), e.Quantity, e.Price,
 			fmt.Sprintf("%d", at)))
 	}
 	return `{"list":[` + strings.Join(out, ",") + `],"nextPageCursor":""}`
@@ -573,11 +598,18 @@ func (v *venueDouble) executionRows() []placedOrder {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	filled, ok := v.fills["*"]
-	if !ok || filled == "0" || v.rejectOnPlace {
+	if !ok || filled == "0" {
 		return nil
 	}
 	out := make([]placedOrder, 0, len(v.places))
 	for _, p := range v.places {
+		if v.rejected[p.ID] {
+			// A refused order executed nothing. Publishing a row for it would
+			// have the venue contradict its own order status, which is the one
+			// shape #242's Contradicted class exists to catch — invented here by
+			// the fixture rather than met at a venue.
+			continue
+		}
 		row := p
 		row.Quantity = filled
 		out = append(out, row)
@@ -611,6 +643,26 @@ func bybitStatus(status string) string {
 		return "Rejected"
 	}
 	return status
+}
+
+// venueOrderID is this venue's own identifier for one client order, and it is
+// DISTINCT per order.
+//
+// A double answering one id for every order is not a shortcut, it is a
+// different venue: two orders on one instrument acked with one venue id is the
+// ack CONFLICT the OMS latches new trading over, so every fixture here would
+// have been quietly running against a poisoned index. Derived from the client
+// id so it is stable across the ack, the order query and the execution rows —
+// three surfaces that must agree about which venue order this is.
+func (v *venueDouble) venueOrderID(clientID string) int64 {
+	var sum int64 = 22542179
+	for _, c := range clientID {
+		sum = sum*31 + int64(c)
+	}
+	if sum < 0 {
+		sum = -sum
+	}
+	return sum
 }
 
 // bybitSideWord is the venue's own capitalization for an order side.

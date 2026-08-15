@@ -87,7 +87,7 @@ func writeCrossVenueReferenceTicks(t *testing.T, observedAt time.Time, stepA, st
 	// min quantity" the same observation — and a resolver that read the wrong
 	// one would pass. That is this repo's eleven-times collapse, and it is here
 	// because the realistic-looking fixture is the colliding one.
-	minQtyFor := map[string]string{"1": "3", "0.1": "0.3", "0.001": "0.003", "0.5": "1.5"}
+	minQtyFor := map[string]string{"1": "3", "0.1": "0.3", "0.001": "0.003", "0.5": "1.5", "100": "300"}
 	lot := func(venue, step, tick string) string {
 		minQty, ok := minQtyFor[step]
 		if !ok {

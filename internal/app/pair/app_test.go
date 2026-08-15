@@ -347,11 +347,14 @@ func TestSideBIsNotSentWhileSideAIsIndeterminate(t *testing.T) {
 	}
 	// The same masking as D6's, one branch over: with the Established guard
 	// removed, leg B is planned against the projection's zero and refused by the
-	// planner, so the Place count above stays 0 and only the REFUSAL says which
-	// code ran. A run stopped because a reading was unfinished must not report a
-	// hedge-sizing problem.
-	if rep.Refusal != nil {
-		t.Errorf("Refusal = %v, want nil — the run stops on the VERDICT, not on a refusal to size a hedge", rep.Refusal)
+	// planner, so the Place count above stays 0 and only what the run ATTEMPTED
+	// says which code ran. An indeterminate pair's refusal is D8's — the unwind
+	// this root declines to make — and never a hedge-sizing complaint.
+	if !errors.Is(rep.Refusal, ErrUnwindRefused) {
+		t.Errorf("Refusal = %v, want %v — an indeterminate pair ends at a human", rep.Refusal, ErrUnwindRefused)
+	}
+	if errors.Is(rep.Refusal, ErrHedgeUnsizable) {
+		t.Errorf("Refusal = %v names a hedge-sizing problem; nothing was sized against side A's unfinished read", rep.Refusal)
 	}
 	if rep.Sides[1].Open != nil {
 		t.Errorf("side B has an Open report (%+v); an unestablished side A may not be hedged at all", rep.Sides[1].Open)
@@ -485,3 +488,250 @@ func TestSideBIsNotSentWhileSideAHoldsUnmeasuredExposure(t *testing.T) {
 		t.Errorf("Verdict = %s, want VerdictIndeterminate (refusal %v)", rep.Verdict, rep.Refusal)
 	}
 }
+
+// runnableConfigWithSteps is the runnable form of validConfigWithSteps: the
+// same two venue doubles, each side on its own lot grid.
+func runnableConfigWithSteps(t *testing.T, stepA, stepB string) (config.Snapshot[Config], [2]*venueDouble) {
+	t.Helper()
+	snap, doubles := runnableConfig(t)
+	snap.Value.Reference.Path = writeCrossVenueReference(t, timeAgo(t, time.Hour), stepA, stepB)
+	return snap, doubles
+}
+
+// TestAnUnsizableHedgeUnwindsSideA is D5's own refusal path. Side A's fill is
+// established, then side B's Plan rejects that quantity against side B's §2.4
+// lot grid with ErrHedgeUnsizable. Nothing is sent on B, but A must still reach
+// the single compensation tail.
+func TestAnUnsizableHedgeUnwindsSideA(t *testing.T) {
+	t.Parallel()
+	snap, servers := runnableConfigWithSteps(t, "1", "100")
+	servers[0].fillIOC("60") // valid on A's 1-unit grid, off B's 100-unit grid
+
+	rep, err := Run(context.Background(), snap, observability.NewRegistry, io.Discard)
+	if err != nil {
+		t.Fatalf("Run() = %v, want nil", err)
+	}
+	if rep.Sides[1].Open == nil {
+		t.Fatal("side B has no Open report; an ATTEMPT that was refused is not the same as no attempt")
+	}
+	if !errors.Is(rep.Sides[1].Open.Refusal, ErrHedgeUnsizable) {
+		t.Fatalf("side B refusal = %v, want %v", rep.Sides[1].Open.Refusal, ErrHedgeUnsizable)
+	}
+	if servers[1].placeCalls() != 0 || servers[0].placeCalls() != 2 {
+		t.Fatalf("Place calls A/B = %d/%d, want 2/0 — A open plus unwind, nothing on B (refusal %v)",
+			servers[0].placeCalls(), servers[1].placeCalls(), rep.Refusal)
+	}
+}
+
+// TestAHalfOpenPairUnwindsSideA is the case alternative (ii) exists for: side A
+// filled, side B reached Place and came back terminally rejected, and the
+// exposure is closed rather than left for a human. This is specifically the
+// terminal-rejection path, not a Plan refusal.
+func TestAHalfOpenPairUnwindsSideA(t *testing.T) {
+	t.Parallel()
+	snap, servers := runnableConfig(t)
+	servers[0].fillIOC("60")
+	servers[1].rejectPlace() // B's venue refuses; nothing opens there
+
+	rep, err := Run(context.Background(), snap, observability.NewRegistry, io.Discard)
+	if err != nil {
+		t.Fatalf("Run() = %v, want nil", err)
+	}
+	if rep.Sides[0].Unwind == nil {
+		t.Fatalf("no unwind attempted on a half-open pair (verdict %s, refusal %v)", rep.Verdict, rep.Refusal)
+	}
+	if servers[1].placeCalls() != 1 {
+		t.Errorf("side B received %d Place calls; the fixture must REACH the venue, "+
+			"or this is the Plan-refusal path under another name", servers[1].placeCalls())
+	}
+	// The unwind's claims, asserted separately: a close that got the side right
+	// and reduce-only wrong opens fresh exposure while looking like a close.
+	place, ok := servers[0].lastPlace()
+	if !ok {
+		t.Fatal("side A received no order at all")
+	}
+	if !strings.EqualFold(place.Side, "buy") {
+		t.Errorf("unwind side = %q, want buy (the opposite of the sell that opened)", place.Side)
+	}
+	if !place.ReduceOnly {
+		t.Error("unwind reduceOnly = false; a non-reduce-only close can open a position")
+	}
+	if place.Quantity != "60" {
+		t.Errorf("unwind quantity = %q, want the established fill \"60\"", place.Quantity)
+	}
+	first, _ := servers[0].firstPlace()
+	if place.ID == first.ID {
+		t.Error("unwind reused the opening leg's ClientOrderID; §5.3 forbids reuse in the recoverable window")
+	}
+	// And the close is REPORTED: the unwind filled the whole exposure, so the
+	// pair ended flat.
+	if rep.Verdict != VerdictUnopened {
+		t.Errorf("Verdict = %s, want VerdictUnopened — the unwind closed the whole exposure", rep.Verdict)
+	}
+}
+
+// TestASkewedPairIsNotUnwound and TestAnIndeterminatePairIsNotUnwound are D8.
+// A compensating trade is §6.7's gate's business and §6.7 cannot see this pair
+// (record §95 §4), so this root acts on exactly one reading and hands every
+// other to a human. They are separate tests because they arrive from different
+// situations and must not share a fixture.
+func TestASkewedPairIsNotUnwound(t *testing.T) {
+	t.Parallel()
+	snap, servers := runnableConfig(t)
+	servers[0].fillIOC("100")
+	servers[1].fillIOC("60") // partial hedge: both sides exposed, unequally
+
+	rep, err := Run(context.Background(), snap, observability.NewRegistry, io.Discard)
+	if err != nil {
+		t.Fatalf("Run() = %v, want nil", err)
+	}
+	if rep.Verdict != VerdictSkewed {
+		t.Fatalf("Verdict = %s, want VerdictSkewed (refusal %v)", rep.Verdict, rep.Refusal)
+	}
+	for i := range rep.Sides {
+		if rep.Sides[i].Unwind != nil {
+			t.Errorf("side %d was unwound on a skewed pair; §6.7 owns that compensation", i)
+		}
+	}
+	if !errors.Is(rep.Refusal, ErrUnwindRefused) {
+		t.Errorf("Refusal = %v, want %v naming why nothing was compensated", rep.Refusal, ErrUnwindRefused)
+	}
+}
+
+func TestAnIndeterminatePairIsNotUnwound(t *testing.T) {
+	t.Parallel()
+	snap, servers := runnableConfig(t)
+	servers[0].fillIOC("60")
+	servers[1].holdOrderNonTerminal() // B sent, fate unknown
+
+	rep, err := Run(context.Background(), snap, observability.NewRegistry, io.Discard)
+	if err != nil {
+		t.Fatalf("Run() = %v, want nil", err)
+	}
+	if rep.Verdict != VerdictIndeterminate {
+		t.Fatalf("Verdict = %s, want VerdictIndeterminate (refusal %v)", rep.Verdict, rep.Refusal)
+	}
+	if servers[1].placeCalls() != 1 {
+		t.Errorf("side B received %d Place calls; this fixture needs B SENT and unresolved", servers[1].placeCalls())
+	}
+	if rep.Sides[0].Unwind != nil {
+		t.Error("side A was unwound while side B's fate was unknown — the unwind could double the exposure it was meant to close")
+	}
+}
+
+// TestAnUnwindThatFailsLeavesTheReportExposed. The unwind is an order like any
+// other and it can be refused; when it is, the pair is still half-open and the
+// report must say so rather than reporting the attempt as the outcome.
+func TestAnUnwindThatFailsLeavesTheReportExposed(t *testing.T) {
+	t.Parallel()
+	snap, servers := runnableConfig(t)
+	servers[0].fillIOC("60")
+	servers[0].rejectPlaceAfter(1) // the open succeeds; the unwind is refused
+	servers[1].rejectPlace()
+
+	rep, err := Run(context.Background(), snap, observability.NewRegistry, io.Discard)
+	if err != nil {
+		t.Fatalf("Run() = %v, want nil", err)
+	}
+	if rep.Sides[0].Unwind == nil {
+		t.Fatal("no unwind was attempted at all; this test is about a FAILED one")
+	}
+	if rep.Verdict != VerdictHalfOpen {
+		t.Fatalf("Verdict = %s, want VerdictHalfOpen — the unwind did not close it", rep.Verdict)
+	}
+	if !Exposed(rep.Verdict) {
+		t.Error("Exposed = false on a failed unwind")
+	}
+	if servers[0].placeCalls() != 2 {
+		t.Errorf("side A received %d Place calls, want the open plus the refused unwind", servers[0].placeCalls())
+	}
+}
+
+// tightenOrderBudget narrows one side's ORDERS budget to (opening 1, routine 2,
+// capacity 3): one opening order fits, a second does not, and the reserve above
+// the opening ceiling is what §7.6 keeps for Safety traffic.
+func tightenOrderBudget(t *testing.T, cfg *Config, side int) {
+	t.Helper()
+	limits := cfg.Sides[side].OMS.Venue.Limits
+	for i := range limits {
+		if limits[i].Scope == "family" && limits[i].Dimension == "orders" &&
+			limits[i].Product == cfg.Pair.Legs[0].Product {
+			limits[i].OpeningCeiling, limits[i].RoutineCeiling, limits[i].Capacity = 1, 2, 3
+			return
+		}
+	}
+	t.Fatalf("side %d declares no family-scoped orders limit to tighten", side)
+}
+
+// TestTheUnwindIsAdmittedWhereAnOpeningWouldBeRefused is the §7.6 class claim,
+// and it exists because mutating UrgencySafety to UrgencyOpening SURVIVED
+// without it.
+//
+// Reducing exposure is Safety traffic, and the difference is load-bearing
+// rather than cosmetic: the emergency reserve above the opening ceiling is
+// exactly what the order that CLOSES an exposure must be able to spend. Here
+// the opening leg consumes the whole opening budget, so an unwind classed as an
+// opening would be refused a reservation and never reach the venue — leaving
+// the position it was sent to close.
+//
+// The budget is the instrument rather than a latched checklist gate because a
+// gate this root does not own cannot be latched from outside the run, while
+// §7.6's ceilings are configuration and separate the two classes exactly.
+func TestTheUnwindIsAdmittedWhereAnOpeningWouldBeRefused(t *testing.T) {
+	t.Parallel()
+	snap, servers := runnableConfig(t)
+	sideA, _ := snap.Value.sideFor(snap.Value.Pair.Legs[0].Venue)
+	tightenOrderBudget(t, &snap.Value, sideA)
+	servers[sideA].fillIOC("60")
+	servers[1-sideA].rejectPlace() // B refuses, so the pair is half-open on A
+
+	rep, err := Run(context.Background(), snap, observability.NewRegistry, io.Discard)
+	if err != nil {
+		t.Fatalf("Run() = %v, want nil", err)
+	}
+	if rep.Sides[sideA].Unwind == nil {
+		t.Fatalf("no unwind attempted (verdict %s, refusal %v)", rep.Verdict, rep.Refusal)
+	}
+	if rep.Sides[sideA].Unwind.Refusal != nil {
+		t.Fatalf("the unwind was refused: %v — it must ride §7.6's Safety reserve, "+
+			"which is above the opening ceiling the opening leg just consumed",
+			rep.Sides[sideA].Unwind.Refusal)
+	}
+	if n := servers[sideA].placeCalls(); n != 2 {
+		t.Fatalf("side A received %d Place calls, want 2 — the open and the unwind", n)
+	}
+	// The control: the budget really is exhausted for openings, or this test
+	// passes against a ceiling nothing reached.
+	for _, l := range rep.Sides[sideA].RateLimit.Limits {
+		if l.Dimension.String() == "DimensionOrders" && l.Scope.String() == "ScopeFamily" {
+			if l.Used <= l.OpeningCeiling {
+				t.Errorf("orders used = %d against an opening ceiling of %d; the fixture never crossed it "+
+					"and an opening-classed unwind would have been admitted too", l.Used, l.OpeningCeiling)
+			}
+			return
+		}
+	}
+	t.Error("no family-scoped orders limit in the snapshot; the control above checked nothing")
+}
+
+// # A path this package cannot reach, named rather than left to be re-derived
+//
+// The plan asked for a test where side B's leg is refused BY THE DISPATCHER,
+// before Place: `Execute` returns no aggregate error, `LegResult.Err` is
+// non-nil, and nothing reaches the venue. `open` handles that branch, and the
+// branch is load-bearing — reading only the aggregate error is the
+// `if err != nil { return }` reflex the executor's split signature exists to
+// prevent.
+//
+// No fixture here reaches it, and the reason is structural rather than
+// missing effort: every pre-Place refusal inside Dispatch is caused by LOCAL
+// state — an OCC version conflict, a journal fsync failure, a missing venue
+// calibration — none of which a venue double can produce. The two refusals a
+// venue CAN cause arrive elsewhere: a rate-limit reservation is taken for the
+// whole package and surfaces as Execute's aggregate error
+// (TestTheUnwindIsAdmittedWhereAnOpeningWouldBeRefused drives exactly that),
+// and a business rejection crosses the wire and comes back terminal
+// (TestAHalfOpenPairUnwindsSideA).
+//
+// So the branch stands untested from this level. It is listed for the record
+// rather than deleted, because deleting it would restore the reflex.

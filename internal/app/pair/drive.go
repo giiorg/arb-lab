@@ -40,6 +40,17 @@ type drive struct {
 // below resolves the side through sideForLeg, because treating the leg index as
 // a side index is a silent cross-wire that only a reversed document exposes.
 func (d *drive) run() {
+	d.openAndCompose()
+	// ONE tail. Every branch above that composes a verdict reaches this call,
+	// because no composed verdict may bypass compensation through an early
+	// return — including D5's unsizable-hedge path, which is the one that
+	// leaves side A exposed with nothing sent on side B.
+	d.compensate()
+}
+
+// openAndCompose is the drive proper: it opens what it may and leaves a
+// composed verdict in the report. It never compensates — see run.
+func (d *drive) openAndCompose() {
 	sideA := d.sideForLeg(0)
 	sideB := d.sideForLeg(1)
 
@@ -99,6 +110,114 @@ func (d *drive) run() {
 	}
 	d.rep.Verdict, err = Compose(a, d.rep.Sides[sideB].Exposure)
 	d.rep.Refusal = errors.Join(d.rep.Refusal, err)
+}
+
+// compensate is the unwind, and its NARROWNESS is the design (D8).
+//
+// A compensating trade is §6.7's gate's business — "the single gate for every
+// compensating trade" — and record §95 §4 found that §6.7 cannot see a
+// cross-venue pair at all: HedgeGroup is (Account, Venue, Symbol) and the pair
+// sits in two groups with no group holding both. So this root does not get to
+// compensate on a reading it could not fully establish.
+//
+// VerdictHalfOpen with the exposure on leg A is the ONE reading where the answer
+// is unambiguous: A's fill is measured, B opened nothing, and the flat-start
+// gate means closing A returns the account to where it started. Without that
+// gate, an opening sell that merely reduced a pre-existing long would be
+// followed by a reduce-only buy that increases the position. Every other exposed
+// reading ends here for a human:
+//
+//   - VerdictSkewed: both sides carry exposure and the residual is a per-venue
+//     quantity §6.7 exists to size. Unwinding either side by this root's
+//     arithmetic would be that gate's job done outside it.
+//   - VerdictIndeterminate: at least one leg's fate is unknown. An unwind
+//     against an unknown leg can DOUBLE the exposure it meant to close.
+//   - VerdictHalfOpen on leg B: expressible, and out of scope for phase 1 — the
+//     drive opens leg A first, so the only way B is exposed alone is an A fill
+//     that later read as zero, which is a contradiction the run must not
+//     resolve by trading.
+//
+// An unreadable quantity is NOT an unwind. flat's error means leg A's fill was
+// never populated, and Compose has already answered Indeterminate for it — but
+// the guard checks it here rather than resting on that, because a premise about
+// another function's output is exactly the thing that goes stale silently.
+// aFlat stays false on the error path, so the `aErr == nil` term is what
+// refuses.
+func (d *drive) compensate() {
+	sideA := d.sideForLeg(0)
+	exposure := d.rep.Sides[sideA].Exposure
+	aFlat, aErr := flat(exposure.Filled)
+
+	if !(d.rep.Verdict == VerdictHalfOpen && exposure.Established && aErr == nil && !aFlat) {
+		if Exposed(d.rep.Verdict) {
+			d.rep.Refusal = errors.Join(d.rep.Refusal,
+				fmt.Errorf("verdict %s: %w", d.rep.Verdict, ErrUnwindRefused))
+		}
+		return
+	}
+
+	unwound, err := d.unwind(0, exposure.Filled)
+	d.rep.Sides[sideA].Unwind = unwound
+	if err != nil {
+		d.rep.Refusal = errors.Join(d.rep.Refusal, err)
+	}
+	if unwound == nil || unwound.Refusal != nil {
+		// A refused unwind leaves the pair exactly as it was. The verdict is not
+		// touched: the report must state where the pair ENDED, and an attempt is
+		// not an outcome.
+		return
+	}
+
+	// Re-read leg A and recompose. The close counts ONLY when the unwind's own
+	// fill matches the exposure it was sized to: a partial close is still
+	// exposure, and a comparison that accepted "some of it filled" would report
+	// a half-closed pair as unopened — the flattering direction.
+	after, _ := d.establish(0, unwound.ID)
+	if !after.Established {
+		return
+	}
+	cmp, err := after.Filled.Cmp(exposure.Filled)
+	if err != nil || cmp != 0 {
+		return
+	}
+	// Exposure is NOT overwritten: it stays the opening reading, which is a fact
+	// about what the open did and belongs in the report. What changed is the
+	// pair's net position, and the verdict is where that is stated. Nothing here
+	// constructs a zero quantity either — a literal fixedpoint.Quantity{} carries
+	// no asset tag and is precisely the value Sign refuses, so manufacturing one
+	// to mean "flat now" would put an unreadable value into the report.
+	d.rep.Verdict = VerdictUnopened
+}
+
+// unwind plans and sends the reduce-only close of one leg.
+//
+// UrgencySafety, not UrgencyOpening: reducing exposure is §7.6's safety class,
+// and the difference is load-bearing rather than cosmetic. A stale-projection
+// latch raised by the opening leg's own fan-in refuses the next OPENING package
+// at the executor's admission read — and if the unwind were classed as one, the
+// hold that a failed apply raises would block the very order that closes the
+// exposure the hold is about.
+func (d *drive) unwind(leg int, filled fixedpoint.Quantity) (*LegReport, error) {
+	side := d.sideForLeg(leg)
+	m := d.runners[side].Module()
+
+	plan, err := d.cfg.unwindPlan(leg, filled)
+	if err != nil {
+		return &LegReport{Refusal: err}, err
+	}
+	records, err := m.Plan.Plan(plan)
+	if err != nil {
+		return &LegReport{Refusal: err}, err
+	}
+	refs := []application.DispatchRef{{ID: records[0].Order.ClientOrderID, Version: records[0].Version}}
+	ex, err := m.Execute.Execute(d.runners[side].Checklist(), refs, application.UrgencySafety)
+	if err != nil {
+		return &LegReport{ID: refs[0].ID, Refusal: err}, err
+	}
+	if ex.Legs[0].Err != nil {
+		return &LegReport{ID: refs[0].ID, Refusal: ex.Legs[0].Err, Result: ex.Legs[0]}, ex.Legs[0].Err
+	}
+	return &LegReport{ID: refs[0].ID, Result: ex.Legs[0]}, nil
 }
 
 // open plans one leg and executes it.
