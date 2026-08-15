@@ -98,7 +98,7 @@ picked up. #241 unchanged. #235 carries seven; #220, #227, #228 unchanged; **#22
 is widened by one item** (the `ambiguous-order-model.md` SM §1 row). **Six
 `knownStale` markers, all #229's**, per the correction above.
 
-**THREE THINGS NAMED RATHER THAN FIXED, so they are not re-derived as bugs.**
+**FOUR THINGS NAMED RATHER THAN FIXED, so they are not re-derived as bugs.**
 (1) A contradiction found at the **second** look is reported on
 `GateNetDeltaAsserted` while `out.Join` still holds the first look's report
 (`reconcile.go:307`), so the operator report's `contradicted` lines cover the
@@ -110,7 +110,34 @@ rendered today, so there is no defect — the *protection* stops at `Join`'s
 boundary while the report spans both structs. (3) `internal/app/exercise/app.go:142`
 still treats `StateSubmitted` as success, deliberately — the exercise root places
 one order, calls no join, and exits — but it is the consumer whose success
-condition hid this for four slices.
+condition hid this for four slices. (4) `internal/platform/boot/gate.go:369`
+illustrates `OutcomeNeedsOperator` with three examples; the real roster is **five
+causes across seven sites** (`reconcile.go:373`/`:431`/`:435` net-delta,
+`:680` `Unattributed`, `:689` `Contradicted`, `:699` permanent `Unproved`,
+`app/reconcile/app.go:665` account posture), four of them pre-slice. No count
+word, so nothing is false — but `boot` declares no producer roster, so any number
+written about it has to be greped rather than recalled.
+
+**⚠ A DEFECT CLASS THIS SLICE'S OWN REVIEW FOUND, AND IT IS THE MOST TRANSFERABLE
+THING HERE.** `internal/oms/application/resolve.go:397-401` said proved absence is
+an accepted answer *"of `DispatchAuthorized` and `SubmissionUnknown` **and of
+nothing else**"*. `Submitted` now reaches `AbsentAfterFinality`, so the derived set
+has **three** members — and **this slice never opened that file**
+(`git diff … -- resolve.go` is empty). Not a spec deviation: core §5.3 licenses it
+verbatim with *"`DispatchAuthorized` **or beyond**"* (`build-spec.md:518`). The
+code was right; the comment was wrong; it is fixed.
+
+**The lesson is about the search, not the sentence.** The slice-close reading pass
+was scoped to *comment blocks the slice added* — a **diff-scoped** search, which
+cannot find this class by construction. The pass that finds it is keyed off the
+diff's **effects**: *for each derived set or predicate whose value this slice
+moved, grep the tree for prose asserting that value and re-read every hit.* This is
+the slice's signature count-word defect on a **sixth** axis and **the first outside
+the diff** — the five before it (R1, R6, R9, R10, R12) were all in touched files,
+which is what made the weaker generalization look sufficient. Note the second-order
+point: the *derivation* in `resolve.go` worked perfectly, widening with no code
+edit, which is why a listed set was rejected there. **A derived set cannot drift; a
+sentence describing it can.**
 
 **ONE INSTRUMENT PROPOSED AND NOT BUILT, and it is cheap.** SM §1's transitions
 table has now been found incomplete **three times on the same shape**, each fix

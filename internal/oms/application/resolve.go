@@ -397,8 +397,22 @@ func (r *Resolver) Resolve(id ids.ClientOrderID) (Resolution, error) {
 	// The resolvable states are DERIVED from SM §1 rather than listed here: an
 	// order is resolvable by this rule exactly when proved absence is one of the
 	// answers the domain would accept for it. That is true of
-	// DispatchAuthorized and SubmissionUnknown and of nothing else, which is
-	// §5.3's set — and deriving it means the two cannot drift.
+	// DispatchAuthorized, Submitted and SubmissionUnknown and of nothing else,
+	// which is §5.3's set — "an order at DispatchAuthorized OR BEYOND is
+	// resolved only by OrderByClientID/Fills under the venue-specific
+	// stable-not-found rule" (core §5.3 rules) — and deriving it means the two
+	// cannot drift.
+	//
+	// The set was TWO until v0.9.61 and this comment is the only thing in this
+	// file that #242 had to change, which is the derivation earning its keep.
+	// SM §1 gave Submitted no query-resolution row, so Submitted could not
+	// reach AbsentAfterFinality and the gate below excluded it; adding the row
+	// added the target, and the gate widened with it — no edit to the line
+	// below, no edit to this function. A LISTED set would have stayed at two
+	// and disagreed with the machine silently, which is exactly the drift this
+	// derivation exists to make impossible. What it does not protect is the
+	// PROSE: the sentence above was written when the set was two, stayed true-
+	// looking, and had to be corrected by hand one slice later.
 	//
 	// StatePlanned failing this check is the case worth naming: §5.3 says such
 	// an order "was never dispatched (no venue order can exist)", so querying a

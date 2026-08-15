@@ -278,24 +278,59 @@ terminal — *"never a synthetic stable-not-found alone"*, *"the ONE canonical
 boundary"*. Nothing in it forbids proving more before writing less. A marker is
 owed for a **departure from a requirement**; exceeding one is not a departure.
 
-What makes this more than an assertion is that the strengthening is **invariant
-under §6.7's classifier**, which is the only consumer whose verdict could
-observe it:
+What makes this more than an assertion is that the strengthening is **almost
+always invariant under §6.7's classifier** — the only consumer whose verdict could
+observe it — and that the one exception is bounded by a different mechanism. The
+argument is over the **transition withheld**, not over a set of states, and the
+distinction matters: an earlier draft of this section argued it over "every state
+the gate can hold an order in", which is wrong, because `MayExistAtVenue`
+(`orderstate.go:229-233`) admits **all four terminals** and none of those is in
+the `Ambiguous` cell.
 
-- For the three **terminal** targets (`Filled`, `Canceled`, `Rejected`) the sweep
-  is *required* by SM §2 step 3. The gate is not stricter there at all.
-- `AbsentAfterFinality` is refused outright by §10.1.
-- The two **non-terminal** targets are `Acknowledged` and `PartiallyFilled`, and
-  SM §2's `Ambiguous` row (`state-machines.md:122`) lists `DispatchAuthorized` /
+Case by target:
+
+- The **four** terminal targets are `Filled`, `Canceled`, `Rejected` and
+  `AbsentAfterFinality` (`IsTerminal`, `orderstate.go:151`; SM §1
+  `state-machines.md:33`). For the first three the sweep is *required* by SM §2
+  step 3, so the gate is not stricter there at all; `AbsentAfterFinality` is
+  refused outright by §10.1.
+- The two **non-terminal** targets are `Acknowledged` and `PartiallyFilled`. When
+  the stored state is also non-terminal, both sides are in one cell: SM §2's
+  `Ambiguous` row (`state-machines.md:122`) lists `DispatchAuthorized` /
   `Submitted` / `SubmissionUnknown` / `Acknowledged` / `PartiallyFilled` /
-  `CancelPending` / `CancelUnknown` **in one cell**. So every state the gate can
-  hold an order in, and every non-terminal state it declines to advance to, are
-  members of the same classification. The residual is `Ambiguous` either way.
+  `CancelPending` / `CancelUnknown`, and `ContributesPossibleDelta`
+  (`orderstate.go:240-256`) returns true for exactly those seven and false for
+  `Planned` plus the four terminals. The residual is `Ambiguous` either way.
+- When the stored state is **terminal** and the venue reports a non-terminal, the
+  edge is a contradiction (`CanTransition` refuses it), so no advance was
+  available to withhold — `Contradicted`, not `Incomplete`, and the verdict is
+  unchanged by a different route.
 
-The strengthening therefore cannot change a §6.7 verdict. It costs a retry and an
-`Incomplete` line in the report, and a short sweep is retryable on the next poll.
-A state **not** advanced holds the possible-delta interval, which is the
-direction that is right when somebody forgets.
+**The exception, and it is real rather than a technicality.**
+`AbsentAfterFinality → PartiallyFilled`/`Filled` **is** a legal edge — §3.0's
+*"venue reality wins"*, a discovered late execution superseding a proved absence
+(`transition.go:268-274`). There the stored state contributes **no** possible
+delta and the target contributes one, so withholding the advance holds the
+**more optimistic** reading: the system believes there is no exposure while the
+venue is reporting a fill. That is the unsafe direction, and it is the one place
+this strengthening is not free.
+
+**What bounds it is not the classifier but the posture.** The same gate that
+withholds the advance appends to `report.Incomplete`, `joinOutcome` returns
+`boot.OutcomeIncomplete`, and `Outcome.posture()` (`gate.go:505-508`) maps that to
+`PostureReconcileOnly` — **below `PostureTrading`**. So the optimistic reading is
+never traded on: the boot is held, the order id is printed with its reason
+(§10.4), and the next poll's sweep either proves coverage or holds it again.
+The mitigation is a *different* mechanism from the invariance argument, which is
+precisely why it has to be stated rather than assumed — the invariance argument
+does not cover this row, and reading it as though it did is how a later session
+would conclude the gate is free in all cases.
+
+Everywhere else the strengthening costs a retry and an `Incomplete` line, and a
+short sweep is retryable on the next poll. A state **not** advanced holds the
+possible-delta interval, which is the direction that is right when somebody
+forgets — and on the supersession rows it is the direction that is wrong, held
+safe by the posture rather than by the state.
 
 ### 10.3 `Contradicted → OutcomeNeedsOperator` — the cell definition holds it
 
@@ -316,10 +351,30 @@ is both:
 
 So the cell is wide enough and the placement is right. **One deferred minor:**
 the member's summary line (`gate.go:369`) illustrates with *"a foreign order, an
-unexplained position delta, a latched takeover epoch"* — three examples, now four
-producers. There is no count word and the sentence does not claim totality, so it
-is not a false claim; but the list stayed at three while a producer was added, and
-a future reader is one edit away from reading it as a roster. Named, not fixed.
+unexplained position delta, a latched takeover epoch"* — three examples. There is
+no count word and the sentence does not claim totality, so it is not a false
+claim; but the list stayed at three while a producer was added, and a future
+reader is one edit away from reading it as a roster. Named, not fixed.
+
+**The actual roster, counted rather than estimated, because an earlier draft of
+this paragraph wrote "now four producers" and that number was derived from
+nothing.** `boot` declares no producer list, so the count has to come from a
+grep: `OutcomeNeedsOperator` is reported at **seven sites** across **five
+causes** —
+
+| Cause | Sites |
+|---|---|
+| the net-delta assertion holds | `reconcile.go:373` (first look, not spot-delta-only), `:431` (a spot delta stable across two looks), `:435` (the second look surfaced another kind) |
+| `Join.Unattributed` | `reconcile.go:680` |
+| `Join.Contradicted` | `reconcile.go:689` — **this slice's** |
+| an `Unproved` absence a retry cannot lift | `reconcile.go:699` |
+| an unsatisfied account posture | `internal/app/reconcile/app.go:665` |
+
+Four of the five predate #242. The irony is worth keeping rather than editing
+away: **the paragraph observing that `gate.go:369` carries no count word
+introduced one of its own**, in a record whose §12 is about exactly that. A
+count over a set nothing declares is a claim, and this one had to be greped
+before it could be written.
 
 ### 10.4 The grep's path list is short by a directory, and the gate has no executable home
 
@@ -352,9 +407,9 @@ deviation. Three reasons for changing the pattern rather than recording a limit:
    marker somebody must land — which is the gate's purpose. A false negative is a
    slice closing over a deviation nobody sees.
 3. **`cmd/arblab` is now a real site for such claims**, not a hypothetical one:
-   this slice added forty-six lines of them there, and Ruling R6 established that
-   the CLI is *"the consumer of last resort"* for a finding an operator must act
-   on.
+   the file gained 46 lines, **37 of them comment**, and Ruling R6 established
+   that the CLI is *"the consumer of last resort"* for a finding an operator must
+   act on.
 
 **The exact change owed:** `grep -rn "SPEC EDIT OWED" internal/ tools/` →
 `grep -rn "SPEC EDIT OWED" internal/ tools/ cmd/`, in CLAUDE.md's *"Deviations
@@ -447,6 +502,60 @@ recording: **a count word can be wrong and its total right**, because two errors
 in a derived arithmetic can cancel. The brief asked for the number to be verified
 by counting, and counting is what separated them; re-deriving the *decomposition*
 rather than the total is what makes the check bite.
+
+## 11b. A slice falsifies claims in files it never touches, and a diff-scoped reading pass cannot see them
+
+**Found in review, not by me, and the defect is in §10's *method* rather than in
+any of its verdicts.** `internal/oms/application/resolve.go:397-401` carried:
+
+> *"proved absence is one of the answers the domain would accept for it. That is
+> true of `DispatchAuthorized` and `SubmissionUnknown` **and of nothing else**,
+> which is §5.3's set — and deriving it means the two cannot drift."*
+
+`Submitted` now reaches `StateAbsentAfterFinality`, so the derived set has
+**three** members. Verified by probe rather than by reading the switch: calling
+`CanTransition(s, StateAbsentAfterFinality)` for all twelve states returns nil for
+exactly `dispatch_authorized`, `submitted`, `submission_unknown`.
+`git diff e581831..e923a42 -- internal/oms/application/resolve.go` is **empty** —
+this slice never opened the file — and §5 of this record *celebrates* the very
+widening that falsified the sentence.
+
+**Not a spec deviation, and no marker is owed.** Core §5.3's rules paragraph
+(`build-spec.md:518`) licenses it in as many words: *"an order at
+`DispatchAuthorized` **or beyond** is resolved **only** by
+`OrderByClientID`/`Fills` under the venue-specific stable-not-found rule"*, and
+"or beyond" is `Submitted`. **The code is right and the comment was wrong**, so
+the fix is the comment.
+
+**The method lesson, which is why this is recorded rather than just patched.**
+§10's reading pass was scoped to *"every comment block this slice added that cites
+a spec section"* — a **diff-scoped** search. That scope cannot find this class by
+construction: the falsified claim is in a file with no diff. Task 2's review
+missed it on the same axis, having verified that `resolve.go` correctly *gained*
+`Submitted` without asking what the file already *said* about the set's size.
+
+The search that finds it is keyed off the diff's **effects** rather than its
+**lines**: *which existing claims does this slice's behaviour change?* Concretely,
+for each domain predicate or derived set whose value this slice moved
+(`successors(StateSubmitted)`, and therefore `CanTransition(_, AbsentAfterFinality)`
+and `Resolver`'s entry gate), grep the tree for prose asserting that value — a
+count, a membership list, an "and nothing else" — and re-read every hit. Cheap,
+and it is the only pass that reaches untouched files.
+
+This is the slice's signature defect on a sixth axis and **the first instance in
+code the slice never edited**. The five before it were all inside the diff:
+`joinOutcome`'s three enumerations (R1), the renderer's fourth (R6), the
+renderer's "every other finding" (R9), the reflection guard's type scope (R12),
+and `record.go`'s doc list (R10). The generalization those five suggested was
+*"an enumeration this slice touched may have stopped being total"*. The correct
+one is stronger and has no `git diff` in it: **an enumeration this slice's
+BEHAVIOUR falsified may live anywhere.**
+
+Related and distinct, worth not conflating: the derivation in `resolve.go` did
+its job perfectly — the gate widened with no code edit, which is exactly why a
+listed set was rejected there. What has no failing state is the **prose beside
+it**. A derived set cannot drift; a sentence describing the derived set can, and
+does, silently.
 
 ## 12b. `adr-history.md` gained a record block its own status line cannot announce
 
