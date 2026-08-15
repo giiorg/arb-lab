@@ -386,9 +386,21 @@ func (r *Reconciler) Reconcile(c *boot.Checklist) (Reconciliation, error) {
 			out.Cause = err
 			return out, c.Report(boot.GateNetDeltaAsserted, boot.OutcomeFailed)
 		}
-		if len(second.Incomplete) > 0 || len(second.Unattributed) > 0 {
-			// The re-join itself did not conclude: the world is still moving,
-			// and a delta computed over it proves nothing either way.
+		if len(second.Incomplete) > 0 || len(second.Unattributed) > 0 || len(second.Contradicted) > 0 {
+			// The re-join did not settle what this gate needs settled: a sweep
+			// short of the instant it was asked about, an execution it cannot
+			// name, or a lifecycle reading SM §1 has no edge to. Only the first
+			// is the world still moving — the other two concluded, and
+			// concluded in disagreement — but a delta computed over any of the
+			// three proves nothing either way.
+			//
+			// A contradiction is not retryable, and reporting it Incomplete
+			// here loses no escalation: the next boot's FIRST-look join meets
+			// the same one and joinOutcome latches NeedsOperator on
+			// GateVenueJoined, which is the gate whose evidence it is. This
+			// gate asks the narrower question — would a delta computed over
+			// this re-join prove anything — and over a contradiction it would
+			// not.
 			return out, c.Report(boot.GateNetDeltaAsserted, boot.OutcomeIncomplete)
 		}
 		if newAbsence(joined.Absent, second.Absent) {
@@ -665,6 +677,15 @@ func (r *Reconciler) joinOutcome(out Reconciliation) boot.Outcome {
 	// exists whether or not we can attribute it. Not lifted by running the join
 	// again: the same account answers the same way.
 	if len(out.Join.Unattributed) > 0 {
+		return boot.OutcomeNeedsOperator
+	}
+	// Two well-formed readings SM §1 has no edge between. Not lifted by running
+	// the join again — the same account answers the same way — and it sits above
+	// Incomplete for exactly that reason: Incomplete's cell is "ran, concluded,
+	// work remains", and no further work reconciles a venue that reports Rejected
+	// about an order this system watched go live. What an operator is being asked
+	// to decide is which of the two records is about the order they think it is.
+	if len(out.Join.Contradicted) > 0 {
 		return boot.OutcomeNeedsOperator
 	}
 	// An absence §5.3 can NEVER prove is an order that will be just as

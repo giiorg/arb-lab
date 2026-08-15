@@ -563,6 +563,27 @@ func TestRecordSpotBaselineRefusesAnUnattributedExecution(t *testing.T) {
 	}
 }
 
+// TestRecordSpotBaselineRefusesAContradictedOrder: the log says this order
+// FILLED and the venue says the venue REJECTED it — two well-formed readings
+// SM §1 has no edge between. A baseline is an attestation, and which of the
+// two records it would be attesting about is not settled.
+func TestRecordSpotBaselineRefusesAContradictedOrder(t *testing.T) {
+	t.Parallel()
+
+	h := happyHarness(t)
+	// The executed quantity is UNCHANGED at 0.5, and that is the collapse
+	// guard rather than tidiness: move it and the cross-check disagrees, the
+	// Unattributed refusal fires one line earlier, and this test would pass
+	// with the contradiction refusal deleted. Only the STATE differs from the
+	// happy harness.
+	h.reader.statuses[recordFilledID] = []venue.OrderStatus{presentStatus(t, venue.OrderStateRejected, "0.5")}
+	m := newModule(t, h.deps)
+
+	if _, err := m.RecordSpotBaseline(h.path, h.rdeps); !errors.Is(err, oms.ErrRecordContradicted) {
+		t.Fatalf("RecordSpotBaseline = %v, want ErrRecordContradicted", err)
+	}
+}
+
 // TestRecordSpotBaselineRefusesAnUnpinnedBalance: a baseline is an
 // attestation, and attesting an ambiguous B stores the ambiguity as fact — so
 // an unpinned coverage row refuses on the FIRST read, before the settle

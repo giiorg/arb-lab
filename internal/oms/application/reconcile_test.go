@@ -578,6 +578,64 @@ func TestReconcileAnUnattributedExecutionNeedsAnOperator(t *testing.T) {
 	}
 }
 
+// TestReconcileHoldsForOperatorOnAContradictedOrder.
+//
+// A contradiction is not retryable and the direction matters: the same account
+// answers the same way on the next boot, so an outcome that permitted a retry
+// would let a deployment boot forever over two readings that can never agree.
+// It sits with Unattributed rather than with Incomplete for that reason —
+// Incomplete's cell means "ran, concluded, work remains", and no further work
+// changes this one.
+func TestReconcileHoldsForOperatorOnAContradictedOrder(t *testing.T) {
+	t.Parallel()
+
+	bad := replayOrder(t, mintedID(t, 1))
+	good := joinOrder(t, 2, perp(), domain.SideBuy, "0.2")
+	f := newReconcileFixture(t, joinNow,
+		append(
+			replayScript(t, 1, bad, joinNow.Add(-time.Hour), domain.StateAcknowledged),
+			replayScript(t, 4, good, joinNow.Add(-time.Hour), domain.StatePartiallyFilled)...)...)
+
+	// The contradiction: this system watched the order go live, the venue calls
+	// it a submission-time rejection, and SM §1 has no edge between the two.
+	f.joinVenue.status[bad.ClientOrderID] = venueSays(t, domain.StateRejected, "V-1", "0")
+	// The positive control in the same run — a reading SM §1 DOES have an edge
+	// to, so this is not a join that objected to everything. It also keeps
+	// checklist item 2: two orders, two replayed states, two venue readings.
+	f.joinVenue.status[good.ClientOrderID] = venueSays(t, domain.StateFilled, "V-2", "0.2")
+	f.joinVenue.sweeps[perp()] = ports.ExecutionSweep{
+		Executions: []ports.VenueExecution{execution(t, "E-1", good.ClientOrderID, "V-2", "0.2")},
+	}
+	f.positions.reports[perpScopeFor()] = ports.PositionReport{}
+
+	c := bootChecklist(t)
+	got, err := f.reconciler.Reconcile(c)
+	if err != nil {
+		t.Fatalf("Reconcile = %v, want nil", err)
+	}
+	if len(got.Join.Contradicted) != 1 {
+		t.Fatalf("contradicted = %v, want the one order whose two readings have no edge between them",
+			got.Join.Contradicted)
+	}
+	// The collapse guard, and it is what makes the two assertions below mean
+	// anything: the ladder's first holding case wins, so a fixture that also
+	// produced an unattributed execution, a truncated sweep or an unproved
+	// absence would report NeedsOperator with this rung deleted.
+	if len(got.Join.Unattributed) != 0 || len(got.Join.Incomplete) != 0 || len(got.Unproved) != 0 {
+		t.Fatalf("unattributed=%v incomplete=%v unproved=%v, want none of them — an earlier rung would be answering",
+			got.Join.Unattributed, got.Join.Incomplete, got.Unproved)
+	}
+	if got.Join.Advanced != 1 {
+		t.Errorf("advanced = %d, want 1 — the second order is the positive control", got.Join.Advanced)
+	}
+	if o := outcomeOf(t, c, boot.GateVenueJoined); o != boot.OutcomeNeedsOperator {
+		t.Errorf("GateVenueJoined = %s, want OutcomeNeedsOperator", o)
+	}
+	if !latched(t, c, boot.GateVenueJoined) {
+		t.Error("two readings that can never agree did not latch — the next boot answers the same way")
+	}
+}
+
 func TestReconcileATruncatedSweepIsIncomplete(t *testing.T) {
 	t.Parallel()
 

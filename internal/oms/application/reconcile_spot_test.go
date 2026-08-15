@@ -172,6 +172,53 @@ func TestReconcileAnOrderNewlyAbsentInTheSecondLookIsIncomplete(t *testing.T) {
 	}
 }
 
+// TestReconcileAContradictionInTheSecondLookIsIncomplete is the same shape one
+// finding over: the venue's LIFECYCLE reading changes inside the bracket to one
+// SM §1 has no edge to, so the re-join concluded in disagreement rather than
+// agreement — and a delta computed over two records that disagree about what
+// this order IS proves nothing about the wallet.
+//
+// The escalation is not lost by answering Incomplete here. The next boot's
+// FIRST-look join meets the same contradiction and joinOutcome's rung latches
+// NeedsOperator on GateVenueJoined, which is the gate whose evidence it is.
+// This gate's question is the narrower one.
+func TestReconcileAContradictionInTheSecondLookIsIncomplete(t *testing.T) {
+	t.Parallel()
+
+	f, buy := spotDeltaBoot(t, true)
+	// The first look is CLEAN — the venue's reading equals the replayed state,
+	// so no rung of joinOutcome answers and GateVenueJoined passes. That is what
+	// makes this gate's answer this gate's: with a contradiction at the first
+	// look, Site A's rung would hold the boot before the bracket ever ran.
+	f.onWait = func() {
+		// Filled → Rejected: two terminal readings, no edge between them. The
+		// cumulative is UNCHANGED at 0.5, so the cross-check still agrees and
+		// the sweep still proves through — a contradiction and nothing else.
+		f.joinVenue.status[buy.ClientOrderID] = venueSays(t, domain.StateRejected, "V-1", "0.5")
+	}
+	c := bootChecklist(t)
+	got, err := f.reconciler.Reconcile(c)
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(got.Join.Contradicted) != 0 {
+		t.Fatalf("first-look contradicted = %v, want none — Site A's rung would answer instead",
+			got.Join.Contradicted)
+	}
+	if o := outcomeOf(t, c, boot.GateVenueJoined); o != boot.OutcomePassed {
+		t.Fatalf("GateVenueJoined = %s, want OutcomePassed — the first look must be clean", o)
+	}
+	if o := outcomeOf(t, c, boot.GateNetDeltaAsserted); o != boot.OutcomeIncomplete {
+		t.Errorf("GateNetDeltaAsserted = %s, want OutcomeIncomplete — the re-join disagreed with itself", o)
+	}
+	if latched(t, c, boot.GateNetDeltaAsserted) {
+		t.Error("a delta computed over a contradicted re-join latched — that is a permanent incident minted from a record we cannot read")
+	}
+	if len(f.waits) != 1 {
+		t.Errorf("waits = %v, want exactly one bracket", f.waits)
+	}
+}
+
 // TestReconcileAnAbsenceInBothLooksStillLatchesAStableDelta is the §70i
 // control: an order absent at BOTH looks was resolved through §5.3 before the
 // first assert ever ran, and it re-reports absent on every boot for as long

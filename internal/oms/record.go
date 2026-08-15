@@ -127,10 +127,13 @@ type AbsorbedDelta struct {
 // different operator conversation: an open spot order (wait for terminal), an
 // incomplete sweep (retry), an unattributed execution (the non-negotiable one
 // — real exposure with no owner, and recording over it folds it into "not
-// ours" permanently), an unproved absence (§5.3's timers have not concluded),
-// a stale projection (fix the store first), an unpinned balance row (a resting
-// order or borrow — resolve it, then record), and either surface moving
-// across the settle window (the world is still trading; run it again).
+// ours" permanently), a contradicted lifecycle reading (the venue and this
+// system hold states SM §1 has no edge between, so it is not settled which
+// record the baseline would be about), an unproved absence (§5.3's timers have
+// not concluded), a stale projection (fix the store first), an unpinned
+// balance row (a resting order or borrow — resolve it, then record), and
+// either surface moving across the settle window (the world is still trading;
+// run it again).
 func (m *Module) RecordSpotBaseline(path string, deps RecordBaselineDeps) (RecordedBaseline, error) {
 	var out RecordedBaseline
 	if deps.Fingerprint == "" {
@@ -175,7 +178,7 @@ func (m *Module) RecordSpotBaseline(path string, deps RecordBaselineDeps) (Recor
 		return out, fmt.Errorf("record baseline replay: %w", err)
 	}
 
-	// 2. Join: sweep concluded, cross-check agreed.
+	// 2. Join: sweep concluded, cross-check agreed, lifecycle readings agreed.
 	joined, err := m.Join.Join(rec.Dispatched)
 	if err != nil {
 		return out, fmt.Errorf("record baseline join: %w", err)
@@ -185,6 +188,16 @@ func (m *Module) RecordSpotBaseline(path string, deps RecordBaselineDeps) (Recor
 	}
 	if len(joined.Incomplete) > 0 {
 		return out, fmt.Errorf("orders %v: %w", joined.Incomplete, ErrRecordSweepIncomplete)
+	}
+	// The third condition, and it is about STATE where the two above are about
+	// quantity. A baseline is an attestation of `B − ours`, and `ours` is
+	// summed over the spot orders' cumulatives — so recording over two
+	// histories SM §1 has no edge between mints a permanent fact from a
+	// projection it is not settled we can read. It refuses rather than waits,
+	// like every other arm here, and unlike Incomplete it is not the kind of
+	// refusal a retry lifts: the same account answers the same way.
+	if len(joined.Contradicted) > 0 {
+		return out, fmt.Errorf("orders %v: %w", joined.Contradicted, ErrRecordContradicted)
 	}
 
 	// 3. Every absence through §5.3's rule — a pending absence refuses, a
@@ -531,8 +544,9 @@ func balanceEvidenceEqual(a, b recordEvidence) bool {
 }
 
 // The record gauntlet's refusals. Each is its own sentinel because §70h item
-// 8's claim is behavioural: four distinct refusals, or the gauntlet collapses
-// into "something refused".
+// 8's claim is behavioural: distinct refusals on distinct fixtures, or the
+// gauntlet collapses into "something refused". Item 8 enumerated four; the
+// roster has grown past them and the rule is what carries, not the count.
 var (
 	ErrRecordFingerprintUnset  = errors.New("oms: record baseline needs the transport credential fingerprint")
 	ErrRecordSettleUnwired     = errors.New("oms: record baseline needs the settle bracket (spot_settle and a wait)")
@@ -541,6 +555,7 @@ var (
 	ErrRecordSpotOrderOpen     = errors.New("oms: record baseline refused — a spot order is not terminal")
 	ErrRecordSweepIncomplete   = errors.New("oms: record baseline refused — an executions sweep did not conclude")
 	ErrRecordUnattributed      = errors.New("oms: record baseline refused — an execution the cross-check could not attribute is real exposure with no owner")
+	ErrRecordContradicted      = errors.New("oms: record baseline refused — the venue and this system report lifecycle states SM §1 has no edge between, so which record the baseline describes is not settled")
 	ErrRecordAbsenceUnproved   = errors.New("oms: record baseline refused — an absent order §5.3 has not concluded about")
 	ErrRecordProjectionStale   = errors.New("oms: record baseline refused — a resolved state did not reach the projection")
 	ErrRecordBalanceUnpinned   = errors.New("oms: record baseline refused — a coverage asset's balance could not be pinned this read")
