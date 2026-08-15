@@ -137,17 +137,29 @@ func writeReconcileDiagnosis(w io.Writer, r appreconcile.Report) {
 	// # An obligation, because the last version of this comment stated a FACT
 	// # and the fact was false
 	//
-	// Every per-order finding list `application.Join` carries is rendered here,
-	// and a list added there OWES a loop here. That is deliberately a standing
-	// obligation rather than a description of today's membership. Task #242
-	// added Contradicted and found this renderer printing neither it nor
-	// Unattributed; the comment then written to fix that claimed the renderer
-	// enumerated "every other finding", while Incomplete was unrendered the
-	// whole time. A totality claim in prose decays silently and re-reading it
-	// is the only thing that catches it — which is the defect class this slice
-	// exists for, one layer out. So the claim is ENFORCED by
-	// TestReconcileReportRendersEveryJoinFindingList rather than asserted here,
-	// and Absent's exemption is recorded there with its reason.
+	// Every per-order finding list `application.Join` carries is EITHER
+	// rendered here OR exempt by name, with its reason, in
+	// TestReconcileReportRendersEveryJoinFindingList — and a list added there
+	// owes one or the other. Absent is today's only exemption. The disjunction
+	// is not hedging: the previous wording said every list is rendered here,
+	// which is false of Absent and was rescued only by an exemption clause
+	// several lines further down. A sentence true by virtue of a distant
+	// clause is the same prose shape as a totality claim true only until
+	// somebody edits elsewhere (ruling R13).
+	//
+	// That is a standing obligation rather than a description of today's
+	// membership, and it is ENFORCED rather than asserted — because three
+	// versions of this claim have now decayed silently. Task #242 added
+	// Contradicted and found this renderer printing neither it nor
+	// Unattributed; the comment then written to repair that claimed the
+	// renderer enumerated "every other finding", while Incomplete was
+	// unrendered the whole time; the test then written to enforce THAT
+	// selected one exact element type, so a finding list of any other shape —
+	// an id carried beside its reason, which Reconciliation.Unproved already
+	// is — fell out of the guard without changing a thing it asserted (ruling
+	// R12). Each version read as true and was checked by nothing. The failing
+	// state now lives in the test, which is the only thing that has ever
+	// caught this.
 	//
 	// The omission was not cosmetic. All three of these hold GateVenueJoined
 	// below PostureTrading, so the boot stops and Blocking() names the gate —

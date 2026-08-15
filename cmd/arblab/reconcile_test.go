@@ -304,9 +304,24 @@ func TestReconcileReportGoldenNoMiss(t *testing.T) {
 // for "the id reached the output at all", and the probe id is unique per
 // field — so no other line can supply it, which is what the fallback-superset
 // trap punishes.
+//
+// # The selector is every SLICE, and that is the third version of this defect
+//
+// The first version of this test selected fields whose type was exactly
+// []ids.ClientOrderID. That guard went stale silently in precisely the way
+// the prose it replaced went stale: adding Repudiated []UnprovedOrder to
+// application.Join left it PASSING, no output, `checked` untouched (ruling
+// R12). Reconciliation.Unproved is already that shape, and the obvious next
+// edit to Contradicted — carry the venue's state beside the id — would have
+// dropped an already-covered field out of the guard while `checked` merely
+// went 3 to 2, which no assertion here could see.
+//
+// A guard's selector has to be at least as wide as the claim it backs, or the
+// claim is narrower than it reads. The claim is about every per-order finding
+// list, so the selector is every slice: Join's counters are ints and drop out
+// on their own, a field that changes ELEMENT type stays selected, and a slice
+// this test cannot plant a probe into fails loudly rather than falling out.
 func TestReconcileReportRendersEveryJoinFindingList(t *testing.T) {
-	orderList := reflect.TypeOf([]ids.ClientOrderID(nil))
-
 	// Absent is exempt, and the reason is a claim about EVIDENCE rather than a
 	// convenience: an absence is not a finding yet. The venue not holding an
 	// order licenses nothing until §5.3's rule runs, so it renders as the
@@ -315,10 +330,17 @@ func TestReconcileReportRendersEveryJoinFindingList(t *testing.T) {
 	// would report a verdict the join is forbidden to reach.
 	exempt := map[string]string{"Absent": "rendered as the absent: count plus §5.3's per-order unproved lines"}
 
+	isFindingList := func(f reflect.StructField) bool { return f.Type.Kind() == reflect.Slice }
+
+	// The exemption pre-check, and it is this test's real vacuity anchor
+	// rather than the checked > 0 below: it demands that Absent still EXIST on
+	// application.Join and still be selected by the same predicate the loop
+	// uses. So a rename, a retype, or a broken selector fails HERE, by name,
+	// before the loop can quietly match nothing.
 	joinType := reflect.TypeOf(application.Join{})
 	for name := range exempt {
 		f, ok := joinType.FieldByName(name)
-		if !ok || f.Type != orderList {
+		if !ok || !isFindingList(f) {
 			t.Fatalf("exemption names %q, which is not a per-order finding list on application.Join — "+
 				"a stale exemption silently un-checks a field", name)
 		}
@@ -327,7 +349,7 @@ func TestReconcileReportRendersEveryJoinFindingList(t *testing.T) {
 	checked := 0
 	for i := range joinType.NumField() {
 		f := joinType.Field(i)
-		if f.Type != orderList {
+		if !isFindingList(f) {
 			continue
 		}
 		if _, skip := exempt[f.Name]; skip {
@@ -338,27 +360,73 @@ func TestReconcileReportRendersEveryJoinFindingList(t *testing.T) {
 		// One field at a time, with an id nothing else in the report can
 		// produce: if the line appears, it appeared because THIS list was
 		// rendered.
-		probe := ids.ClientOrderID("probe-" + f.Name)
+		probe := "probe-" + f.Name
+		elem := reflect.New(f.Type.Elem()).Elem()
+		if !plantProbe(elem, probe) {
+			t.Fatalf("application.Join.%s is a finding list this test cannot probe: nothing settable and "+
+				"string-shaped in %s. Give it an id the probe can plant, or exempt it by name with its "+
+				"reason — a list the guard cannot probe must not fall OUT of the guard",
+				f.Name, f.Type.Elem())
+		}
+		list := reflect.MakeSlice(f.Type, 1, 1)
+		list.Index(0).Set(elem)
+
 		var join application.Join
-		reflect.ValueOf(&join).Elem().Field(i).Set(reflect.ValueOf([]ids.ClientOrderID{probe}))
+		reflect.ValueOf(&join).Elem().Field(i).Set(list)
 
 		var buf bytes.Buffer
 		writeReconcileReport(&buf, appreconcile.Report{
 			Reconciliation: application.Reconciliation{Join: join},
 		})
-		if !strings.Contains(buf.String(), string(probe)) {
+		if !strings.Contains(buf.String(), probe) {
 			t.Errorf("application.Join.%s is a per-order finding list the diagnosis never renders — "+
 				"a boot it holds would name no order and no reason:\n%s", f.Name, buf.String())
 		}
 	}
 
-	// A vacuous pass and a clean pass look identical: if the type match ever
-	// stopped selecting anything, the loop above would check nothing and
-	// report success. No expected COUNT is pinned — that would be the same
-	// decaying claim this test replaces — only that the property has subjects.
+	// A vacuous pass and a clean pass look identical. This is the weaker of
+	// the two vacuity guards — the pre-check above catches a broken selector
+	// first, and by name — but it is what remains true if every field were
+	// exempted. No expected COUNT is pinned: that would be the same decaying
+	// claim this test replaces, only that the property has subjects.
 	if checked == 0 {
 		t.Fatal("no per-order finding list was checked; the field selection matched nothing and this test proved nothing")
 	}
+}
+
+// plantProbe writes id somewhere inside v — one ELEMENT of a finding list —
+// and reports whether it found anywhere to write it.
+//
+// A finding list's element is an id today and may be a struct carrying the id
+// beside its reason tomorrow (Reconciliation.Unproved already is), so the
+// probe follows the shape rather than naming a type. It prefers a
+// ClientOrderID field, because a struct with several strings should be probed
+// through the one the renderer is most likely to print; failing that it takes
+// the first settable string it finds. Returning false is not a fallback, it is
+// the caller's t.Fatalf: default-deny, so an element shape nobody anticipated
+// stops this test rather than silently leaving its field unchecked.
+func plantProbe(v reflect.Value, id string) bool {
+	orderID := reflect.TypeOf(ids.ClientOrderID(""))
+	switch v.Kind() {
+	case reflect.String:
+		if !v.CanSet() {
+			return false
+		}
+		v.SetString(id)
+		return true
+	case reflect.Struct:
+		for i := range v.NumField() {
+			if v.Type().Field(i).Type == orderID {
+				return plantProbe(v.Field(i), id)
+			}
+		}
+		for i := range v.NumField() {
+			if plantProbe(v.Field(i), id) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func goldenQty(t *testing.T, asset, v string) fixedpoint.Quantity {
