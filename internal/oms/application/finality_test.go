@@ -197,9 +197,12 @@ func TestAPlacedOrderReachesEveryTerminalTheVenueCanReport(t *testing.T) {
 		},
 		{
 			// An explicit venue rejection. Distinct evidence class from proved
-			// absence (FLAG-2), and one of the TWO targets Submitted could already
-			// reach before this slice widened the row — Acknowledged is the other,
-			// and the pair is worth naming: the defect was never "no legal edge"
+			// absence (FLAG-2), and a target Submitted could already reach before
+			// this slice widened the row — Acknowledged is the other one OF THE
+			// READINGS THIS TABLE DRIVES, and the scoping is the claim: pre-slice
+			// successors(Submitted) also held SubmissionUnknown, which no §4 ACL
+			// reading produces, so it is legal and undrivable from here. Worth
+			// naming because the defect was never "no legal edge"
 			// alone. Two of these five rows were legal the whole time and no order
 			// took either, because nothing called the write.
 			name: "venue rejection", venueState: domain.StateRejected,

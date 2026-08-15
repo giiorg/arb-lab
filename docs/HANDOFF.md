@@ -128,6 +128,15 @@ order (`:1010-1019`). Those reach `reconcile.go:308-311` as `boot.OutcomeFailed`
 hole (nothing trades either way, and no shipped `toDomainState` arm emits
 `AbsentAfterFinality`), but it means the port defence fires only on boots whose
 sweep reaches the watermark. Record §10.2's PORT exception.
+(6) **`arblab record` now MOVES ORDER STATES as a side effect of taking a spot
+baseline.** `RecordSpotBaseline` calls `m.Join.Join(rec.Dispatched)` at
+`internal/oms/record.go:192` — step 2 of its gauntlet — and since #242 that call
+journals and applies the venue's reading instead of only reporting it. Not a new
+*class* of write on that root (the join was already there, and the baseline
+already refused on its findings), so no code change is owed; written down here
+because "taking a baseline" does not sound like a write path, and the next
+session to reason about which roots mutate order state should not have to
+re-derive it. Reached from `internal/app/reconcile/record.go:84`.
 
 **⚠ A DEFECT CLASS THIS SLICE'S OWN REVIEW FOUND, AND IT IS THE MOST TRANSFERABLE
 THING HERE.** `internal/oms/application/resolve.go:397-401` said proved absence is
@@ -153,7 +162,14 @@ wrong** when the slice arrived (R10, HANDOFF's own `knownStale` five, Task 6's
 brief's delta count — re-derivation finds those, not search scope). What makes
 `resolve.go` distinctive is a checkable property rather than a position in a
 count: **it is the first of the falsified group found in a file with an empty
-diff.** Second-order point worth keeping: the *derivation* in `resolve.go` worked
+diff.** **The branch review then sharpened that: the empty-diff property belongs
+to the HUNK, not the file.** `transition.go:77-79`'s *"two states share it"* was
+falsified by the `case StateSubmitted:` arm **109 lines below it in the same
+function**, added by this slice's own first commit `9b87b17` — one hunk at `:184`,
+nothing else in the file touched. A file-level `git diff --stat` marks that file
+as *touched* and would have discharged it, so the effect-keyed pass must also
+**re-read the whole surrounding declaration**: the falsifying edit and the
+falsified sentence are routinely within scroll distance and in different hunks. Second-order point worth keeping: the *derivation* in `resolve.go` worked
 perfectly, widening with no code edit, which is why a listed set was rejected
 there. **A derived set cannot drift; a sentence describing it can.**
 

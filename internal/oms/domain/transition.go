@@ -75,8 +75,10 @@ func CanTransition(from, to OrderState) error {
 // keeps it on the stack.
 func successors(from OrderState) ([]OrderState, error) {
 	// resolved is the outcome set of an OrderByClientID/Fills query on an order
-	// whose disposition is unknown. Named once because two states share it, and
-	// they must: the second is the finding recorded below.
+	// whose disposition is unknown. Named once because the query-resolution rows
+	// share it, and they must: every one of them beyond SubmissionUnknown's own
+	// is a finding recorded below — the same omission found again on a new axis,
+	// which is why the set is shared rather than restated per row.
 	//
 	// [SPEC EDIT LANDED — v0.9.34] StateCanceled was NOT in this set, and its
 	// absence is the v0.9.11 venue-initiated-termination finding repeating on the
@@ -103,7 +105,10 @@ func successors(from OrderState) ([]OrderState, error) {
 	// leaves a wrong edge as the only legal one is worse than a missing edge.
 	//
 	// SM §1's transitions table now carries Canceled among the query-resolution
-	// targets for both source states. The evidence rule is unchanged and is the
+	// targets for every state carrying a query-resolution row — which holds by
+	// construction on this side, since every such row returns this one slice, so
+	// a row added later cannot acquire a different target set by accident. The
+	// evidence rule is unchanged and is the
 	// one this state has always carried: an explicit venue-terminal record PLUS
 	// the final executions sweep, never a cancel ack alone (SM §2 step 3).
 	resolved := []OrderState{
@@ -119,8 +124,9 @@ func successors(from OrderState) ([]OrderState, error) {
 		return []OrderState{StateDispatchAuthorized}, nil
 
 	case StateDispatchAuthorized:
-		// [SPEC EDIT LANDED — v0.9.11] SM §1's transitions table gives this state exactly two
-		// rows — "send returns → Submitted" and "no-return / crash →
+		// [SPEC EDIT LANDED — v0.9.11] Before this edit SM §1's transitions table gave this
+		// state two rows and no others — "send returns → Submitted" and
+		// "no-return / crash →
 		// DispatchAuthorized (stays)" — and the second names the resolution
 		// ("resolved by query only") in its ACTION column while leaving the
 		// target column pointing back here. Read as the table alone, an order
@@ -144,9 +150,11 @@ func successors(from OrderState) ([]OrderState, error) {
 		// is alerted about an order the venue may well have filled hours ago, and
 		// nothing anywhere reports an error.
 		//
-		// SM §1's transitions table now carries the five query-resolution edges,
-		// same set and same evidence rules as SubmissionUnknown's — the exit the
-		// "stays" row's action column named but never targeted.
+		// SM §1's transitions table now carries this state's query-resolution
+		// edges, the same set and the same evidence rules as SubmissionUnknown's —
+		// the exit the "stays" row's action column named but never targeted. The
+		// set is named once above rather than counted here, because v0.9.34 later
+		// added a member to it and a number written here would not have moved.
 		//
 		// [SPEC EDIT LANDED — v0.9.11] The StateSubmissionUnknown edge is a SECOND silence in
 		// the same row, and it is the one the core states in words while SM §1

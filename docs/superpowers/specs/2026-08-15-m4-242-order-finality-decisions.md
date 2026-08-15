@@ -660,6 +660,23 @@ made the weaker generalization —
 sufficient. The correct one has no `git diff` in it: **an enumeration this
 slice's BEHAVIOUR falsified may live anywhere.**
 
+**And the empty-diff property belongs to the HUNK, not to the file** — the branch
+review found the sharpest case of all, and it is in the file this slice edited.
+`transition.go:77-79` said `resolved` is *"named once because **two states** share
+it"*; the `case StateSubmitted:` arm added by `9b87b17` — **this slice's own first
+commit** — made it three, and `git diff e581831..2dbbff9 -- transition.go` shows a
+**single hunk at `:184`**, so lines 77-112 have an empty diff inside a file with a
+very non-empty one. Same file, same function, 109 lines apart. So the property
+that made `resolve.go` findable does not narrow the search the way it first looks:
+a file-level `git diff --stat` marks `transition.go` as touched and would have
+*discharged* it. The pass has to be keyed off the diff's effects and then read the
+whole surrounding declaration, because **the falsifying edit and the falsified
+sentence are routinely in each other's scroll distance and in different hunks.**
+Along with it, `:105-106`'s *"both source states"* and `:147`'s *"the **five**
+query-resolution edges"* (the latter already wrong on arrival — v0.9.34 added the
+sixth member, so it belongs to the second group above). All three are weakened
+rather than re-counted, per §12c.
+
 Related and distinct, worth not conflating: the derivation in `resolve.go` did
 its job perfectly — the gate widened with no code edit, which is exactly why a
 listed set was rejected there. What has no failing state is the **prose beside
