@@ -128,6 +128,24 @@ func writeReconcileDiagnosis(w io.Writer, r appreconcile.Report) {
 		rec.Recovery.Records, len(rec.Recovery.Dispatched))
 	fmt.Fprintf(w, "joined:   %d orders, %d fills admitted, %d duplicates\n",
 		rec.Join.Orders, rec.Join.Fills, rec.Join.Duplicates)
+	// The two join findings that LATCH, directly under the `joined:` line they
+	// qualify and in joinOutcome's own ladder order — most restrictive first,
+	// which is that ladder's rule and now this report's. The absence block
+	// below is the same gate's retryable half (§5.3 concludes most of them), so
+	// it reads after: an operator triaging a held boot wants the orders no
+	// retry will clear before the ones the next boot may.
+	//
+	// Until task #242 the renderer printed NEITHER, while enumerating every
+	// other finding the diagnosis carries. A boot could therefore halt with
+	// `blocking: [GateVenueJoined]` and name no order and no reason — held, and
+	// not told what for. The rule the omission broke is the one this whole
+	// slice is about: a finding nobody reads is a finding nobody acts on.
+	for _, id := range rec.Join.Unattributed {
+		fmt.Fprintf(w, "  unattributed %s: the venue's cumulative disagrees with the executions this join could attribute\n", id)
+	}
+	for _, id := range rec.Join.Contradicted {
+		fmt.Fprintf(w, "  contradicted %s: the venue and this system hold lifecycle states SM §1 has no edge between\n", id)
+	}
 	if n := len(rec.Join.Absent); n > 0 {
 		fmt.Fprintf(w, "absent:   %d order(s) the venue does not hold; %d resolved, %d unproved\n",
 			n, rec.Resolved, len(rec.Unproved))

@@ -210,6 +210,22 @@ func TestReconcileReportCarriesTheBanAlert(t *testing.T) {
 // every test in this file until this one existed. Unexplained deltas are the
 // one section absent here: their fixture needs a position surface and their
 // format is owned by the join tests.
+//
+// # The two join findings carry their own collapse guard (task #242)
+//
+// Unattributed and Contradicted are the two findings that LATCH
+// GateVenueJoined, and until #242 the renderer printed neither — a boot could
+// halt naming no order at all. They are pinned here rather than in a test of
+// their own because this is the golden whose subject is completeness, and a
+// section nobody added to the no-miss fixture is exactly the section that
+// silently stops rendering.
+//
+// The fixture gives them DIFFERENT order ids (ord-3, ord-4) and the renderer
+// gives them different line prefixes, and both halves are load-bearing: with
+// one shared id, "prints both lists" and "prints one list twice" produce
+// identical output, which is the copy-paste defect two adjacent loops over
+// two same-typed slices actually invite. Distinct ids also make the pair
+// non-collapsible under a swap of the two loops.
 func TestReconcileReportGoldenNoMiss(t *testing.T) {
 	var buf bytes.Buffer
 	writeReconcileReport(&buf, appreconcile.Report{
@@ -227,7 +243,15 @@ func TestReconcileReportGoldenNoMiss(t *testing.T) {
 		Storage:  errors.New("journal on nfs"),
 		Reconciliation: application.Reconciliation{
 			Recovery: application.Recovery{Records: 7, Dispatched: []ids.ClientOrderID{"ord-1", "ord-2"}},
-			Join:     application.Join{Orders: 2, Fills: 3, Duplicates: 1, Absent: []ids.ClientOrderID{"ord-2"}},
+			Join: application.Join{
+				Orders: 2, Fills: 3, Duplicates: 1,
+				Absent: []ids.ClientOrderID{"ord-2"},
+				// Distinct ids, deliberately — see the doc above. A shared id
+				// here would make the two loops indistinguishable from one
+				// loop rendered twice.
+				Unattributed: []ids.ClientOrderID{"ord-3"},
+				Contradicted: []ids.ClientOrderID{"ord-4"},
+			},
 			Resolved: 0,
 			Unproved: []application.UnprovedOrder{{Order: "ord-2", Reason: application.ReasonNoAnchor}},
 			Stale:    []ids.ClientOrderID{"ord-1"},
@@ -244,6 +268,8 @@ func TestReconcileReportGoldenNoMiss(t *testing.T) {
 		"storage:  journal on nfs\n" +
 		"replayed: 7 records, 2 dispatched orders\n" +
 		"joined:   2 orders, 3 fills admitted, 1 duplicates\n" +
+		"  unattributed ord-3: the venue's cumulative disagrees with the executions this join could attribute\n" +
+		"  contradicted ord-4: the venue and this system hold lifecycle states SM §1 has no edge between\n" +
 		"absent:   1 order(s) the venue does not hold; 0 resolved, 1 unproved\n" +
 		"  unproved ord-2: no_anchor\n" +
 		"  stale projection for ord-1\n" +
