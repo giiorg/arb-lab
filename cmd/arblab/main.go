@@ -66,6 +66,9 @@ func dispatch(args []string, stdout, stderr io.Writer) int {
 	if len(args) >= 2 && args[0] == "exercise" && args[1] == "run" {
 		return exerciseRun(args[2:], stdout, stderr)
 	}
+	if len(args) >= 2 && args[0] == "pair" && args[1] == "run" {
+		return pairRun(args[2:], stdout, stderr)
+	}
 	if len(args) >= 2 && args[0] == "margin" && args[1] == "reconcile" {
 		return marginReconcile(args[2:], stdout, stderr)
 	}
@@ -91,6 +94,7 @@ usage:
   arblab reference fetch  -reference <in.json> -out <out.json>
   arblab baseline record  -config <file> -out <file>
   arblab exercise run     -config <file>
+  arblab pair run         -config <file>
   arblab margin reconcile -config <file> -op <id> -actor <name> -at <RFC3339> -note <text>
 
 calibrate fetch commits one closed family-1 dataset identity (venue REST
@@ -117,6 +121,18 @@ package from the config's trade block. Exit codes: reconcile's three, plus
 unjournaled, or a stale projection holding new trading). After a 3 the
 recovery path is "reconcile run"; re-running exercise with the same trade
 id is refused by §5.3's id-reuse rule.
+
+pair run drives ONE cross-venue package across TWO deployments: two
+§5.2 blocks, two journals, two reconcile-only boots, and — only if both
+verdicts are clean and both legs' venues are FLAT — leg A, then leg B
+sized to leg A's ESTABLISHED fill. A leg that filled nothing opens no
+hedge; a leg whose fill could not be read stops the run. On a half-open
+pair it issues one reduce-only close of leg A. Exit codes: reconcile's
+three, plus 3 (a leg was dispatched and needs a human) and 4 — THE PAIR
+IS EXPOSED: the two venues hold unbalanced positions. §6.7's classifier
+cannot see a cross-venue pair, so nothing compensates a 4
+automatically; the recovery path is "reconcile run" on each side and a
+manual close.
 
 margin reconcile records core §7.1's "explicit accounting / operator
 action" against ONE Ambiguous margin op — the §9 incident that blocks new
