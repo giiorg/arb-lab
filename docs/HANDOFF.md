@@ -98,7 +98,9 @@ picked up. #241 unchanged. #235 carries seven; #220, #227, #228 unchanged; **#22
 is widened by one item** (the `ambiguous-order-model.md` SM §1 row). **Six
 `knownStale` markers, all #229's**, per the correction above.
 
-**FOUR THINGS NAMED RATHER THAN FIXED, so they are not re-derived as bugs.**
+**THINGS NAMED RATHER THAN FIXED, so they are not re-derived as bugs — the list
+is open, nothing closes it, and it gained a member during review, so add to it
+rather than trusting its length** (§12c).
 (1) A contradiction found at the **second** look is reported on
 `GateNetDeltaAsserted` while `out.Join` still holds the first look's report
 (`reconcile.go:307`), so the operator report's `contradicted` lines cover the
@@ -117,6 +119,15 @@ causes across seven sites** (`reconcile.go:373`/`:431`/`:435` net-delta,
 `app/reconcile/app.go:665` account posture), four of them pre-slice. No count
 word, so nothing is false — but `boot` declares no producer roster, so any number
 written about it has to be greped rather than recalled.
+(5) **The join's sweep gate pre-empts `advance` entirely, so `advance`'s two
+error returns are withheld along with its writes** — a venue state failing
+`Validate()` (`join.go:1001-1007`) and `ErrVenueStateNotAnAbsence` on a present
+order (`:1010-1019`). Those reach `reconcile.go:308-311` as `boot.OutcomeFailed`
+→ `PostureHalted`; under a short sweep the same order yields `OutcomeIncomplete`
+→ `PostureReconcileOnly` instead, so the gate **downgrades a halt**. Not a safety
+hole (nothing trades either way, and no shipped `toDomainState` arm emits
+`AbsentAfterFinality`), but it means the port defence fires only on boots whose
+sweep reaches the watermark. Record §10.2's PORT exception.
 
 **⚠ A DEFECT CLASS THIS SLICE'S OWN REVIEW FOUND, AND IT IS THE MOST TRANSFERABLE
 THING HERE.** `internal/oms/application/resolve.go:397-401` said proved absence is
@@ -145,6 +156,24 @@ count: **it is the first of the falsified group found in a file with an empty
 diff.** Second-order point worth keeping: the *derivation* in `resolve.go` worked
 perfectly, widening with no code edit, which is why a listed set was rejected
 there. **A derived set cannot drift; a sentence describing it can.**
+
+**AND THE RULE THAT CAME OUT OF THE REPAIRS THEMSELVES: prefer WEAKENING to
+enumerating** (record §12c). Repeatedly in this slice a fix for a false
+enumeration introduced the next one — in code, in a comment, in a stamp, in the
+unblocking document, in the closing record and in the slice ledger — because a
+closed list is falsified by anything that adds a member and **a fix is exactly
+the event that adds one.** So where a claim ranges over a set you would otherwise
+have to keep counting, write a **universal plus a named subset**: record §10.2's
+bound now reads *"below `PostureTrading` in every case, whatever was withheld —
+and never more permissive than the path it pre-empts except where that path would
+have halted the boot"* in place of *"one bound covers both exceptions"*, and it
+survives the next exception being found, which the earlier wording did not. The
+universal is also the checkable half: `posture()` is a total function over
+`Outcome`, so a reader verifies it by reading a switch rather than by trusting a
+search somebody once ran. Where a closed enumeration really is load-bearing,
+**say what closes it** — record §10.2's terminal set is *"`IsTerminal`'s members
+less `AbsentAfterFinality`"* with the exclusion argued, so a new terminal moves
+the referent instead of silently falsifying the sentence.
 
 **ONE INSTRUMENT PROPOSED AND NOT BUILT, and it is cheap.** SM §1's transitions
 table has now been found incomplete **three times on the same shape**, each fix

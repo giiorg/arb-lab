@@ -264,6 +264,11 @@ Open / PartiallyFilled / Filled / Terminated / Rejected — and cannot emit
 `StateAbsentAfterFinality`. The guard is a defence at the port, which is
 legitimate and cheap.
 
+**And the defence does not fire on every boot**, which §10.2's PORT exception
+covers: the sweep gate precedes it in program order, so on a boot whose sweep is
+short this guard is never reached. Recorded here as well as there because a
+reader arriving at this subsection is the one who would otherwise assume it.
+
 ### 10.2 The join's sweep gate over NON-TERMINAL targets — a deliberate local strengthening, and it is verdict-invariant
 
 `join.go:892-908` refuses to advance on a short sweep **before every target**,
@@ -279,8 +284,9 @@ boundary"*. Nothing in it forbids proving more before writing less. A marker is
 owed for a **departure from a requirement**; exceeding one is not a departure.
 
 What makes this more than an assertion is that the strengthening is **almost
-always invariant under §6.7's classifier** — the only consumer whose verdict could
-observe it — and that the one exception is bounded by a different mechanism. The
+always invariant under §6.7's classifier** — the consumer whose per-order verdict
+would otherwise change — and that wherever it is not, the residual is bounded by
+a different mechanism, stated below as a universal rather than as a list. The
 argument is over the **transition withheld**, not over a set of states, and the
 distinction matters: an earlier draft of this section argued it over "every state
 the gate can hold an order in", which is wrong, because `MayExistAtVenue`
@@ -301,15 +307,21 @@ Case by target:
   `CancelPending` / `CancelUnknown`, and `ContributesPossibleDelta`
   (`orderstate.go:240-256`) returns true for exactly those seven and false for
   `Planned` plus the four terminals. The residual is `Ambiguous` either way.
-- When the stored state is one of the three **genuinely** terminal states
-  (`Filled` / `Canceled` / `Rejected` — **not** `AbsentAfterFinality`, whose
-  supersession edges are the first exception below) and the venue reports a
-  non-terminal, the edge is a contradiction: `CanTransition` refuses it and no
-  advance was available to withhold. **But that is the sweep-succeeded case.**
-  With a short sweep the gate at `join.go:892-908` returns first and `advance`
-  (`:966`) never runs at all — which is the second exception below.
+- When the stored state is terminal **and its transitions are refusals** — the
+  set is `IsTerminal`'s members less `AbsentAfterFinality`, which is what closes
+  it, and `AbsentAfterFinality` is out because its supersession edges are the
+  STATE exception below — and the venue reports a non-terminal, the edge is a
+  contradiction: `CanTransition` refuses it and no advance was available to
+  withhold. **But that is the sweep-succeeded case.** With a short sweep the
+  gate at `join.go:892-908` returns first, so `advance` (`:966`) does not run
+  and **nothing downstream of the gate runs either** — which is what the
+  DIAGNOSIS and PORT exceptions below are about.
 
-**The first exception, and it is real rather than a technicality.**
+The exceptions are named for what they withhold rather than numbered, because
+this record has already had to renumber one closed list (§12) and the gate
+pre-empts *everything* downstream of it, so the list is open by construction.
+
+**The STATE exception, and it is real rather than a technicality.**
 `AbsentAfterFinality → PartiallyFilled`/`Filled` **is** a legal edge — §3.0's
 *"venue reality wins"*, a discovered late execution superseding a proved absence
 (`transition.go:268-274`). There the stored state contributes **no** possible
@@ -318,7 +330,7 @@ delta and the target contributes one, so withholding the advance holds the
 venue is reporting a fill. That is the unsafe direction, and it is the one place
 this strengthening is not free.
 
-**The second exception, which is about the DIAGNOSIS rather than the state.**
+**The DIAGNOSIS exception, which is about the finding rather than the state.**
 Because the gate precedes `advance` in program order, a short sweep withholds not
 only the transition but the *finding*. On a stored-terminal order whose venue
 reading contradicts it, the strengthening **converts a latching
@@ -328,28 +340,49 @@ appends it (`join.go:1033`) is downstream of the return at `:907`. What the
 unstrengthened path would have produced is a contradiction; what this path
 produces is "try again".
 
-**One bound covers both exceptions, and it is the posture rather than the
-classifier.** The gate appends to `report.Incomplete`, `joinOutcome` returns
-`boot.OutcomeIncomplete`, and `Outcome.posture()` (`gate.go:505-508`) maps
-`OutcomeUnreported`, `OutcomePending`, `OutcomeIncomplete` **and**
-`OutcomeNeedsOperator` alike to `PostureReconcileOnly` — **below
-`PostureTrading`**. So neither exception can be traded on: in the first the
-optimistic reading is held, in the second the escalation is delayed, and in both
-the boot stops and the order id is printed with its reason (§10.4). Latching is
-**deferred, not lost** — the contradiction surfaces on the first boot whose sweep
-completes, which is the same argument Ruling R3 makes about a second-look
-contradiction and R11 records (§11).
+**The PORT exception, which is about `advance`'s ERROR returns.** `advance` can
+leave two ways that are neither a finding nor a write: a venue state failing
+`Validate()` (`join.go:1001-1007`) and §10.1's `ErrVenueStateNotAnAbsence` on a
+present order (`:1010-1019`). Both propagate through `joinOne` out of `Join`
+(`join.go:681`), and `reconcile.go:308-311` reports `boot.OutcomeFailed`, which
+`posture()` maps to `PostureHalted` (`gate.go:513-514`). Under a short sweep the
+same order yields `OutcomeIncomplete` and `PostureReconcileOnly` instead. The
+two returns are not the same case and the difference is worth keeping: a
+malformed reading has **no target at all**, so SM §2 step 3 cannot be said to
+require or excuse a sweep for it, and the gate genuinely pre-empts it; the
+absence guard's target is `AbsentAfterFinality`, which is terminal, so the sweep
+was required there anyway and the pre-emption is a fact about **program order**
+rather than about the strengthening. Either way **§10.1's port defence fires
+only on boots whose sweep reaches the watermark** — and a broken ACL is exactly
+the condition that guard exists for, so the gating is worth naming even though
+§10.1 records that no shipped `toDomainState` arm emits the state.
+
+**The bound is the posture, and it is stated as a universal rather than as a
+list — the gate pre-empts everything downstream of itself, so any list of what
+it withholds is open.** Every path through the gate produces the same thing: it
+appends to `report.Incomplete`, `joinOutcome` returns `boot.OutcomeIncomplete`,
+and `Outcome.posture()` (`gate.go:505-508`) puts that at `PostureReconcileOnly`
+— **below `PostureTrading` in every case, whatever was withheld.** So nothing
+the gate changes can be traded on. Against the path it pre-empts that posture is
+never more permissive **except where the pre-empted path would have halted the
+boot**, which is checkable rather than enumerated: `PostureReconcileOnly` is the
+next rung above `PostureHalted` (`posture.go:48-59`), and `OutcomeFailed` is
+what this seam reports when `Join` returns an error. That is the PORT exception
+and only it. Where the withheld outcome would have **latched**, latching is
+**deferred, not lost** — it surfaces on the first boot whose sweep completes,
+which is the same argument Ruling R3 makes about a second-look contradiction and
+R11 records (§11).
 
 That the bound is a *different mechanism* from the invariance argument is
 precisely why it has to be stated rather than assumed. The invariance argument
-covers neither row, and reading it as though it did is how a later session
-concludes the gate is free in all cases.
+covers none of the exceptions, and reading it as though it did is how a later
+session concludes the gate is free in all cases.
 
 Everywhere else the strengthening costs a retry and an `Incomplete` line, and a
 short sweep is retryable on the next poll. A state **not** advanced holds the
 possible-delta interval, which is the direction that is right when somebody
-forgets — and on these two rows it is the direction that is wrong, held safe by
-the posture rather than by the state.
+forgets — and wherever the gate withholds something rather than merely delaying
+it, that direction is held safe by the posture rather than by the state.
 
 ### 10.3 `Contradicted → OutcomeNeedsOperator` — the cell definition holds it
 
@@ -522,6 +555,37 @@ in a derived arithmetic can cancel. The brief asked for the number to be verifie
 by counting, and counting is what separated them; re-deriving the *decomposition*
 rather than the total is what makes the check bite.
 
+## 12c. The structural lesson: prefer WEAKENING to enumerating
+
+Repeatedly in this slice, a fix for a false enumeration introduced the next one —
+in code, in a comment, in a stamp, in the unblocking document, in this record and
+in the slice ledger. (Review kept a count of the instances; it is not reproduced
+here, because I have not re-derived it and that is the whole subject of this
+section.) These are not unrelated slips: a closed list is falsified by anything
+that adds a member, and **a fix is exactly the event that adds one**, so an
+enumeration written at the moment of repair is written at the moment its
+membership is least settled.
+
+**The rule: where a claim ranges over a set you would otherwise have to keep
+counting, write a universal plus a named subset instead of a closed list.**
+§10.2's bound is the worked example. *"Below `PostureTrading` in every case,
+whatever was withheld — and never more permissive than the path it pre-empts
+except where that path would have halted the boot"* replaces *"one bound covers
+both exceptions"*, and it survives the next exception being found; the earlier
+wording did not survive the first one. The universal is also the half a reader
+can **check**: `posture()` is a total function over `Outcome` (`gate.go:505-522`,
+and §3.6 rule 10 is what keeps it total), so "below `PostureTrading` in every
+case" is a property of a switch that can be read, whereas "both" is a property of
+a search somebody once performed.
+
+**Where a closed enumeration is genuinely load-bearing, say what closes it.**
+§10.2's terminal-state bullet does that: the set is `IsTerminal`'s members less
+`AbsentAfterFinality`, and the exclusion is *argued* rather than listed, so a
+member added to `IsTerminal` moves the sentence's referent instead of silently
+falsifying it. That is the same move `resolve.go`'s derived resolvable set makes
+in code (§5), one register over — and §11b is what happens when the derivation is
+right and the **prose** beside it is still a closed list.
+
 ## 11b. A slice falsifies claims in files it never touches, and a diff-scoped reading pass cannot see them
 
 **Found in review, not by me, and the defect is in §10's *method* rather than in
@@ -576,9 +640,10 @@ and conflating them is what made a single count look available:
 
 - **Claims this slice's behaviour FALSIFIED** — true when written, false
   afterwards, and *nothing edited them*. `resolve.go:397-401` is one.
-  `joinOutcome`'s enumerations (R1) and the renderer's (R6, R9) are others: the
-  arrival of `Contradicted` is what made them non-total. The lesson is the search
-  below.
+  `joinOutcome`'s enumerations (R1) and the renderer's (R6, R9) are others, and
+  so is the #236 plan's D4 blocking list, which is prose in a plan rather than
+  code: the arrival of `Contradicted` is what made them non-total. The lesson is
+  the search below.
 - **Claims that were ALREADY wrong when this slice arrived** — `record.go`'s
   refusal list (R10, ruled in only because the diff already touched the
   sentence), HANDOFF's `knownStale` five (§12), Task 6's brief's delta count.
@@ -587,8 +652,10 @@ and conflating them is what made a single count look available:
 
 What distinguishes `resolve.go` is **not** its position in a count but a property
 that can be checked without one: it is the first member of the first group found
-in a file with **an empty diff**. Every earlier member of that group sat in code
-the slice had opened, which is exactly what made the weaker generalization —
+in a file with **an empty diff**. Every earlier member of that group sat in a
+file the slice had opened — D4's blocking list is a member and lives in a
+document, not in code, so "in code" would be false of it — which is exactly what
+made the weaker generalization —
 *"an enumeration this slice touched may have stopped being total"* — look
 sufficient. The correct one has no `git diff` in it: **an enumeration this
 slice's BEHAVIOUR falsified may live anywhere.**
