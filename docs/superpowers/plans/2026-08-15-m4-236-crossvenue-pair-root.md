@@ -8,45 +8,47 @@
 
 **Tech Stack:** Go (root module), `internal/app/reconcile` (the boot), `internal/oms` (the module), `internal/platform/{clock,config,fixedpoint,ids,observability,boot}`, `net/http/httptest` for venue doubles. No new dependencies.
 
-> ## BLOCKED — this plan cannot be executed yet, and the reason is not in this plan
+> ## UNBLOCKED — the dependency landed in task #242 (2026-08-15, `d7d2075`)
 >
-> **A leg this system places reaches `domain.StateSubmitted` and nothing in the
-> repository advances it.** Not the join (its only repository writes are `Load`
-> and `ApplyFill`, and neither `ApplyFill` nor `ApplyAck` touches state), not the
-> resolver (`resolve.go:397` admits only `DispatchAuthorized` and
-> `SubmissionUnknown`), not any other caller of `ApplyState`. `StateSubmitted` is
-> non-terminal (`orderstate.go:146`) and may advance only to
-> `{Acknowledged, Rejected, SubmissionUnknown}` (`transition.go:186`).
+> This plan was blocked because **a leg this system placed reached
+> `domain.StateSubmitted` and nothing advanced it**, so D4's `Establish` could
+> never establish a leg this root actually placed: every successful run would
+> read `VerdictIndeterminate`, leg B would never be sent, D8 would refuse the
+> unwind, and a real fill on side A would be left naked and reported as "exposed,
+> for a human" — the outcome this slice exists to prevent, produced on the happy
+> path.
 >
-> **D4 requires a terminal state, so `Establish` can never establish a leg this
-> root actually placed.** Every successful run would read `VerdictIndeterminate`,
-> leg B would never be sent, and D8 would refuse the unwind — leaving a real fill
-> on side A naked and reported as "exposed, for a human". That is the outcome
-> this whole slice exists to prevent, produced on the happy path. Task 7's unwind
-> confirmation re-uses `establish`, so a successful close could not be recognised
-> either.
+> **Task #242 closed it in ten commits, `e581831..d7d2075`.** The finding turned
+> out to be sharper than "nothing calls `ApplyState`": **SM §1 gave `Submitted`
+> no query-resolution row**, so a driver written against `CanTransition` would
+> have been refused by the domain on the ordinary outcome of every order this
+> system sends — `Filled`, `Canceled` and `PartiallyFilled` had no legal target.
+> `state-machines.md` v0.9.61 adds the row (`9b87b17`), and `01d27ce` makes
+> `Joiner.joinOne` journal and apply the venue's lifecycle reading — the reading
+> it has held since slice F2 — as its last step, after the executions are
+> admitted and cross-checked.
 >
-> It was invisible because `arblab exercise run` treats `StateSubmitted` **as its
-> success state** (`exercise/app.go:142`) and exits. The single-venue root never
-> needed to know whether a leg filled; #236 is the first thing that does.
+> Decisions, rejected alternatives and the reading pass:
+> **`docs/superpowers/specs/2026-08-15-m4-242-order-finality-decisions.md`**.
+> The original finding stays in
+> `docs/superpowers/specs/2026-08-15-m4-236-order-finality-gap.md`.
 >
-> **Nothing in this plan is wrong as a result** — D4, D5, D7 and D8 were written
-> against SM §1 as specified, and SM §1 is not wrong, it was unimplemented. What
-> this plan gains is a **dependency**, not a redesign, and the remedy is smaller
-> than it looks: `ports.VenueOrder` already carries `State domain.OrderState`
-> *"already translated into SM §1's"* vocabulary, and the joiner already fetches
-> it at `join.go:801`. The venue's terminal state is in hand and simply never
-> journaled.
+> **What changes in this plan, and it is two tasks.** `drive.establish` (task 6)
+> now reads a terminal state the join actually produces, in place of a polling
+> loop that waited on one nothing wrote; and `venueDouble` (task 5) gains the
+> venue-status responses the advance consumes — the joiner calls `venue.Resolve`
+> and reads `status.State`, so a double that answers only the fill surface will
+> leave every leg indeterminate. **Everything else stands**: D4, D5, D7 and D8
+> were written against SM §1 as specified, and SM §1 was not wrong — it was
+> unimplemented. This plan is **not re-planned here**.
 >
-> The finding, its full evidence chain, the two rejected alternatives and what
-> the remedy must deliver are recorded in
-> **`docs/superpowers/specs/2026-08-15-m4-236-order-finality-gap.md`**. Read it
-> before task 1.
->
-> **What changes here when that task lands:** `drive.establish` (task 6) calls the
-> new finality operation in place of its `Join` + `LegState` polling loop, and
-> `venueDouble` (task 5) gains the venue-status responses that walk consumes.
-> Everything else stands.
+> **One correction to D4 beyond the mechanism, and it is the count-word shape.**
+> D4's blocking-list enumeration (`Absent` / `Incomplete` / `Unattributed`) was
+> total when it was written and is not now: #242 added a fourth per-order finding
+> class, **`Contradicted`** — the venue and this system holding lifecycle states
+> SM §1 has no edge between — which latches `boot.OutcomeNeedsOperator`. A leg
+> whose id appears in it must read **indeterminate**, exactly as the other three
+> do. D4 is corrected accordingly.
 
 **Spec:** `docs/superpowers/specs/2026-08-15-m4-236-crossvenue-root-scoping.md` (record §95). Read it before task 1 — in particular §4 (the classifier cannot see a cross-venue pair), §6 (the three rulings) and §7 (the five rejected alternatives). Supporting: `docs/build-spec.md` §5.1, §5.2, §5.3, §6, §6.7, §7.5, §7.6; `docs/state-machines.md` SM §1.
 
@@ -111,7 +113,7 @@ These were settled by record §95 or by reading the code during planning. They a
 
 **D3 — One leg per side, for this slice, and the reason is D2.** With two legs on one side, that side's indices are 0 and 1 while the other side's restart at 0, so "leg index" would stop identifying a leg within the pair. Widening needs a leg-index base on `application.TradePlan`, which is a kernel change and therefore not #236's (ruling 3).
 
-**D4 — Exposure is read, never assumed, and the reading is three-valued.** After a leg's IOC, the root calls that side's `Module.Join.Join([id])` and then a new `Module.LegState(id)`. Exposure is **established** only when the leg's state is terminal for state *and* the id appears in none of the join's `Absent`/`Incomplete`/`Unattributed` lists. Anything else is **indeterminate**, which stops the run. This is the direction that matters: a zero cumulative read too early is indistinguishable from "did not fill", and concluding "did not fill" on a leg that actually filled leaves naked exposure reported as a clean run.
+**D4 — Exposure is read, never assumed, and the reading is three-valued.** After a leg's IOC, the root calls that side's `Module.Join.Join([id])` and then a new `Module.LegState(id)`. **`Join` is what ADVANCES the leg's state** — since task #242 (`01d27ce`) it journals and applies the venue's lifecycle reading as its last step — so `LegState(id)` reads a terminal one on the ordinary path rather than a `Submitted` that nothing moves. Exposure is **established** only when the leg's state is terminal for state *and* the id appears in none of the join's `Absent`/`Incomplete`/`Unattributed`/**`Contradicted`** lists (`Contradicted` is #242's fourth finding class — the venue and this system holding states SM §1 has no edge between; it latches `boot.OutcomeNeedsOperator`, so it can never be read as established). Anything else is **indeterminate**, which stops the run. This is the direction that matters: a zero cumulative read too early is indistinguishable from "did not fill", and concluding "did not fill" on a leg that actually filled leaves naked exposure reported as a clean run.
 
 **D5 — Leg B is sized to leg A's ESTABLISHED FILL, not to the configured quantity.** A partial fill on A hedged at the configured size is naked exposure on B. If A's fill fails B's own §2.4 filters, `Plan` refuses — nothing is sent on B — and the run unwinds A. Quantizing A's fill down to B's grid and hedging the remainder is better and is **owed, not built** (task 14 records it).
 

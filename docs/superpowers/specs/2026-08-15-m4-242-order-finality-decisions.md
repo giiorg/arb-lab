@@ -1,0 +1,502 @@
+# Record §96 (closing) — task #242: the order lifecycle reaches a terminal, and the finding was a missing ROW rather than a missing CALL
+
+**Status:** landed, 2026-08-15. Milestone 4, task **#242**, seven tasks, ten
+commits (`e581831..d7d2075`). `state-machines.md` v0.9.60 → **v0.9.61** (§1
+only); `build-spec.md` **unchanged** — SM §1's normative owner already stated the
+requirement, which is the whole finding. `docs/formal/freshness.json` gains one
+premise row. `make ci` green on both modules; the `SPEC EDIT OWED` grep over
+`internal/ tools/` is zero. **#236 is unblocked.**
+
+The finding this closes is recorded in
+`docs/superpowers/specs/2026-08-15-m4-236-order-finality-gap.md`; the plan is
+`docs/superpowers/plans/2026-08-15-m4-242-order-finality-transition.md`. This
+record holds the decisions taken during execution, the alternatives rejected with
+their grounds, and the reading pass the slice-close grep cannot perform.
+
+| Commit | What |
+|---|---|
+| `9b87b17` | SM §1's `Submitted` gains its query-resolution row |
+| `eb295fa` | `Resolver` admits `Submitted`, and the derivation is checked |
+| `01d27ce` | the join journals and applies the venue's lifecycle reading |
+| `e47795f` `5807217` `e00a7a7` `c120ee7` | the new `Contradicted` class reaches all four enumerations of the join's blocking findings, and the operator report renders them |
+| `cb7b8f7` | the `Place`→terminal walks and the replay round-trip |
+| `41ec395` `d7d2075` | SM §1 becomes a tracked **premise** of formal model (a) |
+
+## 1. The finding sharpened: not "nothing calls `ApplyState`", but "SM §1 gives `Submitted` no query-resolution row"
+
+The parent record diagnosed a **transition with no driver** — a state machine
+declared and policed while nothing called the write. That is true and it is not
+the load-bearing half. The load-bearing half is that **the write had no legal
+destination to make.**
+
+`domain.CanTransition` is a faithful transcription of SM §1's table, and SM §1
+gave `Submitted` exactly three targets: `ack → Acknowledged`, `reject →
+Rejected`, `timeout/5xx → SubmissionUnknown`. All three are **live-path** events.
+The venue's own answer to a resolving query — `Filled`, `Canceled`,
+`PartiallyFilled`, three of the five readings `toDomainState`
+(`driven/orderresolver.go:285`) can produce — had **no legal target from
+`Submitted` at all**. A driver added against that table would have been refused
+by the domain on the ordinary outcome of every order this system sends.
+
+Two places already required the row and neither reached it:
+
+- **SM §1's own crash-recovery invariant**: *"an order at `DispatchAuthorized`
+  **or beyond** is resolved **only** by `OrderByClientID`/`Fills`"* — "or beyond"
+  is `Submitted`.
+- **core §6.7**, which lists `Submitted` among the states whose residual is
+  ambiguous and must be *quiesced to finality* through the query contract.
+
+That is verbatim the v0.9.11 shape, whose own note in `transition.go` reads *"the
+requirement is stated twice elsewhere and neither statement made it into the
+table."* v0.9.11 fixed it for `DispatchAuthorized`; v0.9.34 carried `Canceled`
+onto both recovery rows because *"the fix was carried across the LIVE states
+only"*. `Submitted` is the **third axis of the same miss and the most reachable
+of the three** — the other two states are entered by a crash or a transport
+failure, this one by every successful `Place`.
+
+Why it survived four slices: `arblab exercise run` treats `StateSubmitted` **as
+its success state** (`internal/app/exercise/app.go:142`), so the only consumer
+that existed never needed to know whether a leg filled.
+
+## 2. The departure from the parent record's §5 requirement 1
+
+The record required applying the venue's state by *"walking the intermediate hops
+`transition.go` requires (`Submitted → Acknowledged → Filled`/`Canceled`), rather
+than inventing a direct edge."* **This slice added the direct edges instead**,
+under the plan's §0 and the operator ruling of 2026-08-15. Recorded here so a
+later session does not silently reopen it. The three arguments:
+
+1. **The edge is not an invention — it is a row the table has twice been found
+   missing, on two other axes** (§1 above). It carries the identical six targets
+   and the identical evidence rules `DispatchAuthorized` and `SubmissionUnknown`
+   already carry: no new state, no new evidence class.
+2. **With the row added, the walk has nothing left to do.** The ACL produces
+   exactly five domain states. Every (state `Joiner.load` admits) × (one of those
+   five) pair is a no-op, one legal edge, or a contradiction that must be
+   refused. The matrix is the plan's §0.1 and it has no cell needing an
+   intermediate.
+3. **A general walk is unsafe, and §3 gives the concrete counterexample.**
+
+**What is unchanged from the record:** §5 requirements 2 (placement, §6 below),
+3 (tests from a real `Place`, Task 5) and 4 (`make formal-fresh`, Task 6, §8
+below). §4's rejection of the re-scoped-D4 alternative stands untouched and is
+not reopened.
+
+## 3. Rejected: the derived walk through `Acknowledged`
+
+A general shortest-path walk over `successors()` needs **a rule about which
+intermediates may be inferred**, and that rule needs its own normative home — so
+the walk does not avoid a spec edit; it adds a concept *and* owes one.
+
+The counterexample is concrete rather than hypothetical: shortest-path routes
+`AbsentAfterFinality → Canceled` through **`PartiallyFilled`**, journaling a fill
+that was never observed. That is exactly the evidence-class conflation FLAG-2
+exists to prevent, minted by the mechanism chosen to be conservative.
+
+## 4. Rejected: a sibling `Settler` use case beside `Joiner`
+
+Two costs, both measurable rather than aesthetic:
+
+- **It duplicates SM §2 step 3's sweep gate.** A terminal state needs *"an
+  explicit venue-terminal record **plus** the final executions sweep"*, and the
+  join already refuses to conclude on a short sweep. A sibling would re-run the
+  sweep or copy the gate — a second home for the contract SM §2 calls *"the ONE
+  canonical boundary … never a weaker cancel-ack-only variant"*.
+- **It doubles the venue spend on #236's poll loop.** #236's D4 calls
+  `Module.Join.Join([id])` per settle attempt; a sibling adds a second
+  `venue.Resolve` per poll on the hottest path in the live root, against §5.3's
+  requirement that rate-limit budget be **reserved** for recovery.
+
+## 5. Rejected: widening `Resolver`'s resolvable set
+
+`Resolver`'s entry gate derives its resolvable set from *"proved absence is one
+of the answers the domain would accept"* (`resolve.go:397`). That is the right
+derivation for §5.3's four-gate stable-not-found rule and the **wrong** one for
+"the venue has the order and says it is finished". Widening it fuses two evidence
+classes into one use case — the same conflation §3 rejects, arriving through a
+gate instead of through a path.
+
+**The derivation is nevertheless load-bearing, and it produced a bonus fix that
+is tested rather than assumed.** Adding `Submitted → AbsentAfterFinality` to SM
+§1 makes `Resolver.Resolve` start admitting `Submitted` orders *by derivation*,
+with no edit to `resolve.go`. Before this slice, a placed order the venue holds
+no record of could not be resolved by §5.3's rule at all — the one state every
+successfully-placed order occupies was the one state the rule could not reach.
+Task 2 is the check that the derivation actually fires, and its red bar isolates
+to the resolvable-set gate at `resolve.go:408-409`.
+
+## 6. Where it runs, and the orthogonality decision
+
+**Inside `Joiner.joinOne`**, answering §5 requirement 2, on four grounds: the
+joiner already holds both halves and already draws a conclusion from comparing
+them (it has fetched `status.State` since slice F2 and used it for attribution
+and the `Unattributed` cross-check); SM §2 step 3's sweep gate is already in that
+function; it is the call #236 already makes; and `Resolver` was considered and
+rejected (§5).
+
+**The advance runs LAST, after the executions are admitted and cross-checked, and
+it runs even when the cross-check disagreed.** §5.3 keeps state and ledger
+orthogonal — *"nothing relates `State` to `Cumulative`"* — the disagreement is
+about **amount** and the advance is about **finality**. Refusing to advance on an
+`Unattributed` order would leave it in the state this slice exists to move it out
+of, in order to punish a number the report already carries. A consumer that needs
+both gates on both.
+
+## 7. Two observations the transition matrix produced, and the cheap instrument that would have found all three
+
+Neither is fixed here. Both are verified against the tree at `d7d2075`.
+
+- **`CancelPending → PartiallyFilled` has no target.**
+  `transition.go:258-263` gives `CancelPending` exactly
+  `{CancelUnknown, Canceled, Filled}` — `Filled` is FLAG-1's *"the cancel loses
+  the race to a full fill"*. A cancel that loses the race to a **partial** fill
+  has nowhere to go. Unreachable today because nothing in this system sends a
+  cancel, which is precisely why it is written down rather than left to be
+  discovered by the slice that first does.
+- **`Acknowledged → Rejected` is absent, and that is correct.** A venue reporting
+  `Rejected` on an order we watched go live is a **contradiction**, not an edge —
+  a rejection is a submission-time verdict. The join must report it, not force
+  it, and `Contradicted` is where it lands.
+
+**The instrument, proposed and not built.** SM §1's transitions table has now
+been found incomplete **three times on the same shape** (v0.9.11, v0.9.34,
+#242), and each fix was applied to the states the omission was *noticed* on. The
+reason the shape keeps recurring is that the oracle cannot see it:
+`transition_test.go`'s `specEdges` is a **flat transcription** of the table —
+it asserts that every row the document has is in the code, and a row the document
+never had is invisible to it in both directions.
+
+The cheap complement is a **reverse pass**: for each state the joiner can load,
+for each of the five readings the ACL can produce, name the target or name the
+refusal — a page of work, and it produces exactly the plan's §0.1 matrix. All
+three historical omissions are cells in it, and so is `CancelPending →
+PartiallyFilled`, which no consumer has yet reached. This is the repo's own **"a
+vocabulary with one axis loses a case"** rule applied to an oracle: the
+transcription is one-dimensional over rows, and the defect lives in the product
+of rows × readings.
+
+## 8. The `formal-fresh` finding: SM §1 was tracked by neither model
+
+`make formal-fresh` stayed **green through Task 1's edit to SM §1**, and Ruling
+C7 had anticipated a failure Task 6 would heal. The truth was quieter and worse:
+`state-machines.md` §1 was tracked by **neither model in neither role**, so there
+was nothing to fail. The gate was green about a section it does not watch —
+*"a verifier blind to its own source"*, one level out, and it is the second time
+tracking premises rather than only subjects has found something (§88 records the
+first two, #231 and #232).
+
+**The row was stamped FRESH rather than `knownStale`, and the precedent is
+explicit.** `FenceTakeover`'s `build-spec.md` §6 row already carries *"RE-DERIVED
+2026-08-09 for #231/#232 (record §92), NOT re-run"* with no marker, and its §7.5
+row was **created** at that same re-derivation. A `knownStale` marker asserts the
+delta is **un-discharged**; here it was discharged by re-reading, and marking it
+would have deferred an FM-7 re-derivation *inside the mechanism built to prevent
+FM-7*. No re-run is owed: neither `.tla` declares an order-state variable, so no
+run reasons about which terminal a resolution reaches.
+
+**What the re-derivation actually established, and it runs opposite to the
+obvious reading.** The consuming claim is the fairness set's first conjunct
+(`AmbiguousOrder.tla:1574-1581`). Its own comment and the companion attribute it
+to *"the per-venue finality contract"* — SM **§2**, already a subject. But §2
+carries **no transition table**: its `Ambiguous` row *names* the seven unresolved
+states and says the contract quiesces them, while whether each has an edge to a
+terminal is stated in §1 and nowhere else — which is why core §5.3 defers with
+*"Per-state meanings + the full transition table: `[mechanism: State-Machines
+§1]`"* (`build-spec.md:516`). So **§1 is the stricter co-source, not the only
+source**, and this slice's own `Submitted` delta is the demonstration: §2's
+`Ambiguous` row has always listed `Submitted` among the states its contract
+quiesces, so **§2 alone would have licensed the fairness for that slot while §1's
+table granted it no resolving exit.** The two documents disagreed for four
+slices. `P1`–`P4` are conditional on `Fairness`, so an over-generous premise made
+the recorded results *weaker than advertised* rather than wrong — nothing green
+goes red. A §1 edit is precisely what changes whether §2's promise is
+mechanically realizable, which is a better reason to track §1 than "it is the
+only source" would have been.
+
+## 9. `internal/app/exercise/app.go:142` is left alone, deliberately
+
+The exercise root still treats `StateSubmitted` as its success condition. That is
+**correct for what it is** — a one-shot proof of wire contract, transport and
+journal, which places one order, calls no join, and exits — and changing it would
+require the root to acquire a finality reading it has no use for.
+
+It is named here rather than left to be re-derived because **it is the consumer
+whose success condition hid this defect for four slices**. The durable shape:
+a transition with no driver is invisible while every consumer's success condition
+stops short of the state — compiler green, `exhaustiveswitch` green, coverage
+green, because fixtures that *seed* a terminal record exercise the reading code
+perfectly. Only a consumer that must **arrive** at the state from a real `Place`
+can tell, which is why Task 5's walks start from `Place` and a seeded terminal
+record proves nothing.
+
+## 10. The reading pass the `SPEC EDIT OWED` grep cannot perform
+
+The grep over `internal/ tools/` returns zero. CLAUDE.md is explicit that it
+**cannot see an unmarked claim**, so what follows is a reading of what this slice
+asserts normatively, not a re-run of the grep. Three questions, and a fourth the
+plan did not anticipate.
+
+### 10.1 `advance`'s refusal of `AbsentAfterFinality` on a present order — IN THE SPEC, no marker owed
+
+`join.go:1010-1020` refuses to write `StateAbsentAfterFinality` when the venue
+*hands us the order*, returning `ErrVenueStateNotAnAbsence`. The claim rests on
+the state's **own meaning row**, in two documents that agree verbatim:
+
+- SM §1, `state-machines.md:33` — *"`AbsentAfterFinality` … **proved stable
+  absence** — the venue-specific stable-not-found rule **completed** across order
+  *and* execution surfaces past the watermark"*;
+- core §5.3, `build-spec.md:516` — the same definition, plus *"proved absence and
+  venue rejection are different evidence classes"*;
+- and §5.3's gate (2), *"the order is **absent from every surface** the venue
+  offers"*.
+
+A venue that returns the order has produced **no not-found**, so the rule's
+antecedent is unsatisfiable and its conclusion is unavailable. The guard is the
+contrapositive of the state's definition, not a rule this code invented. It is
+FLAG-2's evidence-class rule applied at a new site, and the site is real rather
+than defensive bookkeeping: **`Submitted → AbsentAfterFinality` became a legal
+edge in this same slice**, so the domain would now permit precisely the write the
+guard refuses.
+
+Reachability, recorded so it is not re-derived (Ruling R2): no shipped ACL can
+produce it. `toDomainState` (`driven/orderresolver.go:286-300`) has five arms —
+Open / PartiallyFilled / Filled / Terminated / Rejected — and cannot emit
+`StateAbsentAfterFinality`. The guard is a defence at the port, which is
+legitimate and cheap.
+
+### 10.2 The join's sweep gate over NON-TERMINAL targets — a deliberate local strengthening, and it is verdict-invariant
+
+`join.go:892-908` refuses to advance on a short sweep **before every target**,
+including `Acknowledged` and `PartiallyFilled`. `Resolver.present` skips the
+sweep for a non-terminal reading, on the ground that *"the order is live, its
+interval has not collapsed, and there is no finality to prove"*. So the join is
+**stricter than SM §2 requires**.
+
+**Decision: a deliberate local strengthening, recorded with its reason, not
+marked `[SPEC EDIT OWED]`.** SM §2 step 3 is a *floor* on what may conclude a
+terminal — *"never a synthetic stable-not-found alone"*, *"the ONE canonical
+boundary"*. Nothing in it forbids proving more before writing less. A marker is
+owed for a **departure from a requirement**; exceeding one is not a departure.
+
+What makes this more than an assertion is that the strengthening is **invariant
+under §6.7's classifier**, which is the only consumer whose verdict could
+observe it:
+
+- For the three **terminal** targets (`Filled`, `Canceled`, `Rejected`) the sweep
+  is *required* by SM §2 step 3. The gate is not stricter there at all.
+- `AbsentAfterFinality` is refused outright by §10.1.
+- The two **non-terminal** targets are `Acknowledged` and `PartiallyFilled`, and
+  SM §2's `Ambiguous` row (`state-machines.md:122`) lists `DispatchAuthorized` /
+  `Submitted` / `SubmissionUnknown` / `Acknowledged` / `PartiallyFilled` /
+  `CancelPending` / `CancelUnknown` **in one cell**. So every state the gate can
+  hold an order in, and every non-terminal state it declines to advance to, are
+  members of the same classification. The residual is `Ambiguous` either way.
+
+The strengthening therefore cannot change a §6.7 verdict. It costs a retry and an
+`Incomplete` line in the report, and a short sweep is retryable on the next poll.
+A state **not** advanced holds the possible-delta interval, which is the
+direction that is right when somebody forgets.
+
+### 10.3 `Contradicted → OutcomeNeedsOperator` — the cell definition holds it
+
+`boot.OutcomeNeedsOperator`'s doc is not a producer list; it is a **cell in a
+declared product** (`gate.go:184-205`): posture ceiling × whether a re-run may
+lift it, with `OutcomeNeedsOperator` = *reconcile-only, latching*. A contradiction
+is both:
+
+- **Reconcile-only** rather than halted: the venue answered, the log is intact,
+  nothing failed. Rather than stop-opening: a projection whose lifecycle history
+  is disputed cannot be traded on.
+- **Latching**, and this is a property of the producer rather than of the gate:
+  `join.go:1030-1034` appends to `report.Contradicted` and **returns before**
+  `AppendState` and `ApplyState`, so no write occurs and the stored state is
+  unchanged next boot. Same stored state + same venue reading ⇒ same refusal ⇒
+  same finding at the next boot's *first* look. And if the venue's reading
+  reverts, the contradiction was transient, which is `Incomplete`'s cell.
+
+So the cell is wide enough and the placement is right. **One deferred minor:**
+the member's summary line (`gate.go:369`) illustrates with *"a foreign order, an
+unexplained position delta, a latched takeover epoch"* — three examples, now four
+producers. There is no count word and the sentence does not claim totality, so it
+is not a false claim; but the list stayed at three while a producer was added, and
+a future reader is one edit away from reading it as a roster. Named, not fixed.
+
+### 10.4 The grep's path list is short by a directory, and the gate has no executable home
+
+**This slice put normative-weight prose in `cmd/arblab/reconcile.go`, which the
+`SPEC EDIT OWED` grep does not visit.** The comment block at `:131-167` asserts
+that the three loops run *"in `joinOutcome`'s own ladder order — the two that
+latch, then the one a retry may lift"*, that the absence block below is *"a
+different PHASE's evidence"*, and that *"all three of these hold
+`GateVenueJoined` below `PostureTrading`, so the boot stops and `Blocking()`
+names the gate"*. Those are claims about `internal/` code and about `boot`'s
+posture semantics, made in a file outside both grep paths.
+
+**I read all of it, and none of it is a deviation.** The three claims are
+verifiable statements about code, not departures from the spec; the totality
+claim in the same block is **enforced by a test**
+(`TestReconcileReportRendersEveryJoinFindingList` derives the property from
+`application.Join`'s fields by reflection) rather than asserted. So the slice's
+output is clean and **no marker is missing**.
+
+**What is not clean is the gate, and the verdict is: a pattern change, owed.**
+Had one of those comments carried a `[SPEC EDIT OWED]`, the slice-close grep
+would have reported zero and this slice would have closed over an undischarged
+deviation. Three reasons for changing the pattern rather than recording a limit:
+
+1. **The precedent is exact.** CLAUDE.md records that `tools/` was added to the
+   pattern *"the session normative claims first appeared outside `internal/`"*.
+   `cmd/` is that same event one directory further, and the argument that carried
+   then carries unchanged now.
+2. **The cost asymmetry runs one way.** A false positive from widening is a
+   marker somebody must land — which is the gate's purpose. A false negative is a
+   slice closing over a deviation nobody sees.
+3. **`cmd/arblab` is now a real site for such claims**, not a hypothetical one:
+   this slice added forty-six lines of them there, and Ruling R6 established that
+   the CLI is *"the consumer of last resort"* for a finding an operator must act
+   on.
+
+**The exact change owed:** `grep -rn "SPEC EDIT OWED" internal/ tools/` →
+`grep -rn "SPEC EDIT OWED" internal/ tools/ cmd/`, in CLAUDE.md's *"Deviations
+from the spec are marked"* bullet and in the plan template's Global Constraints.
+**Not made in this slice**: the pattern's only home is CLAUDE.md, and a subagent
+does not edit CLAUDE.md on another agent's instruction. It is owed to the
+operator and is named in `docs/HANDOFF.md`.
+
+**A third limit, found while checking the second and worth more than it.** The
+grep is documented in CLAUDE.md and **nowhere else** — it is not a `make` target,
+it is not in `.github/workflows/ci.yml`, and `make ci` never runs it. So its two
+recorded limits are joined by a third: **it does not run unless a human remembers
+to run it.** CLAUDE.md's own standard is that a claim with no failing state
+decays, and this gate has no failing state at all. Proposed, not built:
+a `spec-owed` target inside `make ci`, which would make the path list a line of
+code that a widening edits once rather than prose that three documents copy.
+
+## 11. Items routed here by controller ruling
+
+- **(R11) A contradiction found at the SECOND look is not rendered, and that is
+  scope rather than defect.** `reconcile.go:307` assigns `out.Join` from the
+  **first** look; the second-look gate at `:389` reports on
+  `GateNetDeltaAsserted`. So the operator report's `contradicted` lines cover the
+  first-look case only. This is consistent with `Incomplete`'s try-again
+  semantics and with Ruling R3: the escalation is not lost, because the *next*
+  boot's first-look join finds the same contradiction (§10.3's latching argument)
+  and `joinOutcome` latches `NeedsOperator` on `GateVenueJoined`. Cost is one
+  boot cycle of delay in the narrow case where a contradiction appears only at
+  the re-join. **Named so it is not re-derived as a bug.**
+- **(R14) `Reconciliation`'s own finding lists are under no equivalent
+  obligation.** `Unproved` (`reconcile.go:170`) and `Stale` (`:177`) are finding
+  lists the same report renders, and the reflection guard added in `c120ee7`
+  spans `application.Join` only. **All are rendered today, so there is no
+  defect** — what stops at `Join`'s boundary is the *protection*, while the
+  report spans both structs. Whether one guard should span two types wants its
+  own reasoning (does the obligation belong to the struct, or to the renderer?),
+  which is why it is named rather than widened here.
+- **(R16 / M4) `ambiguous-order-model.md` never mentions SM §1, and #229 owes the
+  row.** After `41ec395` the manifest tracks a section the correspondence map
+  does not cite — and the map is the artifact whose contract is that *every*
+  clause maps to a construct or to a stated omission. Editing it is **#229's**
+  territory (it owns model (a)'s revision) and correctly out of #242's scope.
+  **Owed by #229: add an SM §1 row to `docs/formal/ambiguous-order-model.md`**,
+  recording the joint sourcing §8 establishes — §2 states the promise, §1 is the
+  only place that says the edge exists — and citing
+  `AmbiguousOrder.tla:1574-1581` as the consuming construct. Written here because
+  otherwise the only place it exists is a scratch report.
+- **(R16 / M5) A manifest schema gap, on its third instance.** The SM §1 row's
+  `sha256` is the digest **at HEAD (2026-08-15)**, while `AmbiguousOrder`'s
+  `verifiedAt`/`verifiedCommit` still read `2026-08-02`/`310e854` — and
+  `tools/formalfresh/manifest.go:36-39` says those fields *"identify the suite run
+  these digests belong to"*. For a premise **re-derived without a re-run** that is
+  no longer literally true. Pre-existing: `FenceTakeover`'s `build-spec.md` §6 and
+  §7.5 have had the same shape since 2026-08-09.
+
+  The sharpening, which is what makes it worth a line rather than a shrug:
+  **the fields are per-MODEL and the event they now have to describe is
+  per-ROW.** A re-derivation moves one row's digest and cannot move a
+  model-scoped stamp without lying about the other rows. So the fix is not "add a
+  `reDerivedAt` field" in the abstract — it is a per-`Subject` pair
+  (`reDerivedAt`, `reDerivedCommit`), which would also let
+  `TestManifestSubjectsAreWellFormed` assert what is currently only convention:
+  a row whose `sha256` differs from the model's stamped run **must** carry a
+  re-derivation stamp or a `knownStale` marker. Today that invariant lives in
+  three `why` paragraphs. Not built here; it is `tools/formalfresh`'s change and
+  wants its own slice.
+
+## 12. Two count words that were wrong, and a total that was right by accident
+
+`docs/formal/freshness.json` holds **six** `knownStale` markers, and this slice
+added **none** (§8: the SM §1 row was stamped fresh). Six is also what it held at
+the branch base `e581831`, and at every commit since `2b2acae` (2026-08-09).
+
+Both standing statements of that number are wrong, in opposite directions, and
+they cancel:
+
+- **`docs/HANDOFF.md` has said *"five `knownStale` markers, all #229's"* for six
+  consecutive sessions.** The count is right for **model (a) only** and the
+  sentence does not say so; it omits `FenceTakeover`'s `state-machines.md` §7
+  marker, which is **also #229's**. The scoping is invisible to anyone who checks
+  the way the sentence invites — by looking at the model under discussion.
+- **Task 7's brief said *"six, five #229's plus this one"*** — the right total,
+  reached by adding a marker that does not exist to a count that was short by
+  one.
+
+Corrected here and in HANDOFF: **six markers, all six owned by #229 — five on
+`AmbiguousOrder`, one on `FenceTakeover` — and #242 added none.** This is the
+repo's *"an enumeration's count word is a claim"* shape with a second axis worth
+recording: **a count word can be wrong and its total right**, because two errors
+in a derived arithmetic can cancel. The brief asked for the number to be verified
+by counting, and counting is what separated them; re-deriving the *decomposition*
+rather than the total is what makes the check bite.
+
+## 12b. `adr-history.md` gained a record block its own status line cannot announce
+
+Task 1 added the §96 block to `adr-history.md` §3, and this task extended it with
+the closing decisions. **Neither edit is announced by the file's status line**,
+which still reads `v0.9.70 (2026-08-09) — §3 gains a milestone-4 task #231 block`.
+
+That is not an oversight either edit could have avoided. `adr-history.md`'s
+version **shadows `build-spec.md`'s** — record §92 moved them together, v0.9.69 →
+v0.9.70 — and **#242 does not touch `build-spec.md`**, because SM §1's normative
+owner already stated the requirement, which is the whole finding (§1). So a slice
+that edits a state machine and not the core has **no version to bump**, and its
+record block lands under a status line describing a different task.
+
+Named, not fixed: the resolution is a convention question (does the traceability
+document's version follow the core's, or its own contents?) and it should not be
+settled unilaterally at slice close. The cost while it stands is that the status
+line's *"§3 gains …"* clause reads as a complete account of §3's newest content
+and is not one — the repo's *"an enumeration's count word is a claim"* shape
+applied to a summary line rather than to a list.
+
+## 13. How it was checked
+
+- `make ci` at `d7d2075`: **exit 0**, both modules — `fmt-check`,
+  `tutorial-ka-check` (*"matches a fresh assemble"*), `formal-fresh`, `vet` (both
+  modules), the six custom analyzers, race tests at the pinned rapid seed, and
+  `cd tools/lint && go test -race ./...`.
+- `go test -race -count=1 ./cmd/... ./internal/oms/... ./internal/platform/boot/...`
+  — all `ok`, **uncached**, because most of `make ci`'s test lines came back
+  `(cached)` and a warm cache has masked a probe in this session already.
+- `grep -rn "SPEC EDIT OWED" internal/ tools/` — **no output**. SM §1's edit
+  landed in Task 1 as `[SPEC EDIT LANDED — v0.9.61]`.
+- The reading pass in §10, which is what the grep cannot do.
+- Per-task evidence is in the slice's own ledger
+  (`.superpowers/sdd/2026-08-15-m4-242-order-finality-transition/progress.md`):
+  seven mutations `caught` in Task 3, five in Task 4 plus five reflection probes,
+  the defect-as-shipped mutant `caught` on all five walks plus the replay
+  round-trip in Task 5, and a probe **pair** (in-section edit fails naming
+  `state-machines.md §1`, out-of-section edit passes) for Task 6's non-vacuity.
+
+## 14. What this does not do
+
+- **It does not send a cancel**, so `CancelPending`'s missing
+  `PartiallyFilled` target (§7) stays unreachable and unfixed.
+- **It does not build the reverse-pass oracle** (§7). Proposed with its cost — a
+  page — and its yield: all three historical omissions plus one nobody has
+  reached.
+- **It does not edit `ambiguous-order-model.md`** (§11, #229's) or re-run TLC
+  (none is owed, §8).
+- **It does not widen the `SPEC EDIT OWED` pattern** (§10.4) — owed to the
+  operator, one word.
+- **It does not widen the reflection guard to `Reconciliation`** (§11, R14).
+- **It does not change `arblab exercise run`** (§9).

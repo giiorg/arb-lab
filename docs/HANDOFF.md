@@ -1,6 +1,132 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-15, session 141): **#236 IS PLANNED, REVIEWED TWICE AND NOW BLOCKED — THE ORDER LIFECYCLE STOPS AT `Submitted` AND NOTHING IN THE REPOSITORY ADVANCES IT, SO THE PLAN'S FILL GATE CAN NEVER OPEN. DOCS ONLY, NO CODE. THE NEXT ACTION IS `writing-plans` FOR THE FINALITY TASK, NOT FOR #236.**
+## Status (2026-08-15, session 142): **#242 IS CLOSED — A PLACED ORDER NOW REACHES A TERMINAL, AND THE FINDING WAS A MISSING SM §1 *ROW* RATHER THAN A MISSING *CALL*. TEN COMMITS, `make ci` GREEN BOTH MODULES. **#236 IS UNBLOCKED** AND IS THE NEXT ACTION.**
+
+**Read `docs/superpowers/specs/2026-08-15-m4-242-order-finality-decisions.md`** —
+it holds the sharpened finding, the one departure from the parent record and the
+operator ruling behind it, three rejected alternatives with their grounds, the
+reading pass the `SPEC EDIT OWED` grep cannot perform, and four items routed to it
+by controller ruling. The finding itself stays in
+`2026-08-15-m4-236-order-finality-gap.md`; the plan is
+`docs/superpowers/plans/2026-08-15-m4-242-order-finality-transition.md`.
+
+**⚠ THE FINDING SHARPENED, AND THIS IS THE HALF WORTH CARRYING.** Session 141
+diagnosed *a transition with no driver* — the state machine declared and policed
+while nothing called `ApplyState`. True, and not load-bearing. **SM §1 gave
+`Submitted` no query-resolution row at all**, so a driver written against
+`CanTransition` would have been **refused by the domain** on the ordinary outcome
+of every order this system sends: `Filled`, `Canceled` and `PartiallyFilled` —
+three of the five readings the ACL can produce — had no legal target from
+`Submitted`. Two places already required the row and neither reached it (SM §1's
+own *"`DispatchAuthorized` **or beyond** is resolved only by query"* invariant,
+and core §6.7's ambiguous-residual list, which names `Submitted`). That is the
+**third axis** of v0.9.11's finding and **the most reachable** of the three — the
+other two states are entered by a crash or a transport failure, this one by every
+successful `Place`. `state-machines.md` v0.9.60 → **v0.9.61**; `build-spec.md`
+**unchanged**, because SM §1's normative owner already stated the requirement,
+which *is* the finding.
+
+**WHAT LANDED.** `9b87b17` the SM §1 row → `eb295fa` `Resolver` admits `Submitted`
+(a **derived** bonus fix: `Submitted → AbsentAfterFinality` becomes legal, so a
+placed order the venue holds no record of can now be resolved by §5.3's rule at
+all) → `01d27ce` the join journals and applies the venue's reading, LAST, after
+the cross-check, and **even when the cross-check disagreed** (§5.3 keeps state and
+ledger orthogonal) → `e47795f`/`5807217`/`e00a7a7`/`c120ee7` the new
+`Contradicted` class reaches **all four** enumerations of the join's blocking
+findings and the operator report renders them → `cb7b8f7` five `Place`→terminal
+walks plus the replay round-trip → `41ec395`/`d7d2075` SM §1 becomes a tracked
+**premise** of formal model (a).
+
+**⚠ THE NEXT ACTION: #236.** Its plan's `BLOCKED` block is replaced with the
+dependency-landed note. Two of its tasks change and nothing else does: task 6's
+`drive.establish` now reads a terminal state the join actually produces, and task
+5's `venueDouble` gains the venue-status responses the advance consumes. **D4's
+mechanism sentence is corrected in two places**: `Module.Join.Join([id])` now
+advances the leg's state so `Module.LegState(id)` reads a terminal one, and D4's
+blocking-list enumeration (`Absent`/`Incomplete`/`Unattributed`) was total when it
+was written and is not now — **`Contradicted` joins it**. #236 is not re-planned
+here.
+
+**THE GATE FINDING, AND IT IS OWED TO THE OPERATOR.** This slice put
+normative-weight prose in **`cmd/arblab/reconcile.go`** — claims about
+`joinOutcome`'s ladder order, which findings latch, and what `Blocking()`
+includes — and the slice-close grep visits `internal/` and `tools/` only. Nothing
+in `cmd/` is wrong (all of it was read; the totality claim there is *enforced by a
+reflection test* rather than asserted), so **no marker is missing**. What is
+missing is reach: a `[SPEC EDIT OWED]` landing in `cmd/` today would let a slice
+close over an undischarged deviation. **Verdict: a pattern change, one word —
+`grep -rn "SPEC EDIT OWED" internal/ tools/ cmd/`** — on the exact precedent that
+put `tools/` in the pattern. **Not made here**: the pattern's only home is
+`CLAUDE.md`. And a third limit found while checking the second: the grep is **not
+a `make` target and not in CI**, so beside "cannot see an unmarked claim" and
+"cannot see a directory nobody added" sits **"does not run unless somebody
+remembers"**. Proposed, not built: a `spec-owed` target inside `make ci`.
+
+**A COUNT WORD THIS FILE HAS CARRIED WRONG FOR SIX SESSIONS.** *"Five
+`knownStale` markers, all #229's"* is right for **model (a) only** and does not
+say so — it omits `FenceTakeover`'s `state-machines.md` §7 marker, which is also
+#229's. The manifest holds **six**, has held six since `2b2acae` (2026-08-09), and
+**#242 added none**: the SM §1 premise row was stamped **fresh**, on the footing
+`FenceTakeover`'s `build-spec.md` §6 and §7.5 rows already use — a premise
+re-derived rather than re-run, because a `knownStale` marker asserts an
+*un-discharged* delta and deferring one inside the mechanism built to prevent FM-7
+would be FM-7. **Six markers, all six #229's — five on `AmbiguousOrder`, one on
+`FenceTakeover`.** Task 7's brief independently said *"six: five #229's plus this
+one"*, which is the right total reached by adding a marker that does not exist to
+a count short by one. Two errors, opposite directions, cancelling: **re-derive the
+decomposition, not the total.**
+
+**THE `formal-fresh` FINDING, which is quieter than the failure that was
+expected.** The gate stayed **green through Task 1's edit to SM §1** — not because
+it healed, but because `state-machines.md` §1 was tracked by **neither model in
+neither role**. The gate was green about a section it does not watch. #229 now
+owes **two** things on SM §1: its scheduled model-(a) revision, and — new —
+**a §1 row in `docs/formal/ambiguous-order-model.md`**, which never mentions the
+section the manifest now tracks. The re-derivation's own result is the sharp
+part: the fairness conjunct is **jointly sourced**, §2 states the promise and §1
+is the only place that says the edge exists, so §1 is the **stricter** co-source —
+and this slice's `Submitted` delta is the proof, since §2 alone would have
+licensed a fairness the table granted no exit for. Nothing green goes red.
+
+**STILL OPEN, unchanged from session 141 except where noted.** The capture is
+**still down** by the 2026-08-15 decision (~9 GiB/day accepted, pending the
+Hetzner host) — #239 and #240 unmoved. #237 (post-cutoff funding fetch) is still
+cheap, still deadline-free, still the thing most likely to be forgotten. #225 and
+#226 remain the only B4 blockers; **neither blocks #236, and #242 no longer does
+either.** §94 §10's deferred review round still reopens when #225's port is next
+picked up. #241 unchanged. #235 carries seven; #220, #227, #228 unchanged; **#229
+is widened by one item** (the `ambiguous-order-model.md` SM §1 row). **Six
+`knownStale` markers, all #229's**, per the correction above.
+
+**THREE THINGS NAMED RATHER THAN FIXED, so they are not re-derived as bugs.**
+(1) A contradiction found at the **second** look is reported on
+`GateNetDeltaAsserted` while `out.Join` still holds the first look's report
+(`reconcile.go:307`), so the operator report's `contradicted` lines cover the
+first-look case only — consistent with `Incomplete`'s try-again semantics, and the
+escalation is not lost because the next boot's *first* look latches it.
+(2) `Reconciliation`'s own finding lists (`Unproved`, `Stale`) are under no
+obligation equivalent to the reflection guard now covering `Join`'s; all are
+rendered today, so there is no defect — the *protection* stops at `Join`'s
+boundary while the report spans both structs. (3) `internal/app/exercise/app.go:142`
+still treats `StateSubmitted` as success, deliberately — the exercise root places
+one order, calls no join, and exits — but it is the consumer whose success
+condition hid this for four slices.
+
+**ONE INSTRUMENT PROPOSED AND NOT BUILT, and it is cheap.** SM §1's transitions
+table has now been found incomplete **three times on the same shape**, each fix
+applied to the states the omission was *noticed* on. `transition_test.go`'s
+`specEdges` oracle is a **flat transcription** — it cannot see a row the document
+never had, in either direction. A **reverse pass** (for each state the joiner can
+load, for each of the five ACL readings: name the target or name the refusal) is a
+page of work, produces the plan's §0.1 matrix, and contains all three historical
+omissions **plus** one nobody has reached — `CancelPending → PartiallyFilled` is
+absent while `CancelPending → Filled` exists, so a cancel losing the race to a
+*partial* fill has no target. Unreachable today because nothing sends a cancel,
+which is exactly why it is written down.
+
+---
+
+## Status (2026-08-15, session 141 — HISTORICAL): **#236 IS PLANNED, REVIEWED TWICE AND NOW BLOCKED — THE ORDER LIFECYCLE STOPS AT `Submitted` AND NOTHING IN THE REPOSITORY ADVANCES IT, SO THE PLAN'S FILL GATE CAN NEVER OPEN. DOCS ONLY, NO CODE. THE NEXT ACTION IS `writing-plans` FOR THE FINALITY TASK, NOT FOR #236.**
 
 **Read `docs/superpowers/specs/2026-08-15-m4-236-order-finality-gap.md` — it holds the finding, the
 evidence chain link by link, the two rejected alternatives and what the remedy must deliver.** The
