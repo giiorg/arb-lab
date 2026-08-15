@@ -304,7 +304,6 @@ func TestResolveRefusesAnOrderTheDomainWouldNotProveAbsent(t *testing.T) {
 
 	refused := []domain.OrderState{
 		domain.StatePlanned,
-		domain.StateSubmitted,
 		domain.StateAcknowledged,
 		domain.StatePartiallyFilled,
 		domain.StateCancelPending,
@@ -336,8 +335,20 @@ func TestResolveRefusesAnOrderTheDomainWouldNotProveAbsent(t *testing.T) {
 	}
 
 	// The positive control, and it is what makes the list above a claim rather
-	// than a universally-refusing predicate: these two ARE resolvable.
-	for _, state := range []domain.OrderState{domain.StateDispatchAuthorized, domain.StateSubmissionUnknown} {
+	// than a universally-refusing predicate: these three ARE resolvable.
+	//
+	// StateSubmitted joined them in #242, and it joined by DERIVATION rather than
+	// by edit — the gate asks the domain whether proved absence is an answer it
+	// would accept, and SM §1's new query-resolution row says it is. That is the
+	// derivation working as designed, and it closes a second gap nobody had
+	// named: a successfully placed order the venue holds NO record of could not
+	// be resolved by §5.3's rule at all, because the one state every such order
+	// is in was refused at the door.
+	for _, state := range []domain.OrderState{
+		domain.StateDispatchAuthorized,
+		domain.StateSubmitted,
+		domain.StateSubmissionUnknown,
+	} {
 		t.Run("admitted/"+state.String(), func(t *testing.T) {
 			t.Parallel()
 
@@ -472,6 +483,47 @@ func TestResolveProvesAbsenceWhenEveryGatePasses(t *testing.T) {
 	}
 	if !v.windows[0].until.Equal(horizon) {
 		t.Errorf("swept until %v, want the horizon %v", v.windows[0].until, horizon)
+	}
+}
+
+// TestResolveProvesAbsenceOfAPlacedOrder is the case the derivation opened.
+//
+// Before #242 a Submitted order was refused at the resolvable-set gate, so the
+// one state every successfully placed order occupies was the one state §5.3's
+// stable-not-found rule could not be run for. A Place that reached the venue's
+// edge and left no record there — the lost-ack-plus-nothing-landed case — had no
+// terminal available to it.
+func TestResolveProvesAbsenceOfAPlacedOrder(t *testing.T) {
+	t.Parallel()
+
+	anchorAt := testNow
+	at, err := clock.NewServerTime(anchorAt, testUncertainty)
+	if err != nil {
+		t.Fatalf("NewServerTime: %v", err)
+	}
+	horizon := horizonOf(at, testPolicy())
+
+	res, j, r, v := newResolver(t, engineTimeFor(horizon), testPolicy())
+	o := dispatchableOrder(t)
+	resolvableAt(t, r, o, domain.StateSubmitted, anchorAt)
+	v.status = absentVenue(publishedReach())
+	v.sweeps = []ports.ExecutionSweep{provenSweep(horizon)}
+
+	got, err := res.Resolve(o.ClientOrderID)
+	if err != nil {
+		t.Fatalf("Resolve = %v, want nil", err)
+	}
+	if got.Outcome != application.OutcomeResolved {
+		t.Fatalf("Outcome = %v (%v), want resolved", got.Outcome, got.Reason)
+	}
+	if got.State != domain.StateAbsentAfterFinality {
+		t.Errorf("State = %s, want absent_after_finality", got.State)
+	}
+	if !got.Journaled || !got.Applied {
+		t.Errorf("Journaled=%v Applied=%v, want both true", got.Journaled, got.Applied)
+	}
+	if states := j.states(); len(states) != 1 || states[0] != domain.StateAbsentAfterFinality {
+		t.Errorf("journal holds %v, want one absent_after_finality record", states)
 	}
 }
 
