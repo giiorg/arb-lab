@@ -79,7 +79,20 @@ func writeCrossVenueReferenceTicks(t *testing.T, observedAt time.Time, stepA, st
 			"maker": "0.0002", "taker": "0.0005", "tier": "VIP0-modeled",
 			"class": "hand_recorded", "observed_at": %q, "source": "test fixture"}`, venue, observed)
 	}
+	// min_qty is THREE steps rather than one, and the table is explicit so a new
+	// step has to choose one deliberately.
+	//
+	// Both fields are fixedpoint.Quantity in the same asset, so a fixture whose
+	// min_qty equalled its step would make "resolved the step" and "resolved the
+	// min quantity" the same observation — and a resolver that read the wrong
+	// one would pass. That is this repo's eleven-times collapse, and it is here
+	// because the realistic-looking fixture is the colliding one.
+	minQtyFor := map[string]string{"1": "3", "0.1": "0.3", "0.001": "0.003", "0.5": "1.5"}
 	lot := func(venue, step, tick string) string {
+		minQty, ok := minQtyFor[step]
+		if !ok {
+			t.Fatalf("no min_qty declared for step %q; add one that DIFFERS from the step", step)
+		}
 		tickField := ""
 		if tick != "" {
 			tickField = fmt.Sprintf("\"tick\": %q,", tick)
@@ -90,7 +103,7 @@ func writeCrossVenueReferenceTicks(t *testing.T, observedAt time.Time, stepA, st
 			"quote": "USDT", "min_notional": "5", %s
 			"class": "hand_recorded", "observed_at": %q,
 			"source": "test fixture mirroring docs/venue-profiles.md trading filters"
-		}`, venue, step, step, tickField, observed)
+		}`, venue, step, minQty, tickField, observed)
 	}
 	doc := fmt.Sprintf(`{
 		"fees": [%s, %s],
