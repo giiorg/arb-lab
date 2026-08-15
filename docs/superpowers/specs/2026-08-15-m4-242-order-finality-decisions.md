@@ -301,12 +301,15 @@ Case by target:
   `CancelPending` / `CancelUnknown`, and `ContributesPossibleDelta`
   (`orderstate.go:240-256`) returns true for exactly those seven and false for
   `Planned` plus the four terminals. The residual is `Ambiguous` either way.
-- When the stored state is **terminal** and the venue reports a non-terminal, the
-  edge is a contradiction (`CanTransition` refuses it), so no advance was
-  available to withhold — `Contradicted`, not `Incomplete`, and the verdict is
-  unchanged by a different route.
+- When the stored state is one of the three **genuinely** terminal states
+  (`Filled` / `Canceled` / `Rejected` — **not** `AbsentAfterFinality`, whose
+  supersession edges are the first exception below) and the venue reports a
+  non-terminal, the edge is a contradiction: `CanTransition` refuses it and no
+  advance was available to withhold. **But that is the sweep-succeeded case.**
+  With a short sweep the gate at `join.go:892-908` returns first and `advance`
+  (`:966`) never runs at all — which is the second exception below.
 
-**The exception, and it is real rather than a technicality.**
+**The first exception, and it is real rather than a technicality.**
 `AbsentAfterFinality → PartiallyFilled`/`Filled` **is** a legal edge — §3.0's
 *"venue reality wins"*, a discovered late execution superseding a proved absence
 (`transition.go:268-274`). There the stored state contributes **no** possible
@@ -315,22 +318,38 @@ delta and the target contributes one, so withholding the advance holds the
 venue is reporting a fill. That is the unsafe direction, and it is the one place
 this strengthening is not free.
 
-**What bounds it is not the classifier but the posture.** The same gate that
-withholds the advance appends to `report.Incomplete`, `joinOutcome` returns
-`boot.OutcomeIncomplete`, and `Outcome.posture()` (`gate.go:505-508`) maps that to
-`PostureReconcileOnly` — **below `PostureTrading`**. So the optimistic reading is
-never traded on: the boot is held, the order id is printed with its reason
-(§10.4), and the next poll's sweep either proves coverage or holds it again.
-The mitigation is a *different* mechanism from the invariance argument, which is
-precisely why it has to be stated rather than assumed — the invariance argument
-does not cover this row, and reading it as though it did is how a later session
-would conclude the gate is free in all cases.
+**The second exception, which is about the DIAGNOSIS rather than the state.**
+Because the gate precedes `advance` in program order, a short sweep withholds not
+only the transition but the *finding*. On a stored-terminal order whose venue
+reading contradicts it, the strengthening **converts a latching
+`OutcomeNeedsOperator` into a retryable `OutcomeIncomplete`** for as long as the
+sweep stays short: `report.Contradicted` is never appended, because the line that
+appends it (`join.go:1033`) is downstream of the return at `:907`. What the
+unstrengthened path would have produced is a contradiction; what this path
+produces is "try again".
+
+**One bound covers both exceptions, and it is the posture rather than the
+classifier.** The gate appends to `report.Incomplete`, `joinOutcome` returns
+`boot.OutcomeIncomplete`, and `Outcome.posture()` (`gate.go:505-508`) maps
+`OutcomeUnreported`, `OutcomePending`, `OutcomeIncomplete` **and**
+`OutcomeNeedsOperator` alike to `PostureReconcileOnly` — **below
+`PostureTrading`**. So neither exception can be traded on: in the first the
+optimistic reading is held, in the second the escalation is delayed, and in both
+the boot stops and the order id is printed with its reason (§10.4). Latching is
+**deferred, not lost** — the contradiction surfaces on the first boot whose sweep
+completes, which is the same argument Ruling R3 makes about a second-look
+contradiction and R11 records (§11).
+
+That the bound is a *different mechanism* from the invariance argument is
+precisely why it has to be stated rather than assumed. The invariance argument
+covers neither row, and reading it as though it did is how a later session
+concludes the gate is free in all cases.
 
 Everywhere else the strengthening costs a retry and an `Incomplete` line, and a
 short sweep is retryable on the next poll. A state **not** advanced holds the
 possible-delta interval, which is the direction that is right when somebody
-forgets — and on the supersession rows it is the direction that is wrong, held
-safe by the posture rather than by the state.
+forgets — and on these two rows it is the direction that is wrong, held safe by
+the posture rather than by the state.
 
 ### 10.3 `Contradicted → OutcomeNeedsOperator` — the cell definition holds it
 
@@ -542,14 +561,37 @@ and `Resolver`'s entry gate), grep the tree for prose asserting that value — a
 count, a membership list, an "and nothing else" — and re-read every hit. Cheap,
 and it is the only pass that reaches untouched files.
 
-This is the slice's signature defect on a sixth axis and **the first instance in
-code the slice never edited**. The five before it were all inside the diff:
-`joinOutcome`'s three enumerations (R1), the renderer's fourth (R6), the
-renderer's "every other finding" (R9), the reflection guard's type scope (R12),
-and `record.go`'s doc list (R10). The generalization those five suggested was
-*"an enumeration this slice touched may have stopped being total"*. The correct
-one is stronger and has no `git diff` in it: **an enumeration this slice's
-BEHAVIOUR falsified may live anywhere.**
+**No ordinal is claimed here, and the reason is the section's own subject.** An
+earlier draft called this *"the sixth instance"* and named *"the five before it
+(R1, R6, R9, R10, R12)"*. Review found the ordinal and the list disagree — the
+slice ledger counts D4's blocking-list enumeration as a member and my list did
+not, Task 6's mis-split stamp delta is a member of something and is in neither,
+and R10 is recorded there as **pre-existing** rather than falsified. Checking it
+showed the real fault: **the ordinal was asserted over a class whose membership
+criterion had never been written down**, which is this record's own §12 shape one
+level up — a count over a set nothing declares.
+
+The class does not have one membership; it has **two, with different lessons**,
+and conflating them is what made a single count look available:
+
+- **Claims this slice's behaviour FALSIFIED** — true when written, false
+  afterwards, and *nothing edited them*. `resolve.go:397-401` is one.
+  `joinOutcome`'s enumerations (R1) and the renderer's (R6, R9) are others: the
+  arrival of `Contradicted` is what made them non-total. The lesson is the search
+  below.
+- **Claims that were ALREADY wrong when this slice arrived** — `record.go`'s
+  refusal list (R10, ruled in only because the diff already touched the
+  sentence), HANDOFF's `knownStale` five (§12), Task 6's brief's delta count.
+  Nothing falsified these; they were short when written and had gone unread. The
+  lesson there is re-derivation, not search scope.
+
+What distinguishes `resolve.go` is **not** its position in a count but a property
+that can be checked without one: it is the first member of the first group found
+in a file with **an empty diff**. Every earlier member of that group sat in code
+the slice had opened, which is exactly what made the weaker generalization —
+*"an enumeration this slice touched may have stopped being total"* — look
+sufficient. The correct one has no `git diff` in it: **an enumeration this
+slice's BEHAVIOUR falsified may live anywhere.**
 
 Related and distinct, worth not conflating: the derivation in `resolve.go` did
 its job perfectly — the gate widened with no code edit, which is exactly why a

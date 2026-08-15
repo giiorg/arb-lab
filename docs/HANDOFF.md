@@ -131,13 +131,20 @@ code was right; the comment was wrong; it is fixed.
 was scoped to *comment blocks the slice added* — a **diff-scoped** search, which
 cannot find this class by construction. The pass that finds it is keyed off the
 diff's **effects**: *for each derived set or predicate whose value this slice
-moved, grep the tree for prose asserting that value and re-read every hit.* This is
-the slice's signature count-word defect on a **sixth** axis and **the first outside
-the diff** — the five before it (R1, R6, R9, R10, R12) were all in touched files,
-which is what made the weaker generalization look sufficient. Note the second-order
-point: the *derivation* in `resolve.go` worked perfectly, widening with no code
-edit, which is why a listed set was rejected there. **A derived set cannot drift; a
-sentence describing it can.**
+moved, grep the tree for prose asserting that value and re-read every hit.*
+
+**No ordinal is given, deliberately** — an earlier draft said "sixth instance" and
+listed five, and review showed the ordinal and the list disagree because the class
+had **no written membership criterion**. It splits in two, with different lessons:
+claims this slice's behaviour **falsified** (true when written, nothing edited
+them — R1's and R6/R9's enumerations, and `resolve.go`), and claims **already
+wrong** when the slice arrived (R10, HANDOFF's own `knownStale` five, Task 6's
+brief's delta count — re-derivation finds those, not search scope). What makes
+`resolve.go` distinctive is a checkable property rather than a position in a
+count: **it is the first of the falsified group found in a file with an empty
+diff.** Second-order point worth keeping: the *derivation* in `resolve.go` worked
+perfectly, widening with no code edit, which is why a listed set was rejected
+there. **A derived set cannot drift; a sentence describing it can.**
 
 **ONE INSTRUMENT PROPOSED AND NOT BUILT, and it is cheap.** SM §1's transitions
 table has now been found incomplete **three times on the same shape**, each fix
