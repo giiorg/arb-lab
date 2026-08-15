@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +12,8 @@ import (
 	apppair "github.com/giiorg/arb-lab/internal/app/pair"
 	appreconcile "github.com/giiorg/arb-lab/internal/app/reconcile"
 	"github.com/giiorg/arb-lab/internal/platform/boot"
+	"github.com/giiorg/arb-lab/internal/platform/clock"
+	"github.com/giiorg/arb-lab/internal/platform/config"
 	"github.com/giiorg/arb-lab/internal/platform/ids"
 	"github.com/giiorg/arb-lab/internal/platform/ratelimit"
 )
@@ -233,5 +236,51 @@ func TestPairReportOfANotDrivenRunNamesTheRefusal(t *testing.T) {
 	// to withhold what the boots observed.
 	if n := strings.Count(got, "ratelimit:"); n != 1 {
 		t.Errorf("report has %d rate-limit lines, want the one side that has something to report:\n%s", n, got)
+	}
+}
+
+// TestExampleDocumentValidates loads the committed example and validates it.
+//
+// This is the check that stops the example rotting silently: a document nobody
+// loads is prose, and this one is the shape an operator copies before a live
+// demo run. It resolves NO secret — the document holds refs, and resolving them
+// is a boot phase rather than validation.
+//
+// # The two journal paths are rewritten, and the reason is a real requirement
+//
+// sameJournal resolves each journal's PARENT directory, so a document whose
+// `./run/pair/` does not exist is refused — by design, because a path that
+// cannot be resolved cannot be told apart from the other side's. The example
+// ships with the relative paths an operator will actually use, and this test
+// runs from cmd/arblab where that directory does not exist, so it points both
+// at a directory that does. Everything else in the document is exactly as
+// committed. The runbook's first step is the operator's half of the same fact:
+// `mkdir -p ./run/pair`.
+func TestExampleDocumentValidates(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile("../../configs/pair.demo.example.json")
+	if err != nil {
+		t.Fatalf("read example: %v", err)
+	}
+	dir := t.TempDir()
+	doc := string(data)
+	for _, side := range []string{"binance", "bybit"} {
+		want := "./run/pair/" + side + ".db"
+		if !strings.Contains(doc, want) {
+			t.Fatalf("the example no longer declares %s; this rewrite is silently doing nothing", want)
+		}
+		doc = strings.ReplaceAll(doc, want, filepath.Join(dir, side+".db"))
+	}
+
+	wall, err := clock.NewWall(nil)
+	if err != nil {
+		t.Fatalf("NewWall: %v", err)
+	}
+	store, err := config.New[apppair.Config]("pair.demo.example.json", wall.Now(), []byte(doc))
+	if err != nil {
+		t.Fatalf("the committed example does not load: %v", err)
+	}
+	if err := store.Current().Value.Validate(); err != nil {
+		t.Fatalf("the committed example does not validate: %v", err)
 	}
 }
