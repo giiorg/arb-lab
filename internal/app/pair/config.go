@@ -30,13 +30,14 @@ import (
 // the drift would surface as a run that reconciles differently from the
 // recovery run over the same journal.
 //
-// [SPEC EDIT OWED] §12 item 7 describes strategy #2's execution half as
-// "`strategy/crossvenue` live wiring over the milestone-3 OMS + milestone-4
-// controls". "Live wiring" reads as connection work and does not say that the
-// composition root is single-venue by design or that the hedge group cannot
-// hold two venues. This document shape is the answer to both; §12 item 7 and
-// §5.2 need a sentence naming the two-deployment shape. Owned by task #241
-// alongside §5.1/§6.7's re-scope — see record §95 §8.
+// [SPEC EDIT LANDED — v0.9.71] §12 item 7 described strategy #2's execution
+// half as "`strategy/crossvenue` live wiring over the milestone-3 OMS +
+// milestone-4 controls". "Live wiring" reads as connection work and said
+// neither that the composition root is single-venue by design nor that the
+// hedge group cannot hold two venues. §5.2's OMS-deployment-block bullet now
+// states that a cross-venue package is TWO blocks under one root, with the two
+// refusals below as its rules; §12 item 7 carries the scope correction. The
+// normative re-scope of §5.1/§6.7 is still task #241's and is not this.
 type Config struct {
 	// Sides are the two deployments, exactly two, on two venues, over two
 	// journals. See ErrSideVenueDuplicate and ErrSideJournalShared: neither

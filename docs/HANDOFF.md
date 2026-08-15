@@ -1,6 +1,97 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-15, session 142): **#242 IS CLOSED — A PLACED ORDER NOW REACHES A TERMINAL, AND THE FINDING WAS A MISSING SM §1 *ROW* RATHER THAN A MISSING *CALL*. THE SLICE IS `e581831..6449b43`, MERGED TO `main`, `make ci` GREEN BOTH MODULES. **#236 IS UNBLOCKED** AND IS THE NEXT ACTION.**
+## Status (2026-08-16, session 143): **#236 IS BUILT — `internal/app/pair` DRIVES ONE CROSS-VENUE PACKAGE ACROSS TWO DEPLOYMENTS, `make ci` GREEN BOTH MODULES, `SPEC EDIT OWED` AT ZERO. NO LIVE RUN WAS PERFORMED.**
+
+**Read `docs/superpowers/specs/2026-08-15-m4-236-crossvenue-root-scoping.md` §10**
+— it holds what was built against each ruling, the three markers that keep
+alternative (v) visible, the five owed items, and **five findings the plan did not
+predict**. The plan is
+`docs/superpowers/plans/2026-08-15-m4-236-crossvenue-pair-root.md`; every one of
+its fourteen tasks is landed.
+
+**DO NOT RE-DERIVE THESE.** Record §95's three rulings are **settled**; its three
+unknowns are **measured** (§95 §2, dated 2026-08-15); and the pair concept lives
+**in the root, not the kernel**, by ruling 3's split. `domain.HedgeGroup` is
+untouched, §6.7 is unedited, and `Module.Classify` still has **no production
+caller** — all three deliberately.
+
+**WHAT LANDED.** `4a54686` the two `oms` projections a root behind the
+`singlewriter` fence cannot otherwise take → `8dc4345` the pair concept
+(`Verdict`, `Compose`, three-valued `Establish`) → `5851983` the two-sided
+document and the two refusals its shared `TradeID` rests on → `0c63c03` per-side
+filters from one reference revision → `1ddadb9` two boots and the
+both-clean-and-flat gate → `4e90a1c` the sequential drive → `5ae7a88` the unwind
+and the two readings it refuses → `1a62faa` `ExitClass` with `ExitExposed` →
+`4b2f591` the import fence → `1201ccd` `arblab pair run` → `30ade99` the demo
+document and runbook → `7d4c363` paired mode.
+
+**⚠ WHAT #236 SHIPS IS §95 §7's ALTERNATIVE (v), WITH THE MARKERS ON.** The root
+composes a verdict **above** the hedge group and leaves cross-venue
+*classification* owed to **#241**. §95 §7 (v) warned the root must not silently
+*become* (v) with no marker; the three markers are `pair.go`'s package comment,
+`Verdict`'s own doc, and `ErrUnwindRefused`/`drive.compensate` — each naming §6.7
+and §95 §4 by section. **The one compensating trade this root issues runs on
+exactly one reading** (half-open, side A, fill established); skewed and
+indeterminate end at `ExitExposed` for a human, because sizing that residual is
+§6.7's job and §6.7 cannot see this pair.
+
+**THE SPEC EDIT IS LANDED, NOT ROUTED.** `build-spec.md` **v0.9.70 → v0.9.71**:
+§5.2's OMS block now says it describes ONE deployment on ONE venue and that a
+cross-venue package is **two** blocks under one root — with the two rules that
+make one shared `TradeID` safe (**different venues, different PHYSICAL journals**,
+the journal one an *identity* check because a relative/absolute alias, a symlinked
+parent and a hard link all resolve to one chain) — and §12 item 7 carries the
+scope correction "live wiring" hid. **`grep -rn "SPEC EDIT OWED" internal/ tools/
+cmd/` is at ZERO.** Neither edited section is tracked by `formal-fresh`, so no
+model stamp moved and **no new `knownStale` marker exists: still six, all
+#229's.**
+
+**⚠ NO ORDER REACHED A VENUE.** Everything ran against `httptest` doubles. §95 §8's
+not-claimed list stands **entirely unchanged** — nothing here is evidence about
+demo books, demo fills, demo funding or the strategy's economics. The live run
+follows `docs/runbooks/pair-demo-run.md`, whose §8 restates the same list; note
+its two dated limits, that **the Bybit demo key expires 2026-11-10T07:03:17Z** and
+that `reference fetch` reads the **mainnet** public hosts, which is the same
+environment on Binance and a different one on Bybit.
+
+**THREE FINDINGS WORTH CARRYING PAST THIS SLICE.** (1) **A guard duplicating a
+downstream check reads as tested and is not** — mutating away "leg A filled
+nothing → do not send leg B" SURVIVED, because the planner refuses a zero-quantity
+leg anyway, so the Place count is identical and only the **refusal** differs.
+(2) **An unestablished leg was always also flat** in every fixture the plan
+specified, so the `Established` guard was equivalent to the flat guard; the
+isolating fixture holds side A's order live **with 60 already executed against
+it**. (3) **Bybit's metering shape is not Binance's** — no per-endpoint weight at
+all, a closed eight-endpoint budget roster, and a §4.1 posture read that rides the
+**spot** family even on a perp-only deployment. A cross-venue document is the
+first one that has to carry both, and copying one venue's rows under the other's
+name is a fixture asserting a false external fact.
+
+**THE NEXT ACTION IS THE OPERATOR'S CALL, and there are three candidates.**
+(a) **Run it on the demos** — the runbook is written, and it is the only thing
+that turns any of this into evidence. (b) **#241**, the normative re-scope of
+§5.1/§6.7 the three markers point at, which also owns the durable-pair-record
+question. (c) **#237**, the post-cutoff funding fetch — still cheap, still
+deadline-free, still the thing most likely to be forgotten.
+
+**STILL OPEN, carried forward.** The capture is **still down** by the 2026-08-15
+decision (~9 GiB/day accepted, pending the Hetzner host) — #239 and #240 unmoved.
+#225 and #226 remain B4's only blockers and **neither blocked #236**; §94 §10's
+deferred review round still reopens when #225's port is next picked up. #229 is
+unchanged and still owes SM §1's model-(a) revision plus the
+`ambiguous-order-model.md` §1 row. #235 carries seven; #220, #227, #228, #238 and
+#241 unchanged. **Six `knownStale` markers, all #229's — five on
+`AmbiguousOrder`, one on `FenceTakeover`.**
+
+**ONE ITEM STILL OWED TO THE OPERATOR, unchanged from session 142.** Widen
+`CLAUDE.md`'s slice-close grep to `internal/ tools/ cmd/` — this session ran it
+that way by hand and it is how the `cmd/` marker would have been found. No marker
+is missing today; only the pattern's reach is short, and it is still neither a
+`make` target nor in CI.
+
+---
+
+## Previously (2026-08-15, session 142): **#242 IS CLOSED — A PLACED ORDER NOW REACHES A TERMINAL, AND THE FINDING WAS A MISSING SM §1 *ROW* RATHER THAN A MISSING *CALL*. THE SLICE IS `e581831..6449b43`, MERGED TO `main`, `make ci` GREEN BOTH MODULES. **#236 IS UNBLOCKED** AND IS THE NEXT ACTION.**
 
 **Read `docs/superpowers/specs/2026-08-15-m4-242-order-finality-decisions.md`** —
 it holds the sharpened finding, the one departure from the parent record and the

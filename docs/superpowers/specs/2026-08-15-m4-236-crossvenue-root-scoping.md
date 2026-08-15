@@ -254,3 +254,118 @@ TLS with no CA bundle — the exact trap `probe230.py`'s header comment document
 a script written without reading it. A probe that fails identically everywhere reads as a finding
 about the venues. **A negative result needs its positive control before it is believed**, and here
 the control was free: a symbol that certainly has a book.
+
+---
+
+## 10. What was built (2026-08-16, session 143, `internal/app/pair`)
+
+### 1. Ruling 1's shape, delivered
+
+`internal/app/pair` is the composition root: **two `reconcile.Runner`s, two journals, two
+`oms.Module`s, held open simultaneously by one process**, driving ONE cross-venue perp-perp package.
+`arblab pair run -config <file>` is the verb — not a `crossvenue` subcommand, because every existing
+`crossvenue` subcommand is an offline research tool and an operator must not be one word away from
+confusing a simulation with a live order path.
+
+Both execution modes are built. **Sequential** (§7 alternative (ii), the plan's phase 1) opens leg A,
+establishes its exposure, and sends leg B **sized to A's established fill**; **paired** (phase 2)
+sends both before either is established and composes at the fan-in. The mode is a required field with
+no default — two failure surfaces, and a defaulted mode is a decision nobody made.
+
+### 2. Ruling 2's concept, and where it lives
+
+`pair.Verdict` and `pair.Compose` are in the **root**, not the kernel. `domain.HedgeGroup` is
+untouched, §6.7 is unedited, and `Module.Classify` still has no production caller. The concept has
+five members — `Unopened`, `Intact`, `HalfOpen`, `Skewed`, `Indeterminate` — and `Exposed()` is the
+predicate the exit class derives from.
+
+The reading that feeds it is **three-valued** (`Establish`): exposure counts as measured only when the
+order is terminal for *state* **and** the join reported none of its four per-order finding lists about
+it. The fourth is `Contradicted`, which #242 added after this record was written; the plan's own D4
+was corrected for it, and what guards a *fifth* is a reflective test over `JoinFacts`' fields rather
+than a backstop in the code — the backstop was written, and mutating it to `if false` **survived**,
+because it is unreachable while every field has an arm.
+
+### 3. What #236 actually ships is §7's alternative (v), and the markers are on
+
+The root reports both per-venue verdicts side by side and composes **above** them; cross-venue
+*classification* stays owed. §7 (v) warned: *"If #241 slips, the root must not silently become (v)
+with no marker."* The markers are three, all naming §6.7 and this record's §4 by section:
+
+1. `internal/app/pair/pair.go`'s package comment — why the concept is not in the kernel, and what that
+   costs.
+2. `pair.Verdict`'s own doc — "It is NOT §6.7's verdict and must not be confused with one."
+3. `ErrUnwindRefused`'s doc, and `drive.compensate`'s comment — the one reading this root will act on,
+   and the three it hands to a human.
+
+### 4. The one `[SPEC EDIT OWED]`, discharged here
+
+`build-spec.md` **v0.9.70 → v0.9.71**. §5.2's OMS-deployment-block bullet now states that the block
+describes one deployment on one venue and that a cross-venue package is **two** of them under one
+root, with the two rules that make one shared `TradeID` safe: the sides must name **different venues**
+and **different physical journals**. §12 item 7 gains a scope correction naming both halves the phrase
+"live wiring" hid — the new root, and §6.7's blindness to the pair.
+
+The marker is **removed from the code**, not carried forward: the slice-close gate is a grep, it
+cannot see an unmarked claim, and a marker carried past its slice is worse than either landing it or
+routing it. Neither edited section is tracked by `formal-fresh` (it watches §2, §3, §5, §5.3, §6, §7,
+§7.1, §7.4, §7.5 and SM §1/§7), so no model's stamp moves and **no new `knownStale` marker is
+created**. The count stands at **six, all #229's**.
+
+### 5. Five things owed, with their reasons
+
+- **Task #241**, unchanged: the pair as a kernel concept, its residual composition rule, and whether
+  it is §5.1's fifth journal record scope.
+- **Quantization (D5).** A fill that fails the partner's grid unwinds the **whole** leg rather than
+  hedging the quantized part and unwinding the remainder. Correct and coarse; the better version needs
+  a lot-grid rounding decision with an explicit direction, which is a money-rounding argument and
+  deserves its own slice. Not urgent while runs are fixed-size.
+- **A durable pair record.** The shared `TradeID` correlates the two legs in both journals, which is
+  the fact ruling 2 asked for — but **nothing states that the pair *should* have had two legs**. A
+  crash between leg A and leg B leaves side A's journal holding a leg whose partner was never planned
+  anywhere. That is precisely §5.1's fifth-record-scope question, and it belongs to #241.
+- **Half-open on side B.** Sequential mode opens side 0 first, so a side-1-only exposure is a
+  contradiction rather than a case; paired mode **can** produce it, and the compensation for it is
+  refused (D8) rather than handled.
+- **A per-leg dispatch refusal is untested from this level, and it is named rather than deleted.**
+  `drive.open` handles the branch where `Execute` returns no aggregate error, `LegResult.Err` is
+  non-nil and nothing reached the venue — the branch whose absence recreates the
+  `if err != nil { return }` reflex the executor's split signature exists to prevent. No fixture
+  reaches it, and the reason is structural: every pre-`Place` refusal inside `Dispatch` is caused by
+  **local** state (an OCC conflict, a journal fsync failure, a missing venue calibration), none of
+  which a venue double can produce.
+
+### 6. No live run was performed
+
+**This slice ran against `httptest` venue doubles only.** No order reached `demo-fapi.binance.com` or
+`api-demo.bybit.com` in session 143, so §8's not-claimed list stands **entirely unchanged** and
+nothing here is evidence about demo books, demo fills, demo funding, or the strategy's economics. The
+runbook `docs/runbooks/pair-demo-run.md` is what a live run follows, and its §8 restates the same
+list operationally. Saying so in a sentence is the point: a record silent about whether the thing ran
+is exactly the shape §9's method note is about.
+
+### 7. Five findings the build produced that the plan did not predict
+
+1. **Bybit's §4.1 posture read rides the SPOT family**, so a *perp-only* Bybit deployment must still
+   route a spot endpoint — the mirror of Binance, where a spot-only deployment needs no futures route.
+   Found by booting it.
+2. **Bybit's transport declares a closed EIGHT-endpoint budget roster** and refuses client
+   construction when a document leaves any row unbudgeted, so that a restart's fallback query cannot
+   spend the primary query's allowance. A cross-venue document is the first one that has to carry both
+   venues' metering shapes, and they are not the same shape: Bybit publishes **no per-endpoint
+   weight** (profiles §5), so the honest configuration is its real requests-per-second budget plus
+   §7.6's written `uncounted` waiver — never Binance's `weight_1m` under a Bybit name.
+3. **A guard duplicating a downstream check reads as tested and is not.** Mutating away "leg A filled
+   nothing → do not send leg B" SURVIVED: with the gate gone, leg B is planned at quantity zero and
+   the **planner's** §2.4 min-quantity rule refuses it, so the Place-count assertion passes for the
+   wrong reason. What separates them is the **refusal** — D6's run is clean — and that is now asserted.
+4. **An unestablished leg was always also flat in every fixture the plan specified**, so the
+   `Established` guard was equivalent to the flat guard and could be deleted with everything green.
+   The isolating fixture holds side A's order **live at the venue with 60 already executed against
+   it**: non-zero exposure that has not been measured, which is the most dangerous reading in this
+   root and the one the guard exists for.
+5. **A rendezvous that counts arrivals cannot tell the two modes apart.** Under sequential dispatch
+   leg A enters the barrier, waits out its bound, leaves, and leg B arrives as the "second" party — so
+   a running total reaches the quorum and reports a fan-out that never happened. What separates the
+   modes is **simultaneity**, so the counter goes down again when a party gives up. Its own negative
+   control is what found this.
