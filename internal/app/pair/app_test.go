@@ -735,3 +735,130 @@ func TestTheUnwindIsAdmittedWhereAnOpeningWouldBeRefused(t *testing.T) {
 //
 // So the branch stands untested from this level. It is listed for the record
 // rather than deleted, because deleting it would restore the reflex.
+
+// setMode rewrites the document's mode with the DECLARED enum-like rather than
+// a bare string, so a renamed constant fails to compile here instead of turning
+// every paired test into a silently sequential one.
+func setMode(snap *config.Snapshot[Config], mode Mode) {
+	snap.Value.Pair.Mode = mode
+}
+
+// TestPairedModeSendsBothLegsBeforeEitherIsEstablished is the mode's defining
+// property. The venue doubles record WHEN each call arrived, and the assertion
+// is that side B's Place landed before side A's first join — otherwise this is
+// sequential mode wearing a different name.
+func TestPairedModeSendsBothLegsBeforeEitherIsEstablished(t *testing.T) {
+	t.Parallel()
+	snap, servers := runnableConfig(t)
+	setMode(&snap, ModePaired)
+	servers[0].fillIOC("100")
+	servers[1].fillIOC("100")
+
+	rep, err := Run(context.Background(), snap, observability.NewRegistry, io.Discard)
+	if err != nil {
+		t.Fatalf("Run() = %v, want nil", err)
+	}
+	joinedAt, ok := servers[0].firstJoinAt()
+	if !ok {
+		t.Fatalf("side A was never joined; there is no ordering to assert (verdict %s, refusal %v)",
+			rep.Verdict, rep.Refusal)
+	}
+	if !servers[1].sawPlaceBefore(joinedAt) {
+		t.Fatal("side B's Place arrived after side A's first join; that is sequential mode")
+	}
+}
+
+// TestPairedModeHoldsBothPlacesOpenAtOnce is the assertion the test above
+// CANNOT make, and without it the mode's defining property is unchecked.
+//
+// "B's Place happened before A's first join" is satisfied by a purely serial
+// Place(A) → Place(B) → Join(A), which is not concurrent fan-out at all: it
+// restores one venue round-trip of leg-time while leaving the test green. The
+// only fixture that separates the two is one where BOTH requests must be in
+// flight simultaneously for either to complete, so a serial implementation
+// deadlocks and the bound reports it rather than hanging.
+func TestPairedModeHoldsBothPlacesOpenAtOnce(t *testing.T) {
+	t.Parallel()
+	snap, servers := runnableConfig(t)
+	setMode(&snap, ModePaired)
+
+	barrier := newPlaceBarrier(t, 2, time.Second)
+	servers[0].blockInPlace(barrier)
+	servers[1].blockInPlace(barrier)
+	servers[0].fillIOC("100")
+	servers[1].fillIOC("100")
+
+	if _, err := Run(context.Background(), snap, observability.NewRegistry, io.Discard); err != nil {
+		t.Fatalf("Run() = %v, want nil", err)
+	}
+	if !barrier.bothArrived() {
+		t.Fatal("the two Place calls were never in flight together; " +
+			"that is sequential dispatch wearing paired mode's name")
+	}
+}
+
+// TestSequentialModeCannotHoldBothPlacesOpen is the barrier fixture's own
+// control. Without it, a barrier that reported "arrived" unconditionally would
+// make the test above pass against any implementation at all.
+func TestSequentialModeCannotHoldBothPlacesOpen(t *testing.T) {
+	t.Parallel()
+	snap, servers := runnableConfig(t)
+	// Mode stays sequential — the fixture's only change.
+	barrier := newPlaceBarrier(t, 2, 200*time.Millisecond)
+	servers[0].blockInPlace(barrier)
+	servers[1].blockInPlace(barrier)
+	servers[0].fillIOC("100")
+	servers[1].fillIOC("100")
+
+	if _, err := Run(context.Background(), snap, observability.NewRegistry, io.Discard); err != nil {
+		t.Fatalf("Run() = %v, want nil", err)
+	}
+	if barrier.bothArrived() {
+		t.Fatal("the barrier reports a rendezvous under SEQUENTIAL dispatch; it cannot distinguish the modes")
+	}
+}
+
+// TestPairedModeSizesBothLegsFromTheDocument. Sequential mode sizes B from A's
+// fill; paired mode CANNOT — nothing is established when B is sent. Stating it
+// as a test stops the two modes' sizing rules being conflated later.
+func TestPairedModeSizesBothLegsFromTheDocument(t *testing.T) {
+	t.Parallel()
+	snap, servers := runnableConfig(t)
+	setMode(&snap, ModePaired)
+	servers[0].fillIOC("60") // a partial fill that sequential mode WOULD have used
+	servers[1].fillIOC("100")
+
+	if _, err := Run(context.Background(), snap, observability.NewRegistry, io.Discard); err != nil {
+		t.Fatalf("Run() = %v, want nil", err)
+	}
+	if got := servers[1].lastPlaceQuantity(); got != "100" {
+		t.Errorf("side B was asked for %q, want the document's \"100\" — nothing is established at fan-out", got)
+	}
+}
+
+// TestPairedModeSkewIsRefusedNotCompensated. Paired mode's characteristic
+// outcome is a skewed pair, and D8 is unchanged: this root does not compensate
+// one, because sizing that residual is §6.7's job and §6.7 cannot see the pair.
+func TestPairedModeSkewIsRefusedNotCompensated(t *testing.T) {
+	t.Parallel()
+	snap, servers := runnableConfig(t)
+	setMode(&snap, ModePaired)
+	servers[0].fillIOC("100")
+	servers[1].fillIOC("60")
+
+	rep, err := Run(context.Background(), snap, observability.NewRegistry, io.Discard)
+	if err != nil {
+		t.Fatalf("Run() = %v, want nil", err)
+	}
+	if rep.Verdict != VerdictSkewed {
+		t.Fatalf("Verdict = %s, want VerdictSkewed (refusal %v)", rep.Verdict, rep.Refusal)
+	}
+	for i := range rep.Sides {
+		if rep.Sides[i].Unwind != nil {
+			t.Errorf("side %d was compensated on a skewed pair", i)
+		}
+	}
+	if rep.ExitClass() != ExitExposed {
+		t.Errorf("ExitClass = %s, want ExitExposed", rep.ExitClass())
+	}
+}

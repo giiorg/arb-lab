@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/giiorg/arb-lab/internal/app/reconcile"
@@ -40,17 +41,34 @@ type drive struct {
 // below resolves the side through sideForLeg, because treating the leg index as
 // a side index is a silent cross-wire that only a reversed document exposes.
 func (d *drive) run() {
-	d.openAndCompose()
-	// ONE tail. Every branch above that composes a verdict reaches this call,
-	// because no composed verdict may bypass compensation through an early
-	// return — including D5's unsizable-hedge path, which is the one that
-	// leaves side A exposed with nothing sent on side B.
+	// The mode's two arms are NAMED and there is no default: Mode exists as a
+	// declared type rather than a bare string precisely so exhaustiveswitch
+	// refuses a third mode whose execution behaviour nobody wrote. Validate has
+	// already refused every value outside the pair, so the flag below is a
+	// wiring assertion rather than an error path.
+	ran := false
+	switch d.cfg.Pair.Mode {
+	case ModeSequential:
+		d.runSequential()
+		ran = true
+	case ModePaired:
+		d.runPaired()
+		ran = true
+	}
+	if !ran {
+		panic(fmt.Sprintf("pair: mode %q did not resolve after Validate", d.cfg.Pair.Mode))
+	}
+	// ONE tail, shared by both modes. Every branch that composes a verdict
+	// reaches this call, because no composed verdict may bypass compensation
+	// through an early return — including D5's unsizable-hedge path, which is
+	// the one that leaves side A exposed with nothing sent on side B. Two copies
+	// is how the two modes' compensation rules come to differ silently.
 	d.compensate()
 }
 
-// openAndCompose is the drive proper: it opens what it may and leaves a
-// composed verdict in the report. It never compensates — see run.
-func (d *drive) openAndCompose() {
+// runSequential is phase 1's drive: it opens what it may and leaves a composed
+// verdict in the report. It never compensates — see run.
+func (d *drive) runSequential() {
 	sideA := d.sideForLeg(0)
 	sideB := d.sideForLeg(1)
 
@@ -109,6 +127,58 @@ func (d *drive) openAndCompose() {
 		d.rep.Refusal = errors.Join(d.rep.Refusal, err)
 	}
 	d.rep.Verdict, err = Compose(a, d.rep.Sides[sideB].Exposure)
+	d.rep.Refusal = errors.Join(d.rep.Refusal, err)
+}
+
+// runPaired sends both legs before either is established.
+//
+// # What it buys and what it costs, both stated
+//
+// It buys leg-time: the interval between the two sends is the interval the pair
+// is unhedged, and in sequential mode that interval includes a bounded settle
+// loop against a venue. It costs the sequential mode's whole safety story — leg
+// B is sized from the DOCUMENT because nothing is established when it goes out,
+// so a partial fill on either side produces a SKEWED pair, which this root will
+// not compensate (D8).
+//
+// # The fan-out is concurrent and the fan-in is not
+//
+// Two goroutines, one per side, each doing plan-then-execute against its own
+// module. Nothing is shared between them: two modules, two journals, two venue
+// clients, two checklists, and each writes only its own index of the two arrays
+// below. The fan-in joins both and composes ONE verdict on this goroutine,
+// because composing is where a second writer would be a defect rather than a
+// slowdown.
+func (d *drive) runPaired() {
+	var wg sync.WaitGroup
+	var opened [2]*LegReport
+	var errs [2]error
+	for i := range d.cfg.Pair.Legs {
+		wg.Add(1)
+		go func(leg int) {
+			defer wg.Done()
+			opened[leg], errs[leg] = d.open(leg, d.mustQuantity(leg))
+		}(i)
+	}
+	wg.Wait()
+
+	for i := range opened {
+		side := d.sideForLeg(i)
+		d.rep.Sides[side].Open = opened[i]
+		if errs[i] != nil {
+			d.rep.Refusal = errors.Join(d.rep.Refusal, errs[i])
+			d.rep.Sides[side].Exposure = unopenedPartner(d.cfg, i)
+			continue
+		}
+		var err error
+		d.rep.Sides[side].Exposure, err = d.establish(i, opened[i].ID)
+		if err != nil {
+			d.rep.Refusal = errors.Join(d.rep.Refusal, err)
+		}
+	}
+	sideA, sideB := d.sideForLeg(0), d.sideForLeg(1)
+	verdict, err := Compose(d.rep.Sides[sideA].Exposure, d.rep.Sides[sideB].Exposure)
+	d.rep.Verdict = verdict
 	d.rep.Refusal = errors.Join(d.rep.Refusal, err)
 }
 

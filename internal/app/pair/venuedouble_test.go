@@ -82,9 +82,12 @@ type venueDouble struct {
 	// rejectFrom is the number of orders this venue accepts before it starts
 	// refusing; negative means it never refuses on that ground.
 	rejectFrom int
-	fills      map[string]string // clientOrderID -> cumulative executed
-	positions  map[string]string // symbol -> signed net, "" meaning flat
-	leverage   string
+
+	// barrier, when set, makes Place block until every party has arrived.
+	barrier   *placeBarrier
+	fills     map[string]string // clientOrderID -> cumulative executed
+	positions map[string]string // symbol -> signed net, "" meaning flat
+	leverage  string
 
 	// afterBoot is a net that appears only once the boot's own enumeration has
 	// been answered — see positionAppearingAfterBoot.
@@ -228,6 +231,71 @@ func (v *venueDouble) rejectPlaceAfter(n int) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.rejectFrom = n
+}
+
+// blockInPlace makes this venue hold every Place open until the barrier's other
+// parties have arrived too.
+func (v *venueDouble) blockInPlace(b *placeBarrier) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.barrier = b
+}
+
+// placeBarrier is a rendezvous of n parties with its OWN bound.
+//
+// The bound is the point rather than a safety net: a sequential implementation
+// can never supply the second party, so without one the test would HANG rather
+// than fail — and a hanging test names no defect. The timeout is kept well under
+// the harness's own limit, because a bound at the harness limit is not a bound.
+// # It counts parties IN FLIGHT, not parties that eventually arrived
+//
+// Counting arrivals is the version that cannot tell the modes apart, and the
+// control test found it: under sequential dispatch leg A enters, waits out the
+// bound, leaves, and leg B then arrives as the "second" party — so a running
+// total reaches the quorum and reports a rendezvous that never happened. What
+// makes the two modes different is SIMULTANEITY, so the counter goes down again
+// when a party gives up.
+type placeBarrier struct {
+	mu      sync.Mutex
+	waiting int
+	parties int
+	all     chan struct{}
+	timeout time.Duration
+	joined  bool
+}
+
+func newPlaceBarrier(t *testing.T, parties int, timeout time.Duration) *placeBarrier {
+	t.Helper()
+	return &placeBarrier{parties: parties, all: make(chan struct{}), timeout: timeout}
+}
+
+// wait blocks until every party is in flight together, or until the bound
+// expires.
+func (b *placeBarrier) wait() {
+	b.mu.Lock()
+	b.waiting++
+	quorum := b.waiting == b.parties
+	if quorum {
+		b.joined = true
+	}
+	b.mu.Unlock()
+	if quorum {
+		close(b.all)
+	}
+	select {
+	case <-b.all:
+	case <-time.After(b.timeout):
+	}
+	b.mu.Lock()
+	b.waiting--
+	b.mu.Unlock()
+}
+
+// bothArrived reports whether every party was in flight at the same instant.
+func (b *placeBarrier) bothArrived() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.joined
 }
 
 // ---------------------------------------------------------------------------
@@ -454,7 +522,12 @@ func (v *venueDouble) record(o placedOrder) bool {
 	if reject {
 		v.rejected[o.ID] = true
 	}
+	barrier := v.barrier
 	v.mu.Unlock()
+	if barrier != nil {
+		barrier.wait()
+		return reject
+	}
 	time.Sleep(2 * time.Millisecond)
 	return reject
 }
