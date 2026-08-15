@@ -131,9 +131,19 @@ type AbsorbedDelta struct {
 // system hold states SM §1 has no edge between, so it is not settled which
 // record the baseline would be about), an unproved absence (§5.3's timers have
 // not concluded), a stale projection (fix the store first), an unpinned
-// balance row (a resting order or borrow — resolve it, then record), and
-// either surface moving across the settle window (the world is still trading;
-// run it again).
+// balance row (a resting order or borrow — resolve it, then record), a
+// coverage asset absent from a read whose silence concludes nothing (§70i —
+// attesting a quantity the venue never stated stores missing evidence as
+// fact), and either surface moving across the settle window (the world is
+// still trading; run it again).
+//
+// A refusal added to the sentinel block below OWES a clause here. Stating the
+// obligation rather than a count is ruling R9's lesson carried to its mirror:
+// this sentence was one refusal short for two slices with nothing failing,
+// because a list in prose cannot go red. Unlike the renderer's equivalent
+// claim there is no cheap enforcement for it — a doc comment is not reachable
+// without parsing source — so the obligation is the instrument, and it is
+// weaker on purpose rather than by oversight.
 func (m *Module) RecordSpotBaseline(path string, deps RecordBaselineDeps) (RecordedBaseline, error) {
 	var out RecordedBaseline
 	if deps.Fingerprint == "" {

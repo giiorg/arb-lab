@@ -128,23 +128,39 @@ func writeReconcileDiagnosis(w io.Writer, r appreconcile.Report) {
 		rec.Recovery.Records, len(rec.Recovery.Dispatched))
 	fmt.Fprintf(w, "joined:   %d orders, %d fills admitted, %d duplicates\n",
 		rec.Join.Orders, rec.Join.Fills, rec.Join.Duplicates)
-	// The two join findings that LATCH, directly under the `joined:` line they
-	// qualify and in joinOutcome's own ladder order — most restrictive first,
-	// which is that ladder's rule and now this report's. The absence block
-	// below is the same gate's retryable half (§5.3 concludes most of them), so
-	// it reads after: an operator triaging a held boot wants the orders no
-	// retry will clear before the ones the next boot may.
+	// application.Join's per-order finding lists, directly under the `joined:`
+	// line they qualify and in joinOutcome's own ladder order — the two that
+	// latch, then the one a retry may lift. The absence block below is a
+	// different PHASE's evidence (§5.3's resolution decides what an absence
+	// licenses), which is why it reads after these rather than among them.
 	//
-	// Until task #242 the renderer printed NEITHER, while enumerating every
-	// other finding the diagnosis carries. A boot could therefore halt with
-	// `blocking: [GateVenueJoined]` and name no order and no reason — held, and
-	// not told what for. The rule the omission broke is the one this whole
-	// slice is about: a finding nobody reads is a finding nobody acts on.
+	// # An obligation, because the last version of this comment stated a FACT
+	// # and the fact was false
+	//
+	// Every per-order finding list `application.Join` carries is rendered here,
+	// and a list added there OWES a loop here. That is deliberately a standing
+	// obligation rather than a description of today's membership. Task #242
+	// added Contradicted and found this renderer printing neither it nor
+	// Unattributed; the comment then written to fix that claimed the renderer
+	// enumerated "every other finding", while Incomplete was unrendered the
+	// whole time. A totality claim in prose decays silently and re-reading it
+	// is the only thing that catches it — which is the defect class this slice
+	// exists for, one layer out. So the claim is ENFORCED by
+	// TestReconcileReportRendersEveryJoinFindingList rather than asserted here,
+	// and Absent's exemption is recorded there with its reason.
+	//
+	// The omission was not cosmetic. All three of these hold GateVenueJoined
+	// below PostureTrading, so the boot stops and Blocking() names the gate —
+	// and without a line here the operator gets a halted boot, a `joined:`
+	// summary, no order id and no reason. Held, and not told what for.
 	for _, id := range rec.Join.Unattributed {
 		fmt.Fprintf(w, "  unattributed %s: the venue's cumulative disagrees with the executions this join could attribute\n", id)
 	}
 	for _, id := range rec.Join.Contradicted {
 		fmt.Fprintf(w, "  contradicted %s: the venue and this system hold lifecycle states SM §1 has no edge between\n", id)
+	}
+	for _, id := range rec.Join.Incomplete {
+		fmt.Fprintf(w, "  incomplete %s: the executions sweep did not prove coverage through the instant it was asked about (a retry may lift this)\n", id)
 	}
 	if n := len(rec.Join.Absent); n > 0 {
 		fmt.Fprintf(w, "absent:   %d order(s) the venue does not hold; %d resolved, %d unproved\n",

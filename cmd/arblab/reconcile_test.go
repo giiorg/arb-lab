@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -251,6 +252,7 @@ func TestReconcileReportGoldenNoMiss(t *testing.T) {
 				// loop rendered twice.
 				Unattributed: []ids.ClientOrderID{"ord-3"},
 				Contradicted: []ids.ClientOrderID{"ord-4"},
+				Incomplete:   []ids.ClientOrderID{"ord-5"},
 			},
 			Resolved: 0,
 			Unproved: []application.UnprovedOrder{{Order: "ord-2", Reason: application.ReasonNoAnchor}},
@@ -270,12 +272,92 @@ func TestReconcileReportGoldenNoMiss(t *testing.T) {
 		"joined:   2 orders, 3 fills admitted, 1 duplicates\n" +
 		"  unattributed ord-3: the venue's cumulative disagrees with the executions this join could attribute\n" +
 		"  contradicted ord-4: the venue and this system hold lifecycle states SM §1 has no edge between\n" +
+		"  incomplete ord-5: the executions sweep did not prove coverage through the instant it was asked about (a retry may lift this)\n" +
 		"absent:   1 order(s) the venue does not hold; 0 resolved, 1 unproved\n" +
 		"  unproved ord-2: no_anchor\n" +
 		"  stale projection for ord-1\n" +
 		"cause:    venue join stopped early\n"
 	if got := buf.String(); got != want {
 		t.Errorf("report drifted from the golden output:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestReconcileReportRendersEveryJoinFindingList enforces the claim the
+// renderer's comment used to merely assert (ruling R9).
+//
+// # Why a reflective test and not a sentence
+//
+// This file has now carried two wrong totality claims about the same six
+// lines. Task #242 found the renderer printing neither Unattributed nor
+// Contradicted; the comment written to repair that said the renderer
+// enumerated "every other finding", while Join.Incomplete was unrendered the
+// whole time. Both were true-sounding, both were checked by nothing, and a
+// third would read exactly like the first two. A count or a list in prose
+// cannot fail — so the property is derived from application.Join's own fields
+// here, and a per-order finding list added there fails this test by NAME
+// rather than going quietly unrendered.
+//
+// # Substring, deliberately, and it does not collide with the goldens
+//
+// The goldens pin FORMAT and order; this pins EXISTENCE, which is a different
+// claim and the one a new field breaks. A substring is the right instrument
+// for "the id reached the output at all", and the probe id is unique per
+// field — so no other line can supply it, which is what the fallback-superset
+// trap punishes.
+func TestReconcileReportRendersEveryJoinFindingList(t *testing.T) {
+	orderList := reflect.TypeOf([]ids.ClientOrderID(nil))
+
+	// Absent is exempt, and the reason is a claim about EVIDENCE rather than a
+	// convenience: an absence is not a finding yet. The venue not holding an
+	// order licenses nothing until §5.3's rule runs, so it renders as the
+	// `absent:` count plus that rule's own per-order `unproved` detail — which
+	// IS the rendering, one phase down. A per-order "absent ord-N" line here
+	// would report a verdict the join is forbidden to reach.
+	exempt := map[string]string{"Absent": "rendered as the absent: count plus §5.3's per-order unproved lines"}
+
+	joinType := reflect.TypeOf(application.Join{})
+	for name := range exempt {
+		f, ok := joinType.FieldByName(name)
+		if !ok || f.Type != orderList {
+			t.Fatalf("exemption names %q, which is not a per-order finding list on application.Join — "+
+				"a stale exemption silently un-checks a field", name)
+		}
+	}
+
+	checked := 0
+	for i := range joinType.NumField() {
+		f := joinType.Field(i)
+		if f.Type != orderList {
+			continue
+		}
+		if _, skip := exempt[f.Name]; skip {
+			continue
+		}
+		checked++
+
+		// One field at a time, with an id nothing else in the report can
+		// produce: if the line appears, it appeared because THIS list was
+		// rendered.
+		probe := ids.ClientOrderID("probe-" + f.Name)
+		var join application.Join
+		reflect.ValueOf(&join).Elem().Field(i).Set(reflect.ValueOf([]ids.ClientOrderID{probe}))
+
+		var buf bytes.Buffer
+		writeReconcileReport(&buf, appreconcile.Report{
+			Reconciliation: application.Reconciliation{Join: join},
+		})
+		if !strings.Contains(buf.String(), string(probe)) {
+			t.Errorf("application.Join.%s is a per-order finding list the diagnosis never renders — "+
+				"a boot it holds would name no order and no reason:\n%s", f.Name, buf.String())
+		}
+	}
+
+	// A vacuous pass and a clean pass look identical: if the type match ever
+	// stopped selecting anything, the loop above would check nothing and
+	// report success. No expected COUNT is pinned — that would be the same
+	// decaying claim this test replaces — only that the property has subjects.
+	if checked == 0 {
+		t.Fatal("no per-order finding list was checked; the field selection matched nothing and this test proved nothing")
 	}
 }
 
