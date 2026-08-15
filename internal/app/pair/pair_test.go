@@ -27,9 +27,17 @@ func eqQty(t *testing.T, got, want fixedpoint.Quantity) {
 	}
 }
 
-// eqPrice is the same for Price. It lands with the first task that asserts a
-// price — the scaffolding table's rule, so that no helper here is a shape
-// nothing calls.
+// eqPrice is the same for Price.
+func eqPrice(t *testing.T, got, want fixedpoint.Price) {
+	t.Helper()
+	cmp, err := got.Cmp(want)
+	if err != nil {
+		t.Fatalf("comparing %v and %v: %v", got, want, err)
+	}
+	if cmp != 0 {
+		t.Errorf("price = %v, want %v", got, want)
+	}
+}
 
 // qty is the fixture's quantity constructor. LAB is the shortlist alt record
 // §95 §2 measured trading on both demo venues.
