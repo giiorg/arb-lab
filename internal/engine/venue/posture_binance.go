@@ -83,7 +83,23 @@ const binanceUnverifiedWeight = 20
 // record §73o. A symbol-scoped read could only ask about symbols this system
 // already names, and the roster coverage check needs to see what the venue
 // actually returned in order to notice a configured symbol MISSING from it.
-func (c *BinanceOrderCodec) EncodePosture() ([]PostureStep, error) {
+//
+// # So the symbols argument is deliberately unused HERE, and that is an
+// # asymmetry between the codecs rather than a default
+//
+// The paragraph above holds on this venue because `/fapi/v1/symbolConfig`
+// volunteers a row for every symbol the account has configured, traded or not:
+// the enumeration exists, so the coverage check can read it and the three
+// per-symbol settings are observable on a flat account from one call.
+//
+// Bybit has no such surface. Its position read answers only for symbols
+// carrying an OPEN POSITION, so the same design left §4.1's three per-symbol
+// rows unobservable on a flat account — and there the symbol-scoped read is the
+// one that surfaces an unknown symbol, by name, which is the opposite of the
+// trade-off above. Record §97 §4 has the measurement. Two codecs that look
+// symmetric, resting on evidence that is not: read neither one's reasoning as
+// the other's.
+func (c *BinanceOrderCodec) EncodePosture(_ []string) ([]PostureStep, error) {
 	op := string(c.venue) + ".AccountPosture"
 	return []PostureStep{
 		{

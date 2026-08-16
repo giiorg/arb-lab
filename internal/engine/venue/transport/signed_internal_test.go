@@ -1085,7 +1085,23 @@ func TestLimitReadersDeriveEndpointNames(t *testing.T) {
 		{"/v5/position/list", "position_list"},
 		{"/v5/account/wallet-balance", "wallet_balance"},
 		{"/v5/account/info", "account_info"},
-		{"/v5/spot-margin-uta/status", "spot_margin_status"},
+		{"/v5/spot-margin-trade/state", "spot_margin_status"},
+		// The pre-2026-08-16 path (record §97). This row is a NAMED MARKER, and
+		// calling it a guard would be the overclaim its own bite-check refused.
+		//
+		// The mutation that would prove it a guard is a RESURRECTION — the old
+		// path re-added beside the new one — and no single-line edit reaches
+		// this row, because two earlier gates fire first: re-adding it under
+		// BybitSpotMarginStatusLimit (or any other declared name) is refused by
+		// ratelimit as "limit declared twice at ScopeEndpoint", and re-adding it
+		// under a fresh name is refused as an undeclared limit. So the roster's
+		// duplicate-name gate is what actually stops a resurrection.
+		//
+		// It is also a specific instance of "/v5/order/unknown" below, which
+		// already asserts that an unrostered path maps to no budget. What it
+		// adds is FINDABILITY: a future reader grepping the retired string lands
+		// on the correction rather than on nothing.
+		{"/v5/spot-margin-uta/status", ""},
 		{"/v5/order/unknown", ""},
 	}
 	for _, tc := range cases {

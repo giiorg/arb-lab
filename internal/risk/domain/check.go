@@ -162,7 +162,7 @@ var binanceClassicRules = []rule{
 //
 // The cell reads: `GET /v5/account/info` marginMode==ISOLATED_MARGIN (the
 // load-bearing check), unifiedMarginStatus ∈ {3,4,5,6}, spotHedgingStatus==OFF;
-// `GET /v5/spot-margin-uta/status`==off; `GET /v5/account/wallet-balance` every
+// `GET /v5/spot-margin-trade/state`.spotMarginMode==0; `GET /v5/account/wallet-balance` every
 // coin borrowAmount==0 ∧ spotBorrow==0; auto-add-margin OFF for every
 // configured linear symbol (not only open positions); one-way positionIdx==0;
 // configured leverage matches pin.
@@ -216,15 +216,21 @@ var bybitUTARules = []rule{
 		setting: SettingSpotMarginMode,
 		scope:   ScopeAccount,
 		subject: SubjectSpotLeg,
-		// Profiles §2 states the SETTER as `/v5/spot-margin-trade/switch-mode 0`
-		// and the read as "`GET /v5/spot-margin-uta/status`==off"; the word the
-		// status endpoint answers with is NOT recorded in either document. "0"
-		// is this rule's best reading, taken from the setter's argument. A venue
-		// answering "OFF" would REFUSE here, by name, with its word in the
-		// failure — the halt direction, and reading the endpoint's published
-		// response is a loosening trigger (#171's credential, or a doc read).
+		// "0" was this rule's best READING until 2026-08-16, inferred from the
+		// setter's argument because no document recorded what the status
+		// endpoint answers with. That comment named its own loosening trigger —
+		// "reading the endpoint's published response" — and the trigger has now
+		// been pulled: Bybit's response table for GET /v5/spot-margin-trade/state
+		// reads `spotMarginMode` — "Spot margin status. 1: on, 0: off", and the
+		// live demo account answers "0". The guess was right and is now OBSERVED.
+		//
+		// The same read corrected the PATH, which was wrong in three places and
+		// 404s at the venue — see posture_bybit.go's wire doc and record §97.
+		// Keep the two apart when reasoning about this row: the word was an
+		// admitted inference that held, and the path was a transcription error
+		// that did not.
 		expect: expectation{kind: expectWord, words: []string{"0"}},
-		why:    "Profiles §2: spot-margin mode off — the off WORD is unverified, taken from the setter's argument (see comment)",
+		why:    "Profiles §2: spot-margin mode off — spotMarginMode==0, verified against Bybit's published response table 2026-08-16",
 	},
 	{
 		setting: SettingBorrowAmount,

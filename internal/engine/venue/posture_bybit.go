@@ -61,18 +61,19 @@ import (
 // transport.BybitSpotMarginStatusLimit — because bybitEndpointRegistry is the
 // roster #186's boot check reads and transport cannot import this package.
 
-// The settleCoin the linear position enumeration is scoped by. Bybit refuses a
-// linear position query carrying neither symbol nor settleCoin, which is the
-// property positions.go relies on: a scope this system got wrong comes back as
-// an error rather than as an empty list that looks flat.
-const bybitPostureSettleCoin = "USDT"
+// The posture's position read is scoped by SYMBOL, not by settleCoin, and the
+// settleCoin constant this file used to hold is gone with it — see EncodePosture
+// for the measurement (record §97 §4). Bybit refuses a linear position query
+// carrying neither, so either scope makes a wrong query an error rather than an
+// empty list that looks flat; what separates them is that only the symbol scope
+// answers for a symbol carrying no position.
 
 // EncodePosture implements AccountPostureCodec.
 //
 // One Bybit posture read is four requests against four separate per-endpoint
 // budgets — none of them weighted, all metered per UID (§73c-2's quotable
 // cost).
-func (c *BybitOrderCodec) EncodePosture() ([]PostureStep, error) {
+func (c *BybitOrderCodec) EncodePosture(symbols []string) ([]PostureStep, error) {
 	op := string(c.venue) + ".AccountPosture"
 
 	// Routed through bybitCategory rather than a literal "linear", so the
@@ -83,7 +84,7 @@ func (c *BybitOrderCodec) EncodePosture() ([]PostureStep, error) {
 		return nil, fmt.Errorf("bybit posture: %w", err)
 	}
 
-	return []PostureStep{
+	steps := []PostureStep{
 		{
 			Probe: PostureProbeAccountInfo,
 			Call: transport.Call{
@@ -114,7 +115,7 @@ func (c *BybitOrderCodec) EncodePosture() ([]PostureStep, error) {
 			Call: transport.Call{
 				Op:     op + ".SpotMargin",
 				Method: "GET",
-				Path:   "/v5/spot-margin-uta/status",
+				Path:   "/v5/spot-margin-trade/state",
 				Family: ids.ProductSpot,
 				Cost:   ratelimit.RequestOnly(),
 			},
@@ -137,7 +138,50 @@ func (c *BybitOrderCodec) EncodePosture() ([]PostureStep, error) {
 			},
 			Answers: []PostureSetting{PostureBorrowAmount, PostureSpotBorrow},
 		},
-		{
+	}
+
+	// One position read PER CONFIGURED SYMBOL, and #171's loosening trigger is
+	// why it is no longer one read for all of them.
+	//
+	// The old call scoped by settleCoin and carried this note: "whether this
+	// endpoint answers for a configured-but-never-traded symbol is established
+	// nowhere". Measured against Bybit demo on 2026-08-16 (record §97 §4):
+	//
+	//	category=linear&settleCoin=USDT   -> 0 rows on a flat account
+	//	category=linear&symbol=LABUSDT    -> 1 row, leverage/autoAddMargin/
+	//	                                     positionIdx all present, size 0
+	//
+	// So settleCoin scope answers only for symbols carrying an OPEN POSITION,
+	// and §4.1's three per-symbol rows were unobservable on a flat account —
+	// the state a two-leg open requires. The two gates were mutually
+	// unsatisfiable: flat means unobserved means refuse, and not-flat means the
+	// flat-start gate refuses instead. Nothing could pass.
+	//
+	// # This reverses ports.PostureScope's ruling, and the control is why
+	//
+	// That type ruled the symbol roster belongs to the requirement rather than
+	// to the read, because "a read scoped by the symbols this system already
+	// names cannot surface a configured symbol the venue does not know". The
+	// reasoning is sound and its premise was untested. Encoded as a control and
+	// answered by the venue:
+	//
+	//	symbol=NOTAREALUSDT -> retCode 10001 "symbol not exist"
+	//
+	// A symbol-scoped read NAMES the unknown symbol. The settleCoin read cannot
+	// even express the question — it returns the same empty list for "venue does
+	// not know this symbol" and "venue knows it and you are flat", which is the
+	// collapse the ruling meant to prevent. So the ruling's goal is better served
+	// by the scope it rejected, on this venue's actual behaviour.
+	//
+	// Cost: the posture read is now 3 + len(symbols) requests rather than a flat
+	// 4, so record §73c-2's "fixed, quotable number" becomes a quotable FUNCTION
+	// of the roster. All four ride per-endpoint request budgets and none is
+	// weighted, so the ceiling that matters is position_list's per-second one.
+	for _, s := range symbols {
+		if s == "" {
+			return nil, fmt.Errorf("%s: posture symbol unset: %w", c.venue, ErrPostureUnreadable)
+		}
+		steps = append(steps, PostureStep{
 			Probe: PostureProbePositionList,
 			Call: transport.Call{
 				Op:     op + ".PositionList",
@@ -145,23 +189,22 @@ func (c *BybitOrderCodec) EncodePosture() ([]PostureStep, error) {
 				Path:   "/v5/position/list",
 				Params: transport.Params{
 					{Key: "category", Value: category},
-					{Key: "settleCoin", Value: bybitPostureSettleCoin},
+					{Key: "symbol", Value: s},
 				},
 				Family: ids.ProductLinearPerp,
 				Cost:   ratelimit.RequestOnly(),
 			},
 			// Bybit's three DERIVATIVES-subject settings, the mirror of
-			// Binance's symbolConfig call. Whether this endpoint answers for a
-			// configured-but-never-traded symbol is established nowhere and is
-			// #171's loosening trigger — it does not affect this list, which
-			// says which settings the call establishes, not for how many.
+			// Binance's symbolConfig call. The list says which settings the
+			// call establishes, not for how many symbols.
 			Answers: []PostureSetting{
 				PosturePositionMode,
 				PostureLeverage,
 				PostureAutoAddMargin,
 			},
-		},
-	}, nil
+		})
+	}
+	return steps, nil
 }
 
 // bybitAccountInfoWire is GET /v5/account/info.
@@ -173,7 +216,19 @@ type bybitAccountInfoWire struct {
 	} `json:"result"`
 }
 
-// bybitSpotMarginStatusWire is GET /v5/spot-margin-uta/status.
+// bybitSpotMarginStatusWire is GET /v5/spot-margin-trade/state.
+//
+// The path was `/v5/spot-margin-uta/status` until 2026-08-16, and that string
+// is a DOC PAGE SLUG rather than an endpoint: Bybit files this call under
+// docs/v5/spot-margin-uta/status, whose body reads "HTTP Request — GET
+// /v5/spot-margin-trade/state". The slug was transcribed as the path. The live
+// API answers the old string with a 404 carrying an EMPTY body on both the demo
+// and the mainnet host, which is how it was found — Bybit envelopes every route
+// it owns, failing or not, so an empty 404 means the request never reached the
+// API layer at all (record §97).
+//
+// Only the path was wrong. The response shape below was right, because it was
+// copied from the same page the slug came from.
 type bybitSpotMarginStatusWire struct {
 	Result struct {
 		SpotMarginMode *string `json:"spotMarginMode"`

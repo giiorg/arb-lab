@@ -48,7 +48,7 @@ const posturePriority = ratelimit.PrioritySafety
 // declared where it is CONSUMED rather than imported as a concrete client —
 // the shape SpotBalanceReader and VenuePositionReader already take.
 type AccountPostureReader interface {
-	AccountPosture(ctx context.Context, urgency ratelimit.Priority, want []venue.PostureSetting) (venue.AccountPostureReport, error)
+	AccountPosture(ctx context.Context, urgency ratelimit.Priority, want []venue.PostureSetting, symbols []string) (venue.AccountPostureReport, error)
 }
 
 // NewAccountPosture builds the adapter.
@@ -88,7 +88,12 @@ func (a *AccountPosture) AccountPosture(scope ports.PostureScope) (domain.Report
 		want = append(want, translated)
 	}
 
-	report, err := a.client.AccountPosture(context.Background(), posturePriority, want)
+	// The roster travels UNTRANSLATED, unlike the settings beside it: a setting
+	// is this context's vocabulary and needs mapping, while a symbol is the
+	// venue's own spelling all the way down — domain.SymbolPin holds it
+	// unnormalised for exactly this reason, so a translation here would be the
+	// second place two spellings reconcile.
+	report, err := a.client.AccountPosture(context.Background(), posturePriority, want, scope.Symbols)
 	if err != nil {
 		// Unwrapped: engine/venue already classified the effect, and a read
 		// that failed must not be re-derived into an empty report.

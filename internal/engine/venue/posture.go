@@ -88,7 +88,7 @@ const (
 	// UTA status and spot hedging in one answer.
 	PostureProbeAccountInfo
 
-	// PostureProbeSpotMargin is Bybit GET /v5/spot-margin-uta/status — spot
+	// PostureProbeSpotMargin is Bybit GET /v5/spot-margin-trade/state — spot
 	// margin mode, which must be off.
 	PostureProbeSpotMargin
 
@@ -437,8 +437,26 @@ type AccountPostureCodec interface {
 	// Ordered because the operator-facing refusal reads better when the
 	// account-wide settings come before the per-symbol ones, and because a
 	// deterministic order makes the rate-limit cost of one posture read a
-	// fixed, quotable number (record §73c-2 promised one).
-	EncodePosture() ([]PostureStep, error)
+	// quotable number (record §73c-2 promised one).
+	//
+	// # symbols is the CONFIGURED roster, in the venue's own spelling
+	//
+	// Required, and empty is refused by the codecs that need it, on this file's
+	// standing direction: an absent roster would have to mean "every symbol the
+	// venue knows" or "none", and both readings return a posture nobody asked
+	// for. Not normalised — the requirement matches the venue's answer verbatim,
+	// so a normalisation here would be a second place two spellings reconcile.
+	//
+	// # It is an argument because one venue cannot answer per-symbol without it
+	//
+	// Binance's symbolConfig volunteers every configured symbol, traded or not,
+	// so its codec ignores this. Bybit's position/list does NOT: scoped by
+	// settleCoin it returns only symbols carrying an open position, so on a flat
+	// account it observes nothing and §4.1's three per-symbol rows are
+	// unobservable — in exactly the state a two-leg open requires. Measured
+	// 2026-08-16, record §97 §4. The two codecs look symmetric and their evidence
+	// is not.
+	EncodePosture(symbols []string) ([]PostureStep, error)
 
 	// DecodePostureStep reads one probe's answer.
 	//
@@ -582,7 +600,7 @@ func PostureStepsFor(steps []PostureStep, want []PostureSetting) ([]PostureStep,
 // have to mean "all of them", so a caller that forgot to build one would read
 // the whole surface — issuing calls on families it may not have routed, which is
 // the failure this argument exists to remove (task #199, record §73p).
-func (c *OrderClient) AccountPosture(ctx context.Context, urgency ratelimit.Priority, want []PostureSetting) (AccountPostureReport, error) {
+func (c *OrderClient) AccountPosture(ctx context.Context, urgency ratelimit.Priority, want []PostureSetting, symbols []string) (AccountPostureReport, error) {
 	op := string(c.codec.Venue()) + ".AccountPosture"
 
 	if err := urgency.Validate(); err != nil {
@@ -594,7 +612,7 @@ func (c *OrderClient) AccountPosture(ctx context.Context, urgency ratelimit.Prio
 			fmt.Errorf("%s: %w", c.codec.Venue(), ErrPostureUnsupported))
 	}
 
-	encoded, err := codec.EncodePosture()
+	encoded, err := codec.EncodePosture(symbols)
 	if err != nil {
 		return AccountPostureReport{}, apperror.Precondition(op, "encode", err)
 	}

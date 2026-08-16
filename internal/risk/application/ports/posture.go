@@ -57,14 +57,46 @@ type AccountPostureSource interface {
 
 // PostureScope is which venue's account to read.
 //
-// It carries the venue and nothing else: the account is the credential's (the
-// venue answers for whatever subaccount the signature names), the symbol roster
-// belongs to the REQUIREMENT rather than to the read — a read scoped by the
-// symbols this system already names cannot surface a configured symbol the
-// venue does not know — and there is no freshness dimension, per the type
-// above.
+// The account is the credential's — the venue answers for whatever subaccount
+// the signature names — and there is no freshness dimension, per the type above.
+//
+// # It carried the venue and nothing else until 2026-08-16, and the reason was
+// falsified rather than outgrown
+//
+// This doc read: "the symbol roster belongs to the REQUIREMENT rather than to
+// the read — a read scoped by the symbols this system already names cannot
+// surface a configured symbol the venue does not know". The goal is right and
+// the premise about venue behaviour was untested. Encoded as a control and
+// answered by Bybit demo (record §97 §4.1):
+//
+//	GET /v5/position/list?category=linear&symbol=NOTAREALUSDT
+//	  -> retCode 10001 "symbol not exist"
+//
+// A symbol-scoped read NAMES an unknown symbol. The settleCoin-scoped read this
+// ruling preserved cannot express the question at all: it returns the same empty
+// list for "the venue does not know this symbol" and "the venue knows it and you
+// hold no position", so the very collapse the ruling meant to prevent was the
+// one it shipped. Worse, on a flat account it observed NOTHING, leaving §4.1's
+// three per-symbol rows unobservable in exactly the state a two-leg open
+// requires — two gates with no state satisfying both.
+//
+// So the roster is here now, and the ruling's goal is better served by the scope
+// it rejected. What has NOT changed is where the roster comes from: it is still
+// derived from the requirement, so the rules and the read range over one list.
 type PostureScope struct {
 	Venue ids.Venue
+
+	// Symbols is the configured roster in the VENUE's own spelling, matched
+	// against the report's subjects verbatim — not normalised, for the reason
+	// domain.SymbolPin gives.
+	//
+	// Empty is legal and means a deployment configuring no derivative
+	// instrument, which is the same fact RosterCoverageNoDerivatives carries.
+	// It is NOT refused the way Settings is, and the asymmetry is deliberate:
+	// an empty Settings has two readings and both are unsafe, while an empty
+	// roster has one, and the per-symbol rules lapse under it rather than
+	// evaluating against nothing.
+	Symbols []string
 
 	// Settings is every setting this read must establish.
 	//

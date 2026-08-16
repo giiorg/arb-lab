@@ -102,7 +102,16 @@ func (g *PostureGuard) Assert() (domain.Verdict, error) {
 		// posture for an account nobody asked about (task #199, record §73p).
 		return domain.CheckWithoutVenueRead(g.requirement)
 	}
-	scope := ports.PostureScope{Venue: g.requirement.Venue, Settings: settings}
+	// The roster is the REQUIREMENT's, so the rules and the read range over one
+	// list. Derived here rather than carried alongside, because the second
+	// derivation is what would let a symbol be required by Check and never asked
+	// of the venue — which reads as ReasonUnobserved, i.e. as the venue's
+	// silence rather than as our omission (record §97 §4).
+	symbols := make([]string, 0, len(g.requirement.Symbols))
+	for _, p := range g.requirement.Symbols {
+		symbols = append(symbols, p.Symbol)
+	}
+	scope := ports.PostureScope{Venue: g.requirement.Venue, Settings: settings, Symbols: symbols}
 	if err := scope.Validate(); err != nil {
 		// Unreachable through NewPostureGuard, which validated the venue — and
 		// reachable through `var g PostureGuard`, which is the case it exists

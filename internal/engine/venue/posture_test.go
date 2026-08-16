@@ -50,8 +50,20 @@ import (
 // among these paths, because it does not publish the field §4.1 was reading from
 // it. Re-adding a per-symbol probe against a POSITION enumeration would restore
 // a gate no flat account can pass.
+//
+// # That last sentence was TRUE, GENERAL, and filed under one venue
+//
+// Bybit's posture read was a per-symbol probe against a position enumeration —
+// precisely the shape this paragraph warns about — from v0.7 until 2026-08-16,
+// and it did exactly what the warning predicts: three per-symbol settings
+// unobservable on a flat account, so no boot could pass in the state a two-leg
+// open requires. The hazard was named for Binance's ENDPOINT rather than for the
+// MECHANISM, so nothing carried it across the file (record §97 §4). The count
+// asserted below is still three because this codec's symbolConfig answers for
+// every configured symbol; the Bybit test's count is now a function of the
+// roster, and the two sitting side by side is the point.
 func TestBinanceEncodePostureIsThreeProbesOnTheFuturesFamily(t *testing.T) {
-	steps, err := binanceCodec(t).EncodePosture()
+	steps, err := binanceCodec(t).EncodePosture(postureRoster)
 	if err != nil {
 		t.Fatalf("EncodePosture: %v", err)
 	}
@@ -140,11 +152,19 @@ func TestEveryPostureStepDeclaresWhatItAnswers(t *testing.T) {
 				if got := len(s.Answers); got != tc.want[s.Probe] {
 					t.Errorf("%s answers %d settings %v, want %d", s.Probe, got, s.Answers, tc.want[s.Probe])
 				}
-				// One setting, one probe. Two probes answering the same setting
-				// would make either family look required for it, so dropping
-				// one would be invisible to the derivation.
+				// One setting, one probe KIND. Two DIFFERENT probes answering
+				// the same setting would make either family look required for
+				// it, so dropping one would be invisible to the derivation —
+				// and that harm is what this row asserts, so it is what the
+				// comparison names.
+				//
+				// Repeated steps carrying the SAME probe are legal since record
+				// §97: Bybit renders one position step per configured symbol,
+				// all on one probe and one family, so no family can hide behind
+				// another. Comparing step identity rather than probe identity
+				// here would refuse the fix that made a flat account bootable.
 				for _, a := range s.Answers {
-					if prior, dup := seen[a]; dup {
+					if prior, dup := seen[a]; dup && prior != s.Probe {
 						t.Errorf("%s is answered by both %s and %s", a, prior, s.Probe)
 					}
 					seen[a] = s.Probe
@@ -231,9 +251,18 @@ func TestPostureStepsForRefusesAWantItCannotServe(t *testing.T) {
 	}
 }
 
+// postureRoster is the configured roster these tests encode against.
+//
+// TWO symbols, not one, and that is the collapse this file would otherwise ship:
+// with a single symbol "one step per configured symbol" and "one step, always"
+// render an identical list, so every count assertion below would pass against
+// the settleCoin-scoped encoder record §97 replaced. The second entry is what
+// makes the per-symbol claim observable at all.
+var postureRoster = []string{"BTCUSDT", "LABUSDT"}
+
 func encodePosture(t *testing.T, c venue.AccountPostureCodec) []venue.PostureStep {
 	t.Helper()
-	steps, err := c.EncodePosture()
+	steps, err := c.EncodePosture(postureRoster)
 	if err != nil {
 		t.Fatalf("EncodePosture: %v", err)
 	}
@@ -623,9 +652,17 @@ func TestBinanceRefusesBybitProbes(t *testing.T) {
 // Bybit
 // ---------------------------------------------------------------------------
 
-// TestBybitEncodePostureIsFourUnweightedProbes.
-func TestBybitEncodePostureIsFourUnweightedProbes(t *testing.T) {
-	steps, err := bybitCodec(t).EncodePosture()
+// TestBybitEncodePostureIsThreeAccountProbesPlusOnePerSymbol pins the step list,
+// and since record §97 the count is a FUNCTION of the roster rather than a
+// constant.
+//
+// The position read is scoped by `symbol` and no longer by `settleCoin`, because
+// settleCoin scope answers only for symbols carrying an open position: on a flat
+// account §4.1's three per-symbol rows were unobservable, and a flat account is
+// the state a two-leg open requires. Record §73c-2's quotable cost becomes
+// 3 + len(symbols).
+func TestBybitEncodePostureIsThreeAccountProbesPlusOnePerSymbol(t *testing.T) {
+	steps, err := bybitCodec(t).EncodePosture(postureRoster)
 	if err != nil {
 		t.Fatalf("EncodePosture: %v", err)
 	}
@@ -634,9 +671,11 @@ func TestBybitEncodePostureIsFourUnweightedProbes(t *testing.T) {
 		venue.PostureProbeSpotMargin,
 		venue.PostureProbeWallet,
 		venue.PostureProbePositionList,
+		venue.PostureProbePositionList,
 	}
 	if len(steps) != len(want) {
-		t.Fatalf("EncodePosture rendered %d steps, want %d", len(steps), len(want))
+		t.Fatalf("EncodePosture rendered %d steps, want %d (3 account + %d symbols)",
+			len(steps), len(want), len(postureRoster))
 	}
 	for i, step := range steps {
 		if step.Probe != want[i] {
@@ -648,6 +687,57 @@ func TestBybitEncodePostureIsFourUnweightedProbes(t *testing.T) {
 		if step.Call.Cost.Weight != 0 {
 			t.Errorf("step %d (%s) charges weight %d — Bybit meters per endpoint per UID "+
 				"and has no weight to charge", i, step.Probe, step.Call.Cost.Weight)
+		}
+	}
+
+	// Each position step must name ITS OWN symbol, and must not carry settleCoin.
+	//
+	// Asserted per step rather than "some step names LABUSDT", because a broken
+	// encoder that pinned every step to postureRoster[0] would satisfy the count
+	// above and any containment check — the roster's second entry exists to make
+	// that distinguishable, and only a positional assertion consumes it.
+	for i, sym := range postureRoster {
+		call := steps[3+i].Call
+		got, ok := paramValue(call.Params, "symbol")
+		if !ok || got != sym {
+			t.Errorf("position step %d asks for symbol %q (present=%t), want %q", i, got, ok, sym)
+		}
+		if settle, ok := paramValue(call.Params, "settleCoin"); ok {
+			t.Errorf("position step %d still carries settleCoin=%q — that scope answers "+
+				"only for symbols with an OPEN POSITION, which is the defect record §97 fixed",
+				i, settle)
+		}
+	}
+}
+
+// TestBybitEncodePostureRefusesAnUnsetSymbol is the roster's own default-deny.
+//
+// An empty string would render `symbol=` on the wire, which Bybit answers as a
+// refusal — but by then the refusal names the venue's opinion of our query
+// rather than our own missing configuration, at the one gate an operator reads
+// most carefully.
+func TestBybitEncodePostureRefusesAnUnsetSymbol(t *testing.T) {
+	if _, err := bybitCodec(t).EncodePosture([]string{"BTCUSDT", ""}); err == nil {
+		t.Fatal("an unset symbol encoded a posture step, want a refusal")
+	}
+}
+
+// TestBybitEncodePostureWithNoSymbolsRendersNoPositionStep is the other end, and
+// it is a legal shape rather than an error: a deployment configuring no
+// derivative instrument has an empty roster, its three per-symbol rules lapse,
+// and a position step demanding the linear-perp family would make §4.1
+// unanswerable for a document §5.2 actively builds toward (record §73n F20).
+func TestBybitEncodePostureWithNoSymbolsRendersNoPositionStep(t *testing.T) {
+	steps, err := bybitCodec(t).EncodePosture(nil)
+	if err != nil {
+		t.Fatalf("EncodePosture: %v", err)
+	}
+	if len(steps) != 3 {
+		t.Fatalf("an empty roster rendered %d steps, want the 3 account probes", len(steps))
+	}
+	for _, s := range steps {
+		if s.Probe == venue.PostureProbePositionList {
+			t.Error("an empty roster still rendered a position step")
 		}
 	}
 }

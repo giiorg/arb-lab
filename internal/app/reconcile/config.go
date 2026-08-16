@@ -275,8 +275,8 @@ func (d Dialect) Validate() error {
 // §73k F14's "Bybit is not symmetric — answerable regardless" was true of the
 // exchange and false of this routing; what makes the two differ is the rule
 // table, not the venue.
-func (d Dialect) postureFamilies(v ids.Venue, coverage riskdomain.RosterCoverage) ([]ids.ProductCategory, error) {
-	steps, dialect, err := d.postureSteps(v)
+func (d Dialect) postureFamilies(v ids.Venue, coverage riskdomain.RosterCoverage, symbols []string) ([]ids.ProductCategory, error) {
+	steps, dialect, err := d.postureSteps(v, symbols)
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +302,15 @@ func (d Dialect) postureFamilies(v ids.Venue, coverage riskdomain.RosterCoverage
 
 // postureSteps returns the dialect's encoded posture steps beside the risk
 // table they are checked against, validating each step on the way out.
-func (d Dialect) postureSteps(v ids.Venue) ([]venue.PostureStep, riskdomain.Dialect, error) {
+// The symbols argument is the CONFIGURED roster in the venue's spelling. It
+// reaches the codec because Bybit's per-symbol posture read must name each
+// symbol — see venue.AccountPostureCodec.EncodePosture and record §97 §4. Family
+// derivation below is independent of how MANY symbols there are and dependent on
+// whether there are any, which is what makes passing the real roster right here
+// rather than a placeholder: an empty roster is a deployment with no derivative,
+// whose per-symbol rules lapse and whose per-symbol step must therefore not
+// demand a family.
+func (d Dialect) postureSteps(v ids.Venue, symbols []string) ([]venue.PostureStep, riskdomain.Dialect, error) {
 	codec, err := orderCodecFor(d, v)
 	if err != nil {
 		return nil, "", err
@@ -314,7 +322,7 @@ func (d Dialect) postureSteps(v ids.Venue) ([]venue.PostureStep, riskdomain.Dial
 		return nil, "", fmt.Errorf("dialect %q has no account posture surface: %w",
 			string(d), ErrDialectUnknown)
 	}
-	steps, err := posture.EncodePosture()
+	steps, err := posture.EncodePosture(symbols)
 	if err != nil {
 		return nil, "", err
 	}
@@ -363,7 +371,7 @@ func stepAnswersAny(s venue.PostureStep, settings []riskdomain.Setting) (bool, e
 // would let a missing probe hide behind a lapsed rule until the day somebody
 // configures a perpetual.
 func (d Dialect) validatePostureCoverage(v ids.Venue) error {
-	steps, dialect, err := d.postureSteps(v)
+	steps, dialect, err := d.postureSteps(v, maximalPostureRoster)
 	if err != nil {
 		return err
 	}
@@ -380,6 +388,39 @@ func (d Dialect) validatePostureCoverage(v ids.Venue) error {
 // named and postureCoverageAgrees taking it as a parameter, the two answers are
 // separable and a test can show they differ (task #199, record §73p).
 const maximalPostureCoverage = riskdomain.RosterCoverageDerivatives
+
+// maximalPostureRoster is the symbol roster the agreement check runs at, and it
+// is a claim in the same way its sibling above is.
+//
+// The check asks whether the TABLES agree — whether every setting the rule table
+// probes is answered by some step — which is a property of the code rather than
+// of one operator's document. Since record §97 a per-symbol step is only
+// MATERIALISED when the roster names a symbol, so an empty roster here would
+// drop Bybit's position step and the check would report agreement about three
+// settings nothing answers: vacuous, and returning nil, and looking exactly as
+// it does now. One symbol is enough because the step list's SHAPE does not vary
+// with the count, only with emptiness — the same reason maximalPostureCoverage
+// is a single value rather than a sweep.
+//
+// The spelling is deliberately not a real listing. A venue symbol here would
+// invite a reader to think the check probes that market.
+var maximalPostureRoster = []string{"COVERAGECHECK"}
+
+// postureRosterOf is the requirement's symbol roster in the venue's own
+// spelling, which is the form the posture read needs.
+//
+// Taken from the REQUIREMENT and never from Config.Instruments, so that the
+// roster the rules are evaluated against and the roster the venue is asked about
+// are the same list. Two derivations of "the configured symbols" would let a
+// symbol be required by one and unread by the other, which is a posture that
+// evaluates a rule against an observation nobody requested.
+func postureRosterOf(req riskdomain.Requirement) []string {
+	out := make([]string, 0, len(req.Symbols))
+	for _, p := range req.Symbols {
+		out = append(out, p.Symbol)
+	}
+	return out
+}
 
 // postureCoverageAgrees is validatePostureCoverage's pure core: does this step
 // list answer every setting the table probes at this coverage?
@@ -806,7 +847,11 @@ func (c Config) validatePosture() error {
 	// c.Instruments (task #199): the roster and the families must come from one
 	// derivation, or a document neither of them changed can be refused by one
 	// and admitted by the other.
-	families, err := c.Venue.Dialect.postureFamilies(c.Venue.Venue, req.Coverage)
+	// The symbols come from req too, and for the same sentence: since record §97
+	// the per-symbol step is only materialised when the roster names a symbol, so
+	// the roster now decides the family set as well as the coverage. Deriving it
+	// from anything but req would be the second walk this comment refuses.
+	families, err := c.Venue.Dialect.postureFamilies(c.Venue.Venue, req.Coverage, postureRosterOf(req))
 	if err != nil {
 		return err
 	}

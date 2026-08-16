@@ -429,8 +429,14 @@ func (v *venueDouble) serveBybit(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && r.URL.Path == "/v5/account/info":
 		bybitOK(w, `{"marginMode":"ISOLATED_MARGIN","unifiedMarginStatus":3,"spotHedgingStatus":"OFF"}`)
 
-	case r.Method == http.MethodGet && r.URL.Path == "/v5/spot-margin-uta/status":
-		bybitOK(w, `{"spotMarginMode":"0"}`)
+	// The path is Bybit's documented one, and this double is why that sentence
+	// needs saying: until 2026-08-16 both this arm and the probe it serves read
+	// `/v5/spot-margin-uta/status`, which the real venue 404s. The default arm
+	// below is v.unexpected, so the double was never lax — it was authored from
+	// the same wrong doc slug as the code, and a strict fixture cannot object to
+	// a fact both sides state identically (record §97).
+	case r.Method == http.MethodGet && r.URL.Path == "/v5/spot-margin-trade/state":
+		bybitOK(w, `{"spotLeverage":"","spotMarginMode":"0","effectiveLeverage":"1"}`)
 
 	case r.Method == http.MethodGet && r.URL.Path == "/v5/account/wallet-balance":
 		bybitOK(w, `{"list":[{"accountType":"UNIFIED","coin":[`+

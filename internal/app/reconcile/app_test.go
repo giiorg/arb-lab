@@ -1975,7 +1975,7 @@ func TestConfigRefusesADeploymentThatRoutesNoPostureFamily(t *testing.T) {
 func TestThePostureCoverageCheckRunsAtTheMAXIMALCoverage(t *testing.T) {
 	t.Parallel()
 
-	steps, dialect, err := DialectBinance.postureSteps("binance")
+	steps, dialect, err := DialectBinance.postureSteps("binance", maximalPostureRoster)
 	if err != nil {
 		t.Fatalf("postureSteps: %v", err)
 	}
@@ -2011,7 +2011,7 @@ func TestThePostureCoverageCheckRunsAtTheMAXIMALCoverage(t *testing.T) {
 		if d == DialectBybit {
 			v = "bybit"
 		}
-		real, realDialect, err := d.postureSteps(v)
+		real, realDialect, err := d.postureSteps(v, maximalPostureRoster)
 		if err != nil {
 			t.Fatalf("postureSteps(%s): %v", d, err)
 		}

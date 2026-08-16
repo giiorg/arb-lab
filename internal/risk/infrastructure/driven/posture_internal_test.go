@@ -35,13 +35,21 @@ type fakeReader struct {
 	// (task #199), and a translation nothing reads is a translation nothing
 	// checks.
 	lastWant []venue.PostureSetting
+
+	// lastSymbols is the field above's argument one more time, for the roster:
+	// since record §97 the scope carries the configured symbols and Bybit's
+	// posture read cannot observe a per-symbol setting without them, so a roster
+	// that never reaches the reader is a roster nothing checks — and it fails as
+	// ReasonUnobserved, which reads as the VENUE's silence rather than as ours.
+	lastSymbols []string
 }
 
-func (f *fakeReader) AccountPosture(ctx context.Context, urgency ratelimit.Priority, want []venue.PostureSetting) (venue.AccountPostureReport, error) {
+func (f *fakeReader) AccountPosture(ctx context.Context, urgency ratelimit.Priority, want []venue.PostureSetting, symbols []string) (venue.AccountPostureReport, error) {
 	f.calls++
 	f.urgencies = append(f.urgencies, urgency)
 	f.lastCtxNil = ctx == nil
 	f.lastWant = want
+	f.lastSymbols = symbols
 	if f.err != nil {
 		return venue.AccountPostureReport{}, f.err
 	}

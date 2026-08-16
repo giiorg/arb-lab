@@ -807,7 +807,7 @@ var bybitEndpointRegistry = [...]bybitEndpointRow{
 	// boot and again before every trade (§6.3's ruling, record §73c-2), so
 	// these two carry real, recurring traffic rather than a one-off boot read.
 	{Path: "/v5/account/info", EndpointBudget: EndpointBudget{Name: BybitAccountInfoLimit, Dimension: ratelimit.DimensionRequests}},
-	{Path: "/v5/spot-margin-uta/status", EndpointBudget: EndpointBudget{Name: BybitSpotMarginStatusLimit, Dimension: ratelimit.DimensionRequests}},
+	{Path: "/v5/spot-margin-trade/state", EndpointBudget: EndpointBudget{Name: BybitSpotMarginStatusLimit, Dimension: ratelimit.DimensionRequests}},
 }
 
 var bybitEndpoints = func() map[string]string {
