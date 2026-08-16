@@ -1,6 +1,73 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-16, session 144): **THE DEMO RUN'S PREPARATION FOUND TWO §4.1 DEFECTS THAT NO TEST COULD, BOTH FIXED. BOTH VENUES NOW BOOT `ExitClean` AGAINST THE LIVE DEMOS. NO ORDER HAS STILL BEEN PLACED.**
+## Status (2026-08-16, session 145): **THE PAIR RAN. FOUR ORDERS PLACED ON THE DEMOS, `VerdictIntact`, EXIT 0, BOTH ACCOUNTS BACK TO FLAT. THREE FINDINGS, ONE OF THEM STRUCTURAL. ⚠ BOTH JOURNALS ARE NOW LATCHED.**
+
+**Read `docs/superpowers/specs/2026-08-16-m4-236-first-live-pair-run.md` (record
+§98)** — what ran, the three findings, and the one measurement this run did *not*
+take cleanly. ADR rows **F23**, **F24**, **F25**.
+
+**THE RUN.** `arblab pair run -config configs/pair.demo.2026-08-16.json` drove one
+cross-venue perp-perp package across two live demo deployments. Both legs filled.
+`VerdictIntact`, exit 0. Then both legs were closed by hand, reduce-only. Both
+venues confirm flat. `pair.id` `01a00a83-e068-7550-9dbf-13283b0cefa5` is spent.
+
+| | Entry | Exit | Fee charged |
+|---|---|---|---|
+| Binance | sell 100 @ `0.08012` | buy 100 @ `0.08067` | `0` |
+| Bybit | buy 100 @ `0.0806` | sell 100 @ `0.0806` | `0.008866` each side |
+
+**⚠ F23 — A PAIR CAN BE OPENED BUT NOT CLOSED IN BAND, AND BOTH JOURNALS ARE
+LATCHED BECAUSE OF IT.** `pair run`'s unwind fires only on a **half-open** pair;
+a *successful* run leaves a live position the root has no command to take off.
+The runbook's manual reduce-only close — written as exit-4 recovery — is the only
+exit from a **green** run too, and taking it latches `GateNetDeltaAsserted` on
+both sides. **No CLI lifts that latch** (`margin reconcile` is scoped to §9's
+Ambiguous *margin ops*). So **every successful `pair run` ends with two latched
+journals**. Nothing could have caught it: every #236 fixture had a half-open pair
+or a clean refusal, and the verdict was always the end of the test — the
+successful pair's *post-condition* was never a subject. The in-band close belongs
+with **#241**.
+
+**⚠ A SECOND RUN NEEDS FRESH JOURNAL PATHS** — `./run/pair/binance.2.db` and
+`bybit.2.db` in a new document. Do **not** delete `binance.db` / `bybit.db`: they
+are now the evidence that the gate fired.
+
+**F24 — BOTH DEMOS MISREPORT COST, IN OPPOSITE DIRECTIONS, AND BINANCE'S DOES IT
+WHILE PUBLISHING THE RIGHT NUMBER.** `commissionRate` returns
+`takerCommissionRate 0.000500` — exactly the reference row — and `userTrades`
+then shows `commission: 0`. Model and published field agree perfectly; only the
+realized ledger disagrees, and no decision path reads it. Bybit charged `0.0011`
+against a reference row of `0.00055` and refuses `/v5/account/fee-rate` with
+`retCode 10001`. **§95 §8's not-claimed list gains demo FEES beside demo fills.**
+
+**F25 — AND THE BYBIT HALF CANNOT BE SETTLED BY ANY FIXTURE.** `0.008866` on
+`8.06` is equally consistent with "the rate is `0.0011`" and "the rate is
+`0.00055` on twice the notional". Both readings are **linear in quantity**, so no
+order size separates them. Left open deliberately; the instrument has to be the
+venue's published rate.
+
+**SETTLED BY A CONTROL, so nobody re-opens it.** The entry filled at exactly the
+limit price on Bybit, which admits "the market moved" or "the demo fills at the
+limit". A reduce-only sell with `orderPrice 0.078` against a bid of `0.08060`
+filled at **`0.0806`** — the bid. **Bybit demo matches against its book.** The
+entry fill was real drift inside the 77s between the book read and the send.
+
+**⚠ THE ROUND TRIP COST 0.90% AND THAT IS NOT A MEASUREMENT.** `0.048` of the
+`0.055` basis was paid at entry, where the four-tick buffer and 77 seconds of
+drift are confounded and this run cannot attribute between them. §2.1's model is
+~0.29%. **Do not carry 0.90% into a hurdle calculation.** A clean figure needs the
+send to follow the read inside the book's timescale — a property of an automated
+path, not of a runbook a person executes.
+
+**WHAT IS AND IS NOT CLAIMED.** Claimed, on venue evidence: the code reaches two
+venues, places two legs, sizes leg B from leg A's established fill, journals both
+with **0 duplicates**, and reports a verdict two independent venue surfaces
+corroborate; `GateNetDeltaAsserted` detects an out-of-band change. **Not claimed:**
+anything about mainnet fills, mainnet fees, funding accrual, or the economics.
+
+---
+
+## Previously (2026-08-16, session 144): **THE DEMO RUN'S PREPARATION FOUND TWO §4.1 DEFECTS THAT NO TEST COULD, BOTH FIXED. BOTH VENUES NOW BOOT `ExitClean` AGAINST THE LIVE DEMOS. NO ORDER HAS STILL BEEN PLACED.**
 
 **Read `docs/superpowers/specs/2026-08-16-m4-236-bybit-spot-margin-path.md` (record
 §97)** — two defects, the reason no check in this repo could have found either,
@@ -90,10 +157,44 @@ MODULES, branch deleted, tree clean.**
 
 ---
 
-## THE NEXT ACTION: THE RUN. Start a fresh session and do this.
+## THE NEXT ACTION: **NOT ANOTHER LIVE RUN.** Measure spread persistence.
 
-**Steps 1, 2 and 5 of `docs/runbooks/pair-demo-run.md` are DONE.** Do not redo
-them:
+**The run is DONE (session 145, record §98) — the whole runbook, §1 through §6.**
+The section below is session 144's preparation notes, kept because a *second*
+run would reuse most of it. Read the three ⚠ items at the top of this file first;
+in particular a second run needs **fresh journal paths**, because both journals
+are latched.
+
+**WHY PERSISTENCE IS THE NEXT QUESTION AND NOT MORE EXECUTION.** Break-even at
+today's spread is `0.29% ÷ 0.00047` ≈ **6.2 settlements ≈ 25 hours** of holding.
+So the strategy's viability is a question about **how long an alt's cross-venue
+funding spread survives**, not about whether the order path works — and §2.3 says
+exactly that: *"edge bar set from measured spread persistence, not the headline
+spread."* Today's `0.047%`/settlement annualizes to ~100%, which is precisely the
+headline number that sentence exists to distrust.
+
+It is measurable from **settled history, with nothing at risk**. `screen run`
+(§42b) already fetches both venues' settled-funding history for the intersection
+universe and writes a ledger, ranking, shortlist and dislocation census. **Start
+by reading what it has already produced for the 8-alt shortlist** before fetching
+anything new.
+
+**THE SECOND-CHEAPEST BOOLEAN, if a live run is wanted anyway: does either demo
+pay funding at all?** Untested. Both venues settle `LABUSDT` on a **4-hour**
+interval at `00/04/08/12/16/20` UTC (`fundingIntervalHours: 4`;
+`fundingInterval: 240`), and the instants **coincide across the two venues**, so
+no window exists where one leg has settled and the other has not. Open ~15 min
+before a settlement, hold across it, close after. ⚠ Given F24 — Binance demo
+publishes a correct fee rate and charges **zero** — *"publishes funding, does not
+pay it"* is a live possibility with precedent from this very session. Note this
+buys a **boolean about the plumbing**, not an economics measurement.
+
+---
+
+### Session 144's preparation notes (all of it already done once)
+
+**Steps 1, 2 and 5 of `docs/runbooks/pair-demo-run.md` were DONE in session 144**
+and consumed by the run in 145:
 
 - `./run/pair/` and both lock directories exist. `./run/` is **gitignored**.
 - The Portfolio-Margin attestation is written and pinned:
@@ -136,9 +237,17 @@ is the single gate for every compensating trade and cannot see a cross-venue pai
 on each side, then closing the exposed leg **by hand**, reduce-only. Never re-run
 `pair run` with the same trade id.
 
-**STILL OPEN, carried forward.** `[OPEN, §97 §9]` **no gate reads any path
-constant against its venue** — this session falsified one by hand and checked
-exactly one; an absence of further findings is an absence of looking. Capture
+**STILL OPEN, carried forward.** `[OPEN, §98 §3]` **no in-band close exists for
+an intact cross-venue pair**, so both journals are latched and a second run needs
+fresh paths — it belongs with **#241**, which owns the classifier a compensating
+close would need. `[OPEN, §98 §5]` **Bybit's demo taker rate is undetermined**
+between `0.0011` and `0.00055`-on-double-notional, and no fixture can settle it —
+only the venue's published rate, which refuses with `retCode 10001`.
+`[OPEN, §98 §8]` **does either demo pay funding at all** — untested, and F24 makes
+"publishes it, does not pay it" a live possibility. `[OPEN, §97 §9]` **no gate
+reads any path constant against its venue** — session 144 falsified one by hand
+and checked exactly one; an absence of further findings is an absence of
+looking. Capture
 still down (~9 GiB/day accepted, pending Hetzner) — #239/#240 unmoved. #225/#226
 remain B4's only blockers. #229 unchanged, still owing SM §1's model-(a) revision
 plus the `ambiguous-order-model.md` §1 row. #235 carries seven; #220, #227, #228,
