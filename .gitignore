@@ -50,6 +50,20 @@ coverage.*
 # logged exploration trail ruling §45f-2 requires.
 /research/crossvenue/rest/
 
+# The pair root's runtime directory (configs/pair.demo.*.json roots it at ./run).
+# Journals, spend locks, and the operator's Portfolio-Margin attestation.
+#
+# Runtime state rather than source, on /archive/'s argument — but the
+# attestation is worth a sentence of its own, because it looks like a document
+# somebody might want committed. It must not be. It is bound to ONE credential's
+# fingerprint and to one account label, so a committed copy goes stale the day a
+# key rotates and reads as current; the config pins its DIGEST, so a stale file
+# refuses by name rather than passing, which is the right direction and not a
+# reason to create the situation. §4.1 also makes it the operator's own signed
+# word about their account, which is theirs to write per deployment and not a
+# fact about this repository.
+/run/
+
 # Local environment
 .env
 .env.*

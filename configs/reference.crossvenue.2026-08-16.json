@@ -1,0 +1,90 @@
+{
+  "fees": [
+    {
+      "venue": "binance",
+      "product": "spot",
+      "contract": "",
+      "maker": "0.001",
+      "taker": "0.001",
+      "tier": "VIP0-modeled",
+      "class": "hand_recorded",
+      "observed_at": "2026-07-31T05:30:00Z",
+      "source": "docs/venue-profiles.md — base-tier fee tables (2026-07-31): binance.com/en/fee/trading, Regular User, undiscounted"
+    },
+    {
+      "venue": "binance",
+      "product": "linear_perp",
+      "contract": "linear",
+      "maker": "0.0002",
+      "taker": "0.0005",
+      "tier": "VIP0-modeled",
+      "class": "hand_recorded",
+      "observed_at": "2026-07-31T05:30:00Z",
+      "source": "docs/venue-profiles.md — base-tier fee tables (2026-07-31): binance.com/en/fee/futureFee, Regular User, USDT pairs, undiscounted"
+    },
+    {
+      "venue": "bybit",
+      "product": "spot",
+      "contract": "",
+      "maker": "0.001",
+      "taker": "0.001",
+      "tier": "nonVIP-modeled",
+      "class": "hand_recorded",
+      "observed_at": "2026-07-31T05:30:00Z",
+      "source": "docs/venue-profiles.md — base-tier fee tables (2026-07-31): bybit.com/en/announcement-info/fee-rate/, Non-VIP, Spot tab, undiscounted"
+    },
+    {
+      "venue": "bybit",
+      "product": "linear_perp",
+      "contract": "linear",
+      "maker": "0.0002",
+      "taker": "0.00055",
+      "tier": "nonVIP-modeled",
+      "class": "hand_recorded",
+      "observed_at": "2026-07-31T05:30:00Z",
+      "source": "docs/venue-profiles.md — base-tier fee tables (2026-07-31): bybit.com/en/announcement-info/fee-rate/, Non-VIP, Perpetual \u0026 Futures tab, undiscounted"
+    }
+  ],
+  "lots": [
+    {
+      "venue": "binance",
+      "product": "linear_perp",
+      "contract": "linear",
+      "symbol": "LABUSDT",
+      "base": "LAB",
+      "step": "1",
+      "min_qty": "1",
+      "quote": "USDT",
+      "min_notional": "5",
+      "tick": "0.0001000",
+      "class": "fetched",
+      "observed_at": "2026-08-16T09:43:26Z",
+      "source": "https://fapi.binance.com/fapi/v1/exchangeInfo"
+    },
+    {
+      "venue": "bybit",
+      "product": "linear_perp",
+      "contract": "linear",
+      "symbol": "LABUSDT",
+      "base": "LAB",
+      "step": "1",
+      "min_qty": "1",
+      "quote": "USDT",
+      "min_notional": "5",
+      "tick": "0.00010",
+      "class": "fetched",
+      "observed_at": "2026-08-16T09:43:26Z",
+      "source": "https://api.bybit.com/v5/market/instruments-info?category=linear\u0026symbol=LABUSDT"
+    }
+  ],
+  "hurdle": {
+    "annual_rate": "0.0369",
+    "access_cost": "0",
+    "liquidity_haircut": "0",
+    "counterparty_haircut": "0",
+    "as_of": "2026-07-30T00:00:00Z",
+    "class": "hand_recorded",
+    "observed_at": "2026-07-31T05:35:00Z",
+    "source": "home.treasury.gov daily treasury bill rates XML feed, 13-week coupon-equivalent close 2026-07-30 = 3.69%. Carried verbatim from configs/reference.btcusdt.json — the pair smoke consumes no hurdle, and re-sourcing a row this run does not read would be a second unverified claim for nothing."
+  }
+}

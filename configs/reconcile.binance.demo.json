@@ -1,0 +1,46 @@
+{
+  "journal_path": "./run/pair/binance.db",
+  "account": "binance-demo-futures",
+  "venue": {
+    "venue": "binance",
+    "dialect": "binance",
+    "api_key_ref": "env:BINANCE_DEMO_API_KEY",
+    "api_secret_ref": "env:BINANCE_DEMO_API_SECRET",
+    "spend_lock_dir": "./run/pair/locks/binance",
+    "endpoints": [
+      {"product": "linear_perp", "scheme": "https", "host": "demo-fapi.binance.com"}
+    ],
+    "timeout": "5s",
+    "read_limit": 1048576,
+    "recv_window": "5s",
+    "limits": [
+      {"name": "ip_requests", "scope": "venue", "dimension": "requests", "interval": "5s",
+       "opening_ceiling": 300, "routine_ceiling": 400, "capacity": 500},
+      {"name": "weight_1m", "scope": "family", "product": "linear_perp", "dimension": "weight",
+       "interval": "1m", "opening_ceiling": 1680, "routine_ceiling": 2160, "capacity": 2400},
+      {"name": "orders_1m", "scope": "family", "product": "linear_perp", "dimension": "orders",
+       "interval": "1m", "opening_ceiling": 840, "routine_ceiling": 1080, "capacity": 1200}
+    ],
+    "throttle_pause": "2m",
+    "ban_pause": "10m",
+    "clock_offset": "0s",
+    "clock_uncertainty": "250ms"
+  },
+  "instruments": [
+    {"venue": "binance", "product": "linear_perp", "contract": "linear", "symbol": "LABUSDT",
+     "base": "LAB", "quote": "USDT", "leverage": 5}
+  ],
+  "position_scopes": [
+    {"venue": "binance", "product": "linear_perp", "settle": "USDT"}
+  ],
+  "resolution": {
+    "max_landing": "30s",
+    "sweep_margin": "5s"
+  },
+  "portfolio_margin_attestation": {
+    "path": "./run/pair/portfolio-margin.binance.json",
+    "sha256": "3eefaed93981d88f480395e693f3be40e3c7ae9048d0b8571d16f5a2dc71da33"
+  },
+  "watchdog_silence": "30s",
+  "stop_budget": "2s"
+}
