@@ -1,6 +1,108 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-16, session 143): **#236 IS BUILT — `internal/app/pair` DRIVES ONE CROSS-VENUE PACKAGE ACROSS TWO DEPLOYMENTS, `make ci` GREEN BOTH MODULES, `SPEC EDIT OWED` AT ZERO. NO LIVE RUN WAS PERFORMED.**
+## Status (2026-08-16, session 144): **THE DEMO RUN'S PREPARATION FOUND TWO §4.1 DEFECTS THAT NO TEST COULD, BOTH FIXED. BOTH VENUES NOW BOOT `ExitClean` AGAINST THE LIVE DEMOS. NO ORDER HAS STILL BEEN PLACED.**
+
+**Read `docs/superpowers/specs/2026-08-16-m4-236-bybit-spot-margin-path.md` (record
+§97)** — two defects, the reason no check in this repo could have found either,
+and a hazard that was written down years ago under the wrong heading. ADR rows
+**F21** and **F22**.
+
+**WHY THIS SESSION EXISTS.** #236 landed green with nothing ever sent to a venue.
+The operator asked to run the demo smoke test. **Step 1 did not finish** before
+the first live read refused.
+
+**DEFECT 1 — a doc page SLUG transcribed as an HTTP path.** The Bybit spot-margin
+probe called `GET /v5/spot-margin-uta/status`, which **does not exist**: 404 with
+an EMPTY body on demo *and* mainnet. Bybit envelopes every route it owns, so an
+empty 404 means the request never reached the API layer — a JSON 404 and an empty
+404 are opposite evidence. `spot-margin-uta/status` is the **documentation page
+slug**; that page reads *"HTTP Request — `GET /v5/spot-margin-trade/state`"*. It
+had reached **seven sites**, one of them `venue-profiles.md`'s verified-facts
+table. **Nothing could have caught it**: the `httptest` double served the same
+wrong path the code asked for, and its default arm already refused unknown paths.
+**A strict fixture cannot object to a fact both sides state identically.**
+
+**DEFECT 2 — a gate no flat account could pass.** With the path fixed, the boot
+reached the posture check and refused again: three per-symbol settings
+`ReasonUnobserved`. The position probe scoped by `settleCoin`, which answers
+**only for symbols carrying an open position**. So §4.1's three
+`SubjectDerivativesLeg` rows were unobservable on a flat account — and **flat is
+the state a two-leg open requires**. The posture gate and the flat-start gate had
+**no account state satisfying both**; the Bybit boot could never have passed,
+independent of defect 1.
+
+**⚠ THE HAZARD WAS ALREADY WRITTEN DOWN, UNDER THE WRONG HEADING.**
+`posture_test.go`'s **Binance** test has said since record §73o: *"re-adding a
+per-symbol probe against a POSITION enumeration would restore a gate no flat
+account can pass."* True, general, and filed under the endpoint that motivated it
+rather than under the mechanism — so nothing carried it one screen down to Bybit,
+which was doing exactly that. **When a hazard note is written, check whether its
+subject is the input or the mechanism; if it is the mechanism, read the siblings
+at once.**
+
+**THE FIX REVERSES A SETTLED RULING, AND A CONTROL IS WHY.** `ports.PostureScope`
+ruled the symbol roster belongs to the requirement rather than to the read,
+because *"a read scoped by the symbols this system already names cannot surface a
+configured symbol the venue does not know."* Encoded as a control and answered by
+the venue: `symbol=NOTAREALUSDT` → **`retCode 10001 "symbol not exist"`**. The
+symbol scope NAMES an unknown symbol; the settleCoin scope returns the same empty
+list for *"the venue does not know it"* and *"you are flat"* — **the collapse the
+ruling meant to prevent was the one it shipped.** The ruling's goal was right and
+its premise about venue behaviour was untested. The roster still comes from the
+requirement, so the rules and the read range over one list. Cost: §73c-2's
+quotable posture cost becomes **`3 + len(symbols)`**.
+
+**WHAT IS VERIFIED NOW.** `make ci` green both modules; `SPEC EDIT OWED` at zero
+across `internal/ tools/ cmd/`; `formal-fresh` untouched (`venue-profiles.md` is
+not tracked, `knownStale` still **six**, all #229's). Three mutations killed on
+the new code, including the one that proves the two-symbol test roster earns its
+keep — with a single symbol, "one step per symbol" and "one step, always" render
+an identical list. **Both venues boot `ExitClean` against the live demo hosts.**
+
+**⚠ ONE CLAIM OF MINE WAS REFUSED BY ITS OWN BITE-CHECK,** and it is left refused
+rather than quietly kept: the retired path in the endpoint-routing table is a
+**findability marker, not a regression guard**. No single-line resurrection
+reaches it, because `ratelimit`'s duplicate-name gate fires first. The comment
+says so.
+
+**⚠ NO ORDER HAS STILL BEEN PLACED.** Every probe this session was a signed READ.
+§95 §8's not-claimed list stands unchanged: nothing here is evidence about demo
+books, demo fills, demo funding, or the strategy's economics. What IS new evidence
+is that the doubles proved the code consistent with itself and nothing else.
+
+**THE OPERATOR'S ACCOUNT STATE, established this session.** Binance demo
+`binance-demo-futures` — 4 908 USDT, flat, LABUSDT ISOLATED/5x, Portfolio-Margin
+attestation written and pinned (`run/pair/portfolio-margin.binance.json`). Bybit
+demo `bybit-demo-1` — ~50 000 USDT, flat, LABUSDT ISOLATED/5x, **key expires
+2026-11-10T07:03:17Z**. Both keys re-confirmed to carry trade permission today.
+
+**THE RUNBOOK'S DEMO-VS-MAINNET PARAGRAPH WAS BACKWARDS** and is corrected (§97
+§8). It read *"For Binance that is the same environment. For Bybit it is not"*,
+generalising §95 §2's demo-vs-**testnet** symbol counts to a different pair of
+environments. Measured on LABUSDT: **Bybit demo and mainnet grids are
+byte-identical; Binance's differ** (tick `0.0001` vs `0.00001`, step `1` vs
+`0.1`). Safe in direction — mainnet's grid is coarser, so the error can only
+over-refuse — but the harm was the reassuring half, which told an operator not to
+check Binance.
+
+**THE NEXT ACTION IS THE RUN ITSELF.** Steps 1–5 of
+`docs/runbooks/pair-demo-run.md` are done and both dry reconciles exit clean.
+What remains is §3 (four marketable prices from a fresh book read), §4 (a fresh
+UUIDv7), and §6. **§3 and §6 must be one continuous sequence** — a stale limit
+turns the IOC into a no-fill, which is a CLEAN run under D6 that measured nothing.
+
+**STILL OPEN, carried forward.** `[OPEN, §97 §9]` **no gate reads any path
+constant against its venue** — this session falsified one by hand and checked
+exactly one; an absence of further findings is an absence of looking. Capture
+still down (~9 GiB/day accepted, pending Hetzner) — #239/#240 unmoved. #225/#226
+remain B4's only blockers. #229 unchanged, still owing SM §1's model-(a) revision
+plus the `ambiguous-order-model.md` §1 row. #235 carries seven; #220, #227, #228,
+#238, #241 unchanged. The `CLAUDE.md` slice-close grep widening to
+`internal/ tools/ cmd/` is **still owed to the operator**.
+
+---
+
+## Previously (2026-08-16, session 143): **#236 IS BUILT — `internal/app/pair` DRIVES ONE CROSS-VENUE PACKAGE ACROSS TWO DEPLOYMENTS, `make ci` GREEN BOTH MODULES, `SPEC EDIT OWED` AT ZERO. NO LIVE RUN WAS PERFORMED.**
 
 **Read `docs/superpowers/specs/2026-08-15-m4-236-crossvenue-root-scoping.md` §10**
 — it holds what was built against each ruling, the three markers that keep
