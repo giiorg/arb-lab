@@ -85,11 +85,56 @@ byte-identical; Binance's differ** (tick `0.0001` vs `0.00001`, step `1` vs
 over-refuse — but the harm was the reassuring half, which told an operator not to
 check Binance.
 
-**THE NEXT ACTION IS THE RUN ITSELF.** Steps 1–5 of
-`docs/runbooks/pair-demo-run.md` are done and both dry reconciles exit clean.
-What remains is §3 (four marketable prices from a fresh book read), §4 (a fresh
-UUIDv7), and §6. **§3 and §6 must be one continuous sequence** — a stale limit
-turns the IOC into a no-fill, which is a CLEAN run under D6 that measured nothing.
+**THE SLICE IS `aa6bf0b..107c220`, MERGED TO `main`, `make ci` GREEN BOTH
+MODULES, branch deleted, tree clean.**
+
+---
+
+## THE NEXT ACTION: THE RUN. Start a fresh session and do this.
+
+**Steps 1, 2 and 5 of `docs/runbooks/pair-demo-run.md` are DONE.** Do not redo
+them:
+
+- `./run/pair/` and both lock directories exist. `./run/` is **gitignored**.
+- The Portfolio-Margin attestation is written and pinned:
+  `run/pair/portfolio-margin.binance.json`, sha256
+  `3eefaed93981d88f480395e693f3be40e3c7ae9048d0b8571d16f5a2dc71da33`. **It is not
+  in git and must not be** — see `.gitignore`. If it is missing, the operator
+  writes a new one and the digest in the config changes with it.
+- The reference revision is `configs/reference.crossvenue.2026-08-16.json`, both
+  venues' `LABUSDT` rows, `class: fetched`, **one** observation instant.
+  ⚠ **`max_age` is 24h — refetch if the run is after 2026-08-17 09:43Z.**
+- Both dry checks exit `ExitClean`:
+  `arblab reconcile run -config configs/reconcile.{binance,bybit}.demo.json`.
+  Re-run both first; they send nothing and they are the cheapest proof the
+  account has not drifted.
+
+**What remains is §3, §4 and §6, and §3 → §6 MUST BE ONE CONTINUOUS SEQUENCE.**
+
+1. **§3** — read both books, set four prices. The two `limit_price` values
+   marketable (sell at or below the bid, buy at or above the ask); the two
+   `unwind_limit_price` values marketable in the **opposite** direction. Prices
+   must be multiples of `0.0001` — the reference carries mainnet's tick, which is
+   the coarser grid on Binance and identical on Bybit, so a price valid under it
+   is valid on both demo hosts.
+2. **§4** — mint a fresh UUIDv7 for `pair.id`. `attempt` stays 0. A re-run with
+   the same id is REFUSED, which is the fail-safe direction.
+3. Write `configs/pair.demo.<date>.json` from `configs/pair.demo.example.json`,
+   with `account` **`binance-demo-futures`** / **`bybit-demo-1`**, the
+   attestation block above, and `reference.path` pointing at the revision.
+4. **§6** — `arblab pair run -config configs/pair.demo.<date>.json`.
+
+**⚠ THE FAILURE MODE THAT LOOKS LIKE SUCCESS.** A limit that is not marketable
+turns the IOC into a no-fill, which is a **clean** run under D6 — exit 0, verdict
+`VerdictUnopened` — and proves nothing about fills. It is the most likely way to
+get a green run that measured nothing, and it is why §3 and §6 cannot be
+separated by a conversation turn spent on anything else.
+
+**⚠ EXIT 4 MEANS THE PAIR IS EXPOSED** and nothing fixes it automatically: §6.7
+is the single gate for every compensating trade and cannot see a cross-venue pair
+(`domain.HedgeGroup` is `(Account, Venue, Symbol)`). Recovery is `reconcile run`
+on each side, then closing the exposed leg **by hand**, reduce-only. Never re-run
+`pair run` with the same trade id.
 
 **STILL OPEN, carried forward.** `[OPEN, §97 §9]` **no gate reads any path
 constant against its venue** — this session falsified one by hand and checked
