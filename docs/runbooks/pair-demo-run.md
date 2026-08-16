@@ -44,12 +44,29 @@ ages would put that comparison across two observation instants.
 
 ⚠ **Named limitation.** `referencePublicConfig` in `cmd/arblab/reference.go`
 targets the **mainnet** public hosts (`fapi.binance.com`, `api.bybit.com`), not
-the demo hosts. For Binance that is the same environment. **For Bybit it is
-not** — record §95 §2 measured 821 demo symbols against 809 testnet, and demo is
-a distinct environment. So a Bybit demo grid may differ from the mainnet grid
-this revision records. The mismatch surfaces as a `Plan` refusal or a venue
-rejection, never as a wrong fill; check the refusal against the demo
-`instruments-info` before widening anything.
+the demo hosts. **Both venues can therefore encode a grid the demo host does not
+serve**, and the mismatch surfaces as a `Plan` refusal or a venue rejection,
+never as a wrong fill. Check any refusal against the demo grid before widening
+anything.
+
+⚠ **This paragraph named the wrong venue until 2026-08-16 (record §97).** It read
+*"For Binance that is the same environment. For Bybit it is not"*, resting on
+§95 §2's demo-vs-testnet symbol counts — a true measurement of a **different**
+pair of environments, generalised to this one. Measured directly on `LABUSDT`:
+
+| | Bybit | Binance |
+|---|---|---|
+| demo vs mainnet grid | **byte-identical** | **differs** |
+| `tickSize` | `0.0001` both | `0.0001` main, `0.00001` demo |
+| `stepSize` | `1` both | `1` main, `0.1` demo |
+| `quantityPrecision` | — | `0` main, `1` demo |
+
+So it was **backwards**, and the harm was the reassuring half: the sentence told
+an operator not to check Binance. The direction happens to be safe on this
+symbol — mainnet's grid is the **coarser** one, so a price and size valid under
+the reference are also valid on demo, and the error can only over-refuse — but
+that is a property of today's LABUSDT rows, not a guarantee. Measure per symbol;
+do not re-derive it from either venue's name.
 
 ## 3. Read both books and set four prices
 
