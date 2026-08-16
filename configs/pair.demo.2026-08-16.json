@@ -1,0 +1,294 @@
+{
+  "sides": [
+    {
+      "oms": {
+        "journal_path": "./run/pair/binance.db",
+        "account": "binance-demo-futures",
+        "venue": {
+          "venue": "binance",
+          "dialect": "binance",
+          "api_key_ref": "env:BINANCE_DEMO_API_KEY",
+          "api_secret_ref": "env:BINANCE_DEMO_API_SECRET",
+          "spend_lock_dir": "./run/pair/locks/binance",
+          "endpoints": [
+            {
+              "product": "linear_perp",
+              "scheme": "https",
+              "host": "demo-fapi.binance.com"
+            }
+          ],
+          "timeout": "5s",
+          "read_limit": 1048576,
+          "recv_window": "5s",
+          "limits": [
+            {
+              "name": "ip_requests",
+              "scope": "venue",
+              "dimension": "requests",
+              "interval": "5s",
+              "opening_ceiling": 300,
+              "routine_ceiling": 400,
+              "capacity": 500
+            },
+            {
+              "name": "weight_1m",
+              "scope": "family",
+              "product": "linear_perp",
+              "dimension": "weight",
+              "interval": "1m",
+              "opening_ceiling": 1680,
+              "routine_ceiling": 2160,
+              "capacity": 2400
+            },
+            {
+              "name": "orders_1m",
+              "scope": "family",
+              "product": "linear_perp",
+              "dimension": "orders",
+              "interval": "1m",
+              "opening_ceiling": 840,
+              "routine_ceiling": 1080,
+              "capacity": 1200
+            }
+          ],
+          "throttle_pause": "2m",
+          "ban_pause": "10m",
+          "clock_offset": "0s",
+          "clock_uncertainty": "250ms"
+        },
+        "instruments": [
+          {
+            "venue": "binance",
+            "product": "linear_perp",
+            "contract": "linear",
+            "symbol": "LABUSDT",
+            "base": "LAB",
+            "quote": "USDT",
+            "leverage": 5
+          }
+        ],
+        "position_scopes": [
+          {
+            "venue": "binance",
+            "product": "linear_perp",
+            "settle": "USDT"
+          }
+        ],
+        "resolution": {
+          "max_landing": "30s",
+          "sweep_margin": "5s"
+        },
+        "portfolio_margin_attestation": {
+          "path": "./run/pair/portfolio-margin.binance.json",
+          "sha256": "3eefaed93981d88f480395e693f3be40e3c7ae9048d0b8571d16f5a2dc71da33"
+        },
+        "watchdog_silence": "30s",
+        "stop_budget": "2s"
+      }
+    },
+    {
+      "oms": {
+        "journal_path": "./run/pair/bybit.db",
+        "account": "bybit-demo-1",
+        "venue": {
+          "venue": "bybit",
+          "dialect": "bybit",
+          "api_key_ref": "env:BYBIT_DEMO_API_KEY",
+          "api_secret_ref": "env:BYBIT_DEMO_API_SECRET",
+          "spend_lock_dir": "./run/pair/locks/bybit",
+          "endpoints": [
+            {
+              "product": "spot",
+              "scheme": "https",
+              "host": "api-demo.bybit.com"
+            },
+            {
+              "product": "linear_perp",
+              "scheme": "https",
+              "host": "api-demo.bybit.com"
+            }
+          ],
+          "timeout": "5s",
+          "read_limit": 1048576,
+          "recv_window": "5s",
+          "limits": [
+            {
+              "name": "ip_requests",
+              "scope": "venue",
+              "dimension": "requests",
+              "interval": "5s",
+              "opening_ceiling": 300,
+              "routine_ceiling": 400,
+              "capacity": 500
+            },
+            {
+              "name": "orders_1s",
+              "scope": "family",
+              "product": "linear_perp",
+              "dimension": "orders",
+              "interval": "1s",
+              "opening_ceiling": 35,
+              "routine_ceiling": 45,
+              "capacity": 50
+            },
+            {
+              "name": "spot_orders_1s",
+              "scope": "family",
+              "product": "spot",
+              "dimension": "orders",
+              "interval": "1s",
+              "opening_ceiling": 14,
+              "routine_ceiling": 18,
+              "capacity": 20
+            },
+            {
+              "name": "order_create",
+              "scope": "endpoint",
+              "dimension": "orders",
+              "interval": "1s",
+              "opening_ceiling": 35,
+              "routine_ceiling": 45,
+              "capacity": 50
+            },
+            {
+              "name": "order_realtime",
+              "scope": "endpoint",
+              "dimension": "requests",
+              "interval": "1s",
+              "opening_ceiling": 35,
+              "routine_ceiling": 45,
+              "capacity": 50
+            },
+            {
+              "name": "order_history",
+              "scope": "endpoint",
+              "dimension": "requests",
+              "interval": "1s",
+              "opening_ceiling": 35,
+              "routine_ceiling": 45,
+              "capacity": 50
+            },
+            {
+              "name": "execution_list",
+              "scope": "endpoint",
+              "dimension": "requests",
+              "interval": "1s",
+              "opening_ceiling": 35,
+              "routine_ceiling": 45,
+              "capacity": 50
+            },
+            {
+              "name": "position_list",
+              "scope": "endpoint",
+              "dimension": "requests",
+              "interval": "1s",
+              "opening_ceiling": 35,
+              "routine_ceiling": 45,
+              "capacity": 50
+            },
+            {
+              "name": "wallet_balance",
+              "scope": "endpoint",
+              "dimension": "requests",
+              "interval": "1s",
+              "opening_ceiling": 35,
+              "routine_ceiling": 45,
+              "capacity": 50
+            },
+            {
+              "name": "account_info",
+              "scope": "endpoint",
+              "dimension": "requests",
+              "interval": "1s",
+              "opening_ceiling": 35,
+              "routine_ceiling": 45,
+              "capacity": 50
+            },
+            {
+              "name": "spot_margin_status",
+              "scope": "endpoint",
+              "dimension": "requests",
+              "interval": "1s",
+              "opening_ceiling": 35,
+              "routine_ceiling": 45,
+              "capacity": 50
+            }
+          ],
+          "uncounted": [
+            {
+              "product": "linear_perp",
+              "dimension": "weight",
+              "reason": "Bybit publishes no per-endpoint weight; its budget is requests per second per endpoint (profiles \u00a75)"
+            },
+            {
+              "product": "spot",
+              "dimension": "weight",
+              "reason": "Bybit publishes no per-endpoint weight; its budget is requests per second per endpoint (profiles \u00a75)"
+            }
+          ],
+          "throttle_pause": "2m",
+          "ban_pause": "10m",
+          "clock_offset": "0s",
+          "clock_uncertainty": "250ms"
+        },
+        "instruments": [
+          {
+            "venue": "bybit",
+            "product": "linear_perp",
+            "contract": "linear",
+            "symbol": "LABUSDT",
+            "base": "LAB",
+            "quote": "USDT",
+            "leverage": 5
+          }
+        ],
+        "position_scopes": [
+          {
+            "venue": "bybit",
+            "product": "linear_perp",
+            "settle": "USDT"
+          }
+        ],
+        "resolution": {
+          "max_landing": "30s",
+          "sweep_margin": "5s"
+        },
+        "watchdog_silence": "30s",
+        "stop_budget": "2s"
+      }
+    }
+  ],
+  "pair": {
+    "id": "01a00a83-e068-7550-9dbf-13283b0cefa5",
+    "attempt": 0,
+    "mode": "sequential",
+    "settle": "3s",
+    "settle_attempts": 5,
+    "legs": [
+      {
+        "venue": "binance",
+        "product": "linear_perp",
+        "contract": "linear",
+        "symbol": "LABUSDT",
+        "side": "sell",
+        "quantity": "100",
+        "limit_price": "0.0797",
+        "unwind_limit_price": "0.0806"
+      },
+      {
+        "venue": "bybit",
+        "product": "linear_perp",
+        "contract": "linear",
+        "symbol": "LABUSDT",
+        "side": "buy",
+        "quantity": "100",
+        "limit_price": "0.0806",
+        "unwind_limit_price": "0.0797"
+      }
+    ]
+  },
+  "reference": {
+    "path": "./configs/reference.crossvenue.2026-08-16.json",
+    "max_age": "24h"
+  }
+}
