@@ -3,8 +3,8 @@
 ## Status (2026-08-29, session 146): **PERSISTENCE IS MEASURED. THE SPREAD WAS NEVER THE BINDING CONSTRAINT — THE COST IS, AND IT IS THE QUANTITY THIS PROJECT HAS MEASURED LEAST. NO CODE, NO VENUE CONTACT, NO NORMATIVE EDIT.**
 
 **Read `docs/superpowers/specs/2026-08-29-persistence-measurement.md` (record
-§99)** — the measurement, three controls, and four findings. ADR rows **F26**,
-**F27**, **F28**, **F29**. Artifacts in `research/persistence/`.
+§99)** — the measurement, three controls, and five findings. ADR rows **F26**,
+**F27**, **F28**, **F29**, **F30**. Artifacts in `research/persistence/`.
 
 **WHAT WAS MEASURED.** 17 478 episodes over 61 eligible symbols × 4 entry
 levels, 235 073 matched settlements, 2020-10-21 → 2026-07-31, from the data
@@ -30,6 +30,16 @@ is `+0.6460`; `LABUSDT` alone is `+0.5439`. Dropping the best **10** of **1 259*
 episodes turns the total negative. Median symbol: **−0.1%/yr**. Against an
 illustrative 4.6% hurdle: **4/56** clear it at 21bp, **3/56** at 29bp,
 **0/56** at 90bp.
+
+**⚠ F30 — THE SHORTLIST'S HEADLINE RETURN HAS NO DECLARED DENOMINATOR, AND IT IS
+PER *ONE* LEG.** `LABUSDT`'s `rank_score 0.71586586` is 71.6% of **one leg's
+notional**; the same episodes on a two-leg deployment return **35.8%** on the
+capital, and less on a true `C_allocated`. `ranking.json` declares this in no
+field. §12 item 2b's own annotation and the operator's memory both quote
+*"71.6%/yr … vs a 4.6% hurdle"* — the comparison §55 exists to protect, done at
+2×. **Not a breach** (§2.1's clause binds the crossvenue *gate*, and §43g says
+step 1 is not gate evidence) — but **halve any step-1 number before comparing it
+to a hurdle**.
 
 **F28** — run length and break-even are different questions with a five-row
 overlap band; an edge bar phrased as *hold for N settlements* misclassifies both

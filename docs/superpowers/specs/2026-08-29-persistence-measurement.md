@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-29 (session 146) · **Task:** the persistence measurement §98 named as the next action · **Milestone:** 4 (pre-gate)
 **Predecessors:** record §98 (the first live pair run, and the 0.90% round trip it could not attribute), §42b (the screening harness), core §2.3 (the edge bar), §2.1 (the cost model)
-**ADR rows:** F26, F27, F28, F29
+**ADR rows:** F26, F27, F28, F29, F30
 **Nothing was sent to a venue. No normative document changed. The output is a measurement and four findings.**
 
 ---
@@ -116,6 +116,34 @@ Three symbols (`NEARUSDT`, `WIFUSDT`, `HBARUSDT`) earn $1.63–$2.53 across 3–
 years, which is positive and renders as `+0.0%/yr`; counting on the rendered
 figure gave 15/56 and 10/56. Caught by comparing two passes of the same
 analysis. A rounding applied for display became a predicate.
+
+## 5b. F30 — the ranking's headline return has no declared denominator
+
+Reconciling this session's per-symbol figures against the shortlist's published
+numbers turned up a factor of exactly two. `LABUSDT`'s `rank_score` is
+`0.71586586`; the same episodes, at $1 000 per leg, return **35.8%** on the
+$2 000 deployed. Both are right: `net_annual` is **per one leg's notional**, and
+a two-leg package deploys two.
+
+`ranking.json` declares this nowhere — not in `params`, not in the pair row, not
+in the level row. The only statement of the base in the whole package is a
+comment on `RoundTripCost()`, a *different* function.
+
+§55 allows a denominator other than `C_allocated` on one condition: *explicitly
+declared in the artifact and demonstrably **at least** `C_allocated`*. One leg's
+notional is smaller than two legs, which is smaller than `C_allocated` — the
+flattered direction the clause exists to bound.
+
+**The screening is not in breach.** §2.1's declared-denominator clause was added
+at v0.9.23 for the **crossvenue gate** (§45p), and §43g says plainly that nothing
+in step 1 is gate evidence. The rule is satisfied where it binds. What is wrong
+is that the number is quoted away from its base — and it demonstrably has been:
+§12 item 2b's step-1 annotation reads *"71.6%/yr down to 1.5%/yr"*, and the
+operator's own memory of this project records *"LAB 71.6%/yr down to BCH 1.5%/yr
+vs a 4.6% hurdle"*. That is the hurdle comparison §55 protects, performed at 2×.
+
+Deferred rather than fixed: a `denominator` field in the report params changes a
+committed artifact's schema and needs a screening re-run.
 
 ## 6. F28 — run length and break-even are two different questions
 
