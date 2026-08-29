@@ -1,0 +1,150 @@
+<style>
+  .wf { font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .wf-shell { display: flex; gap: 6px; border: 1px solid rgba(128,128,128,.35); border-radius: 6px; overflow: hidden; min-height: 210px; }
+  .wf-nav { width: 116px; flex: none; padding: 8px 6px; background: rgba(128,128,128,.10); border-right: 1px solid rgba(128,128,128,.28); }
+  .wf-nav .grp { text-transform: uppercase; letter-spacing: .07em; font-size: 8.5px; opacity: .5; margin: 8px 0 3px; }
+  .wf-nav .it { padding: 3px 5px; border-radius: 3px; opacity: .8; }
+  .wf-nav .it.on { background: rgba(128,128,128,.30); opacity: 1; font-weight: 700; }
+  .wf-main { flex: 1; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+  .wf-row { display: flex; gap: 6px; }
+  .wf-box { border: 1px dashed rgba(128,128,128,.45); border-radius: 4px; padding: 5px 6px; flex: 1; opacity: .85; }
+  .wf-box.solid { border-style: solid; background: rgba(128,128,128,.08); }
+  .wf-box b { display: block; font-size: 9.5px; letter-spacing: .04em; text-transform: uppercase; opacity: .65; margin-bottom: 3px; }
+  .wf-tabs { display: flex; gap: 4px; border-bottom: 1px solid rgba(128,128,128,.3); padding-bottom: 5px; }
+  .wf-tab { padding: 2px 7px; border-radius: 3px; opacity: .6; }
+  .wf-tab.on { background: rgba(128,128,128,.3); opacity: 1; font-weight: 700; }
+  .note { font-size: 12px; opacity: .75; margin-top: 6px; }
+  .tag { display: inline-block; font: 600 9.5px ui-monospace, monospace; padding: 1px 5px; border-radius: 3px; border: 1px solid rgba(128,128,128,.4); opacity: .8; }
+</style>
+
+<h2>How should the dashboard be organised?</h2>
+<p class="subtitle">Same screens in all three — the question is how you navigate between them, and whether "operating" and "deciding whether to operate" are the same place. Click one; details in the terminal.</p>
+
+<div class="cards">
+
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="wf">
+        <div class="wf-shell">
+          <div class="wf-nav">
+            <div style="font-weight:700;font-size:10px;margin-bottom:8px">arb&#8209;lab</div>
+            <div class="it on">Overview</div>
+            <div class="it">Markets</div>
+            <div class="it">Positions</div>
+            <div class="it">Venues</div>
+            <div class="it">Evidence</div>
+            <div class="it">Journal</div>
+            <div class="it">System</div>
+          </div>
+          <div class="wf-main">
+            <div class="wf-row">
+              <div class="wf-box solid"><b>Venue health</b>binance · bybit</div>
+              <div class="wf-box solid"><b>Equity</b>—</div>
+              <div class="wf-box solid"><b>Open</b>0 pkgs</div>
+              <div class="wf-box solid"><b>Alerts</b>2 latched</div>
+            </div>
+            <div class="wf-row" style="flex:1">
+              <div class="wf-box" style="flex:1.6"><b>Top funding spreads (live)</b>LAB · ZK · ARK …</div>
+              <div class="wf-box"><b>PnL trend</b>▁▂▄▃▅▇</div>
+            </div>
+            <div class="wf-row" style="flex:.8">
+              <div class="wf-box"><b>Open positions</b></div>
+              <div class="wf-box"><b>Capture health</b></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A · Flat sidebar, seven sections</h3>
+      <p>One conventional left rail. Every area is one click from anywhere; nothing is nested. A future strategy adds rows inside <em>Markets</em> and <em>Positions</em> rather than new top-level entries.</p>
+      <p style="opacity:.7"><span class="tag">familiar</span> <span class="tag">shallow</span> <span class="tag">7 nav items</span></p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="wf">
+        <div class="wf-shell">
+          <div class="wf-nav">
+            <div style="font-weight:700;font-size:10px;margin-bottom:6px">arb&#8209;lab</div>
+            <div class="wf-tabs" style="margin-bottom:4px">
+              <div class="wf-tab on">Run</div>
+              <div class="wf-tab">Decide</div>
+            </div>
+            <div class="grp">Operating</div>
+            <div class="it on">Overview</div>
+            <div class="it">Positions</div>
+            <div class="it">Markets</div>
+            <div class="it">Venues</div>
+            <div class="grp" style="opacity:.3">Deciding</div>
+            <div class="it" style="opacity:.35">Screening</div>
+            <div class="it" style="opacity:.35">Persistence</div>
+            <div class="it" style="opacity:.35">Verdict</div>
+          </div>
+          <div class="wf-main">
+            <div class="wf-row">
+              <div class="wf-box solid"><b>Venue health</b>binance · bybit</div>
+              <div class="wf-box solid"><b>Equity</b>—</div>
+              <div class="wf-box solid"><b>Open</b>0 pkgs</div>
+            </div>
+            <div class="wf-row" style="flex:1">
+              <div class="wf-box" style="flex:1.6"><b>Live: funding spread leaders</b></div>
+              <div class="wf-box"><b>PnL trend</b>▁▂▄▃▅▇</div>
+            </div>
+            <div class="wf-row" style="flex:.7">
+              <div class="wf-box"><b>Open positions · gates · latches</b></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B · Two modes: <em>Run</em> and <em>Decide</em></h3>
+      <p>An explicit split between operating a live strategy and reading the evidence that decides whether there should be one. Mirrors the tension your own handoff raised — milestone&nbsp;2 is still a kill gate. Costs a mode switch, and some screens (Markets) want to live in both.</p>
+      <p style="opacity:.7"><span class="tag">honest</span> <span class="tag">mode switch</span> <span class="tag">2 + 7</span></p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="wf">
+        <div class="wf-shell" style="flex-direction:column">
+          <div style="display:flex;gap:8px;padding:6px 8px;border-bottom:1px solid rgba(128,128,128,.28);background:rgba(128,128,128,.10)">
+            <span style="font-weight:700">arb-lab</span>
+            <span class="wf-tab on">Console</span>
+            <span class="wf-tab">Markets</span>
+            <span class="wf-tab">Evidence</span>
+            <span class="wf-tab">System</span>
+            <span style="margin-left:auto;opacity:.6">⌘K</span>
+          </div>
+          <div class="wf-main" style="gap:5px">
+            <div class="wf-row">
+              <div class="wf-box solid"><b>Venues</b></div>
+              <div class="wf-box solid"><b>Equity</b></div>
+              <div class="wf-box solid"><b>Open</b></div>
+              <div class="wf-box solid"><b>PnL 24h</b></div>
+              <div class="wf-box solid"><b>Alerts</b></div>
+            </div>
+            <div class="wf-box" style="flex:1"><b>Signal board — every followed market, live, sortable</b>
+              <div style="opacity:.5;margin-top:4px">LABUSDT &nbsp; +0.71 &nbsp; ▇▇▇▇▅ &nbsp;&nbsp; ZKUSDT &nbsp; +0.22 &nbsp; ▇▇▂</div>
+            </div>
+            <div class="wf-row" style="flex:.7">
+              <div class="wf-box"><b>Positions</b></div>
+              <div class="wf-box"><b>Trend</b></div>
+              <div class="wf-box"><b>Journal tail</b></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C · One dense console + drill-downs</h3>
+      <p>A single top bar and one long scrolling console that answers "what's going on" without navigating. Everything else is a drill-down opened from it (click a symbol → detail route). Fewest places to be lost; best on a phone.</p>
+      <p style="opacity:.7"><span class="tag">dense</span> <span class="tag">mobile-first</span> <span class="tag">4 nav items</span></p>
+    </div>
+  </div>
+
+</div>
+
+<p class="note"><strong>My recommendation: A</strong>, with one idea borrowed from C — a persistent top strip of status tiles (venues, equity, open packages, alerts) that stays visible on <em>every</em> screen, so "what's going on" is never more than a glance, and the sidebar collapses to a bottom bar on mobile. B is conceptually the most honest about where this project actually is, but a mode switch is a wall you pay for on every navigation, and the same honesty can be delivered by a single prominent <em>Verdict</em> panel inside A's Evidence section.</p>

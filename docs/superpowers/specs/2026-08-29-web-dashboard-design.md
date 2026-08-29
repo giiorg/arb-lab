@@ -2,7 +2,8 @@
 
 **Date:** 2026-08-29 (session 146, second subject) · **Task:** the operator's stated next topic, scoped from scratch · **Milestone:** 4 (pre-gate), new work item
 **Predecessors:** §99 (F26, F27, F30 — the findings this UI is shaped around), §98 (the first live pair run, F23's latched journals), §42b (the screening harness whose artifacts are the UI's first data source), core §11 (names an *audit projection*), core §3.6 (the six gates this subsystem must satisfy)
-**Status:** design approved in session; no code written under this record.
+**ADR rows:** F31 (the composition root is outside two of the six gates — §4a)
+**Status:** design approved in session, **not yet externally reviewed**; no code written under this record.
 **Nothing was sent to a venue. No normative document changed by this record.** A `build-spec.md` §12 roster entry is **owed** — see §14.
 
 ---
@@ -163,6 +164,17 @@ adapters, which is exactly the code that *should* touch `engine/`.
 The name is not a trick to satisfy a linter. Cross-context view assembly **is**
 application-layer logic; the previous draft's mistake was housing it somewhere
 that did not say so, and the gates noticing is the point.
+
+**The hole is real and has never been exploited — which is why it is invisible.**
+`grep -rn "time\.Now()" internal/app/ --include="*.go"` excluding tests returns
+**nothing**, across all five existing roots (`capture`, `pair`, `reconcile`,
+`exercise`, `sim`). They do import `engine/`, which is correct and is what a
+composition root is for. So `notimenow`'s discipline currently holds in `app/`
+**by convention rather than by enforcement**, and a rule obeyed everywhere it is
+unenforced is indistinguishable from a rule enforced. `serve` is the first app
+root where an ambient clock read would be genuinely *tempting* — a long-running
+process rendering countdowns — which is what turns a latent hole into a live one.
+Recorded as **F31**.
 
 The remaining cost is honest and stated: **more ports across more contexts** than
 the single-context draft, and a `serve` tree that must be kept to one file per view

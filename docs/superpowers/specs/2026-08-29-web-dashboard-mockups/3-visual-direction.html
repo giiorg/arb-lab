@@ -1,0 +1,139 @@
+<style>
+  .vd { --ok:#2f9e63; --warn:#c9922e; --bad:#d64f4f; }
+  .vd .sample { border-radius: 8px; overflow: hidden; margin-bottom: 10px; }
+
+  /* ---------- A · instrument ---------- */
+  .sA { background:#0c0d0f; color:#d8dade; font:12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; padding:0; border:1px solid #1e2126; }
+  .sA .hd { display:flex; gap:0; border-bottom:1px solid #1e2126; }
+  .sA .t { flex:1; padding:8px 11px; border-right:1px solid #1e2126; }
+  .sA .t:last-child { border-right:0 }
+  .sA .k { font-size:8.5px; letter-spacing:.13em; text-transform:uppercase; color:#5d6570; }
+  .sA .v { font-size:16px; margin-top:3px; letter-spacing:-.01em; }
+  .sA .bd { padding:10px 11px }
+  .sA h5 { margin:0 0 8px; font:400 8.5px/1 ui-monospace,monospace; letter-spacing:.16em; text-transform:uppercase; color:#5d6570 }
+  .sA table { width:100%; border-collapse:collapse; font-size:11px }
+  .sA th { text-align:right; font-weight:400; font-size:8.5px; letter-spacing:.09em; text-transform:uppercase; color:#4d545d; padding:0 7px 6px; border-bottom:1px solid #1e2126 }
+  .sA td { text-align:right; padding:5px 7px; border-bottom:1px solid #15171b }
+  .sA th:first-child, .sA td:first-child { text-align:left }
+  .sA .g{color:var(--ok)} .sA .r{color:var(--bad)} .sA .a{color:var(--warn)}
+  .sA .st { font-size:9px; letter-spacing:.09em; padding:2px 0 2px 9px; border-left:2px solid }
+
+  /* ---------- B · editorial ---------- */
+  .sB { background:#fbfaf7; color:#22201d; font:13px/1.55 ui-sans-serif,-apple-system,"Segoe UI",sans-serif; border:1px solid #e2ded6; }
+  .sB .hd { display:flex; border-bottom:1px solid #e2ded6; }
+  .sB .t { flex:1; padding:11px 14px; border-right:1px solid #efece6 }
+  .sB .t:last-child{border-right:0}
+  .sB .k { font-size:10px; letter-spacing:.05em; color:#8d867b; text-transform:uppercase }
+  .sB .v { font:400 20px/1.2 ui-serif, Georgia, "Times New Roman", serif; margin-top:3px; font-variant-numeric:tabular-nums }
+  .sB .bd { padding:13px 14px }
+  .sB h5 { margin:0 0 10px; font:600 11px/1 ui-sans-serif,sans-serif; letter-spacing:.09em; text-transform:uppercase; color:#8d867b }
+  .sB table { width:100%; border-collapse:collapse; font-size:12.5px; font-variant-numeric:tabular-nums }
+  .sB th { text-align:right; font:600 10px/1 ui-sans-serif,sans-serif; letter-spacing:.06em; text-transform:uppercase; color:#a29a8d; padding:0 8px 7px; border-bottom:1px solid #ddd8ce }
+  .sB td { text-align:right; padding:7px 8px; border-bottom:1px solid #efece6 }
+  .sB th:first-child, .sB td:first-child { text-align:left }
+  .sB .name { font:500 13.5px/1 ui-serif,Georgia,serif }
+  .sB .g{color:#1f7a4c} .sB .r{color:#b03a3a} .sB .a{color:#9c7018}
+  .sB .st { font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:#8d867b }
+
+  /* ---------- C · console ---------- */
+  .sC { background:#15171c; color:#e6e8ec; font:12.5px/1.5 ui-sans-serif,-apple-system,"Segoe UI",sans-serif; border:1px solid #262a33; }
+  .sC .hd { display:flex; gap:8px; padding:10px; }
+  .sC .t { flex:1; background:#1b1e25; border:1px solid #262a33; border-radius:8px; padding:9px 11px }
+  .sC .k { font-size:9.5px; letter-spacing:.06em; text-transform:uppercase; color:#767d8b }
+  .sC .v { font:600 17px/1.2 ui-monospace,monospace; margin-top:4px }
+  .sC .bd { padding:0 10px 12px }
+  .sC .card { background:#1b1e25; border:1px solid #262a33; border-radius:8px; padding:11px 12px }
+  .sC h5 { margin:0 0 9px; font:600 10px/1 ui-sans-serif,sans-serif; letter-spacing:.08em; text-transform:uppercase; color:#767d8b }
+  .sC table { width:100%; border-collapse:collapse; font:12px/1 ui-monospace,monospace }
+  .sC th { text-align:right; font:600 9px/1 ui-sans-serif,sans-serif; letter-spacing:.07em; text-transform:uppercase; color:#6b7280; padding:0 8px 7px }
+  .sC td { text-align:right; padding:7px 8px; border-top:1px solid #23262e }
+  .sC th:first-child, .sC td:first-child { text-align:left }
+  .sC .g{color:#3ecf8e} .sC .r{color:#f56565} .sC .a{color:#ecb44a}
+  .sC .pill { display:inline-block; font:600 9.5px/1 ui-sans-serif,sans-serif; padding:4px 8px; border-radius:999px; letter-spacing:.03em }
+  .sC .pill.y{background:rgba(62,207,142,.14); color:#3ecf8e} .sC .pill.m{background:rgba(236,180,74,.14); color:#ecb44a} .sC .pill.n{background:#23262e; color:#767d8b}
+
+  .vd .note { font-size:12px; opacity:.75; margin-top:6px }
+</style>
+
+<h2>Which visual register?</h2>
+<p class="subtitle">The same panel — status tiles plus the signal board — in three directions. All three would be responsive, both themes, tabular figures. Click one.</p>
+
+<div class="vd">
+<div class="options" style="display:block">
+
+  <div class="option" data-choice="a" onclick="toggleSelect(this)" style="display:block;padding:14px">
+    <div class="sample sA">
+      <div class="hd">
+        <div class="t"><div class="k">binance</div><div class="v g">● live</div></div>
+        <div class="t"><div class="k">bybit</div><div class="v g">● live</div></div>
+        <div class="t"><div class="k">open</div><div class="v">0</div></div>
+        <div class="t"><div class="k">attention</div><div class="v r">2</div></div>
+        <div class="t"><div class="k">engine</div><div class="v" style="color:#5d6570">disarmed</div></div>
+      </div>
+      <div class="bd">
+        <h5>signal board · per deployed capital · cost 21bp</h5>
+        <table>
+          <tr><th>symbol</th><th>binance</th><th>bybit</th><th>spread</th><th>next</th><th>p50</th><th>need</th><th>hist/yr</th><th>entry</th></tr>
+          <tr><td>LABUSDT</td><td class="r">−0.0421%</td><td class="g">+0.0180%</td><td>60.1bp</td><td>1h12m</td><td>2</td><td>6</td><td class="g">+31.8%</td><td><span class="st g" style="border-color:var(--ok)">CANDIDATE</span></td></tr>
+          <tr><td>KAITOUSDT</td><td class="r">−0.0110%</td><td class="g">+0.0075%</td><td>18.5bp</td><td>1h12m</td><td>2</td><td>6</td><td class="g">+8.5%</td><td><span class="st a" style="border-color:var(--warn)">MARGINAL</span></td></tr>
+          <tr><td>BEATUSDT</td><td class="r">−0.0090%</td><td class="g">+0.0021%</td><td>11.1bp</td><td>1h12m</td><td>2</td><td>6</td><td class="g">+5.1%</td><td><span class="st a" style="border-color:var(--warn)">MARGINAL</span></td></tr>
+          <tr><td>MMTUSDT</td><td class="r">−0.0052%</td><td class="g">+0.0009%</td><td>6.1bp</td><td>1h12m</td><td>1</td><td>6</td><td class="g">+4.3%</td><td><span class="st" style="border-color:#2b3038;color:#5d6570">BELOW COST</span></td></tr>
+        </table>
+      </div>
+    </div>
+    <h3 style="margin:0 0 4px">A · Instrument</h3>
+    <p style="margin:0">Near-black, monospace throughout, hairline rules, no cards and no shadows. Colour is <em>reserved</em> — it only ever means state, never decoration. Descended from a trading terminal but properly typeset. Densest of the three: more rows per screen than either alternative, and nothing on screen that isn't a number or its label.</p>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)" style="display:block;padding:14px">
+    <div class="sample sB">
+      <div class="hd">
+        <div class="t"><div class="k">Binance</div><div class="v g">Live</div></div>
+        <div class="t"><div class="k">Bybit</div><div class="v g">Live</div></div>
+        <div class="t"><div class="k">Open packages</div><div class="v">0</div></div>
+        <div class="t"><div class="k">Attention</div><div class="v r">2</div></div>
+        <div class="t"><div class="k">Engine</div><div class="v" style="color:#a29a8d">Disarmed</div></div>
+      </div>
+      <div class="bd">
+        <h5>Signal board</h5>
+        <table>
+          <tr><th>Symbol</th><th>Binance</th><th>Bybit</th><th>Spread</th><th>Next</th><th>p50</th><th>Need</th><th>Hist / yr</th><th>Entry</th></tr>
+          <tr><td class="name">LABUSDT</td><td class="r">−0.0421%</td><td class="g">+0.0180%</td><td>60.1 bp</td><td>1h 12m</td><td>2</td><td>6</td><td class="g">+31.8%</td><td class="st" style="color:#1f7a4c">Candidate</td></tr>
+          <tr><td class="name">KAITOUSDT</td><td class="r">−0.0110%</td><td class="g">+0.0075%</td><td>18.5 bp</td><td>1h 12m</td><td>2</td><td>6</td><td class="g">+8.5%</td><td class="st" style="color:#9c7018">Marginal</td></tr>
+          <tr><td class="name">BEATUSDT</td><td class="r">−0.0090%</td><td class="g">+0.0021%</td><td>11.1 bp</td><td>1h 12m</td><td>2</td><td>6</td><td class="g">+5.1%</td><td class="st" style="color:#9c7018">Marginal</td></tr>
+          <tr><td class="name">MMTUSDT</td><td class="r">−0.0052%</td><td class="g">+0.0009%</td><td>6.1 bp</td><td>1h 12m</td><td>1</td><td>6</td><td class="g">+4.3%</td><td class="st">Below cost</td></tr>
+        </table>
+      </div>
+    </div>
+    <h3 style="margin:0 0 4px">B · Editorial</h3>
+    <p style="margin:0">Light-first, warm paper ground, serif display figures against a sans UI. Generous spacing, very restrained colour. Reads like a research publication — which is what this project currently <em>is</em>. Least dense; best for reading evidence, worst for scanning thirty live rows.</p>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)" style="display:block;padding:14px">
+    <div class="sample sC">
+      <div class="hd">
+        <div class="t"><div class="k">Binance</div><div class="v g">● Live</div></div>
+        <div class="t"><div class="k">Bybit</div><div class="v g">● Live</div></div>
+        <div class="t"><div class="k">Open</div><div class="v">0</div></div>
+        <div class="t"><div class="k">Attention</div><div class="v r">2</div></div>
+        <div class="t"><div class="k">Engine</div><div class="v" style="color:#767d8b">Disarmed</div></div>
+      </div>
+      <div class="bd"><div class="card">
+        <h5>Signal board · per deployed capital · 21 bp</h5>
+        <table>
+          <tr><th>Symbol</th><th>Binance</th><th>Bybit</th><th>Spread</th><th>Next</th><th>p50</th><th>Need</th><th>Hist / yr</th><th>Entry</th></tr>
+          <tr><td>LABUSDT</td><td class="r">−0.0421%</td><td class="g">+0.0180%</td><td>60.1bp</td><td>1h12m</td><td>2</td><td>6</td><td class="g">+31.8%</td><td><span class="pill y">Candidate</span></td></tr>
+          <tr><td>KAITOUSDT</td><td class="r">−0.0110%</td><td class="g">+0.0075%</td><td>18.5bp</td><td>1h12m</td><td>2</td><td>6</td><td class="g">+8.5%</td><td><span class="pill m">Marginal</span></td></tr>
+          <tr><td>BEATUSDT</td><td class="r">−0.0090%</td><td class="g">+0.0021%</td><td>11.1bp</td><td>1h12m</td><td>2</td><td>6</td><td class="g">+5.1%</td><td><span class="pill m">Marginal</span></td></tr>
+          <tr><td>MMTUSDT</td><td class="r">−0.0052%</td><td class="g">+0.0009%</td><td>6.1bp</td><td>1h12m</td><td>1</td><td>6</td><td class="g">+4.3%</td><td><span class="pill n">Below cost</span></td></tr>
+        </table>
+      </div></div>
+    </div>
+    <h3 style="margin:0 0 4px">C · Console</h3>
+    <p style="margin:0">Dark, elevated surfaces, rounded corners, pill badges, sans labels over monospace numbers. The well-made-SaaS register — immediately legible to anyone, most familiar on a phone. Costs vertical space to chrome, and the pills compete with the numbers for attention.</p>
+  </div>
+
+</div>
+
+<p class="note"><strong>My recommendation: A, warmed slightly.</strong> Keep A's discipline — hairlines instead of cards, monospace numerics, colour that only ever means state — but lift the background off pure black, widen the row rhythm a touch, and borrow B's typographic care for headings. That gives you density where it matters (a signal board over 61 symbols) without the harshness. C is the safe choice and would look fine, but its chrome buys nothing on a screen whose entire job is numbers, and rounded pills next to a red −0.0421% dilute the one signal you actually need to see.</p>
+</div>

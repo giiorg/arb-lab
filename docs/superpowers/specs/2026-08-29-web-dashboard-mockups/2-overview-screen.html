@@ -1,0 +1,221 @@
+<style>
+  .ov { font: 12px/1.4 ui-sans-serif, -apple-system, "Segoe UI", sans-serif; }
+  .ov code, .ov .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .ov-shell { border: 1px solid rgba(128,128,128,.35); border-radius: 8px; overflow: hidden; }
+  .ov-strip { display: flex; gap: 1px; background: rgba(128,128,128,.28); border-bottom: 1px solid rgba(128,128,128,.35); }
+  .ov-tile { flex: 1; padding: 7px 10px; background: rgba(128,128,128,.10); }
+  .ov-tile .k { font: 600 9px/1 ui-monospace, monospace; letter-spacing: .09em; text-transform: uppercase; opacity: .55; }
+  .ov-tile .v { font: 700 15px/1.25 ui-monospace, monospace; margin-top: 4px; }
+  .ov-tile .s { font-size: 10px; opacity: .55; }
+  .ov-body { display: flex; }
+  .ov-rail { width: 128px; flex: none; padding: 10px 8px; border-right: 1px solid rgba(128,128,128,.28); background: rgba(128,128,128,.05); }
+  .ov-rail .it { padding: 4px 7px; border-radius: 4px; margin-bottom: 1px; opacity: .75; font-size: 11.5px; }
+  .ov-rail .it.on { background: rgba(128,128,128,.28); opacity: 1; font-weight: 600; }
+  .ov-main { flex: 1; padding: 10px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .panel { border: 1px solid rgba(128,128,128,.3); border-radius: 6px; padding: 9px 11px; min-width: 0; }
+  .panel > h4 { margin: 0 0 7px; font: 600 9.5px/1 ui-monospace, monospace; letter-spacing: .09em; text-transform: uppercase; opacity: .6; display: flex; align-items: center; gap: 7px; }
+  .prov { font: 600 8.5px/1 ui-monospace, monospace; padding: 2px 5px; border-radius: 3px; border: 1px solid currentColor; opacity: .75; letter-spacing: .05em; }
+  .p-exists { color: #3fa66b; } .p-daemon { color: #c9922e; } .p-creds { color: #b06fc4; } .p-open { color: #999; }
+  .ov table { width: 100%; border-collapse: collapse; font-family: ui-monospace, monospace; font-size: 10.5px; }
+  .ov th { text-align: right; font: 600 8.5px/1 ui-monospace, monospace; letter-spacing: .06em; text-transform: uppercase; opacity: .5; padding: 0 6px 5px; border-bottom: 1px solid rgba(128,128,128,.25); }
+  .ov th:first-child, .ov td:first-child { text-align: left; }
+  .ov td { text-align: right; padding: 4px 6px; border-bottom: 1px solid rgba(128,128,128,.13); }
+  .chip { display: inline-block; font: 700 8.5px/1 ui-monospace, monospace; padding: 3px 6px; border-radius: 3px; letter-spacing: .05em; }
+  .c-yes { background: rgba(63,166,107,.2); color: #3fa66b; }
+  .c-mar { background: rgba(201,146,46,.2); color: #c9922e; }
+  .c-no  { background: rgba(128,128,128,.18); opacity: .6; }
+  .c-alert { background: rgba(214,79,79,.2); color: #d64f4f; }
+  .pos { color: #3fa66b; } .neg { color: #d64f4f; }
+  .banner { border: 1px solid rgba(201,146,46,.5); background: rgba(201,146,46,.08); border-radius: 6px; padding: 9px 11px; }
+  .bar { height: 5px; border-radius: 3px; background: rgba(128,128,128,.22); overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: currentColor; }
+  .row { display: flex; gap: 10px; align-items: stretch; }
+  .spark { display: flex; align-items: flex-end; gap: 2px; height: 34px; }
+  .spark i { flex: 1; background: currentColor; opacity: .55; border-radius: 1px; }
+  .phone { width: 232px; flex: none; }
+  .note { font-size: 12px; opacity: .78; }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; opacity: .8; margin: 4px 0 14px; align-items: center; }
+</style>
+
+<h2>The Overview screen — every number here is real</h2>
+<p class="subtitle">Pulled from <code>research/screening/ranking.json</code>, <code>research/persistence/summary.json</code> and <code>run/pair/</code>. Each panel is tagged with where its data comes from.</p>
+
+<div class="legend">
+  <span class="prov p-exists">EXISTS</span> readable from disk today
+  <span class="prov p-daemon">DAEMON</span> real, needs <code>serve</code> to poll public venue data
+  <span class="prov p-creds">CREDS</span> needs signed venue calls — phase 2
+  <span class="prov p-open">OPEN</span> not decidable yet
+</div>
+
+<div class="ov">
+<div class="ov-shell">
+
+  <div class="ov-strip">
+    <div class="ov-tile"><div class="k">Binance</div><div class="v" style="color:#3fa66b">● live</div><div class="s">42 ms · wt 118/2400</div></div>
+    <div class="ov-tile"><div class="k">Bybit</div><div class="v" style="color:#3fa66b">● live</div><div class="s">61 ms · 9/120 per s</div></div>
+    <div class="ov-tile"><div class="k">Equity</div><div class="v" style="opacity:.4">—</div><div class="s">phase 2</div></div>
+    <div class="ov-tile"><div class="k">Open pkgs</div><div class="v">0</div><div class="s">flat both venues</div></div>
+    <div class="ov-tile"><div class="k">Attention</div><div class="v" style="color:#d64f4f">2</div><div class="s">latched journals</div></div>
+    <div class="ov-tile"><div class="k">Engine</div><div class="v" style="opacity:.6">DISARMED</div><div class="s">read-only build</div></div>
+  </div>
+
+  <div class="ov-body">
+    <div class="ov-rail">
+      <div style="font-weight:700;font-size:12px;margin-bottom:9px">arb&#8209;lab</div>
+      <div class="it on">Overview</div>
+      <div class="it">Markets</div>
+      <div class="it">Positions</div>
+      <div class="it">Venues</div>
+      <div class="it">Evidence</div>
+      <div class="it">Journal</div>
+      <div class="it">System</div>
+      <div style="margin-top:12px;font-size:9px;opacity:.4;font-family:ui-monospace,monospace">v0.9.28<br>3893f73</div>
+    </div>
+
+    <div class="ov-main">
+
+      <div class="banner">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:5px">
+          <span class="chip c-mar">MILESTONE 2 · NOT DECIDABLE</span>
+          <span class="prov p-exists">EXISTS</span>
+        </div>
+        <div style="font-size:11.5px;line-height:1.5">
+          Median eligible symbol returns <b class="neg">−0.1 %/yr</b> against an assumed round-trip of
+          <b class="mono">21 bp</b>; <b>4 of 56</b> clear a 4.6 % hurdle. At <b class="mono">90 bp</b> — the only cost
+          this project has <em>observed</em> — <b>0 of 56</b> do.
+          <span style="opacity:.7">The cost is an assumption, not a measurement (F26). Nothing below is a verdict.</span>
+        </div>
+      </div>
+
+      <div class="panel" style="border-color:rgba(214,79,79,.5);background:rgba(214,79,79,.06)">
+        <h4>Needs a human <span class="prov p-exists">EXISTS</span></h4>
+        <table>
+          <tr><td><span class="chip c-alert">LATCHED</span></td><td style="text-align:left">binance · <code>GateNetDeltaAsserted</code></td><td style="text-align:left;opacity:.6">run/pair/binance.db</td><td>2026-08-16</td><td style="opacity:.6">no CLI lifts this</td></tr>
+          <tr><td><span class="chip c-alert">LATCHED</span></td><td style="text-align:left">bybit · <code>GateNetDeltaAsserted</code></td><td style="text-align:left;opacity:.6">run/pair/bybit.db</td><td>2026-08-16</td><td style="opacity:.6">no CLI lifts this</td></tr>
+        </table>
+      </div>
+
+      <div class="row">
+        <div class="panel" style="flex:2">
+          <h4>Open positions <span class="prov p-creds">CREDS</span></h4>
+          <div style="padding:16px 0;text-align:center;opacity:.45;font-size:11px">
+            No open packages. Both venues confirm flat.<br>
+            <span style="font-size:10px">Last package <code class="mono">01a00a83…</code> closed 2026-08-16, spent.</span>
+          </div>
+        </div>
+        <div class="panel" style="flex:1">
+          <h4>Equity &amp; realized PnL <span class="prov p-creds">CREDS</span></h4>
+          <div class="spark" style="color:#3fa66b;opacity:.3"><i style="height:40%"></i><i style="height:55%"></i><i style="height:48%"></i><i style="height:62%"></i><i style="height:58%"></i><i style="height:71%"></i><i style="height:66%"></i><i style="height:80%"></i></div>
+          <div style="font-size:10px;opacity:.45;margin-top:5px">Awaiting signed venue reads</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h4>Signal board — entry candidates
+          <span class="prov p-daemon">DAEMON</span><span class="prov p-exists">EXISTS</span>
+          <span style="margin-left:auto;font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;opacity:.7">
+            returns shown <b>per deployed capital</b> (two legs) · cost 21 bp
+          </span>
+        </h4>
+        <table>
+          <thead><tr>
+            <th>Symbol</th><th>Binance</th><th>Bybit</th><th>Spread</th><th>Next</th>
+            <th>p50 run</th><th>need</th><th>hist / yr</th><th>Entry</th>
+          </tr></thead>
+          <tbody>
+            <tr><td><b>LABUSDT</b></td><td class="neg">−0.0421 %</td><td class="pos">+0.0180 %</td><td><b>60.1 bp</b></td><td>1h 12m</td><td>2</td><td>6</td><td class="pos">+31.8 %</td><td><span class="chip c-yes">CANDIDATE</span></td></tr>
+            <tr><td><b>KAITOUSDT</b></td><td class="neg">−0.0110 %</td><td class="pos">+0.0075 %</td><td>18.5 bp</td><td>1h 12m</td><td>2</td><td>6</td><td class="pos">+8.5 %</td><td><span class="chip c-mar">MARGINAL</span></td></tr>
+            <tr><td><b>BEATUSDT</b></td><td class="neg">−0.0090 %</td><td class="pos">+0.0021 %</td><td>11.1 bp</td><td>1h 12m</td><td>2</td><td>6</td><td class="pos">+5.1 %</td><td><span class="chip c-mar">MARGINAL</span></td></tr>
+            <tr><td><b>MMTUSDT</b></td><td class="neg">−0.0052 %</td><td class="pos">+0.0009 %</td><td>6.1 bp</td><td>1h 12m</td><td>1</td><td>6</td><td class="pos">+4.3 %</td><td><span class="chip c-no">BELOW COST</span></td></tr>
+            <tr><td><b>BCHUSDT</b></td><td class="neg">−0.0031 %</td><td class="neg">−0.0004 %</td><td>2.7 bp</td><td>1h 12m</td><td>2</td><td>6</td><td class="pos">+0.5 %</td><td><span class="chip c-no">BELOW COST</span></td></tr>
+            <tr style="opacity:.45"><td colspan="9" style="text-align:left;border:0;padding-top:6px">56 more eligible · 8 shortlisted · 466 pairs screened →</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="row">
+        <div class="panel" style="flex:1">
+          <h4>Persistence <span class="prov p-exists">EXISTS</span></h4>
+          <div style="font-size:10.5px;font-family:ui-monospace,monospace;opacity:.85">
+            <div style="display:flex;justify-content:space-between"><span>median episode</span><b>2 settlements</b></div>
+            <div style="display:flex;justify-content:space-between"><span>break-even</span><b>≈6</b></div>
+            <div style="display:flex;justify-content:space-between;opacity:.7"><span>that is p93</span><b>7 % of episodes</b></div>
+          </div>
+          <div class="spark" style="color:#c9922e;margin-top:8px;height:26px" title="run-length distribution">
+            <i style="height:100%"></i><i style="height:45%"></i><i style="height:21%"></i><i style="height:13%"></i><i style="height:8%"></i><i style="height:6%"></i><i style="height:4%"></i><i style="height:3%"></i><i style="height:2%"></i><i style="height:2%"></i><i style="height:1%"></i><i style="height:5%"></i>
+          </div>
+          <div style="font-size:9px;opacity:.45;margin-top:3px;font-family:ui-monospace,monospace">run 1 … 12+ · 17 478 episodes</div>
+        </div>
+        <div class="panel" style="flex:1">
+          <h4>Concentration <span class="prov p-exists">EXISTS</span></h4>
+          <div style="font-size:10.5px;font-family:ui-monospace,monospace;margin-bottom:6px">
+            <b class="pos">84 %</b> of measured net is <b>LABUSDT</b>
+          </div>
+          <div class="bar" style="color:#c9922e"><i style="width:84%"></i></div>
+          <div style="font-size:10px;opacity:.65;margin-top:6px;line-height:1.45">
+            Dropping the best <b>10</b> of <b>1 259</b> episodes turns the total negative.
+          </div>
+        </div>
+        <div class="panel" style="flex:1">
+          <h4>Capture health <span class="prov p-exists">EXISTS</span></h4>
+          <div style="font-size:10.5px;font-family:ui-monospace,monospace">
+            <div style="display:flex;justify-content:space-between"><span>span</span><b>2020-10 → 2026-07</b></div>
+            <div style="display:flex;justify-content:space-between"><span>settlements</span><b>235 073</b></div>
+            <div style="display:flex;justify-content:space-between"><span>archive gaps</span><b class="pos">0</b></div>
+          </div>
+          <div class="bar" style="color:#3fa66b;margin-top:8px"><i style="width:100%"></i></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<h3 style="margin-top:22px">The same screen on a phone</h3>
+<p class="subtitle">Status strip becomes a 2×3 tile grid; the sidebar becomes a bottom tab bar; the signal board drops to cards.</p>
+
+<div class="phone" style="border:1px solid rgba(128,128,128,.4);border-radius:14px;overflow:hidden;margin-top:8px">
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;background:rgba(128,128,128,.28)">
+    <div class="ov-tile"><div class="k">BIN</div><div class="v" style="font-size:12px;color:#3fa66b">● live</div></div>
+    <div class="ov-tile"><div class="k">BYB</div><div class="v" style="font-size:12px;color:#3fa66b">● live</div></div>
+    <div class="ov-tile"><div class="k">Open</div><div class="v" style="font-size:12px">0</div></div>
+    <div class="ov-tile"><div class="k">Equity</div><div class="v" style="font-size:12px;opacity:.4">—</div></div>
+    <div class="ov-tile"><div class="k">Attn</div><div class="v" style="font-size:12px;color:#d64f4f">2</div></div>
+    <div class="ov-tile"><div class="k">Engine</div><div class="v" style="font-size:11px;opacity:.6">OFF</div></div>
+  </div>
+  <div style="padding:8px;display:flex;flex-direction:column;gap:7px">
+    <div class="banner" style="padding:7px 8px;font-size:10px"><b>NOT DECIDABLE</b> · median −0.1 %/yr @ 21 bp</div>
+    <div class="panel" style="padding:7px 8px;border-color:rgba(214,79,79,.5);background:rgba(214,79,79,.06);font-size:10px">
+      <b style="color:#d64f4f">2 latched journals</b><br><span style="opacity:.6">binance · bybit</span>
+    </div>
+    <div class="panel" style="padding:7px 8px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <b style="font-size:12px">LABUSDT</b><span class="chip c-yes">CANDIDATE</span>
+      </div>
+      <div style="font-family:ui-monospace,monospace;font-size:10px;opacity:.75;margin-top:4px">
+        spread <b>60.1 bp</b> · next <b>1h12m</b><br>p50 run 2 · need 6 · hist <b class="pos">+31.8 %/yr</b>
+      </div>
+    </div>
+    <div class="panel" style="padding:7px 8px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <b style="font-size:12px">KAITOUSDT</b><span class="chip c-mar">MARGINAL</span>
+      </div>
+      <div style="font-family:ui-monospace,monospace;font-size:10px;opacity:.75;margin-top:4px">
+        spread <b>18.5 bp</b> · next <b>1h12m</b><br>p50 run 2 · need 6 · hist <b class="pos">+8.5 %/yr</b>
+      </div>
+    </div>
+  </div>
+  <div style="display:flex;gap:1px;background:rgba(128,128,128,.28);border-top:1px solid rgba(128,128,128,.3)">
+    <div style="flex:1;text-align:center;padding:7px 0;font-size:9px;background:rgba(128,128,128,.22);font-weight:700">Over</div>
+    <div style="flex:1;text-align:center;padding:7px 0;font-size:9px;background:rgba(128,128,128,.08);opacity:.6">Mkts</div>
+    <div style="flex:1;text-align:center;padding:7px 0;font-size:9px;background:rgba(128,128,128,.08);opacity:.6">Pos</div>
+    <div style="flex:1;text-align:center;padding:7px 0;font-size:9px;background:rgba(128,128,128,.08);opacity:.6">Evid</div>
+    <div style="flex:1;text-align:center;padding:7px 0;font-size:9px;background:rgba(128,128,128,.08);opacity:.6">More</div>
+  </div>
+</div>
+</div>
+
+<p class="note" style="margin-top:20px"><strong>Three decisions embedded above, worth arguing with:</strong>
+(1) the <em>verdict banner</em> sits above everything, because a signal board with no cost context is how F26 happens on screen;
+(2) returns are labelled <b>per deployed capital</b> — LABUSDT shows <b>31.8 %</b>, not the 71.6 % in <code>ranking.json</code>, which is per one leg (F30);
+(3) the signal board's <b>“need 6 / p50 2”</b> pair is on every row, so a tempting spread always carries the reason it usually isn't enough.</p>

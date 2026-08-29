@@ -1,6 +1,61 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-29, session 146): **PERSISTENCE IS MEASURED. THE SPREAD WAS NEVER THE BINDING CONSTRAINT — THE COST IS, AND IT IS THE QUANTITY THIS PROJECT HAS MEASURED LEAST. NO CODE, NO VENUE CONTACT, NO NORMATIVE EDIT.**
+## ⚠ THE IMMEDIATE NEXT ACTION: **REVIEW RECORD §100 WITH CODEX. IT IS COMMITTED AND UNREVIEWED.**
+
+`docs/superpowers/specs/2026-08-29-web-dashboard-design.md` (record **§100**,
+commit `9d7a5f3`) scopes a web dashboard and an `arblab serve` binary. It was
+designed and self-reviewed in one session and **has had no external review**. The
+operator's instruction is to run **a few Codex copilot review rounds** against it
+and fix at least anything **critical / major / blocking** before an
+implementation plan is written.
+
+**Use the `codex:codex-copilot` skill.** `codex-cli 0.150.1` is installed and
+`~/.codex/auth.json` is present, so no setup round is needed.
+
+**What to hand the reviewer.** The spec, plus `build-spec.md` §2.1, §2.4, §3.6,
+§11 and §12, plus the three mockups in
+`docs/superpowers/specs/2026-08-29-web-dashboard-mockups/` (they are the visual
+half of the design and are committed precisely because `.superpowers/` is
+gitignored — the same trap `episodes.json` was rescued from).
+
+**What counts as blocking.** In descending order of what would actually cost a
+rebuild:
+
+1. A **§3.6 gate this design would violate or evade** — `nofloat`, `notimenow`,
+   `kernelpurity`, `hexboundary`, `exhaustiveswitch`, `singlewriter`. §4a is now
+   **ADR row F31**: it claims both gates scope by path *segment*, so naming the
+   view package `app/serve/application/` brings it under both. **If that reading
+   of `hexboundary.go:150` / `notimenow.go:121` is wrong, the layout is wrong and
+   F31 is wrong with it** — this is the single highest-value thing to attack, and
+   it is cheap to falsify by writing a probe package and running the analyzer.
+   Note the standing rule while doing so: a probe two gates can both see shows
+   that *something* objected, not that *this* rule did.
+2. A **normative clause the design contradicts.** §100 cites core §2.1 (hurdle,
+   declared denominator), §2.4 (one source of truth for cost, no scoring-time
+   venue call), §11 (`audit` = projection of the OMS journal). **Re-derive the
+   citations rather than trusting them** — three were wrong in the first draft.
+3. A **claim in §5's wire contract that does not survive** — especially rule 2
+   (no client-side money arithmetic) and rule 3 (every ratio carries its
+   denominator), since both are F30 rendered as types.
+4. A **safety claim about the control ladder in §6** — particularly that
+   `singlewriter` is satisfied *by construction* because the browser never
+   reaches the OMS write path.
+5. A **fixture collapse §11 fails to name.** Five are listed; the discipline says
+   look for a sixth before believing the list.
+
+**What is NOT blocking, and must not be re-litigated without a new argument.**
+Every *Rejected alternative* block in §100 records a decision and its reason. A
+reviewer may attack the reason; a reviewer restating the rejected option is not a
+finding. Settled: three-phase delivery, read-only v1, the flat seven-item nav,
+"instrument, warmed" as the visual register, React/Vite/CSS-Modules with no chart
+library, and localhost-only reach for v1.
+
+**Not yet done, deliberately.** No implementation plan exists. `writing-plans` is
+the next step *after* the review rounds, not before.
+
+---
+
+## Status (2026-08-29, session 146 · first subject): **PERSISTENCE IS MEASURED. THE SPREAD WAS NEVER THE BINDING CONSTRAINT — THE COST IS, AND IT IS THE QUANTITY THIS PROJECT HAS MEASURED LEAST. NO CODE, NO VENUE CONTACT, NO NORMATIVE EDIT.**
 
 **Read `docs/superpowers/specs/2026-08-29-persistence-measurement.md` (record
 §99)** — the measurement, three controls, and five findings. ADR rows **F26**,
@@ -61,7 +116,13 @@ not a portfolio), and anything about whether F29's short-history edge is real.
 
 ---
 
-## THE NEXT ACTION: **MEASURE THE ROUND TRIP.** Not the spread again.
+## THE STANDING ECONOMIC NEXT ACTION: **MEASURE THE ROUND TRIP.** Not the spread again.
+
+*(This is the milestone-level next action and it is **not** superseded by §100's
+review. The dashboard work is a parallel subject; the kill gate still turns on
+the number below. §100 §8b claims a book-derived per-symbol cost is part of this
+measurement — that claim is itself one of the things the Codex rounds should
+attack.)*
 
 Three of §99's four findings turn on the cost. §98 already said what a clean
 figure needs: **the send must follow the book read inside the book's
@@ -73,12 +134,14 @@ span covers the whole verdict (F26's table).
 `bybit.2.db`) — both journals remain latched on `GateNetDeltaAsserted` from §98,
 and those files are the evidence that the gate fired. Do not delete them.
 
-**⚠ THE OPERATOR'S STATED NEXT TOPIC IS A WEB UI**, raised at the end of session
-146 and **not yet scoped, designed or decided**. Nothing in the doc set covers
-it: §12's milestone roster has no UI item, and no decision record discusses one.
-Treat it as a fresh brainstorming subject, not as a resumed thread — and note
-that milestone 2 is still a kill gate, so what a UI is *for* depends on an
-economic verdict that F26 says is not yet decidable.
+**THE OPERATOR'S STATED NEXT TOPIC WAS A WEB UI**, raised at the end of session
+146. ***Scoped the same session: record §100, commit `9d7a5f3`.*** The paragraph
+that stood here said it was "not yet scoped, designed or decided" and that §12's
+roster has no UI item; the first clause is now false and **the second is still
+true — the §12 roster entry is a debt §100 §14.1 opens.** §100's answer to "what
+is a UI *for* while the gate is undecided" is that it is an instrument for the
+open question rather than a readout of a settled one, and §100 §8b/§8c argue the
+cost panel is a real fraction of the round-trip measurement below.
 
 ## Previously (2026-08-16, session 145): **THE PAIR RAN. FOUR ORDERS PLACED ON THE DEMOS, `VerdictIntact`, EXIT 0, BOTH ACCOUNTS BACK TO FLAT. THREE FINDINGS, ONE OF THEM STRUCTURAL. ⚠ BOTH JOURNALS ARE NOW LATCHED.**
 
