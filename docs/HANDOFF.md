@@ -1,57 +1,68 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## ⚠ THE IMMEDIATE NEXT ACTION: **REVIEW RECORD §100 WITH CODEX. IT IS COMMITTED AND UNREVIEWED.**
+## ⚠ THE IMMEDIATE NEXT ACTION: **RECORD §100 HAS HAD TWO REVIEW ROUNDS AND OWES A THIRD. STILL NO IMPLEMENTATION PLAN.**
 
-`docs/superpowers/specs/2026-08-29-web-dashboard-design.md` (record **§100**,
-commit `9d7a5f3`) scopes a web dashboard and an `arblab serve` binary. It was
-designed and self-reviewed in one session and **has had no external review**. The
-operator's instruction is to run **a few Codex copilot review rounds** against it
-and fix at least anything **critical / major / blocking** before an
-implementation plan is written.
+`docs/superpowers/specs/2026-08-29-web-dashboard-design.md` (record **§100**) has
+now been through **two Codex `artifact-review` rounds, both NO-SHIP**. Fifteen
+findings were accepted and **every one was validated against source before
+acceptance**; six more were found during that validation, two of them **in round
+1's own repair**. All corrections are in the record, in the mockups, and in
+`docs/adr-history.md` as **F32–F41**. Read **§100 §15** first — it is the review
+record and it names what is still open.
 
-**Use the `codex:codex-copilot` skill.** `codex-cli 0.150.1` is installed and
-`~/.codex/auth.json` is present, so no setup round is needed.
+**The next action is round 3, and §15.6 says what to attack.** In order:
 
-**What to hand the reviewer.** The spec, plus `build-spec.md` §2.1, §2.4, §3.6,
-§11 and §12, plus the three mockups in
-`docs/superpowers/specs/2026-08-29-web-dashboard-mockups/` (they are the visual
-half of the design and are committed precisely because `.superpowers/` is
-gitignored — the same trap `episodes.json` was rescued from).
+1. **The seventh gate.** §6a establishes that `singlewriter` **cannot** give the
+   guarantee §100 originally claimed from it — `internal/oms` is not a policed
+   tree and `oms.Module` exports `Plan`/`Dispatch`/`Execute` — so a
+   capability-limited facade plus a **seventh §3.6 gate** is owed. The construct
+   the analyzer reads is named (declared import edges from
+   `internal/app/serve/…` into the OMS tree) and an isolating probe is named (an
+   operator **HTTP** package importing bare `internal/oms` and selecting
+   `Module.Execute`, where the other three analyzers are silent). **Neither has
+   been run.** F31's lesson is that a scoping claim only held once a probe *with
+   a control* was executed.
+2. **§4c's `[SPEC EDIT OWED]` against `build-spec.md` §11.** Round 2 accepted
+   `arblab serve` as the phase-1 shape **conditionally** — "not defensible until
+   the no-write premise is enforced" — so the spec edit and the seventh gate are
+   **one decision, not two**. §11:817 makes the operator a separate *failure
+   domain*, which is a safety claim.
+3. **A ninth fixture collapse, in the prose rather than the data** (F41). §11's
+   list has now been wrong about being complete three times, and two of the four
+   found by review were outside Go test code entirely — one in a mockup, one in a
+   sentence.
+4. **§7's screens and §8's provenance column**, which neither round attacked line
+   by line. F38 was found in a single sentence of §4; §8 makes thirty-odd
+   provenance claims of the same kind.
 
-**What counts as blocking.** In descending order of what would actually cost a
-rebuild:
+**The three findings worth knowing before reading anything else:**
 
-1. A **§3.6 gate this design would violate or evade** — `nofloat`, `notimenow`,
-   `kernelpurity`, `hexboundary`, `exhaustiveswitch`, `singlewriter`. §4a is now
-   **ADR row F31**: it claims both gates scope by path *segment*, so naming the
-   view package `app/serve/application/` brings it under both. **If that reading
-   of `hexboundary.go:150` / `notimenow.go:121` is wrong, the layout is wrong and
-   F31 is wrong with it** — this is the single highest-value thing to attack, and
-   it is cheap to falsify by writing a probe package and running the analyzer.
-   Note the standing rule while doing so: a probe two gates can both see shows
-   that *something* objected, not that *this* rule did.
-2. A **normative clause the design contradicts.** §100 cites core §2.1 (hurdle,
-   declared denominator), §2.4 (one source of truth for cost, no scoring-time
-   venue call), §11 (`audit` = projection of the OMS journal). **Re-derive the
-   citations rather than trusting them** — three were wrong in the first draft.
-3. A **claim in §5's wire contract that does not survive** — especially rule 2
-   (no client-side money arithmetic) and rule 3 (every ratio carries its
-   denominator), since both are F30 rendered as types.
-4. A **safety claim about the control ladder in §6** — particularly that
-   `singlewriter` is satisfied *by construction* because the browser never
-   reaches the OMS write path.
-5. A **fixture collapse §11 fails to name.** Five are listed; the discipline says
-   look for a sixth before believing the list.
+- **F32 — a section was cited from one of its lines.** §100 read core §11's
+  *"audit = projection of the OMS journal"* and cited §11. The same section
+  specifies `cmd/arblab-operator/`, `internal/app/operator/`, `web/` as a Next.js
+  app, **Next.js on Bun**, and a separate operator failure domain. Three of
+  §100's choices are departures. They are kept and **argued**, and marked
+  `[SPEC EDIT OWED]` — note that marker sits in `docs/`, which the slice-close
+  grep does **not** cover.
+- **F36/F41 — the flagship mockup reproduced from committed data in zero of five
+  rows**, and the `need` column's constant `6` turned out to be **written down as
+  the design** in the footnote beneath it. So it was a correct rendering of a
+  wrong model, not a transcription slip. General rule now recorded: *check
+  whether the prose predicts the fixture's error; if it does, the prose is the
+  subject.*
+- **F39 — §13 deferred a capability core §7.3 had already settled**
+  (`build-spec.md:620`, separate read-only monitoring keys). Phase 2 gets
+  read-only keys; only the broker *mechanism* stays open.
 
-**What is NOT blocking, and must not be re-litigated without a new argument.**
-Every *Rejected alternative* block in §100 records a decision and its reason. A
-reviewer may attack the reason; a reviewer restating the rejected option is not a
-finding. Settled: three-phase delivery, read-only v1, the flat seven-item nav,
-"instrument, warmed" as the visual register, React/Vite/CSS-Modules with no chart
-library, and localhost-only reach for v1.
+**What must not be re-litigated without a new argument.** Every *Rejected
+alternative* block in §100. Settled across both rounds: three-phase delivery,
+read-only v1, the flat seven-item nav, "instrument, warmed", React/Vite with no
+chart library, and localhost-only reach for v1 — the last now standing on §6a's
+stated reason (§7.3 governs a *control plane*, and a read-only surface is not
+one) rather than by default.
 
-**Not yet done, deliberately.** No implementation plan exists. `writing-plans` is
-the next step *after* the review rounds, not before.
+**Still not done, deliberately.** No implementation plan. `writing-plans` comes
+after round 3 and after the seventh gate is settled, not before.
 
 ---
 

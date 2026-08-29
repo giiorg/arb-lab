@@ -54,7 +54,7 @@
     <div class="ov-tile"><div class="k">Binance</div><div class="v" style="color:#3fa66b">● live</div><div class="s">42 ms · wt 118/2400</div></div>
     <div class="ov-tile"><div class="k">Bybit</div><div class="v" style="color:#3fa66b">● live</div><div class="s">61 ms · 9/120 per s</div></div>
     <div class="ov-tile"><div class="k">Equity</div><div class="v" style="opacity:.4">—</div><div class="s">phase 2</div></div>
-    <div class="ov-tile"><div class="k">Open pkgs</div><div class="v">0</div><div class="s">flat both venues</div></div>
+    <div class="ov-tile"><div class="k">Open pkgs</div><div class="v">0 <span style="opacity:.45;font-size:.65em">jrnl</span></div><div class="s">venue unverified · phase 2</div></div>
     <div class="ov-tile"><div class="k">Attention</div><div class="v" style="color:#d64f4f">2</div><div class="s">latched journals</div></div>
     <div class="ov-tile"><div class="k">Engine</div><div class="v" style="opacity:.6">DISARMED</div><div class="s">read-only build</div></div>
   </div>
@@ -99,7 +99,7 @@
         <div class="panel" style="flex:2">
           <h4>Open positions <span class="prov p-creds">CREDS</span></h4>
           <div style="padding:16px 0;text-align:center;opacity:.45;font-size:11px">
-            No open packages. Both venues confirm flat.<br>
+            No open packages <b>in the journal</b>.<br>Venue truth <b>unverified</b> — needs credentials (phase 2).<br>
             <span style="font-size:10px">Last package <code class="mono">01a00a83…</code> closed 2026-08-16, spent.</span>
           </div>
         </div>
@@ -114,7 +114,7 @@
         <h4>Signal board — entry candidates
           <span class="prov p-daemon">DAEMON</span><span class="prov p-exists">EXISTS</span>
           <span style="margin-left:auto;font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;opacity:.7">
-            returns shown <b>per deployed capital</b> (two legs) · cost 21 bp
+            returns shown <b>per deployed capital</b> (two legs) · cost 21 bp<br><span style="opacity:.75">p50 run + hist/yr from <code>research/persistence/</code>; funding legs illustrative, spread and need derived from them</span>
           </span>
         </h4>
         <table>
@@ -123,11 +123,11 @@
             <th>p50 run</th><th>need</th><th>hist / yr</th><th>Entry</th>
           </tr></thead>
           <tbody>
-            <tr><td><b>LABUSDT</b></td><td class="neg">−0.0421 %</td><td class="pos">+0.0180 %</td><td><b>60.1 bp</b></td><td>1h 12m</td><td>2</td><td>6</td><td class="pos">+31.8 %</td><td><span class="chip c-yes">CANDIDATE</span></td></tr>
-            <tr><td><b>KAITOUSDT</b></td><td class="neg">−0.0110 %</td><td class="pos">+0.0075 %</td><td>18.5 bp</td><td>1h 12m</td><td>2</td><td>6</td><td class="pos">+8.5 %</td><td><span class="chip c-mar">MARGINAL</span></td></tr>
-            <tr><td><b>BEATUSDT</b></td><td class="neg">−0.0090 %</td><td class="pos">+0.0021 %</td><td>11.1 bp</td><td>1h 12m</td><td>2</td><td>6</td><td class="pos">+5.1 %</td><td><span class="chip c-mar">MARGINAL</span></td></tr>
-            <tr><td><b>MMTUSDT</b></td><td class="neg">−0.0052 %</td><td class="pos">+0.0009 %</td><td>6.1 bp</td><td>1h 12m</td><td>1</td><td>6</td><td class="pos">+4.3 %</td><td><span class="chip c-no">BELOW COST</span></td></tr>
-            <tr><td><b>BCHUSDT</b></td><td class="neg">−0.0031 %</td><td class="neg">−0.0004 %</td><td>2.7 bp</td><td>1h 12m</td><td>2</td><td>6</td><td class="pos">+0.5 %</td><td><span class="chip c-no">BELOW COST</span></td></tr>
+            <tr><td><b>LABUSDT</b></td><td class="neg">−0.421 %</td><td class="pos">+0.180 %</td><td><b>60.1 bp</b></td><td>1h 12m</td><td>2</td><td>1</td><td class="pos">+35.8 %</td><td><span class="chip c-yes">CANDIDATE</span></td></tr>
+            <tr><td><b>KAITOUSDT</b></td><td class="neg">−0.110 %</td><td class="pos">+0.075 %</td><td>18.5 bp</td><td>1h 12m</td><td>4</td><td>2</td><td class="pos">+7.1 %</td><td><span class="chip c-mar">MARGINAL</span></td></tr>
+            <tr><td><b>BEATUSDT</b></td><td class="neg">−0.090 %</td><td class="pos">+0.021 %</td><td>11.1 bp</td><td>1h 12m</td><td>2</td><td>2</td><td class="pos">+13.0 %</td><td><span class="chip c-mar">MARGINAL</span></td></tr>
+            <tr><td><b>MMTUSDT</b></td><td class="neg">−0.052 %</td><td class="pos">+0.009 %</td><td>6.1 bp</td><td>1h 12m</td><td>1.5</td><td>4</td><td class="pos">+4.8 %</td><td><span class="chip c-no">BELOW COST</span></td></tr>
+            <tr><td><b>BCHUSDT</b></td><td class="neg">−0.031 %</td><td class="neg">−0.004 %</td><td>2.7 bp</td><td>1h 12m</td><td>3</td><td>8</td><td class="pos">+0.8 %</td><td><span class="chip c-no">BELOW COST</span></td></tr>
             <tr style="opacity:.45"><td colspan="9" style="text-align:left;border:0;padding-top:6px">56 more eligible · 8 shortlisted · 466 pairs screened →</td></tr>
           </tbody>
         </table>
@@ -193,7 +193,7 @@
         <b style="font-size:12px">LABUSDT</b><span class="chip c-yes">CANDIDATE</span>
       </div>
       <div style="font-family:ui-monospace,monospace;font-size:10px;opacity:.75;margin-top:4px">
-        spread <b>60.1 bp</b> · next <b>1h12m</b><br>p50 run 2 · need 6 · hist <b class="pos">+31.8 %/yr</b>
+        spread <b>60.1 bp</b> · next <b>1h12m</b><br>p50 run 2 · need 1 · hist <b class="pos">+35.8 %/yr</b>
       </div>
     </div>
     <div class="panel" style="padding:7px 8px">
@@ -201,7 +201,7 @@
         <b style="font-size:12px">KAITOUSDT</b><span class="chip c-mar">MARGINAL</span>
       </div>
       <div style="font-family:ui-monospace,monospace;font-size:10px;opacity:.75;margin-top:4px">
-        spread <b>18.5 bp</b> · next <b>1h12m</b><br>p50 run 2 · need 6 · hist <b class="pos">+8.5 %/yr</b>
+        spread <b>18.5 bp</b> · next <b>1h12m</b><br>p50 run 4 · need 2 · hist <b class="pos">+7.1 %/yr</b>
       </div>
     </div>
   </div>
@@ -217,5 +217,5 @@
 
 <p class="note" style="margin-top:20px"><strong>Three decisions embedded above, worth arguing with:</strong>
 (1) the <em>verdict banner</em> sits above everything, because a signal board with no cost context is how F26 happens on screen;
-(2) returns are labelled <b>per deployed capital</b> — LABUSDT shows <b>31.8 %</b>, not the 71.6 % in <code>ranking.json</code>, which is per one leg (F30);
-(3) the signal board's <b>“need 6 / p50 2”</b> pair is on every row, so a tempting spread always carries the reason it usually isn't enough.</p>
+(2) returns are labelled <b>per deployed capital</b> — LABUSDT shows <b>35.8 %</b>, not the 71.6 % in <code>ranking.json</code>, which is per one leg (F30);
+(3) the signal board carries <b>p50 run beside need</b> on every row, so a tempting spread always arrives with the reason it usually isn't enough — <b>both values are per-symbol and both vary</b>: <code>need = ⌈cost / spread⌉</code>, and p50 run is that symbol's own median from <code>episodes.json</code>. An earlier draft of this note read <i>“the <b>need 6 / p50 2</b> pair is on every row”</i>, and printed exactly that — a constant in a column whose whole purpose is to vary. See record §100 §15.2 (F36).</p>
