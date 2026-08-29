@@ -84,3 +84,4 @@ logger.log
 # directly; importing one for a check writes a __pycache__ beside it).
 __pycache__/
 *.pyc
+.superpowers/
