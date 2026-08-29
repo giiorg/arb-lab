@@ -1,0 +1,377 @@
+package screening
+
+// Persistence harness (record §99). NOT part of the build — this file is
+// stored as .go.txt under research/persistence/ and copied into this
+// package to run:
+//
+//   cp research/persistence/harness.go.txt \
+//      internal/strategy/infrastructure/screening/zz_persistence_test.go
+//   go test ./internal/strategy/infrastructure/screening/ -run TestPersistence -v
+//   rm internal/strategy/infrastructure/screening/zz_persistence_test.go
+//
+// It is kept OUT of the build on purpose. It reads research/screening/raw/,
+// which is gitignored (468 venue files, re-derivable over REST and pinned by
+// sha256 in the committed ledger.json), so as a compiled test it would fail on
+// every clone that has not fetched the raw store — a red suite that means
+// "you do not have the data", which is not a defect anybody should be shown.
+//
+// WHY IT EXISTS. LevelResult publishes Episodes/Wins/Accrued/MaxRun — totals.
+// It does not publish the LENGTH of each episode, so "how long does a
+// cross-venue funding spread survive" (§2.3's bar: an edge bar set from
+// measured persistence) cannot be answered from ranking.json, and neither can
+// "what happens at a round trip other than the fee-only 0.0021".
+//
+// THREE CONTROLS, all required:
+//
+//   A. replayEpisodes' derived totals == the real screenLevel's, in process,
+//      for every symbol x level. The replay is a second reading of the same
+//      state machine; it must agree on what the first one publishes.
+//   B. the real ScreenPair output == the committed ranking.json, for every
+//      symbol x level. This anchors the run to the artifact the screening
+//      actually produced, so a disagreement indicts the loader, not the
+//      analysis.
+//   C. NEGATIVE: replay at the WRONG entry level must DISAGREE. Without it,
+//      A and B are two agreements that were never shown capable of failing.
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/giiorg/arb-lab/internal/platform/fixedpoint"
+)
+
+const (
+	persistRoot = "../../../../research/screening"
+	persistOut  = "../../../../research/persistence/episodes.json"
+)
+
+type persistRankFile struct {
+	Pairs []struct {
+		Symbol   string `json:"symbol"`
+		Eligible string `json:"eligible"`
+		Levels   []struct {
+			Entry      string `json:"entry"`
+			Episodes   int    `json:"episodes"`
+			Wins       int    `json:"wins"`
+			Accrued    int    `json:"accrued_settlements"`
+			MaxRun     int    `json:"max_run"`
+			Gross      string `json:"gross"`
+			Net        string `json:"net"`
+			AboveCount int    `json:"above_count"`
+			StayCount  int    `json:"stay_count"`
+			Per10k     int    `json:"continuation_per_10k"`
+		} `json:"levels"`
+	} `json:"pairs"`
+}
+
+type persistShortFile struct {
+	Symbols []struct {
+		Symbol string `json:"symbol"`
+	} `json:"symbols"`
+}
+
+// persistEpisode is one episode: the settlements it collected, the spread it
+// accrued in its own direction as an exact decimal string, and its instants.
+type persistEpisode struct {
+	Run     int    `json:"run"`
+	Accrued string `json:"accrued"`
+	Start   string `json:"start"`
+	End     string `json:"end"`
+}
+
+type persistLevel struct {
+	Entry    string           `json:"entry"`
+	Episodes []persistEpisode `json:"episodes"`
+}
+
+type persistSymbol struct {
+	Symbol    string         `json:"symbol"`
+	Shortlist bool           `json:"shortlist"`
+	Matched   int            `json:"matched"`
+	First     string         `json:"first"`
+	Last      string         `json:"last"`
+	ModalMin  int            `json:"modal_minutes"`
+	Levels    []persistLevel `json:"levels"`
+}
+
+// replayEpisodes is screenLevel's state machine, emitting each episode instead
+// of folding it. Kept line-for-line parallel to the original so a reader can
+// diff them; control A is what proves the parallel held.
+func replayEpisodes(matched []Match, entry fixedpoint.Rate, maxGap int64) []persistEpisode {
+	exit, err := entry.Div(scrRate("2"), fixedpoint.RoundTowardZero)
+	if err != nil {
+		panic(err)
+	}
+
+	var out []persistEpisode
+
+	inEpisode := false
+	sign := 0
+	accrued := fixedpoint.ZeroRate()
+	run := 0
+	var startAt, endAt time.Time
+
+	closeEpisode := func() {
+		out = append(out, persistEpisode{
+			Run: run, Accrued: accrued.Decimal(),
+			Start: startAt.Format("2006-01-02T15:04Z"),
+			End:   endAt.Format("2006-01-02T15:04Z"),
+		})
+		inEpisode = false
+		sign = 0
+		accrued = fixedpoint.ZeroRate()
+		run = 0
+	}
+
+	open := func(s int, at time.Time) {
+		inEpisode = true
+		sign = s
+		accrued = fixedpoint.ZeroRate()
+		run = 0
+		startAt = at
+		endAt = at
+	}
+
+	for i, m := range matched {
+		// A hole wider than the gap bound ends any open episode first: the
+		// settlements inside it are unmatched, and an episode may not accrue
+		// across evidence we do not have.
+		if inEpisode && m.At.Sub(matched[i-1].At).Nanoseconds() > maxGap {
+			closeEpisode()
+		}
+
+		s := m.Spread
+		absS := mustAbs(s)
+		sgn := mustSign(s)
+
+		if !inEpisode {
+			if mustCmp(absS, entry) >= 0 {
+				open(sgn, m.At) // the trigger print is observed, never accrued
+			}
+			continue
+		}
+
+		signed := s
+		if sign < 0 {
+			signed = mustNeg(s)
+		}
+		accrued = mustAdd(accrued, signed)
+		run++
+		endAt = m.At
+
+		if sgn != sign || mustCmp(absS, exit) < 0 {
+			closeEpisode()
+			if sgn != 0 && mustCmp(absS, entry) >= 0 {
+				open(sgn, m.At)
+			}
+		}
+	}
+	if inEpisode {
+		closeEpisode()
+	}
+	return out
+}
+
+func TestPersistenceEmit(t *testing.T) {
+	rankBytes, err := os.ReadFile(filepath.Join(persistRoot, "ranking.json"))
+	if err != nil {
+		t.Fatalf("ranking: %v", err)
+	}
+	var rank persistRankFile
+	if err := json.Unmarshal(rankBytes, &rank); err != nil {
+		t.Fatalf("ranking decode: %v", err)
+	}
+
+	shortBytes, err := os.ReadFile(filepath.Join(persistRoot, "shortlist.json"))
+	if err != nil {
+		t.Fatalf("shortlist: %v", err)
+	}
+	var short persistShortFile
+	if err := json.Unmarshal(shortBytes, &short); err != nil {
+		t.Fatalf("shortlist decode: %v", err)
+	}
+	isShort := map[string]bool{}
+	for _, s := range short.Symbols {
+		isShort[s.Symbol] = true
+	}
+
+	rawRoot := filepath.Join(persistRoot, "raw")
+
+	var (
+		out      []persistSymbol
+		screened int
+		checkedA int
+		checkedB int
+		episodes int
+	)
+
+	for _, p := range rank.Pairs {
+		if p.Eligible != "ok" {
+			continue
+		}
+
+		bnRaw, _, err := LoadRaw(RawPath(rawRoot, "binance", KindFunding, p.Symbol))
+		if err != nil {
+			t.Fatalf("%s binance raw: %v", p.Symbol, err)
+		}
+		byRaw, _, err := LoadRaw(RawPath(rawRoot, "bybit", KindFunding, p.Symbol))
+		if err != nil {
+			t.Fatalf("%s bybit raw: %v", p.Symbol, err)
+		}
+		bnRows, err := RowsFromRaw(bnRaw)
+		if err != nil {
+			t.Fatalf("%s binance rows: %v", p.Symbol, err)
+		}
+		byRows, err := RowsFromRaw(byRaw)
+		if err != nil {
+			t.Fatalf("%s bybit rows: %v", p.Symbol, err)
+		}
+
+		matched, stats, err := PairSettlements(bnRows, byRows)
+		if err != nil {
+			t.Fatalf("%s pair: %v", p.Symbol, err)
+		}
+		res, err := ScreenPair(p.Symbol, matched, stats)
+		if err != nil {
+			t.Fatalf("%s screen: %v", p.Symbol, err)
+		}
+		screened++
+
+		if len(res.Levels) != len(p.Levels) {
+			t.Fatalf("%s: %d levels computed, ranking.json has %d", p.Symbol, len(res.Levels), len(p.Levels))
+		}
+
+		maxGap := (time.Duration(MaxGapFactor) * res.ModalInterval).Nanoseconds()
+
+		rec := persistSymbol{
+			Symbol:    p.Symbol,
+			Shortlist: isShort[p.Symbol],
+			Matched:   stats.Matched,
+			First:     res.First.Format("2006-01-02T15:04:05Z"),
+			Last:      res.Last.Format("2006-01-02T15:04:05Z"),
+			ModalMin:  int(res.ModalInterval.Minutes()),
+		}
+
+		for i, lvl := range res.Levels {
+			want := p.Levels[i]
+
+			// --- Control B: the live run reproduces the committed artifact.
+			if lvl.Entry.Decimal() != want.Entry {
+				t.Fatalf("%s level %d: entry %s, ranking.json %s", p.Symbol, i, lvl.Entry.Decimal(), want.Entry)
+			}
+			if lvl.Episodes != want.Episodes || lvl.Wins != want.Wins ||
+				lvl.Accrued != want.Accrued || lvl.MaxRun != want.MaxRun ||
+				lvl.AboveCount != want.AboveCount || lvl.StayCount != want.StayCount ||
+				lvl.Per10k != want.Per10k {
+				t.Fatalf("control B %s @%s: got ep=%d win=%d acc=%d max=%d above=%d stay=%d p10k=%d, ranking.json ep=%d win=%d acc=%d max=%d above=%d stay=%d p10k=%d",
+					p.Symbol, want.Entry,
+					lvl.Episodes, lvl.Wins, lvl.Accrued, lvl.MaxRun, lvl.AboveCount, lvl.StayCount, lvl.Per10k,
+					want.Episodes, want.Wins, want.Accrued, want.MaxRun, want.AboveCount, want.StayCount, want.Per10k)
+			}
+			if lvl.Gross.Decimal() != want.Gross || lvl.Net.Decimal() != want.Net {
+				t.Fatalf("control B %s @%s: gross/net %s/%s, ranking.json %s/%s",
+					p.Symbol, want.Entry, lvl.Gross.Decimal(), lvl.Net.Decimal(), want.Gross, want.Net)
+			}
+			checkedB++
+
+			// --- Control A: the replay agrees with the folded original.
+			eps := replayEpisodes(matched, lvl.Entry, maxGap)
+			gotEpisodes, gotAccrued, gotMaxRun, gotWins := 0, 0, 0, 0
+			gross := fixedpoint.ZeroRate()
+			rt := RoundTripCost()
+			for _, e := range eps {
+				gotEpisodes++
+				gotAccrued += e.Run
+				if e.Run > gotMaxRun {
+					gotMaxRun = e.Run
+				}
+				a, perr := fixedpoint.ParseRate(e.Accrued)
+				if perr != nil {
+					t.Fatalf("%s: reparse accrued %q: %v", p.Symbol, e.Accrued, perr)
+				}
+				gross = mustAdd(gross, a)
+				if mustSign(mustSub(a, rt)) > 0 {
+					gotWins++
+				}
+			}
+			if gotEpisodes != lvl.Episodes || gotAccrued != lvl.Accrued ||
+				gotMaxRun != lvl.MaxRun || gotWins != lvl.Wins {
+				t.Fatalf("control A %s @%s: replay ep=%d acc=%d max=%d win=%d, screenLevel ep=%d acc=%d max=%d win=%d",
+					p.Symbol, want.Entry, gotEpisodes, gotAccrued, gotMaxRun, gotWins,
+					lvl.Episodes, lvl.Accrued, lvl.MaxRun, lvl.Wins)
+			}
+			if gross.Decimal() != lvl.Gross.Decimal() {
+				t.Fatalf("control A %s @%s: replay gross %s, screenLevel %s",
+					p.Symbol, want.Entry, gross.Decimal(), lvl.Gross.Decimal())
+			}
+			checkedA++
+			episodes += len(eps)
+
+			rec.Levels = append(rec.Levels, persistLevel{Entry: lvl.Entry.Decimal(), Episodes: eps})
+		}
+		out = append(out, rec)
+	}
+
+	if screened == 0 {
+		t.Fatal("no symbols screened — the driver found nothing, which is a vacuous pass")
+	}
+	if checkedA == 0 || checkedB == 0 {
+		t.Fatalf("controls did not run: A=%d B=%d", checkedA, checkedB)
+	}
+
+	blob, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if err := os.WriteFile(persistOut, blob, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	t.Logf("screened=%d symbols  controlA=%d  controlB=%d  episodes=%d  -> %s",
+		screened, checkedA, checkedB, episodes, persistOut)
+}
+
+// TestPersistenceControlsBite is control C. A and B are agreements; this shows
+// the comparison they rest on is capable of DISagreeing.
+func TestPersistenceControlsBite(t *testing.T) {
+	rawRoot := filepath.Join(persistRoot, "raw")
+	bnRaw, _, err := LoadRaw(RawPath(rawRoot, "binance", KindFunding, "LABUSDT"))
+	if err != nil {
+		t.Fatalf("binance raw: %v", err)
+	}
+	byRaw, _, err := LoadRaw(RawPath(rawRoot, "bybit", KindFunding, "LABUSDT"))
+	if err != nil {
+		t.Fatalf("bybit raw: %v", err)
+	}
+	bnRows, err := RowsFromRaw(bnRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byRows, err := RowsFromRaw(byRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matched, stats, err := PairSettlements(bnRows, byRows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := ScreenPair("LABUSDT", matched, stats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	maxGap := (time.Duration(MaxGapFactor) * res.ModalInterval).Nanoseconds()
+
+	right := replayEpisodes(matched, res.Levels[0].Entry, maxGap)
+	if len(right) != res.Levels[0].Episodes {
+		t.Fatalf("positive arm: replay %d episodes, screenLevel %d", len(right), res.Levels[0].Episodes)
+	}
+
+	wrong := replayEpisodes(matched, res.Levels[1].Entry, maxGap)
+	if len(wrong) == res.Levels[0].Episodes {
+		t.Fatalf("negative arm: replay at the WRONG entry level still matched %d episodes — control A cannot fail", len(wrong))
+	}
+	t.Logf("controls bite: right=%d (== %d), wrong=%d (!= %d)",
+		len(right), res.Levels[0].Episodes, len(wrong), res.Levels[0].Episodes)
+}
