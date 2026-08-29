@@ -1,6 +1,76 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## Status (2026-08-16, session 145): **THE PAIR RAN. FOUR ORDERS PLACED ON THE DEMOS, `VerdictIntact`, EXIT 0, BOTH ACCOUNTS BACK TO FLAT. THREE FINDINGS, ONE OF THEM STRUCTURAL. ⚠ BOTH JOURNALS ARE NOW LATCHED.**
+## Status (2026-08-29, session 146): **PERSISTENCE IS MEASURED. THE SPREAD WAS NEVER THE BINDING CONSTRAINT — THE COST IS, AND IT IS THE QUANTITY THIS PROJECT HAS MEASURED LEAST. NO CODE, NO VENUE CONTACT, NO NORMATIVE EDIT.**
+
+**Read `docs/superpowers/specs/2026-08-29-persistence-measurement.md` (record
+§99)** — the measurement, three controls, and four findings. ADR rows **F26**,
+**F27**, **F28**, **F29**. Artifacts in `research/persistence/`.
+
+**WHAT WAS MEASURED.** 17 478 episodes over 61 eligible symbols × 4 entry
+levels, 235 073 matched settlements, 2020-10-21 → 2026-07-31, from the data
+`screen run` had already fetched. Nothing new was fetched. Three controls:
+replay == `screenLevel` (244/244), `ScreenPair` == committed `ranking.json`
+(244/244), and a **negative** control showing the comparison can fail
+(248 ≠ 131).
+
+**THE ANSWER TO §2.3's QUESTION.** Median episode is **2 settlements** — 8h on a
+4-hour grid, 16h on an 8-hour grid. Break-even is ≈6 settlements, which sits at
+about the **p93** of the run-length distribution. The typical episode does not
+reach it.
+
+**⚠ F26 — THE VERDICT IS A FUNCTION OF AN ASSUMPTION, NOT OF A MEASUREMENT.**
+`RoundTripCost()` is `0.0021` and holds **four taker legs and nothing else** —
+no spread crossing, no slippage. Every `net_annual` and the shortlist itself are
+scored against it. Mean net per episode is positive at two entry levels at
+**21bp**, at one at **29bp** (`build-spec.md:53`'s own model), and at **none**
+at **90bp** (§98's live figure, which §98 says is not a measurement).
+
+**⚠ F27 — 84% OF THE NET IS ONE SYMBOL.** At 10bp/21bp the net across 56 symbols
+is `+0.6460`; `LABUSDT` alone is `+0.5439`. Dropping the best **10** of **1 259**
+episodes turns the total negative. Median symbol: **−0.1%/yr**. Against an
+illustrative 4.6% hurdle: **4/56** clear it at 21bp, **3/56** at 29bp,
+**0/56** at 90bp.
+
+**F28** — run length and break-even are different questions with a five-row
+overlap band; an edge bar phrased as *hold for N settlements* misclassifies both
+ways. **F29** — every symbol above 4%/yr has under 530 days of history and every
+symbol over 1 800 days returns ≈0; *regime* and *small sample* predict this
+identically and **elapsed time is the only separating parameter**, so it is left
+open by construction.
+
+**⚠ `research/persistence/episodes.json` IS COMMITTED BECAUSE ITS INPUT IS NOT.**
+`research/screening/raw/` is gitignored on §42b's sound argument, which makes the
+derived file the only durable form of this measurement on a fresh clone. Do not
+delete it as regenerable — regenerating needs a re-fetch of 468 venue files.
+
+**WHAT IS AND IS NOT CLAIMED.** Claimed: the distributions and per-symbol nets
+are exact readings of the committed screening data, three-way controlled.
+Not claimed: anything about mainnet cost (21/29/90bp are an assumption, a model,
+and one unattributed observation), anything about capital (the totals are a sum,
+not a portfolio), and anything about whether F29's short-history edge is real.
+
+---
+
+## THE NEXT ACTION: **MEASURE THE ROUND TRIP.** Not the spread again.
+
+Three of §99's four findings turn on the cost. §98 already said what a clean
+figure needs: **the send must follow the book read inside the book's
+timescale** — a property of an automated path, not of a runbook a person
+executes. Until that exists the kill gate's answer is set by an assumption whose
+span covers the whole verdict (F26's table).
+
+⚠ A second live run still needs **fresh journal paths** (`./run/pair/binance.2.db`,
+`bybit.2.db`) — both journals remain latched on `GateNetDeltaAsserted` from §98,
+and those files are the evidence that the gate fired. Do not delete them.
+
+**⚠ THE OPERATOR'S STATED NEXT TOPIC IS A WEB UI**, raised at the end of session
+146 and **not yet scoped, designed or decided**. Nothing in the doc set covers
+it: §12's milestone roster has no UI item, and no decision record discusses one.
+Treat it as a fresh brainstorming subject, not as a resumed thread — and note
+that milestone 2 is still a kill gate, so what a UI is *for* depends on an
+economic verdict that F26 says is not yet decidable.
+
+## Previously (2026-08-16, session 145): **THE PAIR RAN. FOUR ORDERS PLACED ON THE DEMOS, `VerdictIntact`, EXIT 0, BOTH ACCOUNTS BACK TO FLAT. THREE FINDINGS, ONE OF THEM STRUCTURAL. ⚠ BOTH JOURNALS ARE NOW LATCHED.**
 
 **Read `docs/superpowers/specs/2026-08-16-m4-236-first-live-pair-run.md` (record
 §98)** — what ran, the three findings, and the one measurement this run did *not*
@@ -157,7 +227,11 @@ MODULES, branch deleted, tree clean.**
 
 ---
 
-## THE NEXT ACTION: **NOT ANOTHER LIVE RUN.** Measure spread persistence.
+## ✅ DONE (session 146, record §99): the persistence measurement. Kept below for its runbook notes.
+
+**The persistence question this section set is ANSWERED — see the status block
+at the top of this file and record §99. The prose below is session 144/145's
+material and is retained only for a second live run.**
 
 **The run is DONE (session 145, record §98) — the whole runbook, §1 through §6.**
 The section below is session 144's preparation notes, kept because a *second*
