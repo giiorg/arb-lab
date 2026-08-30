@@ -688,6 +688,18 @@ tier* `venue-profiles.md:499` gates on its own §42c pricing: under §42c's
 one-source-one-connection-one-topic capture it is **122 sockets at 61 symbols and
 932 at 466**, and this record counts connections nowhere (F54).
 
+**⚠ And the three screens round 4 did not reach do not survive it either
+(§15.10).** **Venues** carries one phase stamp for eight items: *leverage
+brackets* has no data, no type and no reader (F61), *connectivity* has no source
+in this record or the tree (F64), *posture* names two **signed** readers under a
+phase that begins at 1 (F63), *fee tiers* is four hand-recorded rows holding
+**one** tier per venue-product, and *filters* covers **one symbol per reference
+revision** against Markets' 466. **Evidence** renders a headline whose entry
+level is in no artifact, and whose published value is the most favourable of the
+four (F60). **System**'s *formal-model freshness* is a five-verdict gate rendered
+as a boolean, with *"this model's runs are void"* on the green side — **6 of 16
+tracked sections today** (F62). Its other three items hold.
+
 ## 8. The economic surface — what an operator can actually see
 
 The requirement was *"every metric that matters for assessing a funding-rate
@@ -719,8 +731,8 @@ arbitrage opportunity."* This is that list, with provenance, honestly marked.
 
 | Quantity | Source | Phase |
 |---|---|---|
-| Leverage brackets, IM / MM tiers | `research/venue-probes/233-bracket-fixed-point` | 1 |
-| Margin mode; portfolio-margin posture | `venue/posture.go`, `marginstatus.go` | 1 / 2 |
+| Leverage brackets, IM / MM tiers | ⚠ **F61 — that directory holds ONE file, `fixedpoint_oracle.py`, whose own docstring reads its input from `230-adverse-close/captures/`.** The named source is the CONSUMER. The data is three credentialed, non-re-derivable symbols per venue (one Bybit file has no tier table); `internal/` and `cmd/` contain no bracket type, reader or config | **neither** |
+| Margin mode; portfolio-margin posture | ⚠ **F63 — every reader named here is SIGNED**: `/fapi/v1/multiAssetsMargin`, `/symbolConfig`, `/positionSide/dual`, `/v5/account/info`, `/v5/account/wallet-balance`, over `transport.SignedClient`; `MarginStatus` routes through `OrderClient`. There is no phase-1 half | ~~1 /~~ 2 |
 | Liquidation price per leg | ⚠ **F56 — the venue's, never reconstructed.** `venue/marginstatus.go:167`: *"It is the VENUE's number and never one this system reconstructs"*, and absence is modelled (`LiqPriceStated`) because a zero reads as maximum headroom. A bracket-derived figure is a separate **modelled** quantity and may never substitute for venue risk state | 2 |
 | Free vs allocated collateral | `venue/balances.go` | 2 |
 | Basis / mark divergence between legs | `venue/mark.go` | 1 |
@@ -736,7 +748,7 @@ arbitrage opportunity."* This is that list, with provenance, honestly marked.
 | P(clearing break-even) at this run length | ⚠ **F55 — `summary.json`'s `run_vs_breakeven`, which is pinned to entry level `0.0005` and cost `0.0021` and declares neither.** Varying the level alone moves the run-4 figure 10.0 → 38.6 → 94.9 → 100.0 %. Owed before any panel reads it | 1 |
 | Expected net per episode | `episodes.json` | 1 |
 | Annualised return, with denominator | derived | 1 |
-| Hurdle comparison; concentration; sample size | `verdict` **once it carries its hurdle** (F45), F27, F29 | 1 |
+| Hurdle comparison; concentration; sample size | `verdict` **once it carries its hurdle** (F45) **and its entry level** — ⚠ **F60: it carries four hurdle-provenance fields and no level.** Pinned at `0.001` via `per_symbol`; `beat_hurdle_symbols` at 21 bp reads 2/61 · 3/60 · **4/56** · 3/49 across the four levels the file declares, and the published column is the unique maximum. At 90 bp the published `0/56` becomes **2/49**. §14 debt 7 does not name this block | 1 |
 
 **⚠ Three quantities §7 puts on a screen have no row in this table at all
 (§15.9).** *Funding history, both legs* (F53), *equity* and *realized/unrealized
@@ -1191,6 +1203,31 @@ comparable; only writing the comparand beside the conclusion does.
    does, phase 2 shows a current equity point and marks PnL history
    **unavailable** rather than rendering an ephemeral chart that resets on
    deploy.
+10. **Debt 7 widens to `verdict`** (F60). The block §8 sources the Evidence
+    screen's headline to must carry its **entry level**, and adding a `level`
+    field to each `per_symbol` **row** does not do it — `verdict` is a separate
+    top-level emission. Owed before any panel reads it, on F45's own argument and
+    at F45's price: `episodes.json` is committed. **The general form is the debt
+    worth keeping**: when a finding names *n* mirrors, write the remedy against
+    the **file**, not against the finding's list, or the next block inherits the
+    defect while reading as audited.
+11. **§8's leverage-bracket row must be re-sourced or withdrawn** (F61), and the
+    substitute must be labelled **modelled** — §8's own F56 row already forbids a
+    bracket-derived figure standing in for venue risk state. A venue-wide bracket
+    panel is phase 2 on Binance (signed `leverageBracket`) whatever is done here.
+12. **Every phase stamp in §7 becomes per-item where its items disagree** (F63).
+    Positions and Overview already do it; Venues carries eight items under one
+    stamp and that is where a signed reader sat under a "1". **The stamp is a
+    claim per item, not per screen.**
+13. **The System screen's freshness tile renders `formalfresh.Verdict`, all five
+    members** (F62), and `MarkedStale` is rendered as **attention**, not as green.
+    Separately and cheaply: `make formal-fresh` currently prints nothing for a
+    marked-stale section, because `t.Log` in a passing test needs `-v`. Three
+    options, none taken here — `-v` on the target (noisy: it prints every test),
+    a `fmt.Fprintln` to stderr from `Explain`'s caller (visible, and outside the
+    `testing` log discipline), or leaving the gate silent and letting the tile be
+    the surface. **Choosing is a decision, not a fix**, and it is the reason the
+    tile has value rather than being a duplicate of a green CI badge.
 
 ---
 
@@ -1735,12 +1772,238 @@ not the hurdle — it is the **entry level**, a second unlabelled base in the sa
    selection rather than the gate. The second is the collapse checklist's
    fourteenth instance and it landed on the CONTROL rather than on the
    subject.]***
-2. **§7's Venues, Evidence and System screens** — this round reached Overview,
+2. ~~**§7's Venues, Evidence and System screens** — this round reached Overview,
    Markets, Market detail, Positions and Journal. Three screens are still a
-   reading, and the cross-tabulation instrument is cheap enough to finish.
+   reading, and the cross-tabulation instrument is cheap enough to finish.~~
+   ***[DONE — §15.10, five findings, F60–F64. The instrument was cheap as
+   predicted; what it did not predict is that FOUR of the five came from the step
+   AFTER it — opening the source a consistent cross-tabulation names. Three lists
+   agreeing that a quantity exists is three claims, not one check.]***
 3. **The twenty unsampled §8 provenance rows** — F46 found two wrong in ten, F56
    makes it three in eleven, and F56 is the first found against a *venue-semantics*
    comment rather than a schema.
 4. **`ReconcileMarginOp`'s actor identity** and **F42's `notimenow` hole** — both
    untouched since §15.7 named them, and F51 makes the first one sharper: the
    entrypoint that would supply the identity is inside the granted package.
+
+### 15.10 External review, round 5 — the three screens no round had read
+
+**Instrument: the cross-tabulation alone, run to exhaustion.** §15.9 measured
+that the productive instrument was mechanical rather than adversarial — §3's
+phase table, §7's screen table and §8's provenance tables enumerate the same
+quantities from three angles, and three lists by one author *disagreeing*
+localises the error without an argument. Round 4 spent that instrument on five
+screens and found F53 in four commands. This round finished the other three, and
+then did the step F53's discovery had skipped: for every quantity that **is**
+present in all three lists, **open the source and check it holds the quantity.**
+That second step is where four of this round's five findings came from, and it is
+cheap: a cross-tabulation proves a quantity is *claimed* consistently, never that
+it *exists*.
+
+**Verdict: NO-SHIP, unchanged.** Five findings, **F60–F64**. Every one measured
+against source or artifact; two carry a passing control and a passing negative
+control.
+
+| # | Finding | Severity |
+|---|---|---|
+| **F60** | The **Evidence screen's headline** declares its hurdle three ways and its entry level **zero** ways, and the published column is the **most favourable** value over that undeclared axis | MAJOR |
+| **F61** | **Leverage brackets** are sourced to a directory that holds an arithmetic **oracle** and no data; the data is one directory over, credentialed, non-re-derivable, and covers **3 symbols** | MAJOR |
+| **F62** | **"Formal-model freshness"** is one item over a **five**-verdict vocabulary the build collapses to two, and the state on the green side is *"this model's runs are void"* — **6 of 16 sections today** | MAJOR |
+| **F63** | **Posture** is marked phase **"1 / 2"** and every reader it names is a **signed** client; the Venues screen has no per-panel phase to carry the split | MAJOR |
+| **F64** | **Connectivity** appears in §7's screen table and §4b's enum list and **nowhere else** — no source, no phase-1 datum, and it is the quantity **F54** established this record never counts | MINOR |
+
+#### F60 — the kill gate's own number is the third mirror, and it is the one F45 already touched
+
+§8's Persistence table sources *"Hurdle comparison; concentration; sample size"*
+to `summary.json`'s **`verdict`** block, phase 1. That block is what the Evidence
+screen renders, and F45 fixed it: it now carries `hurdle_pct`, `hurdle_class`,
+`hurdle_source` and `hurdle_comparison` — **four** provenance fields — beside
+`beat_hurdle_symbols` and `total_symbols`.
+
+**It carries no entry level.** `summarise.py:98` computes `per_symbol` from
+`eps(s, "0.001")`, an inline literal; `verdict` is derived from `per_symbol` and
+inherits the pin. `summary.json` publishes `levels` (4) in its own header, and
+`pooled` — the one block in the file that declares its level — emits `entry` on
+every row. So the field exists, is cheap, and is absent from exactly the block
+the gate's answer comes out of.
+
+**Measured, with both controls passing.** Recomputing at level `0.001`
+reproduces the committed `verdict` on all four fields at all three costs
+(**control: PASS**); level `0.0005` does not (**negative control: PASS**, so the
+comparison can come out the other way):
+
+| entry level | 21 bp `beat/total` | median | 29 bp `beat/total` | 90 bp `beat/total` |
+|---|---|---|---|---|
+| `0.0002` | 2/61 | −4.6 | 1/61 | 0/61 |
+| `0.0005` | 3/60 | −0.5 | 2/60 | 0/60 |
+| **`0.001`** ← published | **4/56** | **−0.1** | **3/56** | **0/56** |
+| `0.002` | 3/49 | −0.1 | 2/49 | **2/49** |
+
+**The published column is the most favourable reading in both directions.** At
+21 bp and 29 bp it is the unique **maximum** of the four; `median_annual_pct` is
+likewise the best. And at **90 bp** — the cost §99 §F26 and the handoff both
+quote as the kill gate's worst case — the published `0/56` is the *only* value
+that says *nothing clears*: at level `0.002`, **2 of 49 symbols beat the
+hurdle**. That is a qualitative claim flipping on an axis the artifact does not
+record. *(It is not a contradiction of F26, which is about `pooled.mean_net` —
+a different statistic, and one that does declare its `entry`.)*
+
+**And the prose reproduces the error, which is F52's tell.** §99 §5a's table is
+captioned *"Per symbol, annualised on $2 000 of capital ($1 000 per leg)"* — it
+declares the **capital** denominator, F30's fix, and not the level. The level is
+stated three lines and a code block earlier, for a **different** statistic. So
+the table travels into the handoff (*"4/56 clear it at 21bp … 0/56 at 90bp"*) and
+into the ADR carrying its hurdle and its capital and not its level. *A
+declaration in the spec is not in the artifact.*
+
+**§14 debt 7 does not name `verdict`.** It names `run_vs_breakeven` and
+`per_symbol` — F55's two mirrors — and the natural remedy (add a `level` field to
+each `per_symbol` **row**) leaves the `verdict` dict, a separate top-level
+emission, exactly as it is. Worse in the direction that matters: fixing the rows
+makes the block above them read as audited. **F55's own general lesson is what
+finds this** — *enumerate every axis the artifact declares in its own header and
+ask which blocks answer for a single point on it* — applied to F55's own remedy.
+Four provenance fields on one operand and none on the other is what makes it
+invisible: `hurdle_comparison` reads
+`"annual_pct_on_2000 strictly greater than hurdle_pct"`, a complete statement of
+the comparison, in which `annual_pct_on_2000` is the half whose base is not in
+the file.
+
+#### F61 — the bracket source names the consumer, not the data
+
+§8's Carry table: *"Leverage brackets, IM / MM tiers | `research/venue-probes/233-bracket-fixed-point` | **1**"*.
+
+**That directory holds one file: `fixedpoint_oracle.py`.** It is record §90's
+arithmetic oracle for the maintenance-bracket fixed point, and its own docstring
+names its input — `research/venue-probes/230-adverse-close/captures/probe230-binance-DRIFTUSDT.json`.
+`research/venue-probes/README.md` says the same in prose: *"#233's oracle could
+only be made exhaustive because #230's raw bracket table was still on disk."*
+§8 sourced the quantity to the directory that **consumes** it.
+
+**What the data one directory over actually is, and it is three separate
+problems:**
+
+- **Three symbols per venue.** Binance `brackets[]` (`bracket`, `initialLeverage`,
+  `maintMarginRatio`, `notionalCap`, `notionalFloor`) in `BTCUSDT`, `DRIFTUSDT`
+  and a control; Bybit `tiers[]` (`maxLeverage`, `riskLimitValue`) in `0GUSDT`,
+  `BTCUSDT` and a control — and `probe230-bybit-CLSKUSDT.json` has **no tier
+  table at all**. Brackets are per-symbol on both venues; the adjacent Markets
+  screen enumerates **466 / 61**.
+- **Credentialed, and phase 1 is defined as needing none.** The README's first
+  sentence: *"One directory per task that took a **credentialed measurement
+  against a live venue**."*
+- **Non-re-derivable and dated.** The README again: *"A probe capture is **not**
+  re-derivable — it is a snapshot of one account holding one position at one
+  moment, and the position has since been closed."* Taken 2026-08-16.
+
+**And nothing in the engine reads a bracket.** `grep -rn "racket" internal cmd`
+over `*.go` returns only `internal/oms/record_test.go`'s *settle bracket* — a
+bounded wait, an unrelated sense of the word. `configs/` holds no bracket data on
+any spelling (`leverageBracket`, `notionalCap`, `maintMarginRatio`, `riskLimit`).
+So the quantity has **no type, no reader, no config and no committed table** —
+F53's shape exactly, one screen over, and reached the same way: the
+cross-tabulation says all three lists agree, and opening the source says the
+source is a script.
+
+> *Rejected remedy:* re-point §8 at `230-adverse-close/captures/`. It fixes the
+> citation and leaves the screen claiming a venue-wide reference panel from three
+> credentialed snapshots of one closed position. The honest phase-1 statements are
+> *"brackets: unavailable"* or a **modelled** panel over the captured table
+> **labelled as such** — which §8's own F56 row already forbids substituting for
+> venue risk state.
+
+#### F62 — a five-verdict gate rendered as a boolean, and the green side is the one that means "void"
+
+§7's System screen: *"capture coverage, config, build info, formal-model
+freshness"*, phase 1. Three of the four hold up — `internal/engine/capture`'s
+`Report` is a real in-process producer, `configs/` is committed, and
+`cmd/arblab/main.go:174` already reads `debug.ReadBuildInfo()`. The fourth does
+not.
+
+**`tools/formalfresh` has five verdicts, and the build collapses them to two:**
+
+| Verdict | `Fails` | Means |
+|---|---|---|
+| `Fresh` | no | silent, and §88 records that silence as a real negative control |
+| **`MarkedStale`** | **no** | **the section changed, a task owns re-running it, and the model's runs are void** |
+| `MarkerObsolete` | yes | the marker outlived its delta |
+| `MarkerStale` | yes | changed again since the marker was pinned |
+| `Stale` | yes | changed, and nothing owns it |
+
+**Six of sixteen tracked sections are `MarkedStale` today**, across **both**
+models, all owned by task `#229` — including `state-machines.md §2`, a
+`role: subject` section of `AmbiguousOrder` whose own marker says *"the producer
+set is what the model's ledger encodes, so the delta is inside the re-run."*
+Neither model has been re-verified since **2026-08-02**. A tile that renders the
+build's answer renders **fresh**, and the companion still reports its runs as
+valid — which is the precise situation `make formal-fresh` was built to make
+visible.
+
+**And there is no surface displaying it today**, which is what makes the panel
+worth having and makes rendering it as a boolean a regression wearing a feature's
+clothes. `MarkedStale` narrates through `t.Log`; `make formal-fresh` runs
+`$(GO) test ./tools/formalfresh/` **without `-v`**, and Go discards a passing
+test's log output. Measured in an isolated module, positive and negative control
+in one run: with `-v` the line appears **1** time, without it **0**.
+
+**This is F52's shape on the third tile of the same record.** §11's eighth
+collapse row — *"'the journal holds no package', 'venue truth is unavailable' and
+'both venues confirm flat' are three states"* — was written for **Open pkgs** and
+fixed in round 2; F52 found the same defect unfixed on **Attention** in round 4;
+this is **System**. *A fix applied in one place gets applied to its mirror*, and
+the mirror set is every tile in the record, not the tile beside it.
+
+#### F63 / F64 — what is left of the Venues screen once each item is resolved to a source
+
+§7 gives the Venues screen eight items and one phase stamp, **"1 / 2"**, for the
+screen as a whole. Positions splits its stamp explicitly (*"journals 1, live 2"*)
+and Overview annotates its exception (*"1 (equity/positions → 2)"*). Venues does
+neither, so nothing on it says which half is which. Resolved item by item:
+
+| Item | Source, checked | Phase it can honestly hold |
+|---|---|---|
+| reference data | `configs/reference.*.json` | **1** |
+| fee tiers | same — **4 rows, `class: hand_recorded`, exactly ONE tier per (venue, product)**: `VIP0-modeled` / `nonVIP-modeled`. Not a tier table | **1**, with the plural withdrawn |
+| filters | same — `lots` covers **BTCUSDT** (btcusdt revision) or **LABUSDT** (crossvenue revision). One symbol per revision, against Markets' 466 | **1**, bounded |
+| limits | §8's own row: `positionRisk` / `symbolConfig`, **credentialed** (F46) | 2 |
+| leverage brackets | **F61** — no data, no type, no reader | neither |
+| rate-limit budget | **F54** — rendered, and no screen counts itself against it | readout only |
+| **connectivity** | **F64** — no source anywhere | neither |
+| posture and balances | **F63** — signed only | 2 |
+
+**F63.** §8 sources *"Margin mode; portfolio-margin posture"* to
+`venue/posture.go` and `marginstatus.go` at phase **"1 / 2"**. Every probe
+`posture.go` declares is a signed account endpoint — `/fapi/v1/multiAssetsMargin`,
+`/fapi/v1/symbolConfig`, `/fapi/v1/positionSide/dual`, `/v5/account/info`,
+`/v5/account/wallet-balance` — and `posture.go:639` holds a
+`*transport.SignedClient`; `MarginStatus` routes through `OrderClient`, whose
+whole surface is signed. **There is no phase-1 half of this row.** The "1 /" is
+not a smaller claim than F53's: it is the same claim in the phase column instead
+of the source column, and a screen-level stamp is what lets it sit there
+unexamined.
+
+**F64.** `connectivity` occurs **twice** in this record: §7's Venues row, and
+§4b's list of enum-likes `exhaustiveswitch` will bind on (*"attention severity,
+entry verdict, provenance class, venue connectivity state"*). It has no §8 row,
+no entry in §3's phase-1 data list, and no producer — and it is a readout of
+exactly the quantity **F54** established this record prices nowhere, sitting on
+the same screen as F54's rate-limit budget. Minor because the remedy is F54's
+remedy; recorded because §4b already commits a **type** to it, and a declared
+enum with no producer is this repo's own named shape.
+
+#### What round 6 should attack
+
+1. **The twenty unsampled §8 provenance rows**, against **both** schemas and the
+   venue-semantics comments. F46 found two wrong in ten; F56 made it three in
+   eleven; F61 makes it **four in twelve**, and F61 is the first found by opening
+   the named directory rather than by reading either. **The check is `ls`,** and
+   it had not been run on any row.
+2. **`ReconcileMarginOp`'s actor identity** and **F42's `notimenow` hole** — now
+   the only items named by §15.7 and never touched, two rounds on.
+3. **§14's debt list against its own findings.** F60 is a debt that was written
+   too narrowly, found by re-reading debt 7 against the file rather than against
+   the finding. Debts 8 and 9 have not had that treatment.
+4. **The mockups against every screen**, not just Overview. F36 and F52 both
+   landed there because it is the only screen drawn; the three screens this round
+   read have no mockup, and F52's lesson is that a mockup regenerated from real
+   data is what refutes the prose.
