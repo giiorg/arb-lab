@@ -1,0 +1,8 @@
+[
+{"symbol":"FIXTURE","shortlist":true,"matched":10,"first":"2025-01-01T00:00:00Z","last":"2026-01-01T00:00:00Z","modal_minutes":480,"levels":[{"entry":"0.001","episodes":[
+{"run":3,"accrued":"0.0947","start":"2025-06-01T00:00Z","end":"2025-06-02T00:00Z"}
+]}]},
+{"symbol":"EXACT","shortlist":true,"matched":10,"first":"2025-01-01T00:00:00Z","last":"2026-01-01T00:00:00Z","modal_minutes":480,"levels":[{"entry":"0.001","episodes":[
+{"run":3,"accrued":"0.0941","start":"2025-06-01T00:00Z","end":"2025-06-02T00:00Z"}
+]}]}
+]
