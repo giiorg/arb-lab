@@ -755,6 +755,25 @@ already ruled otherwise: **Markets** (*live funding* **none** F65, *spread* live
 only Venues; the counter-evidence for two of the four is in the ⚠ blocks
 directly above this one.
 
+**⚠ AND DRAWING THE OTHER SEVEN SCREENS PUT FOUR MORE CELLS BELOW THEIR STAMP
+(§15.17).** **Markets** — its ranked order is the artifact's own file order, which
+**is** descending `rank_score`, a per-row `argmax` over the entry level (0 of 61
+disagree; the 61 rows sit at **three** levels) and per **one** leg; §7's decision
+2 fixes the denominator on the **Overview** and §8 has no row for the quantity
+(F96). Its *eligible* column is **five-valued** — 367 / 61 / 35 / 2 / **1 policy
+seal** — and the sealed row is BTCUSDT at **1 524×** the liquidity floor (F99);
+the sample that decides it is one 24-hour reading dated **2026-08-01**, with 18 of
+466 rows inside ±20 % of the line (F100); and **405 of 466 rows carry 9 of the 19
+fields**, so *historical stats* is a promise kept on 13 % of the table.
+**Positions** — its phase-**1** half, *historical packages reconstructed from
+journals*, reads a layer written by **one use case**: every `AppendGeneration*`
+call site is in `delever.go` and all five `journal_generation_*` tables are **0
+rows** in both journals (F98), while the grouping the entry path *does* write is a
+TradeID inside a `ClientOrderID` whose leg field is **`00` on both legs** (F97).
+**System** — *capture coverage* names **one** of the verifier's **two** finding
+classes, and the 13 **integrity** kinds, *"the archive is LYING"*, have no cell
+(F101). Its *build info* and *config* items were re-checked and hold.
+
 ## 8. The economic surface — what an operator can actually see
 
 The requirement was *"every metric that matters for assessing a funding-rate
@@ -817,6 +836,17 @@ later slice."*** Balances are point-in-time enumerations with three channels
 equity while `locked != 0`. So a *trend* has no durable store on either side of the
 credential line, and the honest phase-2 scope is a current equity point with PnL
 history **explicitly unavailable** until a durable economic time series exists.
+
+**⚠ Two more quantities Markets renders have no row in this table (§15.17), and
+one of them is what the table is sorted by.** `rank_score` — `ranking.json`'s
+per-row `argmax` over the entry level, per **one** leg — is the ranked column an
+operator orders 466 rows with, and the nearest row here (*Annualised return, with
+denominator*) cites a **different field in a different artifact**, on the two-leg
+denominator (F96). `binance_quote_volume_24h` / `bybit_turnover_24h` is the
+single 24-hour sample that decides `below_floor` for 367 of the 466 rows, and it
+carries no row and therefore **no phase** — while F66, one row up, stamped the
+interval column **`1, dated`** for exactly the same snapshot (F100). This table
+claims to be *the* list, so both absences are claims.
 
 ### 8a. The cost assumption becomes a control
 
@@ -1648,6 +1678,79 @@ comparable; only writing the comparand beside the conclusion does.
     Closing a debt on substance while its text still specifies the rejected
     mechanism leaves the next reader to re-derive which one is normative — so a
     closure states **what closed it**, not only that it closed.
+
+44. **The ranked table states its entry level and its denominator, or it is not a
+    ranking** (F96). `ranking.json`'s row order **is** descending `rank_score`,
+    `rank_score` is each row's `argmax` over the level axis (0 of 61 disagree)
+    and the 61 rows sit at **three** different levels, and the figure is per
+    **one** leg. §7's decision 2 fixes the denominator on the **Overview** only,
+    and §8 has **no row** for the quantity at all — so the fix and the column are
+    on different screens and the economic surface names neither. Owed with §8's
+    row, not instead of it: this is F60's argmax and F30's denominator on one
+    column, and either alone reads as repaired. **#238 owns the consequence for
+    `shortlist.json`**, whose 8 symbols are the top 8 of this same ordering.
+
+45. **The pair path must carry the leg index into the ClientOrderID** (F97).
+    `openPlan(i, …)` and `unwindPlan(i, …)` take the pair's leg index and return
+    a **one-leg** `TradePlan`, so `planning.go:267`'s `Leg: i` re-derives `0` on
+    both sides and both legs of a cross-venue package mint the identical id.
+    `exercise` is the control: one plan, `legs[i]`, correct indices. The cause is
+    structural — **the plan is the unit of journaling and the journal is
+    per-venue**, so a cross-venue package cannot be one plan — which means the
+    fix is to pass the leg through, not to merge the plans. **The id's own
+    documentation defines the field for *"a cash-and-carry package's spot and
+    perp legs"*, the strategy milestone 2 killed**; §2.3's live strategy is
+    perp-perp, and a field whose meaning was fixed by a retired design is a
+    second thing this owes: state what `Leg` indexes now. **Not a §5.3 breach**
+    — the recovery question is asked of a venue and stays unambiguous — but the
+    format's per-trade uniqueness claim is false as shipped.
+
+46. **§7's Positions screen names a package layer the entry path never writes**
+    (F98). Every `AppendGeneration*` call site outside ports, codecs, replay
+    visitors and tests is in `delever.go`, and all five `journal_generation_*`
+    tables are **0 rows** in both journals. The screen is stamped phase **1**.
+    Either the entry path journals a generation, or Positions' phase-1 half is
+    *orders grouped by TradeID* and says so — and the second reading needs debt
+    45 first, because the TradeID lives inside a string whose leg field does not
+    separate the legs. **Do not** reconstruct by joining the two journals and
+    disambiguating on the filename: that encodes *one journal per leg* as a
+    read-side assumption, which `exercise` and `delever` already falsify.
+
+47. **The eligibility column is rendered with its own value, not as a binary**
+    (F99). `ranking.json`'s `eligible` has **five** values over the 466 rows —
+    `below_floor` 367, `ok` 61, `mismatched_grid` 35, `insufficient_matched` 2,
+    and **one `excluded: §42e H1 seal`**, which is a policy decision and not a
+    screening outcome. The sealed row is BTCUSDT: **1 524× the floor**,
+    `same_grid` true, and the only symbol `configs/reference.btcusdt.json`
+    describes. **This is F62's shape a third time** — a multi-valued verdict
+    rendered as green/not-green — so it and F62 want the same rule: *a display
+    inherits the cardinality of the thing it displays.* The column also decides
+    whether a row has data at all: **405 of 466 carry 9 of the 19 fields**, so
+    §7's *historical stats* exist on 13 % of the rows it promises them for, and
+    every one of the 405 reaches an empty Market detail.
+
+48. **§8 owes a row for the screened turnover, and it is `1, dated`** (F100).
+    `binance_quote_volume_24h` and `bybit_turnover_24h` are a **single 24-hour
+    sample** at `cutoff_utc 2026-08-01`, they decide `below_floor` for 367 rows
+    (verified both directions: all 61 `ok` clear the floor, all 367 do not), and
+    **18 of 466 rows sit within ±20 % of it** — 31 within ±50 %. F66 stamped the
+    *interval* column **`1, dated`** for exactly this reason, one row over, and
+    the turnover columns have **no §8 row**, so they inherited no phase. *A
+    finding recorded in a file is not a finding applied to the file.* The header
+    is the second half: *"24h volume"* names a rolling window and the value is a
+    frozen sample.
+
+49. **§7's System screen names both of the capture verifier's finding classes**
+    (F101). `engine/capture/finding.go` declares `FindingClass` as §32k's two
+    exit codes — *1 = integrity, the archive is **LYING**; 2 = coverage, the
+    archive is **HONEST AND THIN*** — with **13** and **12** kinds respectively,
+    and says outright that *"the two are never summed into a single 'problems'
+    count."* §7's item is *capture coverage*, which names one, and the same
+    comment gives the interaction: *"a coverage figure computed while skipping a
+    file nobody could read would be a lie of the same size."* **Do not** replace
+    it with a findings count — that is the sum the file forbids. §15.10's *"its
+    other three items hold"* is corrected to two: build info
+    (`main.go:174`) and config both resolve.
 
 ---
 
@@ -3912,3 +4015,275 @@ whose producers refuse (F94). All three are what happens when a remedy is writte
 from the finding's sentence rather than from the thing the finding is about —
 **the same disease the list itself diagnosed in debt 10 and could not see in
 itself.**
+
+### 15.17 External review, round 12 — the seven screens no round had drawn
+
+**Instrument: draw them, from the artifacts, with a generator.** F36 was found
+because a mockup **invented** a signal board and F52 because the one drawn screen
+claimed a fact the journals do not hold — both came from the *drawing* rather than
+from a reading, because a mockup has to put a value in every cell and a cell with
+no source is visible in a way a table row is not. Round 12 draws the other seven.
+`.../2026-08-29-web-dashboard-mockups/gen-remaining-screens.py` reads
+`ranking.json`, `summary.json`, `episodes.json`, `reference.btcusdt.json`,
+`capture.json`, `freshness.json` and `internal/engine/capture/finding.go` and
+writes `4-remaining-screens.html`. **No figure in the output was typed by a
+person**, which is the property F36 costs when it is missing; re-running it
+re-derives every one, including *6 of 16 tracked sections stale*, which `HANDOFF`
+states independently.
+
+**Six findings, F96–F101.** Four are measurements. `build-spec.md` is unchanged at
+v0.9.74; no code, no venue contact, no normative edit. **F97 is against the
+engine, not against this record** — the first finding in this review that is.
+
+| # | Finding | Severity |
+|---|---|---|
+| **F96** | The ranked table's default order **is** `rank_score`, which is each row's **argmax over the entry level** — 61 rows across **three** levels — and per **one** leg; §7's per-capital decision is scoped to the Overview and §8 has **no row** for it | MAJOR |
+| **F97** | Both legs of the only cross-venue pair carry the **byte-identical** `ClientOrderID`, leg `00`; the id's leg field was defined for the **killed** strategy | MAJOR |
+| **F98** | Positions' phase-1 half reads a **package layer written by one use case** — `journal_generation_*`, **0 rows** in both journals, every writer in `delever.go` | MAJOR |
+| **F99** | Markets' eligibility is **five-valued** rendered as two counts, and one of the five is a **policy seal** on the highest-turnover row in the universe | MAJOR |
+| **F100** | The columns that **decide** that verdict are a single 24-hour sample dated 2026-08-01, stamped nowhere, with **no §8 row** — while F66 one row over already ruled its column *dated* | MAJOR |
+| **F101** | §7's *capture coverage* names **one of the verifier's two finding classes**; the 13 **integrity** kinds — *"the archive is LYING"* — have no cell | MAJOR |
+
+#### F96 — the ranked table's default order is an argmax over a coordinate the table does not show
+
+`ranking.json`'s `pairs` array is **already sorted**: the 61 `eligible == "ok"`
+rows come first in descending `rank_score`, then the 405 others alphabetically.
+So a Markets table that renders the file in file order is sorted by `rank_score`
+**without anybody choosing it** — this is the default you get when nobody decides,
+and this project's own rule is to pick the direction that is right when somebody
+forgets.
+
+What `rank_score` is, measured: **0 of 61** rows disagree with
+`argmax over levels of net_annual`, and `best_entry` is that argmax's coordinate.
+The 61 rows are spread across **three** of the four declared levels — **37 at
+`0.002`, 21 at `0.001`, 3 at `0.0005`** — and three different levels appear in the
+top seven alone (LABUSDT `0.001`, BEATUSDT `0.002`, KAITOUSDT `0.0005`). **The
+column is not one quantity. It is 61 quantities, each read at its own most
+favourable coordinate, and the ordering is decided by that selection.**
+
+This is **F60's disease on a second artifact**. F60 is `summary.json`'s `verdict`
+block being the unique maximum over the level axis with the level in no field;
+here the maximum is taken **per row**, so no single level exists to record. And
+`rank_score` is also **F30's number**: `0.71586586` is 71.6 % of *one* leg's
+notional, which §7's embedded decision 2 fixes — *"returns are labelled per
+deployed capital. LABUSDT reads **+35.8 %/yr**"* — under the heading **"Three
+decisions embedded in the Overview"**. The Overview shows one figure. **The
+sortable 466-row table is a different screen**, and the remedy never reached it.
+
+> **And §8 has no row for it.** §8 claims to be *the* list, *"with provenance,
+> honestly marked"*, so an absence is a claim (§15.9's own rule). Its nearest row
+> is *Annualised return, with denominator*, which cites
+> `per_symbol[].annual_pct_on_2000` — a **different field in a different
+> artifact**, on the two-leg denominator, at one pinned level. The quantity the
+> operator actually sorts 466 rows by appears nowhere in the economic surface.
+
+**Rejected alternative:** render `rank_score / 2` and call it fixed. That repairs
+F30's half and leaves the argmax, which is the half no round had seen — the two
+columns in the drawn Market detail panel show them separately for exactly this
+reason. **Rejected alternative:** sort by `net_annual` at the screen's selected
+entry level instead. Right, and it is a *change to the artifact's consumers*, not
+a display choice: `shortlist.json`'s 8 symbols are the top 8 **of this ordering**,
+so the shortlist is an argmax selection too, and #238 owns whether it stands.
+
+#### F97 — both legs of the only live cross-venue pair carry the same ClientOrderID, and the leg field was defined for the strategy that was killed
+
+Measured on the two journals `HANDOFF` calls *"the evidence that the gate fired"*:
+
+```
+run/pair/binance.db   subject = ab-01M0587R38EN89VFRK50XGSVX5-00-00   (sell)
+run/pair/bybit.db     subject = ab-01M0587R38EN89VFRK50XGSVX5-00-00   (buy)
+```
+
+Byte-identical, including the leg field. `configs/pair.demo.2026-08-16.json`
+declares `legs[0] = binance sell`, `legs[1] = bybit buy` under one `pair.id`.
+
+The mechanism is exact. `ids.ClientOrderID`'s format is
+`ab-<TradeID>-<leg,2>-<attempt,2>` and `ClientOrderRef.Leg`'s own documentation
+reads *"**Leg indexes the order within the trade** — 0 and 1 for a cash-and-carry
+package's spot and perp legs."* `planning.go:267` derives it as `Leg: i` from the
+index **within `plan.Legs`** — correct, and `exercise/config.go:196-203` exercises
+it correctly, building one plan with `legs[i]` for every leg. `pair/config.go:430`
+cannot: `openPlan(i, quantity)` returns
+`TradePlan{Trade: trade, Legs: []LegIntent{intent}}` — **one leg per plan, one
+plan per side** — so the pair's `i` is a parameter of the *caller* and the
+planner re-derives leg from its own one-element slice. It is always `0`.
+`unwindPlan` is the same shape at `Attempt+1`, so leg A's unwind and leg B's
+unwind collide too.
+
+**And the reason `pair` cannot build one plan is the reason this is not a typo.**
+Each side has its own OMS module, its own journal and its own repository — that is
+why there are two `.db` files. **The plan is the unit of journaling, the journal
+is per-venue, and a cross-venue package is therefore not expressible as one
+plan.** So the leg field is scoped to a *plan* while the package is scoped to a
+*venue pair*, and those are the same scope only for the design the id was written
+for: **a cash-and-carry package's spot and perp legs**, the strategy milestone 2
+killed. §2.3's live strategy is perp-perp cross-venue, and under it the field
+means nothing.
+
+Nothing in the running system collides — each side's repository and journal are
+separate, so `Load(id)` is unambiguous **within** a venue. **The one consumer that
+must span the two is the one this record is designing.**
+
+> **Not a §5.3 breach, and the distinction matters.** §5.3's property is
+> *"never reused within the recoverable window"* for the recovery question *"ask
+> the venue what happened to this"* — which is asked **of a venue**, and is still
+> unambiguous. What is lost is the format's own claim: the id is unique per
+> **store**, not per **trade**, and its leg field asserts the second.
+
+**Rejected alternative:** widen the id, or hash the venue into it. `clientorderid.go`
+records a 36-character budget against an unverified venue assumption and says the
+26-character TradeID is the only part with give — a change there re-opens a
+decision that section already took. **The leg index is already two digits and
+already carried by the caller**; `openPlan` has `i` and drops it.
+
+#### F98 — the package layer Positions reads is written by one use case, and it is empty in both journals
+
+§7 stamps Positions' *"historical packages reconstructed from journals"* phase
+**1**. Measured, `sqlite3` over both files:
+
+| Table | binance.db | bybit.db | Only writer |
+|---|---|---|---|
+| `journal` / `journal_planned` / `journal_authorized` / `journal_acked` | 5 / 1 / 1 / 1 | 5 / 1 / 1 / 1 | planner, dispatch |
+| `journal_state` | 2 (`submitted`, `filled`) | 2 | dispatch |
+| **`journal_generation_opened`** | **0** | **0** | `delever.go:252` |
+| **`journal_generation_leg`** | **0** | **0** | `delever.go:429`, `:581` |
+| **`journal_generation_authorized`** | **0** | **0** | `delever.go:534` |
+| **`journal_generation_superseded`** | **0** | **0** | `delever.go:889` |
+| **`journal_generation_phase`** | **0** | **0** | `delever.go:933`, `:950` |
+
+**Every `AppendGeneration*` call site in the tree that is not a test, a port, a
+codec or a replay visitor is in `delever.go`.** The generation layer is the
+journal's *only* grouping construct above a single order, and it is written by the
+**delever** use case alone; the entry path writes none of it. So the schema has
+two notions of "which orders belong together" — the generation tables, which no
+entry has ever populated, and the TradeID embedded in a `ClientOrderID` string,
+which F97 shows does not separate the legs. A phase-1 reader has neither.
+
+This is **F65's shape on the write side**: the type is right, both venues are
+right, and the producer for *this* path does not exist. It is also why F97 is not
+merely cosmetic — with the generation layer empty, the string is the **only**
+grouping the screen can read, and its discriminator is the filename.
+
+> **Rejected alternative:** reconstruct packages by joining the two journals on
+> the TradeID prefix and disambiguating by the database the row came from. It
+> works today and it encodes "one journal per leg" as a **read-side assumption**,
+> which is false the moment a package has two legs on one venue — the exact shape
+> `exercise` already builds and `delever` already journals.
+
+#### F99 — the eligibility column is five-valued, and one of the five is a policy seal on the largest row in the universe
+
+§7 renders Markets as *"all 466 screened / **61 eligible**, sortable and
+filterable"* — two counts. `ranking.json`'s `eligible` field has **five** values:
+
+| Value | Rows | What it means |
+|---|---|---|
+| `below_floor` | 367 | 24h turnover under `floor_turnover_24h_usdt` = 5 000 000 |
+| `ok` | 61 | passed |
+| `mismatched_grid` | 35 | `same_grid == false` (F66: 35/35) |
+| `insufficient_matched` | 2 | under `min_matched_settlements` = 180 |
+| **`excluded: §42e H1 seal…`** | **1** | **BTCUSDT — not a screening outcome at all** |
+
+**This is F62's shape, a third time.** F62 is a five-verdict freshness gate
+rendered as a boolean with *"this model's runs are void"* on the green side; here
+a five-valued screening column is rendered as two counts, with a **policy** value
+folded in beside four **market** ones. And the row it hides is not a marginal one:
+BTCUSDT's Binance 24h quote volume is **1 524× the floor**, `same_grid` is true,
+and it is the only symbol `configs/reference.btcusdt.json` fully describes — so
+the symbol an operator looks for first is the one the screen reports as
+indistinguishable from a thin altcoin.
+
+**The verdict also decides whether a row has any data.** An `ok` row carries
+**19** fields; every other row carries **9** — no `median_abs`, no `p99_abs`, no
+`first`/`last`, no `modal_interval_minutes`, no `levels`, no `best_entry`, no
+`rank_score`. **405 of 466 rows — 86.9 % — carry none of the columns §7 promises
+under *historical stats*, and clicking any of them reaches an empty Market
+detail.** A "sortable and filterable" table over those columns puts 405 rows in
+an undefined position.
+
+**Rejected alternative:** filter the ineligible rows out and show 61. That is the
+Markets screen deleting its own stated scope, and it hides the seal rather than
+rendering it — the operator's question *"why is BTC not here"* is the one case
+where the answer is a **sentence**, and `ranking.json` already carries it as the
+field's value.
+
+#### F100 — the quantity that decides eligibility is a one-day sample, and the *dated* stamp went to the column one row over
+
+`below_floor` — 367 of 466 rows, 79 % — is decided by
+`min(binance_quote_volume_24h, bybit_turnover_24h) < 5 000 000`. Verified both
+ways over the file: **all 61 `ok` rows clear it, all 367 `below_floor` rows do
+not.** Those two fields are a **single 24-hour sample** taken at
+`params.cutoff_utc = 2026-08-01T00:00:00Z`.
+
+Measured, the partition is not robust to that: **10** `below_floor` rows sit above
+0.8× the floor and **31** above 0.5×, while **8** `ok` rows sit below 1.2× — so
+**18 of 466 rows lie inside a ±20 % band that one day's tape decides**, and 31
+more inside ±50 %. Re-screening on a different day moves rows across the line, and
+with them the 19-vs-9-field distinction F99 measures.
+
+**F66 already ruled exactly this, one row over, and the ruling did not travel.**
+§8's *Funding interval and grid alignment* row is stamped **`1, dated`** — because
+it is *"from a snapshot dated **2026-08-01** over a quantity the same file records
+changing up to 1 445 times"*. The turnover columns are the same snapshot, decide
+strictly more of the screen, and are stamped **nothing** — because they have **no
+row in §8 at all**, and a column with no row inherits no phase. *A finding
+recorded in a file is not a finding applied to the file*: F66's `dated` was
+written against the column F66 was looking at.
+
+The column header is the second half. *"24h volume"* names a **rolling window**;
+the value is a **frozen sample**. Nothing in the field name, the type or the
+screen separates them — the same disease as `HANDOFF`'s *"median episode is 2
+settlements"* carrying no level (F83), one artifact over.
+
+#### F101 — *capture coverage* names one of the verifier's two finding classes, and the other one is the archive lying
+
+§15.10 ruled that of System's four items only *formal-model freshness* fails, and
+that *"its other three items hold"*. Two do, checked: **build info** resolves to
+`cmd/arblab/main.go:174`'s `debug.ReadBuildInfo` — the toolchain's own VCS stamp,
+and the file records why it is not an ldflags value — and **config** resolves to
+`configs/capture.json`. The third does not.
+
+`internal/engine/capture/finding.go:8-11` declares `FindingClass` as **§32k's two
+exit codes as a type**:
+
+> *1 = integrity failure — the archive is **LYING***
+> *2 = coverage below threshold — the archive is **HONEST AND THIN***
+
+and then, in the same doc comment: *"The distinction is the whole point… So the
+two are **never summed** into a single 'problems' count."* Counted from the
+`FindingKind.Class()` switch: **13 integrity kinds** (`FindingChecksum`,
+`FindingDigestMismatch`, `FindingManifestMismatch`, …) and **12 coverage kinds**.
+
+**§7's System item is called *capture coverage*.** It names the class covering 12
+of the 25 kinds; the 13 that mean *do not trust this run's numbers* have no cell
+on the screen. And the failure is not that one number is missing beside another —
+the same comment states the interaction: *"a coverage figure computed while
+skipping a file nobody could read would be **a lie of the same size**."* **The
+item as named is precisely the rendering the package warns against**, and it is
+the one an operator would read as green.
+
+**Rejected alternative:** show "capture health: N findings". That is the sum the
+file forbids, and §32a's verdict line is the same sentence one level up: *a
+recorded gap is not an error; an unexplained silence is.*
+
+#### What round 12 changes about the next actions
+
+**Next action (1) is closed, and drawing was the instrument for five of the six.**
+F96 came from asking what the ranked table sorts by; F99 and F100 from having to
+render the eligibility cell and the volume cell as *something*; F98 and F97 from
+having to fill a Positions row. Only F101 came from a reading. **This is the third
+consecutive round where changing the instrument is what produced the findings**,
+and the instrument here is the cheapest of the three: a generator that refuses to
+type a number.
+
+**And one finding is not about this record.** F97 is a defect in
+`internal/app/pair`, found because the read side is the first consumer that has to
+span the two journals. The read side keeps doing this — F52 found the journals do
+not hold gates, F87 found the projector has no constructor, and now the id does
+not separate the legs. **A read side is a second reader of every write decision,
+and the second reader is where a scope that was implicit becomes a bug.**
+
+The remaining next action is unchanged: **a reader for the persistence
+artifacts** (F83's structural half). Round 12 strengthens the case — the generator
+written for these mockups is a *Python* reader of `summary.json` and
+`episodes.json`, which makes it the **third** consumer outside the type system,
+beside `summarise.py` and `verdict_levels.py`.
