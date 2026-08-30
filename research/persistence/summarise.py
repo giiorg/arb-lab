@@ -144,10 +144,37 @@ for c in COSTS:
     print(f"  cost {c}: median {v[len(v)//2]:+7.1f}%/yr  best {v[-1]:+7.1f}%  "
           f"worst {v[0]:+8.1f}%  positive {pos}/{len(v)}  "
           f"beat {HURDLE_PCT}% hurdle {beat}/{len(v)}")
+    # beat_hurdle_symbols is a stored COMPARISON, so it carries its comparand.
+    # It did not, and F45 is what that cost: the threshold lived only here, the
+    # script PRINTED it and never wrote it, and every committed
+    # configs/reference*.json carries 3.69 instead — so a provenance-correct
+    # screen renders a 3.69% hurdle beside a count computed at 4.6%, each half
+    # sourced correctly. Worse for this repo's own discipline: goldens are
+    # generated from committed data, never hand-written, which GUARANTEED every
+    # golden would reproduce `beat 4` at any threshold. The stricter fixture
+    # rule is what made the defect unreachable.
+    #
+    # The field names mirror the reference revision's own hurdle block —
+    # `class` and `source` beside the value — so the two can be rendered side by
+    # side without a translation step, and so a screen that shows 3.69 beside a
+    # count computed at 4.6 has both numbers' provenance in front of it. The
+    # SOURCE is the half a reader gets wrong: this constant is illustrative, it
+    # is not the reference revision's number, and §100 §8c defines "reference
+    # data" as configs/reference.*.json specifically.
     out.setdefault("verdict", {})[c] = {
         "median_annual_pct": str(v[len(v) // 2]),
         "positive_symbols": pos,
         "beat_hurdle_symbols": beat,
+        "hurdle_pct": str(HURDLE_PCT),
+        "hurdle_class": "illustrative_constant",
+        "hurdle_source": (
+            "research/persistence/summarise.py HURDLE_PCT. This is NOT reference "
+            "data: configs/reference.*.json carry annual_rate 0.0369 at class "
+            "hand_recorded, and record §100 §8c defines reference data as those "
+            "revisions specifically. It is also not a calibrated benchmark per "
+            "build-spec §55, whose input is dated and haircut-adjusted."
+        ),
+        "hurdle_comparison": "annual_pct_on_2000 strictly greater than hurdle_pct",
         "total_symbols": len(v),
     }
 json.dump(out, open(OUT, "w"), indent=1)

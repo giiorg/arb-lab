@@ -106,7 +106,7 @@ as the CI pin — the split is what keeps both honest.
 
 ## The rules that bite
 
-§3.6 of the core has ten structural rules. Six are gates, and **all six are
+§3.6 of the core has eleven structural rules. Seven are gates, and **all seven are
 enforced** as custom `golang.org/x/tools/go/analysis` analyzers in `tools/lint/`,
 because a linter you cannot unit-test cannot be *shown* to bite:
 
@@ -117,7 +117,19 @@ because a linter you cannot unit-test cannot be *shown* to bite:
 | `kernelpurity` | A `platform/` package may import only the standard library and other `platform/` packages. |
 | `hexboundary` | `domain/` and `application/` may not import `infrastructure/` or `engine/`. Classifies both ends of the edge, so it scopes to this module's `internal/` rather than matching a bare path segment. |
 | `exhaustiveswitch` | A switch over a module-declared enum-like must name every member. A `default:` does not excuse a missing one — that is where the new member lands silently. No escape: name the rest in a grouped case, which the compiler checks. |
+| `omsauthority` | Only **named composition roots** may import the OMS *use cases* — `internal/oms` (exactly) and `internal/oms/application` (as a tree). Default-deny with a **grant list**, four entries, each carrying its reason. Rule 6 forbids BYPASSING the write path; this forbids *invoking* it from a package that was never granted the authority. Grants are exact packages, never trees. |
 | `singlewriter` | Only `oms` may import the OMS write path — `oms/application/ports` **and** `oms/infrastructure/driven`, by position, `app/` roots included. The port is policed as well as the adapter, because depending on the abstraction is the *recommended* way to depend on anything. `oms/domain` is deliberately out: a projection naming the state enum is §5.1's pattern working. |
+
+**Rule 11 never opened a deferral at all, and the reason completes the pair.** A
+gate is buildable when **the construct the analyzer reads** exists. Rule 10's
+deferral named a *state machine* and waited on eleven enum-likes that had existed
+for slices; rule 11's first draft named the *web tree it was built for* and would
+have waited on a package the same design was still deciding how to build — while
+what it actually reads is the **OMS use-case surface**, shipped since milestone
+3. **Ask which END of the policed edge exists.** It is usually the end being
+protected, not the end being suspected — and scoping to the suspected end also
+fails in the marker direction, because the next suspect tree is unpoliced the day
+somebody creates it (`internal/app/dashboard/`).
 
 **The last deferral expired on 2026-07-27 and the gate landed the same session
 as its subject**, which is now the rule rather than the exception: three gates
@@ -135,6 +147,13 @@ write repository"), and §12's milestone roster named the same trigger, so
 nothing had to be re-derived to know when it was due.
 
 **A clean gate run is not evidence, and neither is a probe two gates can see.**
+Rule 11's is the strongest form: its probe was measured **before the gate
+existed** (all six silent on three routes, with rule 6's control reported three
+lines away in the same file — without which every silent row would have meant
+"the invocation never selected the package"), and again after, where the same
+file draws **rule 11 alone, rule 11 alone, rule 6 alone**. That the two gates are
+disjoint is a measurement, not an argument, and it is what keeps either one's
+probe able to isolate it.
 `singlewriter`'s obvious probe — `marketdata/application` importing
 `oms/infrastructure/driven` — trips `hexboundary` as well, so it shows that
 something objected rather than that this rule did. The isolating probe is a
@@ -254,7 +273,12 @@ These are not style preferences. Each one was paid for.
   entering the two brackets the defect had been measured in** (record §90 §6).
   Boundary-relative sampling plus a printed per-region coverage count is the fix,
   and it is the same rule one layer out — a sweep that cannot say which regions
-  it entered is reporting executions, not coverage. **Eleven times now**,
+  it entered is reporting executions, not coverage. Then `omsauthority`'s own
+  `cmd/` fixture was **granted**, and a granted package is silent whether the
+  module root is resolved from the imported path or from the analyzed one — so
+  the fixture meant to force the first could not fail under the second, because
+  *silent for the right reason and silent for the wrong one are the same output*.
+  The separating fixture had to be one that must **not** be silent. **Twelve times now**,
   which makes it a checklist item and not a war story: before believing a suite,
   find the fixture parameter pinned to the value that collapses the distinction
   the code makes, and vary it. The tell is that the fixture does not contain the
@@ -269,6 +293,20 @@ These are not style preferences. Each one was paid for.
   breaking the signal subscription left the test waiting for a signal that would
   never arrive. Any test reading from a channel a mutation could stop feeding
   needs its own bound.
+- **An equivalent mutant is a finding, not a non-result.** `omsauthority`'s
+  module-root guard SURVIVED, and the diagnosis was provable rather than sampled:
+  `strings.Cut` returns the whole path when the separator is absent, so every
+  policed dir built from that root is strictly longer than the path that produced
+  it and can never match. The same guard was then measured in `singlewriter`,
+  `hexboundary` and `kernelpurity` — **all four survived, all four equivalent** —
+  and each one's comment credited it with a protection the comparison was already
+  providing. That is the real cost: a guard that cannot fail reads in review as
+  load-bearing, and the next person to simplify it has to re-derive that it never
+  was. **And the lesson was already in the file**: `hexboundary`'s
+  `withoutTestSuffix`, one function below the guard, carries a paragraph about
+  exactly this failure, written when `singlewriter` found the twin case. *A
+  finding recorded in a file is not a finding applied to the file* — when a
+  lesson lands, re-read the whole file for its other instances.
 - **A fix applied in one place gets applied to its mirror.** `Receive` was tested
   across 200 trials because a Go `select` picks a ready case at random; `Send` —
   same situation, same coin flip — was tested once, and a mutant survived on it.

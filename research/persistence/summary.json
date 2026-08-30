@@ -1233,18 +1233,30 @@
    "median_annual_pct": "-0.1",
    "positive_symbols": 16,
    "beat_hurdle_symbols": 4,
+   "hurdle_pct": "4.6",
+   "hurdle_class": "illustrative_constant",
+   "hurdle_source": "research/persistence/summarise.py HURDLE_PCT. This is NOT reference data: configs/reference.*.json carry annual_rate 0.0369 at class hand_recorded, and record \u00a7100 \u00a78c defines reference data as those revisions specifically. It is also not a calibrated benchmark per build-spec \u00a755, whose input is dated and haircut-adjusted.",
+   "hurdle_comparison": "annual_pct_on_2000 strictly greater than hurdle_pct",
    "total_symbols": 56
   },
   "0.0029": {
    "median_annual_pct": "-0.2",
    "positive_symbols": 12,
    "beat_hurdle_symbols": 3,
+   "hurdle_pct": "4.6",
+   "hurdle_class": "illustrative_constant",
+   "hurdle_source": "research/persistence/summarise.py HURDLE_PCT. This is NOT reference data: configs/reference.*.json carry annual_rate 0.0369 at class hand_recorded, and record \u00a7100 \u00a78c defines reference data as those revisions specifically. It is also not a calibrated benchmark per build-spec \u00a755, whose input is dated and haircut-adjusted.",
+   "hurdle_comparison": "annual_pct_on_2000 strictly greater than hurdle_pct",
    "total_symbols": 56
   },
   "0.0090": {
    "median_annual_pct": "-1.5",
    "positive_symbols": 1,
    "beat_hurdle_symbols": 0,
+   "hurdle_pct": "4.6",
+   "hurdle_class": "illustrative_constant",
+   "hurdle_source": "research/persistence/summarise.py HURDLE_PCT. This is NOT reference data: configs/reference.*.json carry annual_rate 0.0369 at class hand_recorded, and record \u00a7100 \u00a78c defines reference data as those revisions specifically. It is also not a calibrated benchmark per build-spec \u00a755, whose input is dated and haircut-adjusted.",
+   "hurdle_comparison": "annual_pct_on_2000 strictly greater than hurdle_pct",
    "total_symbols": 56
   }
  }

@@ -190,10 +190,12 @@ func run(pass *analysis.Pass) (any, error) {
 			// always the importer's own module tree. There is deliberately no
 			// second check of that — an unreachable branch no fixture can
 			// exercise is the shape this repo has already paid for twice.
-			root, ok := moduleRoot(path)
-			if !ok {
-				continue
-			}
+			//
+			// That sentence was true and this code still carried the branch it
+			// describes, one call down, for as long as the sentence has been
+			// here: moduleRoot returned an `ok` and the loop consumed it. It is
+			// gone, and the mutation that settled it is recorded there (F50).
+			root := moduleRoot(path)
 			if isOwner(self, root+"/"+owner) {
 				// oms importing its own write path is the pattern working.
 				continue
@@ -219,9 +221,27 @@ func run(pass *analysis.Pass) (any, error) {
 // driven is not this system's OMS, and reporting it would be the gate
 // inventing a violation. testdata carries that exact import so the scoping is
 // measured rather than asserted.
-func moduleRoot(pkgPath string) (string, bool) {
-	root, _, ok := strings.Cut(pkgPath, internalSegment)
-	return root, ok
+//
+// # There is no "not found" branch, and its ABSENCE is the measured part
+//
+// The obvious shape — `root, ok := moduleRoot(self); if !ok { return }` — was
+// here and decided nothing: `if !ok` → `if !ok && false` SURVIVED, and the
+// diagnosis is an equivalent mutant rather than a test gap, provable rather
+// than sampled. Cut returns the WHOLE path when the separator is absent, so
+// every dir built from that root is `root + "/internal/…"` — strictly longer
+// than the path that produced it — and the classification below answers the
+// same way with the branch as without it.
+//
+// Removed rather than kept-and-annotated, for the reason this file already
+// gives about its own withoutTestSuffix one function down: a guard that cannot
+// fail reads in review as the thing providing a protection the arithmetic was
+// providing all along, and the next person to simplify it has to re-derive that
+// it never was. Found in omsauthority (§3.6 rule 11) and carried to all four
+// gates the same session, under this repo's rule that a fix applied in one
+// place is applied to its mirror immediately. Recorded as F50.
+func moduleRoot(pkgPath string) string {
+	root, _, _ := strings.Cut(pkgPath, internalSegment)
+	return root
 }
 
 // isOwner reports whether the analyzed package is the one context permitted to
