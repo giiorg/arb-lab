@@ -1,69 +1,88 @@
 # HANDOFF — Funding-Rate Arbitrage Platform
 
-## ⚠ THE IMMEDIATE NEXT ACTION: **RECORD §100 HAS HAD TWO REVIEW ROUNDS AND OWES A THIRD. STILL NO IMPLEMENTATION PLAN.**
+## ⚠ THE IMMEDIATE NEXT ACTION: **THE SEVENTH GATE. ROUND 3 RAN THE PROBE AND FOUND §100's STATED GUARANTEE INSUFFICIENT — THE GATE IS NOW THE PRIMARY REMEDY, NOT THE BACKSTOP.**
 
 `docs/superpowers/specs/2026-08-29-web-dashboard-design.md` (record **§100**) has
-now been through **two Codex `artifact-review` rounds, both NO-SHIP**. Fifteen
-findings were accepted and **every one was validated against source before
-acceptance**; six more were found during that validation, two of them **in round
-1's own repair**. All corrections are in the record, in the mockups, and in
-`docs/adr-history.md` as **F32–F41**. Read **§100 §15** first — it is the review
-record and it names what is still open.
+had **two Codex `artifact-review` rounds** (§15.1–§15.5) and a **third round run
+in-session** (§15.7) whose job was to *execute* what rounds 1 and 2 could only
+name. Twenty-one findings now, **F32–F46**. Read **§15.7 first** — it is the
+newest and it moves a decision.
 
-**The next action is round 3, and §15.6 says what to attack.** In order:
+**What round 3 did.** §15.6 item 1 said the seventh gate's construct and its
+isolating probe were both named and neither run, and that F31's lesson is that a
+scoping claim holds only once a probe **with a control** is executed. The probe
+was built at `internal/app/serve/httpapi`, run against `make lint`, and deleted.
+**Four probes, one in-file control, two of the five findings are measurements.**
 
-1. **The seventh gate.** §6a establishes that `singlewriter` **cannot** give the
-   guarantee §100 originally claimed from it — `internal/oms` is not a policed
-   tree and `oms.Module` exports `Plan`/`Dispatch`/`Execute` — so a
-   capability-limited facade plus a **seventh §3.6 gate** is owed. The construct
-   the analyzer reads is named (declared import edges from
-   `internal/app/serve/…` into the OMS tree) and an isolating probe is named (an
-   operator **HTTP** package importing bare `internal/oms` and selecting
-   `Module.Execute`, where the other three analyzers are silent). **Neither has
-   been run.** F31's lesson is that a scoping claim only held once a probe *with
-   a control* was executed.
-2. **§4c's `[SPEC EDIT OWED]` against `build-spec.md` §11.** Round 2 accepted
-   `arblab serve` as the phase-1 shape **conditionally** — "not defensible until
-   the no-write premise is enforced" — so the spec edit and the seventh gate are
-   **one decision, not two**. §11:817 makes the operator a separate *failure
-   domain*, which is a safety claim.
-3. **A ninth fixture collapse, in the prose rather than the data** (F41). §11's
-   list has now been wrong about being complete three times, and two of the four
-   found by review were outside Go test code entirely — one in a mockup, one in a
-   sentence.
-4. **§7's screens and §8's provenance column**, which neither round attacked line
-   by line. F38 was found in a single sentence of §4; §8 makes thirty-odd
-   provenance claims of the same kind.
+**⚠ F44 — THE FACADE CANNOT BE THE GUARANTEE, AND §6a HAD THE TWO REMEDIES IN THE
+WRONG ORDER.** §6a said *"the guarantee is a **type**, not a lint"* and filed the
+seventh gate behind it. A facade bounds a **value**.
+`oms.ReconcileMarginOp(ClearanceDeps{JournalPath, Account string}, act)` is a
+**package-level function over two strings the server already holds**; it appends
+an operator act to §5.1's hash-chained journal and there is no value to wrap.
+**Measured:** a web-facing package with no `*oms.Module` and no facade, calling
+it with `time.Now()` as the audit timestamp, **compiles and passes all six
+gates** — while the `oms/application/ports` control import three lines away in the
+same file **is** reported. So **the gate is load-bearing and the facade is the
+backstop**, its deny-list must cover **bare `internal/oms`**, and §4c's
+`[SPEC EDIT OWED]` against core §11 is **the same decision** — as §15.6 item 2
+suspected, now with evidence rather than a guess.
 
-**The three findings worth knowing before reading anything else:**
+**The four other findings, in the order they matter:**
 
-- **F32 — a section was cited from one of its lines.** §100 read core §11's
-  *"audit = projection of the OMS journal"* and cited §11. The same section
-  specifies `cmd/arblab-operator/`, `internal/app/operator/`, `web/` as a Next.js
-  app, **Next.js on Bun**, and a separate operator failure domain. Three of
-  §100's choices are departures. They are kept and **argued**, and marked
-  `[SPEC EDIT OWED]` — note that marker sits in `docs/`, which the slice-close
-  grep does **not** cover.
-- **F36/F41 — the flagship mockup reproduced from committed data in zero of five
-  rows**, and the `need` column's constant `6` turned out to be **written down as
-  the design** in the footnote beneath it. So it was a correct rendering of a
-  wrong model, not a transcription slip. General rule now recorded: *check
-  whether the prose predicts the fixture's error; if it does, the prose is the
-  subject.*
-- **F39 — §13 deferred a capability core §7.3 had already settled**
-  (`build-spec.md:620`, separate read-only monitoring keys). Phase 2 gets
-  read-only keys; only the broker *mechanism* stays open.
+- **F43 — the inventory behind the facade was read from a line range.** §4b and
+  §6a both said `oms.Module` exports `Plan`, `Dispatch` and `Execute`, citing
+  `module.go:464-488` — a range holding exactly those three. The type exports
+  **eleven**, two of them venue-facing write paths the record never named
+  (`MarginTopUp` is *"core §7.1's margin-op **DISPATCH** path"*; `Delever` is SM
+  §7's ladder). **This is F32's own operation, inside the paragraph written to
+  repair F34.** Round 2 found F41 in round 1's repair; round 3 found F43 in round
+  2's. Three consecutive rounds where the best finding was in the last round's fix.
+- **F45 — the ninth fixture collapse, and it is in a committed artifact.**
+  `research/persistence/summary.json`'s `verdict` stores `beat_hurdle_symbols`
+  and **not the hurdle**. The threshold is `summarise.py:139`'s
+  `HURDLE_PCT = D("4.6")`, which the script **prints and does not write**, while
+  every `configs/reference*.json` carries **3.69 %**. A §8c-compliant screen
+  renders a 3.69 % hurdle beside a count computed at 4.6 %, each with correct
+  provenance. **No golden generated from `summary.json` can fail on the hurdle**,
+  because the hurdle is not in it. §5 rule 3 now reads *every ratio carries its
+  denominator, **and every derived comparison carries its comparand***.
+- **F46 — §8's provenance column was checkable and had not been checked.** Two of
+  ten sampled rows name `reference data` for quantities the schema
+  (`Fees`/`Lots`/`Hurdle`) has no field for: funding **rate cap/floor**, which
+  `venue-profiles.md:16` says is *read live*, and **position/order limits**, which
+  come from credentialed endpoints and are phase **2**. Twenty rows unsampled.
+- **F42 — §6a argued three of six analyzers and concluded about six.** The
+  conclusion survived the run; the argument did not cover it. `notimenow`'s
+  premise is the interesting one — `policedLayers` is
+  `{domain, application, engine}`, so **a handler in the web tree may read the
+  ambient clock**, which is §4a's hole from the other side.
+
+**Also: §11's own count words had stopped tracking its table** — *"five
+collapses"* and *"four of the nine"* over ten rows. Both now derived from the
+table. This is the prose collapse §15.6 item 3 asked for, in the section that
+exists to prevent it.
+
+**The next action, in order.** (1) **Write the seventh gate** — F44 makes its
+subject closer and the standing rule is that a gate lands the session its subject
+appears. (2) **Land §4c's `[SPEC EDIT OWED]` against core §11** in the same
+decision. (3) `summarise.py` writes `hurdle_pct`; regenerate `summary.json` (cheap
+— `episodes.json` is committed, no venue re-fetch). (4) Round 4's targets are
+§15.7's closing list: the actor-identity design for `ReconcileMarginOp`, the
+twenty unsampled §8 rows, and **§7's screens, which no round has reached**.
 
 **What must not be re-litigated without a new argument.** Every *Rejected
-alternative* block in §100. Settled across both rounds: three-phase delivery,
+alternative* block in §100. Settled across three rounds: three-phase delivery,
 read-only v1, the flat seven-item nav, "instrument, warmed", React/Vite with no
-chart library, and localhost-only reach for v1 — the last now standing on §6a's
-stated reason (§7.3 governs a *control plane*, and a read-only surface is not
-one) rather than by default.
+chart library, and localhost-only reach for v1 (standing on §6a's stated reason —
+§7.3 governs a *control plane*, and a read-only surface is not one). **Newly
+un-settled:** `record a margin reconcile` is **out** of §6's v2 "safe idempotent
+commands" row — it is a hash-chain append whose repeat is *refused* rather than
+repeatable, with a self-asserted actor, so it is a control action with its own
+§7.3 grant (F44).
 
 **Still not done, deliberately.** No implementation plan. `writing-plans` comes
-after round 3 and after the seventh gate is settled, not before.
-
+after the seventh gate is written, not before.
 ---
 
 ## Status (2026-08-29, session 146 · first subject): **PERSISTENCE IS MEASURED. THE SPREAD WAS NEVER THE BINDING CONSTRAINT — THE COST IS, AND IT IS THE QUANTITY THIS PROJECT HAS MEASURED LEAST. NO CODE, NO VENUE CONTACT, NO NORMATIVE EDIT.**

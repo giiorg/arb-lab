@@ -216,7 +216,7 @@ platform's most safety-critical file.
 | `kernelpurity` | Unaffected — nothing new enters `platform/`. |
 | `hexboundary` | Binds on `audit/{domain,application}`, each context's new read port, and `app/serve/application/`. The venue snapshot cache is a driven adapter in `marketdata/infrastructure/`, reached through a port. |
 | `exhaustiveswitch` | Binds on every new enum-like: attention severity, entry verdict, provenance class, venue connectivity state. |
-| `singlewriter` | **Does not bind here, and cannot be cited as the guarantee.** The gate reads *declared import edges* into two package trees; `internal/oms` itself is **not** one of them, and `oms.Module` exports `Plan`, `Dispatch` and `Execute` as public fields (`internal/oms/module.go:464-488`). A `serve` root may hold a `*oms.Module` and a handler may call it, with all six analyzers green. The guarantee must come from a **capability-limited facade** that cannot name a write use case — see §6a. |
+| `singlewriter` | **Does not bind here, and cannot be cited as the guarantee.** The gate reads *declared import edges* into two package trees; `internal/oms` itself is **not** one of them, and `oms.Module` exports **eleven** public fields, every one of them a use case (`Plan` · `Dispatch` · `Execute` · `Resolve` · `Classify` · `Recover` · `Join` · `Delever` · `Reconcile` · `LiqMonitor` · `MarginTopUp`). A `serve` root may hold a `*oms.Module` and a handler may call any of them, with all six analyzers green — **measured, not read**: see §6a and F42. The guarantee must come from a **capability-limited facade** that cannot name a write use case — see §6a. |
 
 ### 4c. Core §11 already specifies an operator process and a frontend stack — and this record contradicts it
 
@@ -335,8 +335,8 @@ no money. **No money or rate decimal is ever an operand in the browser** — the
 raw decimals still travel for tooltips and tables, where they are formatted and
 never combined.
 
-**Rule 3 — every ratio ships with its denominator.** A bare ratio is not
-encodable by the response type:
+**Rule 3 — every ratio ships with its denominator, and every derived comparison
+ships with its comparand.** A bare ratio is not encodable by the response type:
 
 ```json
 {
@@ -367,6 +367,18 @@ leg's* notional and declares that in no field, and the comparison core §2.1's
 denominator rule exists to
 protect was done at 2× by the two readers closest to it. A number that cannot
 travel without its base cannot repeat that.
+
+**The comparand clause is F45's, and it is the same disease one operand over.**
+A rendered *comparison* — "4 of 56 clear the hurdle", "p50 run clears break-even"
+— is a conclusion, and a conclusion whose threshold is not beside it cannot be
+audited or recomputed. Rule 3 as originally written covered ratios only, and a
+threshold comparison is not a ratio, which is exactly why `summary.json`'s
+`verdict` block shipped `beat_hurdle_symbols` with the hurdle it was beaten
+against nowhere in the file (§8c point 4). So the wire type for a comparison
+carries the **comparand, its unit, and its provenance class**, on the same terms
+the denominator is carried above — and a comparison whose comparand is marked
+`illustrative` may be rendered and **may not carry a verdict**, which is the
+`at_least_c_allocated` obligation transposed.
 
 **Rule 4 — every response carries `server_now`.** Countdowns ("next settlement in
 1h 12m") render against it, never against `Date.now()`. This is `notimenow`
@@ -401,12 +413,29 @@ age beside it. A stale spread rendered next to a green `CANDIDATE` chip is the
 | | The browser may | The browser may not |
 |---|---|---|
 | **v1** | read; nothing else | anything |
-| **v2** | run safe idempotent commands: `screen run`, `reconcile run`, `reference fetch`, record a margin reconcile | place, amend or cancel orders |
+| **v2** | run safe idempotent commands: `screen run`, `reconcile run`, `reference fetch` | place, amend or cancel orders; **record a margin reconcile** — see below |
 | **v3** | **arm / disarm** a strategy per symbol; kill switch | compose an order — ever |
 
 Order placement is the *engine's* job; the browser's job is to supervise it —
 show what the engine is armed for, what it is about to do and why, what it did,
 and carry an always-visible kill switch.
+
+**`record a margin reconcile` was in the v2 row and does not belong there
+(F44).** It was grouped with `screen run` and `reference fetch` as a *safe
+idempotent command*, and it is neither half of that phrase. It is an **append to
+§5.1's hash chain**, and `ReconcileMarginOp`'s own refusal set includes *"already
+reconciled"* — so a repeated request is **refused**, which is not idempotence; it
+is a second outcome the operator has to interpret, during the incident the act
+exists to close. Its `MarginOpReconciliation.Actor` is *"free text and
+self-asserted"*, which `marginop.go` argues correctly for §7.4's solo-honest
+default **when a human types it at a terminal**, and which becomes *anonymous with
+a label* when an HTTP request supplies it — against §7.3's *"no anonymous or
+localhost-implicit trust"* and its *"immutable per-actor audit"*. The immutability
+holds, because the value is inside the hash chain; the **attribution** does not.
+
+So it is re-graded as **a control action with its own §7.3 grant**, and it does
+not ship before §7.3's clauses do. §6a's ladder point 2 already said each rung is
+a distinct authorization; this is the rung that was filed under the wrong one.
 
 Arm/disarm is a write, but it is the right *shape* of write for this codebase:
 it only ever changes a permission, and its safe direction is disarmed. That
@@ -430,16 +459,58 @@ a disarm button's failure mode is that you trade less.
 construction, no new rule is needed"* was wrong in a way worth stating precisely.
 The analyzer reads **declared import edges into two package trees**
 (`oms/application/ports`, `oms/infrastructure/driven`). `internal/oms` itself is
-neither, and `oms.Module` exports `Plan`, `Dispatch` and `Execute` as public
-fields (`internal/oms/module.go:464-488`) — which a composition root legitimately
-holds, since wiring them is what a root is for. A handler reached from that root
-can call them **with all six analyzers green**. The rule is doing its job; it was
-being asked to answer a question about a package it does not police.
+neither, and `oms.Module` exports **eleven** public fields — which a composition
+root legitimately holds, since wiring them is what a root is for. A handler
+reached from that root can call any of them **with all six analyzers green**. The
+rule is doing its job; it was being asked to answer a question about a package it
+does not police.
 
-So the guarantee is a **type**, not a lint: `serve` receives a
-**capability-limited facade** whose method set contains no write use case, and
-the `*oms.Module` never leaves the wiring file. Rule 6's own reasoning applies —
-a package is the unit of dependency, and here a *type* is the unit of authority.
+**Eleven, not three, and the first draft of this paragraph said three (F43).** It
+read the fields in the line range it had cited — `module.go:464-488`, which holds
+exactly `Plan`, `Dispatch` and `Execute` — rather than the type. That is F32's
+own operation applied to a Go struct, inside the paragraph written to repair F34,
+and it matters because **the facade below is sized by this inventory**. Two of
+the eight it missed are venue-facing write paths in their own right:
+`MarginTopUp` is, in `module.go`'s own words, *"core §7.1's margin-op **DISPATCH**
+path"* — a second place an order becomes a request at a venue, beside the
+`Dispatch` this section calls *"the one place"* — and `Delever` is SM §7's
+`PackageDelever` ladder. `Classify` owns §6.7's `outstanding_reserved_reductions`
+ledger; `Recover`, `Join`, `Reconcile` and `Resolve` each write the projection.
+So the facade's obligation is stated as a property, not as a list: **it excludes
+every write capability on `Module`**, and the list above is evidence rather than
+the specification.
+
+So part of the answer is a **type**: `serve` receives a **capability-limited
+facade** whose method set contains no write use case, and the `*oms.Module` never
+leaves the wiring file. Rule 6's own reasoning applies — a package is the unit of
+dependency, and here a *type* is the unit of authority.
+
+**But the type is the SECOND half, not the first, and the first draft of this
+section had the order backwards (F44).** It said *"the guarantee is a type, not a
+lint."* A facade bounds a **value**, and part of the OMS write authority is not on
+any value:
+
+> `oms.ReconcileMarginOp(deps ClearanceDeps, act domain.MarginOpReconciliation)`
+> is a **package-level exported function**, and `ClearanceDeps` is
+> `{JournalPath, Account string}` — two strings the server already reads from its
+> own config. It appends an operator act to §5.1's hash-chained journal; the
+> append, in `marginclearance.go`'s words, *"is durable when it returns."* It needs
+> no `*oms.Module`, no port, no repository, and **no facade can be interposed**,
+> because there is no value to wrap.
+
+**Measured, not argued** (§15.7): a web-facing package holding no `*oms.Module`
+and accepting no facade, calling `ReconcileMarginOp` with `time.Now()` as the
+audit timestamp, **compiles and passes all six gates** — while a
+`oms/application/ports` import three lines away in the same file is reported.
+
+The sting is that this section already named the function. It quotes §7.3's note
+that `arblab margin reconcile` is *"issued offline … because the API does not
+exist; when it does, this act moves onto it"* and answers *"This subsystem is that
+API arriving."* The destination was identified and the remedy specified for it
+does not reach it. **So the seventh gate below is load-bearing and the facade is
+the backstop** — the gate's default-deny of bare `internal/oms` is what closes
+this route — which also settles §15.6 item 2: §4c's `[SPEC EDIT OWED]` and the
+gate are one decision, and the gate is its first half.
 
 **Second, and independent of any gate: §7.3 governs this surface and this record
 never cited it.** `build-spec.md:623` is normative and explicit about a browser
@@ -484,16 +555,28 @@ construct the analyzer reads**, not the feature that motivated it:
 > appears** — the standing rule since the last deferral expired on 2026-07-27 —
 > because a lint over an empty tree passes trivially.
 
-**And its isolating probe is named now, while the reasoning is fresh**, because
-"a clean gate run is not evidence, and neither is a probe two gates can see": an
-operator **HTTP** package importing bare `internal/oms` and selecting
-`Module.Execute`. `singlewriter` is silent there today (neither policed tree is
-imported), `hexboundary` is silent (`internal/oms` is `layerOther`), and
-`notimenow` is silent (no clock read) — so exactly one analyzer may fire, and
-that probe is also the realistic accident.
+**Its isolating probe has now been RUN, with a control** (§15.7), because "a clean
+gate run is not evidence, and neither is a probe two gates can see". The probe is
+an operator **HTTP** package importing bare `internal/oms` and selecting
+`Module.Execute`, and it is also the realistic accident. **All six gates are
+silent on it**; the control — `oms/application/ports` imported from the same file,
+in the same package, under the same invocation — **is reported**, which is the half
+carrying the information. A second route is silent too: `internal/oms/application`
+imported directly, holding an `*application.Executor` with no `*oms.Module`
+anywhere. That is why the deny-list below names both trees.
 
-Recorded as **F34**. Phase 2 and 3 do not begin without this section satisfied,
-and §13's arming store inherits all of it.
+The earlier draft of this paragraph argued **three** of the six analyzers and
+concluded about all six (**F42**). The conclusion survived the run; the argument
+did not cover it. `nofloat`, `kernelpurity` and `exhaustiveswitch` are each silent
+for a different reason, and `notimenow`'s is structural rather than incidental:
+`policedLayers` is `{domain, application, engine}` (`notimenow.go:123`), so
+`internal/app/serve/httpapi` is outside it **by position** — an HTTP handler in
+the web tree may read the ambient clock, which is §4a's hole seen from the other
+side, and it is why the audit timestamp in the measurement above came from
+`time.Now()` with nothing objecting.
+
+Recorded as **F34**, **F42**, **F43** and **F44**. Phase 2 and 3 do not begin
+without this section satisfied, and §13's arming store inherits all of it.
 
 ## 7. Screens
 
@@ -550,7 +633,7 @@ arbitrage opportunity."* This is that list, with provenance, honestly marked.
 | Funding rate, each leg, live | `venue/funding.go`, both venues | 1 |
 | Predicted next funding (premium index) | venue REST | 1 |
 | Funding interval and grid alignment (4h vs 8h) | `ranking.json` + live | 1 |
-| Rate cap / floor per venue | reference data | 1 |
+| Rate cap / floor per venue | **live** — Bybit ticker `fundingCap`, Binance `fundingInfo` (F46) | 1 |
 | Spread — the actual revenue | derived, server-side | 1 |
 | Settlements accrued; countdown to next | derived | 1 |
 
@@ -575,7 +658,7 @@ arbitrage opportunity."* This is that list, with provenance, honestly marked.
 | Free vs allocated collateral | `venue/balances.go` | 2 |
 | Basis / mark divergence between legs | `venue/mark.go` | 1 |
 | Tick, lot, min-notional filters | reference data | 1 |
-| Position and order limits | reference data | 1 |
+| Position and order limits | `positionRisk` / `symbolConfig` — **credentialed** (F46) | **2** |
 
 **Persistence and the decision**
 
@@ -586,7 +669,7 @@ arbitrage opportunity."* This is that list, with provenance, honestly marked.
 | P(clearing break-even) at this run length | `summary.json`'s `run_vs_breakeven` | 1 |
 | Expected net per episode | `episodes.json` | 1 |
 | Annualised return, with denominator | derived | 1 |
-| Hurdle comparison; concentration; sample size | `verdict`, F27, F29 | 1 |
+| Hurdle comparison; concentration; sample size | `verdict` **once it carries its hurdle** (F45), F27, F29 | 1 |
 
 ### 8a. The cost assumption becomes a control
 
@@ -677,8 +760,31 @@ hurdle source of truth.** Three consequences:
    The read side inherits that: an unpopulated cost reads as free and an
    unpopulated rate reads as zero fee, and both compute the gate in our favour.
 
-> This is also the reason §5 rule 3 (every ratio carries its denominator) is not
-> mere hygiene. Core §2.1 **requires** it: a gate may report on a denominator other
+**4. A stored comparison must carry its comparand, and `verdict` does not (F45).**
+Point 2 above is the right treatment for a *figure*, and §8's Persistence table
+sources the hurdle **comparison** to a different artifact where the treatment
+cannot be applied. `summary.json`'s `verdict` block holds `beat_hurdle_symbols`
+per cost level and **no hurdle field**. The threshold is
+`research/persistence/summarise.py:139`'s `HURDLE_PCT = D("4.6")` — annotated in
+place as *"illustrative and … NOT a calibrated constant"* — and the script
+**prints** it and does not **write** it. Rendering the hurdle from the revision
+per point 2 therefore puts **3.69 % beside a count computed at 4.6 %**: every
+field with correct provenance, and the comparison still incoherent, because a
+comparison's base is unrecoverable from a file that does not hold it.
+
+So `summarise.py` writes `hurdle_pct` and its `class` into the `verdict` block
+before any panel reads it. **This is the ninth fixture collapse and it is in the
+artifact rather than in a test**: no golden generated from `summary.json` can
+fail on the hurdle, since the hurdle is not in `summary.json` — §11's
+*"generated from real committed data, never hand-written"* rule is what hides it,
+because the golden faithfully reproduces `4` at any threshold. It is F30's shape
+on the other operand — F30 found the *return* had no declared denominator; this
+is the *comparison* with no declared threshold.
+
+> This is also the reason §5 rule 3 — **every ratio carries its denominator, and
+> every derived comparison carries its comparand**; the second clause is F45's,
+> because a threshold comparison is not a ratio and that is exactly why rule 3 did
+> not cover it — is not mere hygiene. Core §2.1 **requires** the first: a gate may report on a denominator other
 > than `C_allocated` *"on one condition: the denominator is explicitly declared in
 > the artifact."* Rule 3 makes that condition structural instead of editorial.
 
@@ -790,8 +896,9 @@ endpoint may shape the JSON; it may not be the authority for what is in it.
 Recorded as **F37**. `tools/mutate.sh` on the classifier and the
 encoder. Positive controls on every harness.
 
-**The fixture-collapse checklist runs before the mutations.** Five collapses are
-already nameable and must be designed against:
+**The fixture-collapse checklist runs before the mutations.** **Eleven** collapses
+are nameable and must be designed against — the count is stated because this
+list's own count word was wrong (see below):
 
 | Collapse | Why it hides a defect |
 |---|---|
@@ -805,9 +912,22 @@ already nameable and must be designed against:
 | **Independently hand-written responsive mirrors** | the desktop table and the mobile card state one observation twice, so a fix applied to one leaves the other asserting the old value |
 | A golden **generated by the endpoint it checks** | it agrees by construction — it can detect change, never error (see above) |
 | A book fixture whose **configured size fits at the best level** | multi-level VWAP and top-of-book-only return the **same cost**, so the flat-cost defect §8b exists to fix survives inside its own remedy |
+| A golden over an artifact holding a **stored comparison but not its comparand** | `summary.json`'s `beat_hurdle_symbols` reproduces as `4` at **any** hurdle, so no fixture generated from it can fail on the threshold (**F45**) |
 
-**Four of the nine were found by the review rounds in §15, not by writing this
-list** — which is the list's own lesson, twice over.
+**Six of the eleven were found by review rather than by writing this list** —
+rows 6-10 by rounds 1 and 2, row 11 by round 3 — which is the list's own lesson,
+three rounds running. Rows 1-5 are the original five; every row added since came
+from someone attacking the document.
+
+**And the sentence above it was wrong about its own table (round 3).** It read
+*"Five collapses are already nameable"* against a list that had grown to ten, and
+*"Four of the nine"* against the same ten — the golden-generated row (F37) was
+added and neither count word moved. A list about quantities that fail to vary
+carried two constants that had stopped tracking it. This is the shape §15.6 item
+3 asked round 3 to look for, found in the prose of the section that exists to
+prevent it: **an enumeration's count word is a claim, and it decays silently
+because nothing recomputes it.** Both counts are now derived from the table and
+restated whenever a row lands.
 
 **The zero/unknown collapse is the one with a live instance.** The mockup's
 status strip read `Open pkgs 0 · flat both venues` and its panel read *"Both
@@ -882,7 +1002,11 @@ and its counter-argument and stops there; settling it needs a session that owns
 §42b, not this one. **No claim is made about which hurdle figure is correct**
 (3.69 % in every committed revision, 4.6 % in §99's table and core §2.1's prose,
 both labelled illustrative where they appear); §8c's requirement is that whichever
-is rendered arrives with its provenance attached.
+is rendered arrives with its provenance attached — **which F45 shows is sufficient
+for a figure and not for a stored comparison**, since `summary.json`'s
+`beat_hurdle_symbols` was computed at 4.6 % and the file records no hurdle at all.
+Provenance on the hurdle and provenance on the count do not make the two
+comparable; only writing the comparand beside the conclusion does.
 
 ## 13. Open questions, left open deliberately
 
@@ -942,6 +1066,16 @@ is rendered arrives with its provenance attached.
 3. **`.gitignore` gained `.superpowers/`** during this session (the brainstorming
    companion's scratch directory). Unrelated to the subsystem; recorded so it is
    not mistaken for drift.
+4. **`research/persistence/summarise.py` must write `hurdle_pct` into `verdict`,
+   and `summary.json` be regenerated** (F45). One line in the script and a
+   regenerated artifact; owed before any panel reads the block, because until
+   then the comparison it publishes has no recoverable base. Note that the
+   regeneration is cheap: `summarise.py` reads `episodes.json`, which **is**
+   committed (§99), so this does not need a venue re-fetch.
+5. **The seventh §3.6 gate is owed as the PRIMARY remedy, not the backstop**
+   (F44). §6a's deferral names the construct; F44 moves it ahead of the facade
+   and widens its deny-list to bare `internal/oms`. Debt 0's spec edit cannot be
+   settled without it — §15.7 records them as one decision.
 
 ---
 
@@ -1108,3 +1242,103 @@ error**; if it does, the prose is the subject.
 4. **§7's remaining screens and §8's provenance column**, which neither round has
    attacked line by line. F38 was found in one sentence of §4; §8's table makes
    thirty-odd provenance claims of the same kind.
+
+### 15.7 Round 3 — the probe was run, and it found the remedy insufficient
+
+**Instrument: not a review round.** §15.6 item 1 said the seventh gate's construct
+and its isolating probe were both *named* and neither *run*, and that F31's own
+lesson is that a scoping claim holds only once a probe **with a control** has been
+executed. So round 3 opened by running it. Items 3 and 4 were then attacked by
+reading §8's provenance column against the schemas rather than against the
+filenames. **Five findings, F42–F46; two of them are measurements.**
+
+#### The run
+
+A temporary package at `internal/app/serve/httpapi`, built and deleted in the
+session, never committed. `make lint` over `./...` each time.
+
+| Probe | Result |
+|---|---|
+| bare `internal/oms` imported, `Module.Execute` selected | **all six gates silent**, exit 0 |
+| the same file, plus `oms/application/ports` (**control**) | **`singlewriter` reports line 8**; the `internal/oms` import at line 7 stays silent |
+| `internal/oms/application` imported directly, `*application.Executor` held, **no `*oms.Module` anywhere** | **all six gates silent** |
+| `oms.ReconcileMarginOp` called with `ClearanceDeps{JournalPath, Account}` and `time.Now()`, **no `*oms.Module`, no facade** | **`go build` succeeds, all six gates silent**, control in the same file still reported |
+
+The control is the half that carries the information. Had the `ports` import also
+been silent, the run would have said the invocation never selected the package,
+and every row above would have been vacuous — the same structure F31 used, and
+the reason its row says *"the control drew none."*
+
+#### What the run changed
+
+**§6a's conclusion survived and its argument did not cover it (F42).** The
+paragraph named three analyzers and concluded about six. All six are in fact
+silent, so nothing about the design moves — but three of the six premises were
+unwritten, and `notimenow`'s turns out to be the interesting one: `policedLayers`
+is `{domain, application, engine}`, so a handler in the web tree may read the
+ambient clock, which is §4a's hole seen from the other side. The audit timestamp
+in the fourth probe came from `time.Now()` with nothing objecting.
+
+**The facade cannot be the guarantee (F44), and this is the finding that changes
+the shape of the work.** §6a said *"the guarantee is a **type**, not a lint"* and
+filed the seventh gate behind it. A facade bounds a **value**;
+`oms.ReconcileMarginOp` is a package-level function over two strings, and there
+is no value to wrap. **The gate is the load-bearing remedy and the facade is the
+backstop** — which settles §15.6 item 2 in the direction it guessed: §4c's
+`[SPEC EDIT OWED]` and the seventh gate are one decision, and the gate is its
+first half, not its enforcement.
+
+**The inventory behind the facade was read from a line range (F43).** §4b and §6a
+both said `oms.Module` exports `Plan`, `Dispatch` and `Execute`, citing
+`module.go:464-488` — a range that contains exactly those three. The type has
+**eleven** exported fields, two of them venue-facing write paths the record never
+named. This is **F32's own operation** — a construct inventoried from the lines
+that were cited — occurring **inside the paragraph written to repair F34**. Round
+2 found F41 inside round 1's repair; round 3 found F43 inside round 2's. That is
+now three consecutive rounds where the highest-value finding was in the previous
+round's fix, and it is the strongest argument in this record for the next round
+existing.
+
+#### What the reading changed
+
+**§8's provenance column was checkable and had not been checked (F46).** §8c
+defines *reference data* as `configs/reference.*.json`, whose Go type is exactly
+`Fees` / `Lots` / `Hurdle`. Two rows name it for quantities with no field:
+funding **rate cap/floor**, which `venue-profiles.md:16` says is *"read live"*,
+and **position and order limits**, which come from credentialed account endpoints
+and are therefore phase 2 by §8's own phasing of every other credentialed read.
+The rate cap is the sharper of the two, because filing a live quantity as a
+governed revision is §8c point 1 run backwards. Thirty-odd rows were claimed and
+a sample of ten was checked; the other twenty are still a reading.
+
+**The ninth collapse is in an artifact, and §15.6 predicted its neighbourhood
+(F45).** `summary.json`'s `verdict` stores `beat_hurdle_symbols` and not the
+hurdle. The threshold lives in `summarise.py:139` as `HURDLE_PCT = D("4.6")`,
+which the script prints and does not write, while the committed reference
+revisions all carry **3.69 %**. A §8c-compliant screen therefore renders a 3.69 %
+hurdle beside a count computed at 4.6 %, each with correct provenance. §12
+already declines to settle which figure is right and requires only that
+provenance is attached — **sufficient for a figure, insufficient for a stored
+comparison**, and §5 rule 3 now says so.
+
+**And §11's own count words had stopped tracking its table.** *"Five collapses
+are already nameable"* and *"four of the nine"* stood over ten rows. A list about
+quantities that fail to vary carried two constants that had quietly stopped
+varying with it.
+
+#### What round 4 should attack
+
+1. **The seventh gate is now specified and still not written.** F44 makes it the
+   primary remedy rather than the backstop, so the deferral's own rule — the gate
+   lands the session its subject appears — now binds on a subject that is closer.
+   Its deny-list must cover **bare `internal/oms`** (F44's route), not only the
+   `application` tree.
+2. **`ReconcileMarginOp`'s actor field.** §7.3 requires an authenticated identity
+   and a per-actor audit; the field is self-asserted free text, correctly, for a
+   terminal. The design for how an HTTP caller's identity reaches that field does
+   not exist and phase 2 cannot start without it.
+3. **The twenty §8 rows that were not sampled**, against schemas rather than
+   filenames. Two of ten were wrong.
+4. **§7's screens**, still unattacked line by line — the one part of §15.6 round
+   3 did not reach.
+
