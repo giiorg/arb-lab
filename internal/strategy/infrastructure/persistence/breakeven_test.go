@@ -48,6 +48,18 @@ func TestBreakeven_AtTheArtifactsPin(t *testing.T) {
 	if got.At.Entry.Decimal() != "0.0005" || got.At.Cost.Decimal() != "0.0021" {
 		t.Errorf("At = %s/%s, want 0.0005/0.0021", got.At.Entry.Decimal(), got.At.Cost.Decimal())
 	}
+
+	// Verify the sum of episodes equals the population at this coordinate. The
+	// population at entry 0.0005 is 3425 (independently verified by folding
+	// research/persistence/episodes.json excluding run==0 censored records).
+	totalEpisodes := 0
+	for _, row := range got.Rows {
+		totalEpisodes += row.Episodes
+	}
+	const populationAt0_0005 = 3425
+	if totalEpisodes != populationAt0_0005 {
+		t.Errorf("sum of Episodes = %d, want %d (population)", totalEpisodes, populationAt0_0005)
+	}
 }
 
 // The table is a function of BOTH coordinates. A table asserted at one cost
@@ -64,9 +76,12 @@ func TestBreakeven_ClearedCountMovesWithTheCost(t *testing.T) {
 		t.Fatalf("Breakeven dear: %v", err)
 	}
 	cheapTotal, dearTotal := 0, 0
+	cheapEpisodes, dearEpisodes := 0, 0
 	for i := range cheap.Rows {
 		cheapTotal += cheap.Rows[i].ClearedCost
 		dearTotal += dear.Rows[i].ClearedCost
+		cheapEpisodes += cheap.Rows[i].Episodes
+		dearEpisodes += dear.Rows[i].Episodes
 		if cheap.Rows[i].Episodes != dear.Rows[i].Episodes {
 			t.Errorf("row %d: episode count moved with the cost (%d vs %d); it must not",
 				i, cheap.Rows[i].Episodes, dear.Rows[i].Episodes)
@@ -74,6 +89,15 @@ func TestBreakeven_ClearedCountMovesWithTheCost(t *testing.T) {
 	}
 	if cheapTotal != 586 || dearTotal != 125 {
 		t.Fatalf("cleared totals = %d/%d, want 586/125", cheapTotal, dearTotal)
+	}
+
+	// Verify episode counts sum to the population at this coordinate.
+	const populationAt0_0005 = 3425
+	if cheapEpisodes != populationAt0_0005 {
+		t.Errorf("cheap: sum of Episodes = %d, want %d (population)", cheapEpisodes, populationAt0_0005)
+	}
+	if dearEpisodes != populationAt0_0005 {
+		t.Errorf("dear: sum of Episodes = %d, want %d (population)", dearEpisodes, populationAt0_0005)
 	}
 }
 
@@ -86,11 +110,39 @@ func TestBreakeven_BucketsCapAtTwelve(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Breakeven: %v", err)
 	}
-	last := got.Rows[len(got.Rows)-1]
-	if last.Run != 12 || !last.Plus || last.Episodes != 3 {
-		t.Fatalf("12+ bucket = %+v, want run 12, Plus, 3 episodes", last)
-	}
 	if len(got.Rows) != 2 {
 		t.Fatalf("got %d rows, want 2 (run 11 and the 12+ bucket)", len(got.Rows))
+	}
+
+	// Assert the first bucket fully. The fixture has one run-11 episode with
+	// accrued 0.001, which is NOT > 0.0021, so ClearedCost is 0.
+	first := got.Rows[0]
+	if first.Run != 11 || first.Plus || first.Episodes != 1 || first.ClearedCost != 0 {
+		t.Errorf("Rows[0] = %+v, want {Run: 11, Plus: false, Episodes: 1, ClearedCost: 0}", first)
+	}
+
+	// Assert the last bucket (the 12+ bucket). Runs 12, 13, 30 collapse here: one
+	// with accrued 0.001 (not cleared), two with 0.003 and 0.004 (both > 0.0021,
+	// both cleared).
+	last := got.Rows[1]
+	if last.Run != 12 || !last.Plus || last.Episodes != 3 || last.ClearedCost != 2 {
+		t.Errorf("Rows[1] = %+v, want {Run: 12, Plus: true, Episodes: 3, ClearedCost: 2}", last)
+	}
+
+	// Verify Plus is set only on the 12+ bucket.
+	for i, r := range got.Rows {
+		if (i == 1) != r.Plus {
+			t.Errorf("Rows[%d]: Plus = %v, want %v", i, r.Plus, i == 1)
+		}
+	}
+
+	// Verify episode counts sum to the fixture population (4 episodes total).
+	totalEpisodes := 0
+	for _, row := range got.Rows {
+		totalEpisodes += row.Episodes
+	}
+	const fixturePopulation = 4
+	if totalEpisodes != fixturePopulation {
+		t.Errorf("sum of Episodes = %d, want %d (fixture population)", totalEpisodes, fixturePopulation)
 	}
 }
