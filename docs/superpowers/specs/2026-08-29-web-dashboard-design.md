@@ -713,8 +713,8 @@ arbitrage opportunity."* This is that list, with provenance, honestly marked.
 | Predicted next funding (premium index) | ⚠ **F70 — the lane's ONE REST source carries no rate.** `configs/capture.json` declares 39 WebSocket `sources` and **one** `rest_sources` entry — Binance `/fapi/v1/fundingInfo`, one symbol, 1h poll — which §39p-2 says holds *"interval, cap or floor"* and NOT the rate: that is rows 3 and 4, and **row 4 already cites it and calls it *live***. The rate is on the socket, and it is **row 1's field** (`funding.go:80`: *"the venue's current estimate for the NEXT settlement"*), so this row is F65's lane again. `premiumIndex` occurs 4× in the repo — three in Python probes reading it for a **mark**, one in `build-spec.md:593` — and **zero** in `internal/`, `cmd/`, `configs/` or Profiles; `lastFundingRate` is unrecorded in Profiles and its NAME says *last* | **none** |
 | Funding interval and grid alignment (4h vs 8h) | ⚠ **F66 — the file DOES hold it** (`binance_interval_hours`, `bybit_interval_minutes`, `same_grid` on all 466; `universe.go:183` converts at the comparison). But `report.go:141` is `interval_changes` **`int` + `omitempty`**, so *measured zero* (30 rows) and *never measured* (405 rows) reach a reader through one silence; and `same_grid == false` ⇔ `eligible == "mismatched_grid"` **35/35**, so the display column IS the exclusion verdict — from a snapshot dated **2026-08-01** over a quantity the same file records changing up to **1445** times. The *"+ live"* half is **F65** | 1, **dated**; live: none |
 | Rate cap / floor per venue | **live** — Bybit ticker `fundingCap`, Binance `fundingInfo` (F46) | 1 |
-| Spread — the actual revenue | derived, server-side | 1 |
-| Settlements accrued; countdown to next | derived | 1 |
+| Spread — the actual revenue | ⚠ **F77 — every SPREAD producer in the tree pairs SETTLED prints, and each carries a coverage statistic this cell does not.** Three exist: `screening/pairing.go:56`, and `crossvenue/pairing.go:82` over `Settlement` — *"one venue-published **settled** funding print"* — matched on a **caller-chosen `round time.Duration` bucket** because *"same interval is NOT same phase"*, returning `PairStats` that counts every dropped collision; and `crossvenue/sample.go:219` `MergeDecisionPoints`, which joins on **equal** instants and counts `BinanceOnly`/`BybitOnly`, *"a one-legged spread is not a spread."* A spread of two **live** `Funding.Rate` readings has **no producer at all**, and settled-rate history is the one class `build-spec.md:793` excludes as a signal — round 7's own rejected alternative. §45e's `WindowLedger` then says a window's revenue is `Net` **plus** an explicitly carried unhedged-accrual term (`PhaseMax`/`PhaseMin`), zero only on a phase-aligned grid: *"a ledger, not a footnote."* *"server-side"* answers §5 rule 2, not this column | **replay 1 / live: none** (F75) |
+| Settlements accrued; countdown to next | ⚠ **F78 — the countdown's `server_now` has no venue, no band and no validity, and `ServerNow` carries all three on purpose.** `venue/funding.go:95`: *"NextSettle is the venue's next settlement instant, in the **VENUE's own time base**. It is compared against `Clock.ServerNow(venue)`, **never** `Clock.Now`."* §3.5 *"puts a venue in ServerNow's signature"* (`clock.go:46`); it is *"authoritative for **funding-boundary** decisions"*; it returns a `ServerTime` carrying an uncertainty band whose `Certainty` is **three-valued** — *"it has three values on purpose, and the third is the point"*; and `ErrServerTimeUnset` is *"where an uncalibrated venue becomes visible"*, because `ServerNow` has no error to return. §5 rule 4 ships **one scalar** `server_now` for a **two-leg** countdown. *Settlements accrued* is a second quantity on one row: the only `Accrued` in the tree is `screening.LevelStats.Accrued` (a **backtest** count) and `crossvenue.WindowLedger` (over **settled** series); for an open position §15.9's own citation rules — `reconcile.go:205`, *"no fill is journaled"* | **replay 1 / live: none** (F75) |
 
 **Entry and exit cost — where the verdict actually lives**
 
@@ -724,7 +724,7 @@ arbitrage opportunity."* This is that list, with provenance, honestly marked.
 | The account's *actual* tier and discounts | signed `commissionRate` — ⚠ F24: the demo publishes the right number and charges another | 2 |
 | Half-spread crossing at the configured size | ⚠ **F71 — *VWAP* names no construct outside this record: 0 in `internal/`, 0 in `cmd/`, 0 in `build-spec.md`.** Before round 7 it occurred 3× in the whole repository and all three were in this file — this row, §11's book-fixture line and §11's *"VWAP, crossing, slippage"* assertion. *(The total is no longer a stable measurement: §15.12 discusses the word. The **zero in code** is, and it is the half that bites.)* The tree's term is the **walk premium**, and `cost.go` fixes its reference: *"|Σ level fills − **best**·qty|"* — the touch, so the half-spread is not in the number, which is what F26 says of the constant too. The mid exists **once**, as `(ask−bid)/mid`, the **stratum** feature — and `view.go:14`, `readport.go:18` and `enter.go:217` each refuse a collapsed mid as a price, the first citing Profiles for the rule. `PriceView` also drops depth *"deliberately"* | **none** |
 | Slippage at the configured size | ⚠ **F72/F73 — this and the row above are the operands of a MAX, tabled as summands.** `sideCost` is `max(walk premium + adverse charge, p90 charge)`, worse side per leg — `build-spec.md:793`'s *"the **worse of**"* verbatim — so adding them double-charges depth while row 11 (*"4 fee legs + 2 crossings"*) drops the p90; and **`AdverseMove`, a charge inside that max, has no row in this table at all**. F73: `NewConservativeCostModel` has **0** non-test call sites (9 test, as control), `driven.BookSource` has **0** implementations, **no calibration artifact is committed**, and its input `/archive/` is **gitignored**. `marketdata.New` has one production call site — `app/sim/sim.go:132`, *"replayed archive … under TestClock"* | **none** |
-| Round trip = 4 fee legs + 2 crossings | derived | 1 |
+| Round trip = 4 fee legs + 2 crossings | ⚠ **F72** (the combining rule) **and F75** — its inputs are rows 7, 8, 9 and 10, whose phases are 1, **2**, **none**, **none**. Stamped 1 it is the *modelled* round trip and not the account's, which §8a/F35 says may carry no verdict; row 8 — *the account's actual tier* — is the phase-2 input it silently drops | **none** (F75) |
 | Realized cost from actual fills | ⚠ one confounded observation (§98) | **open** |
 
 **Carry, margin and risk**
@@ -743,11 +743,11 @@ arbitrage opportunity."* This is that list, with provenance, honestly marked.
 
 | Quantity | Source | Phase |
 |---|---|---|
-| Settlements to break even | derived from spread and cost | 1 |
+| Settlements to break even | ⚠ **F76/F79 — this table computes break-even TWICE, on two cost bases, two rows apart.** Here it is derived server-side from *"spread and cost"* — row 5 (**none**) and row 11 (**none**) — while row 22 reads it from `summary.json`'s `run_vs_breakeven`, which F55 says is pinned to entry level `0.0005` and cost `0.0021` and declares neither. Rendered together, a `P(clearing break-even)` computed at 21 bp sits beside a settlement count computed at §8b's per-symbol book cost. It is also the **only** derived cell that names its inputs, and both names are ambiguous inside this same table — see F76 | **none** (F75) |
 | p50 / p75 / p90 historical run length | `summary.json` | 1 |
 | P(clearing break-even) at this run length | ⚠ **F55 — `summary.json`'s `run_vs_breakeven`, which is pinned to entry level `0.0005` and cost `0.0021` and declares neither.** Varying the level alone moves the run-4 figure 10.0 → 38.6 → 94.9 → 100.0 %. Owed before any panel reads it | 1 |
 | Expected net per episode | ⚠ **F69 — the file holds `accrued` (GROSS) and no net field at any depth.** Net is `summarise.py:78`/`:109`, `accrued − cost`, keyed by `COSTS = 0.0021 / 0.0029 / 0.0090` — so the row cites **one operand of a subtraction whose other operand is F26's assumption**, with no cost coordinate in the provenance. Honest form: *`episodes.json` (gross) + the cost revision (§8c)*, which also puts F35's verdict/scenario split on the row | 1 for the gross half |
-| Annualised return, with denominator | derived | 1 |
+| Annualised return, with denominator | ⚠ **F79 — row 23 got F69's treatment and this row is the same subtraction, annualised.** The **denominator** half holds: `summary.json`'s `per_symbol[].annual_pct_on_2000` carries it and §5 rule 3 types it. The **parameters** do not. That field is a dict keyed by exactly the three costs §8a offers as a control — `0.0021 / 0.0029 / 0.0090` — so §8a's **custom** and §8b's **per-symbol** cost have **no cell in the artifact**, and the whole `per_symbol` block is pinned to one entry level (F60: `0.001`) recorded in no field, while the file's own header declares `levels` (4) and `costs` (3). Answering for either means `episodes.json`'s gross plus the cost revision — F69's honest form, owed on this row too | 1 for the gross half (F75) |
 | Hurdle comparison; concentration; sample size | `verdict` **once it carries its hurdle** (F45) **and its entry level** — ⚠ **F60: it carries four hurdle-provenance fields and no level.** Pinned at `0.001` via `per_symbol`; `beat_hurdle_symbols` at 21 bp reads 2/61 · 3/60 · **4/56** · 3/49 across the four levels the file declares, and the published column is the unique maximum. At 90 bp the published `0/56` becomes **2/49**. §14 debt 7 does not name this block | 1 |
 
 **⚠ Three quantities §7 puts on a screen have no row in this table at all
@@ -1329,6 +1329,56 @@ comparable; only writing the comparand beside the conclusion does.
     citing `venue-profiles.md` for the rule. Cheap and separate: §11's fixture
     line and its *"VWAP, crossing, slippage"* assertion are rewritten with the
     row.
+
+24. **§8's Phase column is COMPUTED for a derived row, and the row names its
+    input rows by number** (F75, F76). Five rows are stamped phase 1 over inputs
+    at *none*, *dated* and *2*, and the stamp fails in the direction that ships
+    a drawn panel with nothing behind it — §3's own rejected alternative. The
+    two halves are one edit: the phase is `max(inputs)`, which is only checkable
+    once the inputs are named, and naming them in prose is not enough because
+    *spread* and *cost* are each two different quantities inside this table
+    (`crossvenue.Match.Spread` vs `domain.BookFeatures.Spread`; row 11's round
+    trip vs §8b's decomposition vs §8a's scenario). **Row indices, not words.**
+    Once the column is computed, this becomes the first check in this review a
+    linter over the record could run — every input is in the table.
+
+25. **§8's spread row states its JOIN, its tolerance and its coverage, or the
+    row is withdrawn** (F77). All three producers in the tree pair **settled**
+    prints and each returns a drop count — `PairStats` twice, `MergeStats` once
+    (*"a one-legged spread is not a spread"*) — and the domain pairs on a
+    caller-chosen bucket because *"same interval is NOT same phase"*. A spread
+    of two **live** readings has no producer, and settled-rate history is
+    excluded as a signal by `build-spec.md:793`. §45e's unhedged-accrual term
+    (`WindowLedger.PhaseMax`/`PhaseMin`, *"a ledger, not a footnote"*) is part
+    of the revenue and has no row. **Inherits debt 14.**
+
+26. **§5 rule 5 gains the settlement PHASE gap beside the transport skew**
+    (F77). Rule 5 requires cross-leg skew over `RecvTime`, quoting core §3.4's
+    *"never over `SourceTime`"* — correct, and about **freshness**. A two-leg
+    funding quantity has a second gap, `BinanceAt − BybitAt` over the venues'
+    published instants, which decides whether the two rates are **comparable**
+    rather than how old they are. `crossvenue.Match` carries both because the
+    screening threw the second away. The two are different questions and the
+    wire contract carries one.
+
+27. **§5 rule 4's `server_now` carries the venue, the band and the validity**
+    (F78) — the three things `ServerNow` carries and `Now` does not. §3.5 puts
+    a venue in its signature; it is *"authoritative for funding-boundary
+    decisions"*; its `ServerTime` is banded and its `Certainty` is
+    **three-valued**, *"and the third is the point"*; and `ErrServerTimeUnset`
+    is the only place an uncalibrated venue becomes visible. A settlement
+    countdown is a funding boundary on **two** legs, and rule 4 ships one
+    scalar. Failure direction: `Uncertain` renders as `CertainlyNotPassed`,
+    which on a countdown reads as *you still have time*.
+
+28. **Debt 18 widens to row 24, and debt 7 to `per_symbol`** (F79). Row 23 got
+    the *gross + cost revision* treatment and row 24 — the same subtraction,
+    annualised, one row down — did not. `annual_pct_on_2000` is keyed by exactly
+    the three costs §8a offers, so §8a's **custom** option and §8b's
+    **per-symbol** cost have no cell in the artifact; and the `per_symbol` block
+    carries no entry level while the file's header declares four. The
+    denominator half is already sound (§5 rule 3, `annual_pct_on_2000`), which
+    is what isolates this to the **parameters**.
 
 ---
 
@@ -2110,7 +2160,7 @@ enum with no producer is this repo's own named shape.
    | Group | Rows | The check that applies |
    |---|---|---|
    | **A — a named path, never opened** ***[DONE — §15.11, five findings, F65–F69; all five rows failed]*** | 3 `ranking.json`, 16 `venue/balances.go`, 17 `venue/mark.go`, 23 `episodes.json`, and **re-check 1** `venue/funding.go`, which **F53 already found is a payload type with no reader** while row 1 still names it as the live source | `ls` it, then confirm the file **produces** the quantity rather than consuming or merely typing it. This is F61's check |
-   | **B — "derived"** | 5, 6, 11, 20, 24 | A derived row inherits the worst phase and the weakest provenance of its **inputs**, and names none of them. Row 11 (*"4 fee legs + 2 crossings"*) inherits row 7's **single hand-recorded tier** and rows 9/10's live book |
+   | **B — "derived"** ***[DONE — §15.13, five findings, F75–F79; all five rows failed]*** | 5, 6, 11, 20, 24 | A derived row inherits the worst phase and the weakest provenance of its **inputs**, and names none of them. Row 11 (*"4 fee legs + 2 crossings"*) inherits row 7's **single hand-recorded tier** and rows 9/10's live book |
    | **C — "live", no endpoint named** ***[DONE — §15.12, five findings, F70–F74; all three rows failed]*** | 2 (*"venue REST"* — the table's weakest citation, naming no route at all), 9, 10 | Name the route, then answer the phase question §3 actually poses: **is it public or signed**, and does a reader exist? F63 is what this check finds |
    | **D — partially examined, finish it** | 7 and 18 (F63 bounded them: one tier per venue-product, one symbol per reference revision), 21 (F55/F60 opened two blocks of `summary.json`; `pooled` and the header are unexamined) | Re-read the row's **wording** against what the source holds. *Fee tiers* and *filters* are both plurals the source does not support |
 2. **`ReconcileMarginOp`'s actor identity** and **F42's `notimenow` hole** — now
@@ -2568,3 +2618,236 @@ about a composition root.** `venue.Funding`, `venue.BookSnapshot` and
 them has is an **assembly** outside `app/sim`, and no grep for a type or a
 constructor shows that. The grep that does is for the module's `New` — one call
 site, and reading what the package around it says it is.
+
+### 15.13 External review, round 8 — group B, the five rows that say *derived*
+
+**Instrument: §15.10's own group-B check, and it is the only one of the four
+stated as a RULE rather than as a procedure.** Groups A and C say *do this* —
+`ls` the path, resolve the route. Group B says *a derived row inherits the worst
+phase and the weakest provenance of its inputs, and names none of them.* So the
+round begins by doing the arithmetic the rule describes, on all five rows at
+once, before opening any of them:
+
+| Row | Its inputs | Their phases | max | §8 stamped |
+|---|---|---|---|---|
+| **5** Spread | row 1 (funding, both legs) | replay 1 / live **none** (F65) | **none** | 1 |
+| **6** Accrued; countdown | rows 1 and 3 | **none** (F65); **dated** (F66) | **none** | 1 |
+| **11** Round trip | rows 7, 8, 9, 10 | 1; **2** (F24); **none**, **none** (F71–F73) | **none** | 1 |
+| **20** Break-even | rows 5 and 11 | **none**; **none** | **none** | 1 |
+| **23→24** Annualised | row 23 (expected net) | 1 **for the gross half only** (F69) | partial | 1 |
+
+**Every one of the five is stamped above its own inputs, and the handoff's
+warning was an understatement.** It said row 11 had been *"answered against its
+will"* by a group-C finding, twice, and asked whether the others were in the same
+position. They are: **four of the five resolve to a phase already established by
+group A or C**, which makes this debt 10's shape at five times the scale — *a
+remedy scoped to the finding's own list*, where each earlier round fixed the row
+it was looking at and the derived row downstream kept the stamp.
+
+**Verdict: NO-SHIP, unchanged. Five findings, F75–F79, and all five rows fail.**
+The sampled error rate on §8's rows is now **seventeen in twenty-five**, which is
+every row any round has examined except three. Two of the five findings are
+structural — they are about the **columns**, not about a cell — and one lands on
+a **normative wire rule** rather than on §8 at all.
+
+| # | Finding | Severity |
+|---|---|---|
+| **F75** | The Phase column has **no composition rule**, and all five derived rows are stamped above their inputs | MAJOR |
+| **F76** | *"derived"* answers **how**, where the column asks **from what** — and the one row that names its inputs names them ambiguously | MAJOR |
+| **F77** | Every SPREAD producer in the tree pairs **settled** prints and ships a coverage statistic; the **live** spread has none, and no producer | MAJOR |
+| **F78** | §5 rule 4's `server_now` is **one scalar** where `ServerNow` is per-venue, banded and three-valued — on a **two-leg** countdown | MAJOR |
+| **F79** | Row 24 did not get row 23's F69 treatment, and the artifact has **no cell** for §8a's custom cost or §8b's per-symbol cost | MAJOR |
+
+#### F75 — a phase stamp is an arithmetic, and five rows record an opinion instead
+
+§3's phase table is a claim about **what data can honestly be shown**, so a phase
+stamp on a derived quantity is not an editorial judgement: it is the **maximum**
+of its inputs' stamps, because a derivation cannot be more available than the
+thing it derives from. §8 stamps all twenty-five rows independently, and the
+consequence is above — five rows at phase 1 whose inputs are at *none*, *dated*
+and *2*.
+
+**The failure direction is the one this project keeps paying for.** A phase stamp
+that is too EARLY says *this panel works in phase 1*, so phase 1 ships with the
+panel drawn and no number behind it — §3's own rejected alternative, *"a full
+shell with mocked live panels — a dashboard that partly reports nothing is the
+failure mode this project's findings are made of."* Stamped too LATE it merely
+defers a panel that would have worked. The record chose the direction that fails
+silently, on a table it calls *"honestly marked"*.
+
+**And the composition rule is why the earlier rounds could not find this.** F65
+found row 1 has no live producer, F66 dated row 3, F72/F73 emptied rows 9 and 10
+— and none of those findings could see row 5, 6, 11 or 20, because a finding is
+written against the row it examines. Nothing in §8's structure propagates. *The
+remedy is one edit, not five*: the Phase column of a derived row is computed, and
+the row names the inputs it computes over — which is F76.
+
+#### F76 — the Source column asks *from what*, and four of five cells answer *how*
+
+Every other row in §8's four tables answers with an origin — a file, a venue
+field, an endpoint, an artifact. The five group-B cells read `derived`,
+`derived, server-side`, `derived`, `derived from spread and cost`, `derived`.
+**Four of the five name nothing at all**, and `server-side` is not provenance:
+it is §5 rule 2 — *"the browser performs no money arithmetic"* — restated in the
+wrong column, which is how it came to look like an answer.
+
+**The fifth is the instructive one, because naming inputs is not enough when the
+names are ambiguous in the same table.** Row 20 says *"derived from spread and
+cost"*, and both words are overloaded four rows apart:
+
+- **spread** is row 5's *funding* spread — `crossvenue.Match.Spread`, *"oriented
+  Binance minus Bybit"* (`domain/crossvenue/pairing.go:37`) — **and** row 9's
+  *book* half-spread, `domain.BookFeatures.Spread`, *"the relative top-of-book
+  spread, (ask − bid) / mid"* (`domain/stratum.go:203`). Two distinct types in
+  the tree; one word in the table.
+- **cost** is row 11's round trip **and** §8b's per-symbol, per-size
+  decomposition **and** §8a's scenario control, which F35 already had to separate
+  from the verdict by giving them different **types**.
+
+So the remedy is not *"name the inputs"* — it is **name the input rows by
+number**, which is checkable and which makes F75's arithmetic mechanical. A table
+whose rows refer to each other in prose cannot be audited for consistency; one
+whose rows refer to each other by index can.
+
+#### F77 — the live spread has no producer, and every implemented one ships a coverage statistic
+
+Row 5 is *"the actual revenue"*, the quantity the whole screen exists to show.
+There are **three** spread producers in the tree and none of them is it:
+
+| Producer | Over what | What it also returns |
+|---|---|---|
+| `screening/pairing.go:56` | settled series, `time.UnixMilli` prints | `PairStats` |
+| `domain/crossvenue/pairing.go:82` | `Settlement` — *"one venue-published **settled** funding print"* | `PairStats{BinanceCollisions, BybitCollisions}` |
+| `crossvenue/sample.go:219` `MergeDecisionPoints` | sampled estimates on **equal grid instants** | `MergeStats{Joined, BinanceOnly, BybitOnly}` |
+
+**Three facts follow, and each one is missing from the cell.**
+
+1. **A spread is a JOIN, and every join here drops rows and counts them.**
+   `domain/crossvenue/pairing.go` refuses `round <= 0` and buckets both legs
+   because *"same interval is NOT same phase … settlements pair by the venues'
+   PUBLISHED instants, rounded to a caller-chosen bucket … never by an assumed
+   shared grid origin."* `MergeDecisionPoints` states the rule outright: *"An
+   instant only one venue sampled is dropped and counted — **a one-legged spread
+   is not a spread**."* `derived, server-side` carries no tolerance and no
+   coverage, so a screen can render a spread over a join whose drop rate it never
+   reports.
+2. **A spread of two LIVE readings has no producer.** All three consume settled
+   or gridded series. And the live one cannot simply be built by subtracting two
+   `Funding.Rate` values: those are estimates for each venue's **own** next
+   settlement, and `Match` keeps `BinanceAt` and `BybitAt` separately precisely
+   because *"their difference is the pair's phase gap"*. Meanwhile settled-rate
+   history is the one class `build-spec.md:793` excludes as a signal — round 7's
+   own rejected alternative for row 2. **So the spread this repo computes is the
+   one the spec forbids as a signal, and the one §8 wants is unbuilt.**
+3. **§45e says a window's revenue is not one number.** `crossvenue.WindowLedger`
+   carries `Net` **and** `PhaseMax`/`PhaseMin`, the running unhedged accrual,
+   *"a ledger, not a footnote"* — *"Zero both ways on a phase-aligned grid"* and
+   nonzero otherwise. Row 3 is exactly where grid alignment lives, and F66 already
+   found its `same_grid` column is a **dated** snapshot over a quantity the same
+   file records changing up to 1445 times.
+
+**§5 rule 5 names the wrong gap for this row, and that is the finding's sharp
+end.** Rule 5 requires *"every two-leg derived quantity ships the **cross-leg skew
+over `RecvTime`**"*, quoting core §3.4's *"never over `SourceTime`"*. That rule is
+right, and it is about **transport** freshness. A funding spread has a **second**
+gap on the axis §3.4 excludes — the settlement **phase** gap, `BinanceAt −
+BybitAt`, over source instants — and it is the one that decides whether the two
+rates are comparable at all. The wire contract carries the first and not the
+second, and `Match` exists in the tree carrying both *because* the screening
+threw the second away.
+
+#### F78 — one scalar `server_now` for a two-leg, three-valued, per-venue boundary
+
+§5 rule 4 is right about what it was written for: *"Countdowns ('next settlement
+in 1h 12m') render against it, never against `Date.now()`. This is `notimenow`
+projected across the network."* It closes the browser-clock hole. **What it
+reopens is the hole `platform/clock` was designed around**, and the type says so
+in four places:
+
+- `venue/funding.go:95` — *"`NextSettle` is the venue's next settlement instant,
+  in the **VENUE's own time base**. It is compared against
+  `Clock.ServerNow(venue)`, **never** `Clock.Now`: §3.4 measures data age against
+  the venue's clock precisely because the two disagree, and **the disagreement is
+  what a venue-side stall looks like**."*
+- `clock.go:46` — §3.5 *"puts a venue in `ServerNow`'s signature"*, and
+  `ServerNow(Venue) ServerTime` is *"authoritative for **funding-boundary
+  decisions**"*. A settlement countdown is a funding boundary; there is no other
+  reading of it.
+- `ServerTime` carries an **uncertainty band**, and `Certainty` has
+  `CertainlyPassed`, `CertainlyNotPassed` and `Uncertain` — *"It has three values
+  on purpose, and the third is the point."*
+- `ErrServerTimeUnset` is *"where an uncalibrated venue becomes visible"*,
+  because *"`ServerNow` has no error to return (§3.5 fixes its signature)"*.
+
+**Rule 4's `server_now` is a single, venueless, unbanded, always-valid field, and
+row 6 is a two-leg row.** So the wire contract flattens a per-venue three-valued
+answer into one scalar subtraction, and the failure is the same shape as the one
+rule 4 exists to prevent — a countdown wrong on screen with nothing failing —
+one layer in. **The direction is the expensive one:** a countdown reading *"next
+settlement in 4s"* across a band wider than four seconds renders `Uncertain` as
+`CertainlyNotPassed`, which on a settlement countdown says *you still have time
+to act*. And an uncalibrated venue, whose only visible symptom is an unset
+`ServerTime`, has no field on the wire to be unset in.
+
+*A fix applied in one place gets applied to its mirror*: rule 4 is `notimenow`
+projected across the network, so the projection has to carry what `notimenow`'s
+own port carries — the venue, the band and the validity — not just the instant.
+
+#### F79 — the artifact answers for three costs, and §8a offers four
+
+Row 23 (*expected net*) drew F69 last round: the file holds `accrued` (**gross**)
+and no net at any depth, so the row cites one operand of a subtraction whose other
+operand is F26's assumption, and the honest form is *`episodes.json` (gross) + the
+cost revision*. **Row 24 is that same subtraction, annualised, one row down, and it
+was left reading `derived / 1`.**
+
+**The denominator half of the row is sound, and saying so is what isolates the
+defect.** `summary.json`'s `per_symbol[].annual_pct_on_2000` carries the base in
+its own name, §5 rule 3 gives it a type with `amount`, `asset`, `kind`, `size`,
+`leverage` and `at_least_c_allocated`, and rule 3's worked example is this exact
+number — `35.8`, where `31.8` had stood. F30 is treated.
+
+**The parameters are not.** `annual_pct_on_2000` is a **dict keyed by cost**, and
+its three keys are `0.0021 / 0.0029 / 0.0090` — precisely §8a's *21 bp / 29 bp /
+90 bp*. So:
+
+- **§8a's fourth option has no cell.** The control offers *"21 bp / 29 bp / 90 bp
+  / **custom**"*, and a custom cost is not a key in the artifact. §8b's
+  **per-symbol, per-size** cost is not one either — and §8b is the record's own
+  argument that the flat constant must go.
+- **The entry level is recorded nowhere in the block.** `per_symbol` rows hold
+  `symbol, shortlist, episodes, days, modal_minutes, first, last,
+  net_usd_1000_per_leg, annual_pct_on_2000` — no level — while the file's header
+  declares `levels` (4) and `costs` (3). That is F60's finding on the block
+  **beside** the one F60 named, which is debt 7 widening a second time.
+
+So answering row 24 for anything but three pinned costs means recomputing from
+`episodes.json`'s gross — **F69's remedy, on F69's neighbour**. *A remedy scoped
+to the finding's own list*, inside a single table, one row apart.
+
+#### What round 8 changes about the worklist
+
+Group B is closed: **five rows checked, five findings, five rows failed.**
+**Seventeen of twenty-five** §8 rows now carry a defect or a ⚠. Only **group D**
+remains — rows 7, 18 and 21, three rows, *re-read the wording against what the
+source holds*.
+
+**The instrument changed, and that is the reportable part.** Rounds 6 and 7 both
+ran a *resolve the citation* check — a path, then a route — and §100's own note
+that *prose review's yield curve picks the instrument* says a third same-shape
+round would have been the wrong move. Group B's rows cite nothing to resolve, so
+the check had to become **an arithmetic over the table's own structure** rather
+than a lookup against the tree: compute the column, then ask which cells disagree.
+That found F75 and F76 before a single file was opened, and it is the first check
+in this review that a **linter over the record** could run — every input is in the
+table.
+
+**The half that generalises past §8.** Two of the five findings (F77's rule-5 half,
+F78 entirely) are against §5's **normative wire rules**, not against §8's
+provenance. Both have the same shape: a rule written correctly for the hazard it
+names, applied to a **two-leg** quantity, where the port it projects is per-leg.
+Rule 5 measures skew over `RecvTime` and a funding spread's decisive gap is over
+source instants; rule 4 ships one `server_now` and `ServerNow` takes a venue.
+*When a wire rule projects an injected port across the network, check it against
+the port's SIGNATURE, not against the hazard it was written for* — the signature
+is where §3.5 already recorded which arguments the answer depends on.
