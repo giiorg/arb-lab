@@ -709,9 +709,9 @@ arbitrage opportunity."* This is that list, with provenance, honestly marked.
 
 | Quantity | Source | Phase |
 |---|---|---|
-| Funding rate, each leg, live | `venue/funding.go`, both venues | 1 |
+| Funding rate, each leg, live | ⚠ **F65 — every PRODUCER of `venue.Funding` is downstream of a recorded TAPE.** The two are `FundingInfoOverlay.Compose` (fed only by `replay/ingest.go:137`) and `BybitTickerState.funding` (constructed only in `replay/ingest.go` and `crossvenue/sample.go`,`check.go`), all over capture records; `app/capture` writes raw bytes and imports no decoder. The type is right and both venues are right — *live* names a component that does not exist. Binance is gated further: `Compose` emits nothing until the REST `fundingInfo` overlay is applied (§39p-2) | **replay 1 / live: none** |
 | Predicted next funding (premium index) | venue REST | 1 |
-| Funding interval and grid alignment (4h vs 8h) | `ranking.json` + live | 1 |
+| Funding interval and grid alignment (4h vs 8h) | ⚠ **F66 — the file DOES hold it** (`binance_interval_hours`, `bybit_interval_minutes`, `same_grid` on all 466; `universe.go:183` converts at the comparison). But `report.go:141` is `interval_changes` **`int` + `omitempty`**, so *measured zero* (30 rows) and *never measured* (405 rows) reach a reader through one silence; and `same_grid == false` ⇔ `eligible == "mismatched_grid"` **35/35**, so the display column IS the exclusion verdict — from a snapshot dated **2026-08-01** over a quantity the same file records changing up to **1445** times. The *"+ live"* half is **F65** | 1, **dated**; live: none |
 | Rate cap / floor per venue | **live** — Bybit ticker `fundingCap`, Binance `fundingInfo` (F46) | 1 |
 | Spread — the actual revenue | derived, server-side | 1 |
 | Settlements accrued; countdown to next | derived | 1 |
@@ -734,8 +734,8 @@ arbitrage opportunity."* This is that list, with provenance, honestly marked.
 | Leverage brackets, IM / MM tiers | ⚠ **F61 — that directory holds ONE file, `fixedpoint_oracle.py`, whose own docstring reads its input from `230-adverse-close/captures/`.** The named source is the CONSUMER. The data is three credentialed, non-re-derivable symbols per venue (one Bybit file has no tier table); `internal/` and `cmd/` contain no bracket type, reader or config | **neither** |
 | Margin mode; portfolio-margin posture | ⚠ **F63 — every reader named here is SIGNED**: `/fapi/v1/multiAssetsMargin`, `/symbolConfig`, `/positionSide/dual`, `/v5/account/info`, `/v5/account/wallet-balance`, over `transport.SignedClient`; `MarginStatus` routes through `OrderClient`. There is no phase-1 half | ~~1 /~~ 2 |
 | Liquidation price per leg | ⚠ **F56 — the venue's, never reconstructed.** `venue/marginstatus.go:167`: *"It is the VENUE's number and never one this system reconstructs"*, and absence is modelled (`LiqPriceStated`) because a zero reads as maximum headroom. A bracket-derived figure is a separate **modelled** quantity and may never substitute for venue risk state | 2 |
-| Free vs allocated collateral | `venue/balances.go` | 2 |
-| Basis / mark divergence between legs | `venue/mark.go` | 1 |
+| Free vs allocated collateral | ⚠ **F67 — that file is the SPOT wallet enumeration.** `marginstatus.go:41-53` already rules on this quantity: *allocated* is `PostedMargin` (Binance `isolatedWallet` / Bybit `positionIM`), *free* is account-level `availableBalance` and **assigned to `treasury` by §7.2**. Neither is here — and `SpotBalanceRow.Total` **collapses** the very split the row names (*"free + locked on Binance"*), while `balances_bybit.go:27` **refuses** to pin a row where `locked != 0` | 2 |
+| Basis / mark divergence between legs | ⚠ **F68 — `venue.Mark` has ZERO producers anything calls.** `DecodeBinanceMark` and `DecodeBybitMark`: no callers; `replay.DecoderKind` declares three members and none is a mark; `configs/capture.json`'s 39 sources are book and funding only. The mark is in reach in three places and dropped on the record in all three — `wire_binance.go:31` (*"deliberately drops"*), `marginstatus.go:31` (*"NOT decoded here"*), `marketdata/module.go:29` + `engine/state/doc.go:102` (*"no use case, so there is nothing here to compose"*). A declared deferral, stamped phase 1 for a TWO-leg quantity | **neither** |
 | Tick, lot, min-notional filters | reference data | 1 |
 | Position and order limits | `positionRisk` / `symbolConfig` — **credentialed** (F46) | **2** |
 
@@ -746,7 +746,7 @@ arbitrage opportunity."* This is that list, with provenance, honestly marked.
 | Settlements to break even | derived from spread and cost | 1 |
 | p50 / p75 / p90 historical run length | `summary.json` | 1 |
 | P(clearing break-even) at this run length | ⚠ **F55 — `summary.json`'s `run_vs_breakeven`, which is pinned to entry level `0.0005` and cost `0.0021` and declares neither.** Varying the level alone moves the run-4 figure 10.0 → 38.6 → 94.9 → 100.0 %. Owed before any panel reads it | 1 |
-| Expected net per episode | `episodes.json` | 1 |
+| Expected net per episode | ⚠ **F69 — the file holds `accrued` (GROSS) and no net field at any depth.** Net is `summarise.py:78`/`:109`, `accrued − cost`, keyed by `COSTS = 0.0021 / 0.0029 / 0.0090` — so the row cites **one operand of a subtraction whose other operand is F26's assumption**, with no cost coordinate in the provenance. Honest form: *`episodes.json` (gross) + the cost revision (§8c)*, which also puts F35's verdict/scenario split on the row | 1 for the gross half |
 | Annualised return, with denominator | derived | 1 |
 | Hurdle comparison; concentration; sample size | `verdict` **once it carries its hurdle** (F45) **and its entry level** — ⚠ **F60: it carries four hurdle-provenance fields and no level.** Pinned at `0.001` via `per_symbol`; `beat_hurdle_symbols` at 21 bp reads 2/61 · 3/60 · **4/56** · 3/49 across the four levels the file declares, and the published column is the unique maximum. At 90 bp the published `0/56` becomes **2/49**. §14 debt 7 does not name this block | 1 |
 
@@ -1228,6 +1228,44 @@ comparable; only writing the comparand beside the conclusion does.
     `testing` log discipline), or leaving the gate silent and letting the tile be
     the surface. **Choosing is a decision, not a fix**, and it is the reason the
     tile has value rather than being a duplicate of a green CI badge.
+14. **Phase 1 needs a live market-data producer, or the word *live* leaves §8**
+    (F65, F68). Funding decodes only from a tape and the mark decodes from
+    nothing at all, so **both** quantities §7's Markets and Positions screens
+    treat as live are, today, replay readouts or absent. Two honest phase-1
+    forms, and the choice is a design decision rather than a citation fix: a
+    **replay** panel labelled with the tape's own instant, or a live decode path
+    named as work in §12's roster. What may not survive is a row that says
+    *live* and resolves to `replay.Ingester`, which is documented *"for the
+    sim"* and *"one instance per RUN"*.
+15. **`interval_changes` must distinguish zero from unmeasured** (F66).
+    `report.go:141`'s `int` + `omitempty` gives 30 measured-zero rows and 405
+    never-measured rows the same silence. A `*int`, or a sibling
+    `history_measured bool`, or dropping `omitempty` — any of the three. **This
+    is `SpotAbsenceSemantics`' own rule reaching an artifact generator**, and
+    the generator is `internal/`, so it is code and not prose. Separately: a
+    screen rendering `same_grid` must render it as the **exclusion reason** it
+    is (35/35 biconditional with `eligible`), not as a second independent fact.
+16. **§8's collateral row is re-sourced to `marginstatus.go` and split**
+    (F67) — *allocated* = `PostedMargin`, *free* = account-level and
+    **`treasury`'s** by §7.2, so it is two rows in two contexts, not one row in
+    `balances.go`. The spot wallet keeps its own row if the screen wants it, and
+    that row inherits `balances_bybit.go`'s `locked != 0` refusal as a rendered
+    state rather than a blank.
+17. **§8's mark row is withdrawn or its producer is named as work** (F68).
+    `venue.Mark` exists, `mark.go`'s argument for it is sound, and nothing
+    builds one. A phase-1 *basis between legs* needs a mark on **both** legs;
+    Bybit's decoder has never been called and no `DecoderKind` routes it. Cheap
+    and separate: `marketdata/module.go:29` and `engine/state/doc.go:102` both
+    say *"there is no venue.Mark"* and that half is now false — the type
+    landed. Correct the sentence, keep the deferral.
+18. **§8's `episodes.json` row carries its cost coordinate** (F69) — the file
+    holds `accrued`, and *net* is `accrued − cost` at three costs. The row
+    becomes *gross + the cost revision (§8c)*, which is also where F35's
+    verdict/scenario split becomes visible on the provenance line instead of
+    only in §8a's prose. **Debt 10's general form is what this is**: the remedy
+    written against the file, not against the finding's list — and
+    `summarise.py:87`'s inline `> D("0.0021")` inside `cleared_cost` is a fourth
+    mirror sitting in the file debt 10 already owns.
 
 ---
 
@@ -2008,7 +2046,7 @@ enum with no producer is this repo's own named shape.
 
    | Group | Rows | The check that applies |
    |---|---|---|
-   | **A — a named path, never opened** | 3 `ranking.json`, 16 `venue/balances.go`, 17 `venue/mark.go`, 23 `episodes.json`, and **re-check 1** `venue/funding.go`, which **F53 already found is a payload type with no reader** while row 1 still names it as the live source | `ls` it, then confirm the file **produces** the quantity rather than consuming or merely typing it. This is F61's check |
+   | **A — a named path, never opened** ***[DONE — §15.11, five findings, F65–F69; all five rows failed]*** | 3 `ranking.json`, 16 `venue/balances.go`, 17 `venue/mark.go`, 23 `episodes.json`, and **re-check 1** `venue/funding.go`, which **F53 already found is a payload type with no reader** while row 1 still names it as the live source | `ls` it, then confirm the file **produces** the quantity rather than consuming or merely typing it. This is F61's check |
    | **B — "derived"** | 5, 6, 11, 20, 24 | A derived row inherits the worst phase and the weakest provenance of its **inputs**, and names none of them. Row 11 (*"4 fee legs + 2 crossings"*) inherits row 7's **single hand-recorded tier** and rows 9/10's live book |
    | **C — "live", no endpoint named** | 2 (*"venue REST"* — the table's weakest citation, naming no route at all), 9, 10 | Name the route, then answer the phase question §3 actually poses: **is it public or signed**, and does a reader exist? F63 is what this check finds |
    | **D — partially examined, finish it** | 7 and 18 (F63 bounded them: one tier per venue-product, one symbol per reference revision), 21 (F55/F60 opened two blocks of `summary.json`; `pooled` and the header are unexamined) | Re-read the row's **wording** against what the source holds. *Fee tiers* and *filters* are both plurals the source does not support |
@@ -2021,3 +2059,223 @@ enum with no producer is this repo's own named shape.
    landed there because it is the only screen drawn; the three screens this round
    read have no mockup, and F52's lesson is that a mockup regenerated from real
    data is what refutes the prose.
+
+### 15.11 External review, round 6 — group A of §15.10's worklist, opened one path at a time
+
+**Instrument: F61's check, sharpened for a Go file.** §15.10 item 1 grouped the
+sixteen unexamined §8 rows by the check that applies, and group A is the five
+that name a **path**: rows 3, 16, 17, 23, and a re-check of row 1. F61's check
+was `ls` on a directory. On a Go file `ls` proves nothing — the file exists and
+the package compiles either way — so the check has to go one step further:
+**find the call site that CONSTRUCTS the type, not the declaration that names
+it.** Those are different greps and they gave different answers on four of the
+five rows.
+
+**Verdict: NO-SHIP, unchanged.** Five findings, **F65–F69**. All five rows fail.
+Every finding is measured against the tree or against the artifact's own bytes.
+
+| # | Finding | Severity |
+|---|---|---|
+| **F65** | Every producer of `venue.Funding` is downstream of a **recorded tape**; the live lane decodes nothing | MAJOR |
+| **F66** | `ranking.json` holds the interval, and `interval_changes` is `omitempty` on an `int` — one silence for *measured zero* and *never measured*, across the exact 466 / 61 split the screen renders | MAJOR |
+| **F67** | *Free vs allocated collateral* is sourced to the **spot wallet** file, whose row type **collapses** the split the row's own name asks for | MAJOR |
+| **F68** | `venue.Mark` has **zero producers reached by anything**; the mark is available in three places and deliberately dropped in all three | MAJOR |
+| **F69** | `episodes.json` holds `accrued` and no net; the row names **one operand of a subtraction** whose other operand is F26's assumption | MAJOR |
+
+#### F65 — row 1 re-checked: the type has readers, and no live producer
+
+F53 recorded `engine/venue/funding.go` as *"a payload type … with no reader"*.
+That is not accurate on the reader side —
+`marketdata/infrastructure/driving/funding.go:111` type-asserts
+`env.Payload.(venue.Funding)` and `app/sim/sim.go:278` routes it — and the
+inaccuracy is worth correcting rather than inheriting. **The producer side is
+where the row fails, and it fails harder.** There are exactly two producers:
+
+| Producer | Reached from |
+|---|---|
+| `FundingInfoOverlay.Compose` (`wire_binance.go:278`) | its only `Apply` feeder is `replay/ingest.go:137` |
+| `BybitTickerState.funding` (`wire_bybit.go:212`) | constructed only at `replay/ingest.go:63`, `crossvenue/sample.go:140,144,150`, `crossvenue/check.go:224` |
+
+Every one of those call sites reads a **capture record**. `replay.Ingester`'s own
+doc: *"§3.5's raw-ingestion seam for **the sim** … turns **tape entries** into
+pre-dispatch envelopes"*, *"one instance per RUN"*. `crossvenue/sample.go`'s
+header: *"the gate's entry/exit signal is what the **capture's** funding streams
+SHOWED at the instant"*. And the live lane — `arblab capture` →
+`internal/app/capture/pipeline.go` → `transport.Stream` — imports no decoder and
+writes raw bytes; `configs/capture.json` names 39 sources and the pipeline's job
+is `write`, `flushGaps`, `shutdown`.
+
+**So no path exists in this process from a socket to a `venue.Funding` value.**
+The live half writes files and the decode half reads files. §8's row 1 reads
+*"Funding rate, each leg, **live** | `venue/funding.go`, both venues | 1"*. The
+type is right, both venues are right, and *live* names a component that does not
+exist. Binance is the worse half: its interval and clamps arrive only through the
+REST `fundingInfo` overlay, and `Compose` **emits nothing** when the overlay is
+cold — the §39p-2 refusal — so a live Binance funding reading is not merely
+unwired, it is gated on a poll nothing outside the replay ingester performs.
+
+> *Rejected remedy:* re-source the row to `replay`/`capture` and keep phase 1.
+> It makes the citation true and leaves the screen's word *live* meaning *"as of
+> the last tape written"*, which is the one thing a funding dashboard may not
+> silently mean. The honest statements are a phase-1 **replay** readout labelled
+> with the tape's own instant, or a live decode path named as work.
+
+#### F66 — the one row whose file does hold the quantity, and two things bite anyway
+
+`ranking.json` carries `binance_interval_hours`, `bybit_interval_minutes`,
+`same_grid` on all 466 pairs, and `modal_interval_minutes` / `interval_changes`
+on the history rows. It **passes** F61's producer check — the only group-A row
+that does — and `universe.go:183` computes `SameGrid: hours*60 == byMinutes`,
+stating the conversion at the comparison, which is `funding.go`'s own §4 units
+rule honoured in an artifact generator. Then:
+
+| Measured in the committed file | |
+|---|---|
+| `generated_at` / `params.cutoff_utc` | `2026-08-01` — **30 days old today** |
+| rows carrying `interval_changes` | **31**, values to **1445** |
+| rows with any history block | **61** — of which **30 carry no `interval_changes` key** |
+| rows with no history block | **405** — also no `interval_changes` key |
+| `same_grid == false` ⟺ `eligible == "mismatched_grid"` | **35 / 35, in both directions** |
+
+**`report.go:141` is `IntervalChanges int \`json:"interval_changes,omitempty"\`.**
+`omitempty` on an `int` omits a measured zero, so **30 rows meaning "this
+symbol's interval never changed" and 405 meaning "nobody measured it" reach a
+reader through one silence** — and the two populations are exactly the 61 and the
+405 that §7's Markets screen renders side by side (*"all 466 screened / 61
+eligible"*). This is the shape `balances.go` builds an entire
+`SpotAbsenceSemantics` enum to refuse, three files over: *the parameter itself
+decides what silence means, which is why no caller may scope the call.*
+
+**And `same_grid` is not a display column — it is an eligibility verdict.** The
+cross-tab is a biconditional, 35 for 35: every mismatched grid is an exclusion
+reason and every exclusion for that reason is a mismatched grid. So the Markets
+screen's alignment column and the shortlist's exclusion are one fact rendered
+twice, stamped phase 1, sourced to a **dated snapshot** of a quantity the same
+file records changing 1445 times for one symbol.
+
+*(Read carefully: `eligible` is a **string reason**, not a boolean —
+`ok` 61, `below_floor` 367, `mismatched_grid` 35, `insufficient_matched` 2, the
+§42e BTC seal 1. Read as truthy it reports 466/466 eligible, which contradicts
+§7's own 61 and is how a constant column gets manufactured out of a populated
+one.)*
+
+#### F67 — the row names the spot wallet for a derivatives-collateral split
+
+§8's Carry table: *"Free vs allocated collateral | `venue/balances.go` | 2"*.
+
+`balances.go`'s first sentence: *"This file holds the spot balance
+ENUMERATION's vocabulary … what a venue's **spot wallet** read answers with."*
+Collateral is the derivatives-margin question, and `marginstatus.go:41-53`
+already **rules** on it, by name, under the heading *"'Available margin' is a
+quantity NEITHER venue publishes per position"*:
+
+```
+the position's POSTED margin      Binance isolatedWallet · Bybit positionIM
+the position's MARGIN BALANCE     posted + unrealized PnL — derived, not published
+the account's FREE balance        Binance availableBalance — ACCOUNT-level, no symbol
+```
+
+So the row's two halves resolve to two different places and neither is the file
+it names: *allocated* is `PostedMargin`, named for what it is precisely so a
+caller cannot read it as headroom; *free* is account-level and **assigned
+away** — *"already owned elsewhere — §7.2: `treasury` owns balances, the
+concentration cap, inventory-drift monitor, and the rescue-margin float"*, with
+Binance stating `availableBalance` at the top level of `GET /fapi/v3/account`,
+beside the positions array rather than inside it.
+
+**And the named file cannot express the split even for the wallet it does
+answer for.** `SpotBalanceRow.Total` is *"free + locked on Binance … walletBalance
+on a Bybit row whose locked is zero"* — the row's own name asks for the split the
+type **collapses** — and `balances_bybit.go:27` **refuses** to pin a row where
+`locked != 0` rather than bet on an unverified inclusion. The one file §8 cites
+is the one file in the tree that has explicitly declined to answer this question.
+
+Phase **2** is correct here and is not the finding; the finding is that a
+quantity ruled on across two contexts and three venue fields is sourced to a file
+holding none of them.
+
+#### F68 — the mark is available in three places and deliberately dropped in all three
+
+§8's Carry table: *"Basis / mark divergence between legs | `venue/mark.go` | 1"*.
+
+`mark.go` declares `Mark` and `Validate`, with a long and correct argument for
+why the mark is §3.4's own data class and must not ride funding's freshness
+budget. **Nothing constructs it that anything calls:**
+
+- `DecodeBinanceMark` (`wire_binance.go:168`) — **zero callers** outside its test
+- `DecodeBybitMark` (`wire_bybit_mark.go:95`) — **zero callers**, none at all
+- `replay.DecoderKind` declares three members — `binance-markprice`,
+  `binance-fundinginfo`, `bybit-ticker` — and **none is a mark**; the first
+  decodes `BinanceMarkPrice`, which is the funding half of the frame
+- `configs/capture.json` holds 39 sources — `binance/book` 11, `bybit/book` 10,
+  `binance/funding` 9, `bybit/funding` 9 — and **no mark stream on either venue**
+
+The three places the number is in reach are each dropped **on the record**:
+
+| Where the mark is present | The drop, in the file |
+|---|---|
+| Binance `<sym>@markPrice` frame, field `p` | `wire_binance.go:31` — *"it reads `p` — the mark — which this type **deliberately drops**"* |
+| The account/position rows, both venues | `marginstatus.go:31` — *"the mark price is on these rows too … and is **NOT decoded here**"* |
+| The normalization seam | `marketdata/module.go:29` and `engine/state/doc.go:102` — *"there is **no venue.Mark and no use case**, so there is nothing here to compose"* |
+
+**The code is honest and this is not a code defect.** `module.go` states the
+deferral and puts it in the type — *"a caller cannot reach a mark path that is
+not assembled, and there is no nil to check"* — which is this repo's own
+preferred form. §8 is what puts a **two-leg** derived quantity at **phase 1** on
+top of it. Two files in the tree assert in prose that the thing does not exist,
+and the provenance table claims it as a phase-1 render.
+
+*(One correction owed to those two comments: `venue.Mark` **does** now exist —
+`mark.go` declares it. Their substantive half — no use case, nothing to
+compose — is what the zero call sites confirm. `mark_blind_action` in §5.2 keys
+on a class with no producer, which is `enum member with no producer` again.)*
+
+#### F69 — `episodes.json` holds the gross half of a subtraction
+
+§8's Persistence table: *"Expected net per episode | `episodes.json` | 1"*.
+
+The file is a list of 61 symbols, each `{symbol, shortlist, matched, first, last,
+modal_minutes, levels}`, `levels` being four `{entry, episodes}` blocks whose
+episodes are `{run, accrued, start, end}`. **There is no net field, at any depth.**
+`accrued` is the gross funding sum for the episode.
+
+Net is computed downstream, in `summarise.py`, and every place it is computed it
+is keyed by cost:
+
+```
+summarise.py:17    COSTS = ["0.0021", "0.0029", "0.0090"]
+summarise.py:78    row["mean_net"][c] = str((sum(accs) - cd * len(accs)) / len(accs))
+summarise.py:109   tot = sum(D(x["accrued"]) * LEG - D(c) * LEG for x in e)
+```
+
+So the row names an artifact holding **one operand of a subtraction whose other
+operand is F26's assumption** — the `0.0021` that is four taker legs and nothing
+else — and stamps phase 1 on the result with no cost coordinate anywhere in the
+citation. **This is F55 and F60's disease reached from the other side.** Those
+two found blocks inside `summary.json` that answer for one point on a declared
+axis; this is a §8 row citing the file that is *upstream* of the axis entirely,
+so the cost never appears in the provenance at all. The honest row is
+*"`episodes.json` (gross `accrued`) + the cost revision (§8c) — net is derived,
+and the cost is the scenario input of §8a"*, which also makes F35's
+verdict/scenario split visible on the row rather than only in §8a's prose.
+
+*(Adjacent, not a finding: `summarise.py:87`'s `cleared_cost` counter tests
+`D(e["accrued"]) > D("0.0021")` against an inline literal while the block around
+it iterates `COSTS`. It is a fourth mirror of debt 10's shape and it is inside
+the file debt 10 already owns.)*
+
+#### What round 6 changes about the worklist
+
+Group A is closed: **five rows checked, five findings.** The error rate on
+sampled §8 rows is now **nine in seventeen**. Groups B, C and D remain — eleven
+rows — and the check that found four of these five is now stated sharply enough
+to reuse: **a citation to a Go file is a claim about a call site, not about a
+declaration.** `ls` closes group A's cheapest half; the grep that matters is for
+the constructor.
+
+The three remaining groups keep §15.10's order, and one item moves up: **F65 and
+F68 together mean the two live market-data quantities the dashboard's phase 1
+rests on — funding and mark — have no live producer**, which is a §3 phase-1
+question rather than five separate row citations. Group C (rows 2, 9, 10, all
+*"live"*) is where the rest of that answer is, and row 2's *"venue REST"* is the
+table's weakest citation.
