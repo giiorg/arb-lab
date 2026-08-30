@@ -87,8 +87,20 @@ func TestCoordinates_EachFieldIsChecked(t *testing.T) {
 			t.Fatalf("Validate() = %v, want ErrCoordinateUnset", err)
 		}
 	})
-	t.Run("Hurdle missing its class and source", func(t *testing.T) {
-		h := persistence.Hurdle{Annual: mustRate(t, "0.046")}
+	t.Run("Hurdle missing its class", func(t *testing.T) {
+		h := persistence.Hurdle{
+			Annual: mustRate(t, "0.046"),
+			Source: "research/persistence/summarise.py HURDLE_PCT",
+		}
+		if err := h.Validate(); !errors.Is(err, persistence.ErrCoordinateUnset) {
+			t.Fatalf("Validate() = %v, want ErrCoordinateUnset", err)
+		}
+	})
+	t.Run("Hurdle missing its source", func(t *testing.T) {
+		h := persistence.Hurdle{
+			Annual: mustRate(t, "0.046"),
+			Class:  "illustrative_constant",
+		}
 		if err := h.Validate(); !errors.Is(err, persistence.ErrCoordinateUnset) {
 			t.Fatalf("Validate() = %v, want ErrCoordinateUnset", err)
 		}
