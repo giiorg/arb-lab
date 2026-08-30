@@ -1993,11 +1993,25 @@ enum with no producer is this repo's own named shape.
 
 #### What round 6 should attack
 
-1. **The twenty unsampled §8 provenance rows**, against **both** schemas and the
+1. **The unexamined §8 provenance rows**, against **both** schemas and the
    venue-semantics comments. F46 found two wrong in ten; F56 made it three in
    eleven; F61 makes it **four in twelve**, and F61 is the first found by opening
    the named directory rather than by reading either. **The check is `ls`,** and
    it had not been run on any row.
+
+   **⚠ And "the twenty unsampled rows" does not resolve against the tables.** §8's
+   four tables hold **25** rows. **Nine** carry a finding or a ⚠ in the Source
+   column (rows 4, 8, 12, 13, 14, 15, 19, 22, 25 — F46 ×2, F24, §98, F61, F63,
+   F56, F55, F45/F60), so **16** are unexamined, not twenty. *An enumeration's
+   count word is a claim*, and this one was written without the enumeration
+   beside it. The worklist, so round 6 does not re-derive it:
+
+   | Group | Rows | The check that applies |
+   |---|---|---|
+   | **A — a named path, never opened** | 3 `ranking.json`, 16 `venue/balances.go`, 17 `venue/mark.go`, 23 `episodes.json`, and **re-check 1** `venue/funding.go`, which **F53 already found is a payload type with no reader** while row 1 still names it as the live source | `ls` it, then confirm the file **produces** the quantity rather than consuming or merely typing it. This is F61's check |
+   | **B — "derived"** | 5, 6, 11, 20, 24 | A derived row inherits the worst phase and the weakest provenance of its **inputs**, and names none of them. Row 11 (*"4 fee legs + 2 crossings"*) inherits row 7's **single hand-recorded tier** and rows 9/10's live book |
+   | **C — "live", no endpoint named** | 2 (*"venue REST"* — the table's weakest citation, naming no route at all), 9, 10 | Name the route, then answer the phase question §3 actually poses: **is it public or signed**, and does a reader exist? F63 is what this check finds |
+   | **D — partially examined, finish it** | 7 and 18 (F63 bounded them: one tier per venue-product, one symbol per reference revision), 21 (F55/F60 opened two blocks of `summary.json`; `pooled` and the header are unexamined) | Re-read the row's **wording** against what the source holds. *Fee tiers* and *filters* are both plurals the source does not support |
 2. **`ReconcileMarginOp`'s actor identity** and **F42's `notimenow` hole** — now
    the only items named by §15.7 and never touched, two rounds on.
 3. **§14's debt list against its own findings.** F60 is a debt that was written

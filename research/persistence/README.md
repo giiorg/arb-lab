@@ -15,6 +15,7 @@ This directory holds the per-episode expansion and its summary.
 | `episodes.json` | Every episode: settlements collected, spread accrued (exact decimal), start and end instant. 17 478 episodes, 61 symbols × 4 entry levels. |
 | `summarise.py` | Derives `summary.json` and prints the report. Exact `Decimal` throughout. |
 | `summary.json` | Pooled run-length percentiles, the run-vs-break-even table, and per-symbol net at three round-trip costs. |
+| `verdict_levels.py` | **F60's measurement.** What `verdict` would say at each of the four entry levels the file declares, with a control and a negative control. `verdict` is pinned to `0.001` and records no level. Re-run it to verify §100 §14 debt 10's fix. |
 
 ## Reproducing
 
