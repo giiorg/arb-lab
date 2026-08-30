@@ -1,7 +1,9 @@
 # A Go reader for the persistence artifacts — design (record §103)
 
 **Date:** 2026-08-30
-**Status:** implemented 2026-08-30, `d042b38`; final-review fixes 2026-08-30
+**Status:** implemented 2026-08-30, `8a52f10` (final-review fixes; `d042b38` was
+the tip until those landed and no longer names a complete implementation — the
+fix wave changed production code).
 **Closes:** the last open next action of the web dashboard review — *"a reader
 for the persistence artifacts"*, F83's structural half.
 **Opens:** F102, F103 (below), and review round 13.
@@ -135,6 +137,7 @@ type RunLength struct {
         P50, P75, P90, Max int
         Mean               fixedpoint.Rate
         Episodes           int
+        Censored           int   // §7; NetPerEpisode and BreakevenTable carry one too
         At                 EntryAt
 }
 ```
@@ -285,7 +288,9 @@ Four results, all settled before implementation:
 
 The percentile index (`min(len-1, (len*q)//100)` — off-by-one in either
 direction), the `wins` comparison (needs 6.2's fixture to be killable at all),
-the `max(1, days)` floor, and the `Excluded` accumulation.
+the `max(1, days)` floor, the `Excluded` accumulation, and — added by the fix
+wave — the censored split on each of its four carriers and the `Rows` sort's two
+halves. All were run; the one survivor is the equivalent mutant §9 records.
 
 ## 7. Two findings the decoding produced before a line was written
 
