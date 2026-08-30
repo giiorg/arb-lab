@@ -277,3 +277,84 @@ func TestPerSymbol_AnAllCensoredSymbolIsExcludedWithItsCount(t *testing.T) {
 		t.Fatalf("Excluded = %+v, want [%+v]", got.Excluded, want)
 	}
 }
+
+// The documented sort order, asserted directly as an invariant over the rows.
+//
+// It is NOT asserted index-for-index against summary.json, and that is
+// deliberate: summarise.py:115 sorts every published block by
+// -annual_pct_on_2000["0.0021"] — ONE fixed cost — while this fold sorts at
+// whatever coordinate the caller asked for, and the artifact's key is a
+// one-decimal PERCENTAGE while this compares the unrounded ratio. Two symbols
+// tying at one decimal place may legitimately order either way, so an
+// index-for-index comparison would pass for the wrong reason.
+func TestPerSymbol_RowsAreSortedByAnnualThenSymbol(t *testing.T) {
+	set := loadCommitted(t)
+	for _, cost := range []string{"0.0021", "0.0029", "0.0090"} {
+		t.Run(cost, func(t *testing.T) {
+			got, err := set.PerSymbol(sizeAt(t, "0.001", cost))
+			if err != nil {
+				t.Fatalf("PerSymbol: %v", err)
+			}
+			if len(got.Rows) != 56 {
+				t.Fatalf("rows = %d, want 56", len(got.Rows))
+			}
+			assertSorted(t, got.Rows)
+		})
+	}
+}
+
+// The tiebreak half of the rule needs an exact tie, and the committed file has
+// none: all 56 annual ratios at 0.001/0.0021 are DISTINCT (measured), so
+// "ties broken by Symbol ascending" is unexercised against it and any tiebreak
+// at all — or none — would pass. This fixture is two symbols whose Annual is
+// exactly equal, laid out so that neither the file's order nor a plain
+// name sort gives the right answer on its own.
+func TestPerSymbol_TiesBreakOnSymbolAscending(t *testing.T) {
+	set := loadFixture(t, "testdata/annual-tie.json")
+	got, err := set.PerSymbol(sizeAt(t, "0.001", "0.0021"))
+	if err != nil {
+		t.Fatalf("PerSymbol: %v", err)
+	}
+	if len(got.Rows) != 3 {
+		t.Fatalf("rows = %d, want 3", len(got.Rows))
+	}
+	// OMEGA earns twice as much, so it leads despite sorting LAST by name —
+	// which is what stops a pure name sort from passing. ALPHA and ZEBRA are
+	// exactly equal and appear in the file in the opposite order, which is what
+	// stops file order from passing.
+	if got.Rows[0].Annual.Decimal() != "0.00895" {
+		t.Errorf("Rows[0].Annual = %s, want 0.00895", got.Rows[0].Annual.Decimal())
+	}
+	if got.Rows[1].Annual.Decimal() != got.Rows[2].Annual.Decimal() {
+		t.Fatalf("the tie is not a tie: %s vs %s",
+			got.Rows[1].Annual.Decimal(), got.Rows[2].Annual.Decimal())
+	}
+	want := []string{"OMEGA", "ALPHA", "ZEBRA"}
+	for i, name := range want {
+		if got.Rows[i].Symbol != name {
+			t.Errorf("Rows[%d].Symbol = %s, want %s", i, got.Rows[i].Symbol, name)
+		}
+	}
+	assertSorted(t, got.Rows)
+}
+
+// assertSorted checks the documented order directly: Annual non-increasing, and
+// Symbol strictly ascending wherever consecutive Annual values are equal.
+func assertSorted(t *testing.T, rows []persistence.SymbolReturn) {
+	t.Helper()
+	for i := 1; i < len(rows); i++ {
+		cmp, err := rows[i-1].Annual.Cmp(rows[i].Annual)
+		if err != nil {
+			t.Fatalf("Cmp rows %d/%d: %v", i-1, i, err)
+		}
+		if cmp < 0 {
+			t.Errorf("Rows[%d].Annual %s < Rows[%d].Annual %s — not descending",
+				i-1, rows[i-1].Annual.Decimal(), i, rows[i].Annual.Decimal())
+		}
+		if cmp == 0 && rows[i-1].Symbol >= rows[i].Symbol {
+			t.Errorf("tie at %s: Rows[%d].Symbol = %s, Rows[%d].Symbol = %s — "+
+				"ties must break on Symbol ascending",
+				rows[i].Annual.Decimal(), i-1, rows[i-1].Symbol, i, rows[i].Symbol)
+		}
+	}
+}
