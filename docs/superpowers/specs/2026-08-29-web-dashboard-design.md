@@ -720,7 +720,7 @@ arbitrage opportunity."* This is that list, with provenance, honestly marked.
 
 | Quantity | Source | Phase |
 |---|---|---|
-| Taker / maker fee, per venue, per tier | `configs/reference.*.json`, `venue-profiles.md` | 1 |
+| Taker / maker fee, per venue, per **product** (row 7) | ⚠ **F80/F81 — the fetcher writes ONE of the document's three blocks, and the row names the axis that is constant.** `cmd/arblab/reference.go:69` calls `driven.FetchLots` and nothing else — there is no `FetchFees` in the tree — and `FetchLots` opens `out := doc` and rebuilds only `out.Lots`, so **every committed `fees` row is `class: hand_recorded`, `observed_at 2026-07-31T05:30Z`, including in the revision the fetcher itself produced** (positive control: that revision's `lots` block reads `fetched`, 2026-08-16T09:43:26Z). Core §2.4, quoted in §8b, requires *"**programmatically-fetched**, per-leg, per-venue maker/taker fees"*; §8c point 3 cannot catch it because the provenance is present and **true**. F81: `tier` is one value per (venue, product) (F63) while **`product` moves the round trip 43 %** — Binance spot taker `0.001` vs `linear_perp` `0.0005`, so row 11's *"4 fee legs"* is `0.0021` perp-perp (`params.go:85`) and `0.0030` spot+perp, and **both leg shapes have live consumers** (`service.go:469-472` vs `gate_crossvenue.go:255-259`). The port is `Fees(inst ids.VenueInstrument, asOf time.Time)` — *"the **(venue, product)** cell, **as-of**"* — and **neither argument is in this row**, nor are its three refusals (`ErrAsOfUnset`, `ErrCellAbsent`, `ErrNotPeriodCorrect`, the last for any instant before the `observed_at` §8c point 1 reads against) | 1 |
 | The account's *actual* tier and discounts | signed `commissionRate` — ⚠ F24: the demo publishes the right number and charges another | 2 |
 | Half-spread crossing at the configured size | ⚠ **F71 — *VWAP* names no construct outside this record: 0 in `internal/`, 0 in `cmd/`, 0 in `build-spec.md`.** Before round 7 it occurred 3× in the whole repository and all three were in this file — this row, §11's book-fixture line and §11's *"VWAP, crossing, slippage"* assertion. *(The total is no longer a stable measurement: §15.12 discusses the word. The **zero in code** is, and it is the half that bites.)* The tree's term is the **walk premium**, and `cost.go` fixes its reference: *"|Σ level fills − **best**·qty|"* — the touch, so the half-spread is not in the number, which is what F26 says of the constant too. The mid exists **once**, as `(ask−bid)/mid`, the **stratum** feature — and `view.go:14`, `readport.go:18` and `enter.go:217` each refuse a collapsed mid as a price, the first citing Profiles for the rule. `PriceView` also drops depth *"deliberately"* | **none** |
 | Slippage at the configured size | ⚠ **F72/F73 — this and the row above are the operands of a MAX, tabled as summands.** `sideCost` is `max(walk premium + adverse charge, p90 charge)`, worse side per leg — `build-spec.md:793`'s *"the **worse of**"* verbatim — so adding them double-charges depth while row 11 (*"4 fee legs + 2 crossings"*) drops the p90; and **`AdverseMove`, a charge inside that max, has no row in this table at all**. F73: `NewConservativeCostModel` has **0** non-test call sites (9 test, as control), `driven.BookSource` has **0** implementations, **no calibration artifact is committed**, and its input `/archive/` is **gitignored**. `marketdata.New` has one production call site — `app/sim/sim.go:132`, *"replayed archive … under TestClock"* | **none** |
@@ -736,7 +736,7 @@ arbitrage opportunity."* This is that list, with provenance, honestly marked.
 | Liquidation price per leg | ⚠ **F56 — the venue's, never reconstructed.** `venue/marginstatus.go:167`: *"It is the VENUE's number and never one this system reconstructs"*, and absence is modelled (`LiqPriceStated`) because a zero reads as maximum headroom. A bracket-derived figure is a separate **modelled** quantity and may never substitute for venue risk state | 2 |
 | Free vs allocated collateral | ⚠ **F67 — that file is the SPOT wallet enumeration.** `marginstatus.go:41-53` already rules on this quantity: *allocated* is `PostedMargin` (Binance `isolatedWallet` / Bybit `positionIM`), *free* is account-level `availableBalance` and **assigned to `treasury` by §7.2**. Neither is here — and `SpotBalanceRow.Total` **collapses** the very split the row names (*"free + locked on Binance"*), while `balances_bybit.go:27` **refuses** to pin a row where `locked != 0` | 2 |
 | Basis / mark divergence between legs | ⚠ **F68 — `venue.Mark` has ZERO producers anything calls.** `DecodeBinanceMark` and `DecodeBybitMark`: no callers; `replay.DecoderKind` declares three members and none is a mark; `configs/capture.json`'s 39 sources are book and funding only. The mark is in reach in three places and dropped on the record in all three — `wire_binance.go:31` (*"deliberately drops"*), `marginstatus.go:31` (*"NOT decoded here"*), `marketdata/module.go:29` + `engine/state/doc.go:102` (*"no use case, so there is nothing here to compose"*). A declared deferral, stamped phase 1 for a TWO-leg quantity | **neither** |
-| Tick, lot, min-notional filters | reference data | 1 |
+| Tick, lot, min-notional filters (row 18) | ⚠ **F82 — one `observed_at` over a row whose own `source` records TWO observation dates, and §8c point 2's remedy is what publishes the wrong one.** *"reference data"* names no file, block or field — with row 2's *"venue REST"* (F70) the only cell in the table citing a **category**. Resolved (F63) to `configs/reference.*.json` `lots`, whose every btcusdt row stamps `observed_at 2026-07-31T05:09:00Z` while its `source` says *"Lot/notional members observed 2026-07-31 … **tick observed 2026-08-03** (single-revision store carries one `observed_at` … **the tick member is consumed only by the live order path, which reads as-of now**)"*. That justification is a claim about the **consumer set**, and this row is a new consumer reading as-of the revision: §8c point 2's *render `as_of`/`class`/`source` beside the figure* then prints **2026-07-31 beside a tick observed 2026-08-03**. `LotRules(inst, asOf)` compares against **one** instant per row, so nothing between file and screen can separate the members. And the glob names three revisions with **disjoint** `lots` (BTCUSDT ×4 / LABUSDT ×2, one a placeholder `.in` template) where the port reads `store.Current()` — one document, no selector | 1 |
 | Position and order limits | `positionRisk` / `symbolConfig` — **credentialed** (F46) | **2** |
 
 **Persistence and the decision**
@@ -744,8 +744,8 @@ arbitrage opportunity."* This is that list, with provenance, honestly marked.
 | Quantity | Source | Phase |
 |---|---|---|
 | Settlements to break even | ⚠ **F76/F79 — this table computes break-even TWICE, on two cost bases, two rows apart.** Here it is derived server-side from *"spread and cost"* — row 5 (**none**) and row 11 (**none**) — while row 22 reads it from `summary.json`'s `run_vs_breakeven`, which F55 says is pinned to entry level `0.0005` and cost `0.0021` and declares neither. Rendered together, a `P(clearing break-even)` computed at 21 bp sits beside a settlement count computed at §8b's per-symbol book cost. It is also the **only** derived cell that names its inputs, and both names are ambiguous inside this same table — see F76 | **none** (F75) |
-| p50 / p75 / p90 historical run length | `summary.json` | 1 |
-| P(clearing break-even) at this run length | ⚠ **F55 — `summary.json`'s `run_vs_breakeven`, which is pinned to entry level `0.0005` and cost `0.0021` and declares neither.** Varying the level alone moves the run-4 figure 10.0 → 38.6 → 94.9 → 100.0 %. Owed before any panel reads it | 1 |
+| p50 / p75 / p90 historical run length (row 21) | ⚠ **F83 — the quantity has exactly ONE coordinate and the row names none; the member it leads with cannot see the omission.** `pooled` is the one block of four carrying both axes the file's header declares (`entry` per element, `wins`/`mean_net` keyed by cost) — so the loss is in the **row**, not the artifact. Run length is a function of entry level alone (`summarise.py:58`; cost enters only `wins`/`mean_net`). Across the four declared levels: p50 **1, 2, 2, 1**; p75 **3, 3, 3, 3**; p90 **5, 6, 5, 4**; episodes 12 322 / 3 425 / 1 259 / 472. **p75 is constant at every level**, so any golden or panel check on it passes everywhere and cannot detect the missing coordinate — the fifteenth fixture collapse, in the artifact rather than a test. Controls: §99 §3's declared *"at the 10bp entry level"* reading reproduces exactly at `0.001` (2.572 / 2 / 5 / 20), and `run_vs_breakeven`'s twelve entries sum to **3 425** = `pooled[0.0005]`, re-deriving F55 from another direction. `HANDOFF.md` already restates *"median episode is 2 settlements"* with **no level**, and at two of the four it is **1** | 1 |
+| P(clearing break-even) at this run length (row 22) | ⚠ **F55 — `summary.json`'s `run_vs_breakeven`, which is pinned to entry level `0.0005` and cost `0.0021` and declares neither.** Varying the level alone moves the run-4 figure 10.0 → 38.6 → 94.9 → 100.0 %. Owed before any panel reads it. **⚠ F84 — and it is a STORED DERIVATION over row 11.** `summarise.py:86` is `D(e["accrued"]) > D("0.0021")`, and that constant is row 11's round trip, phase **none** after F75 — so this row is F75's defect exactly, and group B could not see it because the enumeration keyed on the five cells that **say** `derived`. Its input is row 21, named in prose (*"at this run length"*) and not by index. Rows 20 and 22 are the same break-even two rows apart at two phases | **none** (F84) |
 | Expected net per episode | ⚠ **F69 — the file holds `accrued` (GROSS) and no net field at any depth.** Net is `summarise.py:78`/`:109`, `accrued − cost`, keyed by `COSTS = 0.0021 / 0.0029 / 0.0090` — so the row cites **one operand of a subtraction whose other operand is F26's assumption**, with no cost coordinate in the provenance. Honest form: *`episodes.json` (gross) + the cost revision (§8c)*, which also puts F35's verdict/scenario split on the row | 1 for the gross half |
 | Annualised return, with denominator | ⚠ **F79 — row 23 got F69's treatment and this row is the same subtraction, annualised.** The **denominator** half holds: `summary.json`'s `per_symbol[].annual_pct_on_2000` carries it and §5 rule 3 types it. The **parameters** do not. That field is a dict keyed by exactly the three costs §8a offers as a control — `0.0021 / 0.0029 / 0.0090` — so §8a's **custom** and §8b's **per-symbol** cost have **no cell in the artifact**, and the whole `per_symbol` block is pinned to one entry level (F60: `0.001`) recorded in no field, while the file's own header declares `levels` (4) and `costs` (3). Answering for either means `episodes.json`'s gross plus the cost revision — F69's honest form, owed on this row too | 1 for the gross half (F75) |
 | Hurdle comparison; concentration; sample size | `verdict` **once it carries its hurdle** (F45) **and its entry level** — ⚠ **F60: it carries four hurdle-provenance fields and no level.** Pinned at `0.001` via `per_symbol`; `beat_hurdle_symbols` at 21 bp reads 2/61 · 3/60 · **4/56** · 3/49 across the four levels the file declares, and the published column is the unique maximum. At 90 bp the published `0/56` becomes **2/49**. §14 debt 7 does not name this block | 1 |
@@ -1379,6 +1379,50 @@ comparable; only writing the comparand beside the conclusion does.
     carries no entry level while the file's header declares four. The
     denominator half is already sound (§5 rule 3, `annual_pct_on_2000`), which
     is what isolates this to the **parameters**.
+
+29. **`arblab reference fetch` fetches the fee and hurdle blocks, or core §2.4's
+    *programmatically-fetched* is marked as unmet in §8b** (F80). The command
+    calls `driven.FetchLots` and nothing else; `FetchLots` rebuilds only
+    `out.Lots`, so every committed `fees` row and every `hurdle` block is
+    `hand_recorded` at 2026-07-31 — including in the revision the fetcher
+    produced, whose `lots` block reads `fetched` and is the control. §8c's
+    sentence *"`arblab reference fetch` writes them"* is true of one block of
+    three. §8c point 3 does not reach it: it refuses a **missing** class, and
+    core §2.4 constrains **which class**, which nothing reads the field for.
+    Until a fetcher exists the honest form is §8b naming the fee half as owed
+    beside F73's slippage half — both halves of the same clause, both unbuilt.
+
+30. **§8's provenance rows name the PORT's coordinates and refusals, not the
+    store** (F81, F82). `Fees(inst ids.VenueInstrument, asOf time.Time)` and
+    `LotRules(inst, asOf)` fix which coordinates the answer depends on and how it
+    declines — `ErrAsOfUnset`, `ErrCellAbsent`, `ErrNotPeriodCorrect` — and rows 7
+    and 18 carry none of it. Row 7 names `tier`, which is constant, and omits
+    `product`, which separates a `0.0021` round trip from a `0.0030` one and has
+    live consumers on both sides. This is F74's *no cell for a refusal* with the
+    refusals now named, and F78's *check the signature* applied to a provenance
+    row instead of a wire rule.
+
+31. **A per-member observation date needs a per-member stamp, or the member is
+    withdrawn from the row** (F82). `reference.btcusdt.json`'s `lots` rows stamp
+    one `observed_at` over members observed 2026-07-31 and 2026-08-03, with the
+    split documented in the row's own `source` and justified by a claim about the
+    **consumer set** — *"consumed only by the live order path, which reads as-of
+    now."* Row 18 is a consumer that reads as-of the revision, so §8c point 2's
+    remedy renders the wrong date beside the tick. Either `LotRules` gains
+    per-member provenance, or row 18 states that the tick is out of its scope.
+    The same shape sits on `hurdle` in the crossvenue revisions, whose carry is
+    justified by *"the pair smoke consumes no hurdle"* — a claim §8 changes.
+
+32. **F75's composition rule keys on the QUANTITY, not on the cell's wording, and
+    debt 24's count word is withdrawn** (F84). Debt 24 says *"five rows"*; row 22
+    is a sixth and is stamped phase 1 over row 11, because `summarise.py:86`
+    compares `accrued` against the literal `0.0021` — row 11's round trip, phase
+    **none**. A derivation stored in an artifact is still a derivation, and its
+    Source cell names the file holding the **answer** rather than the **inputs**,
+    which passes every check group B's arithmetic could run. Rows 23, 24 and 25
+    are the same shape and were each caught separately (F69, F79, F45/F60) —
+    three findings for one missing composition inside one table. The linter debt
+    24 promises needs a membership predicate before it can be written.
 
 ---
 
@@ -2162,7 +2206,7 @@ enum with no producer is this repo's own named shape.
    | **A — a named path, never opened** ***[DONE — §15.11, five findings, F65–F69; all five rows failed]*** | 3 `ranking.json`, 16 `venue/balances.go`, 17 `venue/mark.go`, 23 `episodes.json`, and **re-check 1** `venue/funding.go`, which **F53 already found is a payload type with no reader** while row 1 still names it as the live source | `ls` it, then confirm the file **produces** the quantity rather than consuming or merely typing it. This is F61's check |
    | **B — "derived"** ***[DONE — §15.13, five findings, F75–F79; all five rows failed]*** | 5, 6, 11, 20, 24 | A derived row inherits the worst phase and the weakest provenance of its **inputs**, and names none of them. Row 11 (*"4 fee legs + 2 crossings"*) inherits row 7's **single hand-recorded tier** and rows 9/10's live book |
    | **C — "live", no endpoint named** ***[DONE — §15.12, five findings, F70–F74; all three rows failed]*** | 2 (*"venue REST"* — the table's weakest citation, naming no route at all), 9, 10 | Name the route, then answer the phase question §3 actually poses: **is it public or signed**, and does a reader exist? F63 is what this check finds |
-   | **D — partially examined, finish it** | 7 and 18 (F63 bounded them: one tier per venue-product, one symbol per reference revision), 21 (F55/F60 opened two blocks of `summary.json`; `pooled` and the header are unexamined) | Re-read the row's **wording** against what the source holds. *Fee tiers* and *filters* are both plurals the source does not support |
+   | **D — partially examined, finish it** ***[DONE — §15.14, five findings, F80–F84; all three rows failed]*** | 7 and 18 (F63 bounded them: one tier per venue-product, one symbol per reference revision), 21 (F55/F60 opened two blocks of `summary.json`; `pooled` and the header are unexamined) | Re-read the row's **wording** against what the source holds. *Fee tiers* and *filters* are both plurals the source does not support |
 2. **`ReconcileMarginOp`'s actor identity** and **F42's `notimenow` hole** — now
    the only items named by §15.7 and never touched, two rounds on.
 3. **§14's debt list against its own findings.** F60 is a debt that was written
@@ -2851,3 +2895,288 @@ source instants; rule 4 ships one `server_now` and `ServerNow` takes a venue.
 *When a wire rule projects an injected port across the network, check it against
 the port's SIGNATURE, not against the hazard it was written for* — the signature
 is where §3.5 already recorded which arguments the answer depends on.
+
+### 15.14 External review, round 9 — group D, and the check is the port that serves the row
+
+Group D is the last three rows and the only group whose check is neither a lookup
+nor an arithmetic: **re-read the row's wording against what the source holds.**
+Two of the three turned out to have a *port* between the row and the file —
+`ports.Fees` and `ports.LotRules` — and once that is noticed the check sharpens
+into round 8's own carried sentence, one round on: **resolve the row against the
+PORT'S SIGNATURE, not against the file.** A file answers *what values exist*; a
+signature answers *which coordinates the answer depends on, and how it can
+refuse*. Rows 7 and 18 fail on both halves. Row 21 has no port at all, and that
+is what makes its coordinate loss invisible.
+
+| # | Row | What it says | What the source holds |
+|---|---|---|---|
+| 7 | Taker / maker fee, per venue, per tier | `configs/reference.*.json`, `venue-profiles.md` / 1 | **F80** — `arblab reference fetch` upgrades one of the document's three blocks, and the fee block is not it, against core §2.4's *programmatically-fetched*. **F81** — the row names `tier`, which is constant, and omits `product`, which moves the round trip 43 %, and both of `Fees(inst, asOf)`'s arguments |
+| 18 | Tick, lot, min-notional filters | reference data / 1 | **F82** — one `observed_at` over a row whose own `source` records two observation dates, and §8c point 2's remedy is what publishes the wrong one |
+| 21 | p50 / p75 / p90 historical run length | `summary.json` / 1 | **F83** — `pooled` is keyed by entry level and the row names none; p75 is **3 at every level the file declares** |
+| — | (row 22, reached from 21) | `summary.json` / 1 | **F84** — F75's composition rule keys on the *word* `derived`, and row 22 is a stored derivation over row 11 |
+
+#### F80 — `reference fetch` upgrades one block of three, and the two it skips are the economic surface
+
+§8c makes the committed revisions the dashboard's cost and hurdle source of
+truth, and says of `fees`, `lots` and `hurdle` together: *"`arblab reference
+fetch` writes them."* It writes one.
+
+`cmd/arblab/reference.go:69` calls `driven.FetchLots` and nothing else; there is
+no `FetchFees` and no `FetchHurdle` anywhere in the tree. `FetchLots`
+(`reference_fetch.go:350`) opens `out := doc` and rebuilds **only** `out.Lots`,
+so `Fees` and `Hurdle` are carried through the fetcher verbatim, `class` and
+`observed_at` included. Measured over the three committed revisions, with the
+fetcher's own output as the **positive control**:
+
+| Revision | `fees` | `lots` | `hurdle` |
+|---|---|---|---|
+| `reference.btcusdt.json` | `hand_recorded`, 2026-07-31T05:30Z | `hand_recorded`, 2026-07-31T05:09Z | `hand_recorded`, 2026-07-31T05:35Z |
+| `reference.crossvenue.in.json` (the template) | `hand_recorded`, 2026-07-31T05:30Z | `hand_recorded`, 2026-08-16T00:00Z | `hand_recorded`, 2026-07-31T05:35Z |
+| `reference.crossvenue.2026-08-16.json` (**fetched from it**) | `hand_recorded`, 2026-07-31T05:30Z | **`fetched`**, 2026-08-16T09:43:26Z | `hand_recorded`, 2026-07-31T05:35Z |
+
+The control is what makes this a measurement rather than an unexercised default:
+the class field **can** say `fetched`, the fetcher demonstrably makes it say so,
+and `diff`ing the template against its own fetched output shows the delta is
+**exactly** the two `lots` rows' `tick`, `class`, `observed_at` and `source` —
+every `fees` row and the whole `hurdle` block byte-identical.
+
+**The clause this falsifies is normative and §8b quotes it.** Core §2.4:
+*"Round-trip cost MUST be computed from **programmatically-fetched**, per-leg,
+per-venue maker/taker fees plus a measured slippage model."* §8b reproduces that
+sentence to argue the per-symbol decomposition was already required, and §8c then
+declares these revisions the source of truth — so the record satisfies a clause
+whose operative word names the one half with no code path. The slippage half is
+F73's (`0` implementations); the fee half is this.
+
+**And §8c point 3 cannot catch it, because the block's provenance is correct.**
+Point 3 refuses *"a revision missing writer class, observed-at or document
+revision."* The fee rows are missing none of those — they carry a class, and the
+class is `hand_recorded`, and it is **true**. Validation asks whether provenance
+is *present*; core §2.4 constrains which *class* it may be, and nothing reads the
+field for that. *A check that cannot fail*, in the form where the honest marking
+is what hides the gap.
+
+The hurdle is the same block one step further along: `reference.crossvenue.*`'s
+`hurdle.source` reads *"Carried verbatim from `configs/reference.btcusdt.json`"*,
+so the figure §8c point 2 renders *"from the revision, with its provenance"* is a
+copy whose provenance names the other file — and §8c point 2 is the treatment
+F30 earned. The carry is **correctly justified in place** (*"the pair smoke
+consumes no hurdle, and re-sourcing a row this run does not read would be a
+second unverified claim for nothing"*) — and that justification is a claim about
+the **consumer set**, which §8 changes. Same shape as F82 below, on a different
+block of the same document.
+
+#### F81 — the row names the axis the file holds constant and omits both of the port's arguments
+
+Row 7 reads *"Taker / maker fee, **per venue, per tier**"*. F63 already withdrew
+the `tier` plural: four rows, `class: hand_recorded`, exactly **one** tier per
+(venue, product) — `VIP0-modeled` / `nonVIP-modeled`. What round 6 could not see
+from the Venues screen is that the row names the axis that is **constant** and
+omits the one that **varies**.
+
+The port fixes both coordinates, and its doc comment says so:
+
+```go
+// Fees answers the fee face: the (venue, product) cell, as-of.
+Fees(inst ids.VenueInstrument, asOf time.Time) (domain.LegFees, error)
+```
+
+`product` is the axis the committed rows actually vary, and it moves the number
+by 2×: Binance spot taker `0.001` against Binance `linear_perp` taker `0.0005`.
+**Two live consumers select opposite ways.** `strategy/application/service.go:469-472`
+reads `SpotFees` and `PerpFees` — strategy #1's leg shape, long spot + short perp
+on one venue. `driving/gate_crossvenue.go:255-259` reads both venues' perp —
+strategy #2's, which is the live one. Both shapes' rows are committed in the same
+file, and **row 11's *"4 fee legs"* resolves to `0.0021` on the perp rows and
+`0.0030` on a spot+perp pairing** — 43 % apart, in the kill gate's own quantity,
+selected by a coordinate neither row 7 nor row 11 names. `params.go:85` is
+explicit where §8 is silent: *"§42b step 3: **four perp taker legs** … enter and
+exit a two-venue **perp-perp** position at taker on both venues."*
+
+**`asOf` is the second omitted argument, and it is §8c point 1's own word.**
+Point 1 says the dashboard *"reads the fee (and lot-rule, and hurdle) revision
+**as-of the decision instant**"*. The port takes that instant and can refuse on
+it three ways — `ErrAsOfUnset` when it is zero, `ErrCellAbsent` when no row
+matches the instrument, and `ErrNotPeriodCorrect` when the instant precedes the
+revision's `observed_at`, which for every committed fee row means **any decision
+instant before 2026-07-31T05:30Z**. §8's table has no cell for a refusal — F74's
+sentence — and here the refusing path is reachable from the design as written,
+not from a hypothetical.
+
+**This is F78's shape on a different port, and round 8 predicted it.** Round 8's
+carried sentence was *check the wire rule against the port's signature, not
+against the hazard it was written for*. The same instrument applied to a
+**provenance row** rather than a wire rule reads: *a provenance cell that names a
+file is answering with the store; the port is where the repo already recorded
+which coordinates the answer depends on and how it declines to answer.*
+
+#### F82 — one `observed_at` over two observation dates, and the remedy is what publishes the wrong one
+
+Row 18's Source cell is the bare phrase *"reference data"*. It names no file, no
+block and no field — the same weakness F70 recorded for row 2 (*"venue REST"*,
+naming no route), and the only other cell in §8's twenty-five that cites a
+**category** instead of an origin. F63 resolved it to `configs/reference.*.json`'s
+`lots` and bounded it to one symbol per revision.
+
+The wording check finds a second thing, and it is in the file's own prose. Every
+`lots` row in `reference.btcusdt.json` carries `observed_at: 2026-07-31T05:09:00Z`
+and a `source` that says, verbatim:
+
+> *"Lot/notional members observed 2026-07-31 and re-confirmed unchanged
+> 2026-08-03; **tick observed 2026-08-03** (single-revision store carries one
+> `observed_at`, kept at the row's original date so the committed calibration's
+> frozen as-of stays answerable — **the tick member is consumed only by the live
+> order path, which reads as-of now**)."*
+
+So the row is **four filters at one stamp, and one of them was observed three
+days later**. The justification is sound and it is a claim about the **consumer
+set** — *the tick is consumed only by the live order path*. Row 18 adds a
+consumer that reads the tick as-of the **revision**, which is precisely the case
+the parenthesis excludes.
+
+**§8c point 2's remedy is what does the damage.** Point 2's treatment for a
+figure is to *render `as_of`, `class` and `source` beside it*, so that a reader
+meeting a number alone cannot mistake its base — F30's disease, treated. Applied
+to row 18 it prints **2026-07-31 beside a tick observed 2026-08-03**: a correct
+field, correctly rendered, attached to the one member it is wrong for. The
+provenance column names the **row**, and the fact is per **member**.
+
+Nothing between the file and the screen can separate them either.
+`LotRules(inst, asOf)` compares `asOf.Before(lots.Provenance.ObservedAt)` against
+**one** instant for the whole row, so the port carries the same granularity the
+file does, and `domain.LotRules` has one `Provenance`.
+
+**And the glob is a third claim.** `configs/reference.*.json` resolves to three
+files whose `lots` blocks are **disjoint** — `btcusdt` (4 rows, BTCUSDT spot and
+perp, both venues) and the two `crossvenue` revisions (2 rows, LABUSDT perp
+only) — one of which is a `.in` **template** whose rows are placeholders by their
+own `source` text. `Fees` and `LotRules` read `r.store.Current()`: exactly one
+document. The row cites a set where the port takes one revision, and names no
+selector.
+
+#### F83 — the run-length row's quantity has one coordinate, and the member it leads with is the one that cannot see it
+
+Row 21 is *"p50 / p75 / p90 historical run length | `summary.json` | 1"*. `pooled`
+is the block that holds it, and it is the **one block of the four that carries
+both axes the file's own header declares** — `entry` on each of its four entries,
+and a `wins`/`mean_net` dict keyed by cost inside each. F55 and F60 found the two
+blocks that lost a coordinate; `pooled` keeps them. The defect is therefore not in
+the artifact this time — it is that **the row citing it names neither**.
+
+Run length is a function of the **entry level alone**: `summarise.py:58` builds
+`pooled` per level, and cost enters only through `wins` and `mean_net`. So the
+quantity has exactly one coordinate, and the row supplies none. Read straight
+out of the committed file:
+
+| entry | episodes | p50 | p75 | p90 | max |
+|---|---|---|---|---|---|
+| 0.0002 | 12 322 | 1 | **3** | 5 | 71 |
+| 0.0005 | 3 425 | 2 | **3** | 6 | 36 |
+| 0.001 | 1 259 | 2 | **3** | 5 | 20 |
+| 0.002 | 472 | 1 | **3** | 4 | 20 |
+
+**`run_p75` is 3 at every level the file declares.** That is the fifteenth
+fixture collapse in this project's list, and it is in the artifact rather than in
+a test, like F45's: any golden, panel assertion or eyeball check written against
+p75 passes at every entry level and **cannot detect that the coordinate is
+missing** — the fixture does not contain the thing under test. `run_p50` splits
+only the outer pair from the inner (1, 2, 2, 1) and `run_p90` takes 5 twice
+(5, 6, 5, 4), so a two-level fixture can collapse either of those as well; the
+only member with four distinct values is **`episodes`**, which spans 26× and is
+not in the row at all. *The separating member depends on which levels are
+sampled, so the honest fixture states the level rather than hunting for a member
+that happens to vary.*
+
+**Controls.** §99 §3 declares its level — *"Pooled over all 61 symbols, **at the
+10bp entry level**: mean run 2.57, median 2, p90 5, max 20"* — and the `0.001`
+row above reproduces it exactly (2.572 / 2 / 5 / 20). So §99 is right and the
+loss happens downstream. Independently, `run_vs_breakeven`'s twelve entries sum
+to **3 425 episodes**, which is `pooled[entry=0.0005].episodes` on the nose —
+reproducing F55's *pinned to entry level `0.0005`* from a different direction.
+
+**The number has already travelled without its base once.** `docs/HANDOFF.md`
+restates the measurement as the answer to §2.3 — *"Median episode is **2
+settlements** — 8h on a 4-hour grid, 16h on an 8-hour grid. Break-even is ≈6
+settlements, which sits at about the p93"* — with no level. At two of the four
+levels the file declares, the median is **1**. F30's shape, one hop downstream of
+a source that was careful.
+
+#### F84 — F75's rule keys on the WORD *derived*, and row 22 is a stored derivation over a phase-none input
+
+Row 21 is read next to row 22, *"P(clearing break-even) **at this run length**"*
+— so the two rows are an input pair the table states in prose and not by index,
+which is F76's remedy owed on a pair group B never reached. Following it finds
+the harder thing.
+
+Row 22 is stamped phase **1** and sourced to `summary.json`. Its content is
+`run_vs_breakeven`, and `summarise.py:86` computes `cleared_cost` as:
+
+```python
+if D(e["accrued"]) > D("0.0021"):
+```
+
+That `0.0021` is **row 11's quantity** — the four-leg round trip — which F75 put
+at phase **none**. Row 22 is therefore stamped above its input by exactly the
+defect F75 names, and group B's enumeration could not reach it, because the
+enumeration keyed on the five cells that **say** `derived`.
+
+**A derivation stored in an artifact is still a derivation.** The Source column
+then names the file that holds the *answer* rather than the *inputs*, which is
+the honest-looking form of F76's *how*-instead-of-*from what* — a file path is a
+real origin, so the cell passes every check group B's arithmetic could run. Rows
+20 and 22 are the same break-even two rows apart at **two different phases**: row
+20 derived at render (`none` after F75) and row 22 derived in advance (`1`).
+
+**So debt 24 is scoped too narrowly, and its own wording says so.** It reads
+*"**Five** rows are stamped phase 1 over inputs at *none*, *dated* and *2*"* — a
+count word inside an enumeration, which this project has recorded before as its
+own hazard — and it promises *"the first check in this review a linter over the
+record could run"* while giving that linter no membership predicate. The rule has
+to key on **is this quantity computed from other rows**, not on whether the cell
+says so; otherwise the debt inherits the finding's enumeration and rows 22, 23
+and 25 read as audited because a *different* finding happened to touch them.
+
+The same test applied to the rest of the Persistence table: row 23 (F69's gross
+half), row 24 (F79) and row 25 (F45/F60) are all stored derivations over cost, and
+all three were caught one at a time by rounds 6, 8 and 5 respectively — three
+separate findings for one missing composition, which is F70/F73/F65's pattern
+inside a single table.
+
+#### What round 9 changes about the worklist
+
+**§15.10's worklist is closed. Twenty-five rows, four groups, four rounds, and
+every one of the sixteen rows the worklist opened failed** — group A 5/5, group C
+3/3, group B 5/5, group D 3/3.
+
+**The standing total is replaced by an enumeration, because it does not
+reproduce.** Rounds 6–8 carried a running count (*"four in twelve"*, *"seventeen
+in twenty-five"*) and re-deriving it against the tables gives a different number,
+which is this project's own *an enumeration's count word is a claim* landing on
+the review's own bookkeeping. Measured: **23 of the 25 rows carry a ⚠, and the
+two that do not are rows 4 (*rate cap / floor per venue*) and 19 (*position and
+order limits*)** — both cited to F46, both examined, both passing. Of the 23,
+**21** carry a finding from this review (F52 onward); rows 8 and 12 carry F24 and
+§98, which predate it. State the two clean rows, not the total.
+
+**The instrument changed again, and in the direction the yield curve predicts.**
+Round 6 opened paths, round 7 resolved routes, round 8 computed a column. Group
+D's rows are the ones whose citation *resolves* — the file exists, holds the
+quantity, and is committed — so the only thing left to read was the **wording**,
+and the wording had to be checked against something with more structure than a
+file. Two of the three rows had a **port** between them and their file, and the
+port's signature carries what the file cannot: which coordinates the answer
+depends on (`Fees(inst, asOf)`), and how it refuses (`ErrAsOfUnset`,
+`ErrCellAbsent`, `ErrNotPeriodCorrect`). *When a provenance row cites a store,
+find the port that reads it — a store answers what values exist, a signature
+answers what the answer is a function of.*
+
+**The third row had no port, and that is why its loss is invisible.**
+`summary.json` and `episodes.json` have **zero** Go readers in `internal/`,
+`cmd/` or `tools/` — they are written by `summarise.py` and read by
+`verdict_levels.py`, both outside the type system. So the entire Persistence
+table (rows 21–25) cites artifacts with no as-of, no refusal and no declared
+coordinate, while the Cost table's rows 7 and 18 cite a store that has all three
+and are simply not using them. **F55, F60, F79 and F83 are four coordinate losses
+in one file, and the reference document has had none** — that is the difference a
+port makes, and it is the argument for where the persistence figures should be
+read from before any panel reads them.
