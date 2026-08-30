@@ -157,6 +157,12 @@ func TestOracle_PooledAgreesWithSummariseDotPy(t *testing.T) {
 				if npe.Wins != row.Wins[cost] {
 					t.Errorf("cost %s: wins %d, artifact %d", cost, npe.Wins, row.Wins[cost])
 				}
+				// mean_net is skipped here ONLY at the censored level (0.0002),
+				// and only because it is a KNOWN divergence, not an untested
+				// cell: TestOracle_CensoringIsTheOnlyDisagreement asserts it, at
+				// all three costs, with its magnitude. This test is "where the
+				// two implementations agree"; asserting equality on a cell known
+				// to disagree would be the wrong claim, not a weaker one.
 				if rl.Censored == 0 && npe.MeanNet.Decimal() != roundedTo9(t, row.MeanNet[cost]) {
 					t.Errorf("cost %s: mean_net %s, artifact (to 9) %s",
 						cost, npe.MeanNet.Decimal(), roundedTo9(t, row.MeanNet[cost]))
@@ -178,8 +184,29 @@ func TestOracle_PooledAgreesWithSummariseDotPy(t *testing.T) {
 }
 
 // F103's magnitude, asserted rather than tolerated. At level 0.0002 the two
-// implementations DISAGREE, in three places and by exactly this much, because
-// summarise.py counts five right-censored records as episodes of length zero.
+// implementations DISAGREE, in FOUR places and by exactly this much, because
+// summarise.py counts five right-censored records as episodes of length zero:
+// episodes (12322 vs 12317+5), run_mean, mean_gross, and mean_net at every
+// cost. mean_net was originally missing from this list — task-8-brief.md's
+// code (and this file's first commit, copying it) guarded the pooled
+// agreement test's mean_net comparison with `rl.Censored == 0`, which is
+// correct there (that test claims agreement, and this cell does not agree),
+// but nothing asserted the divergence itself, so the "only three places"
+// claim below was never checked against the fourth cell it was silently
+// skipping.
+//
+// The mechanism is the SAME single cause as the other three, not a fourth
+// cause: the numerator is identical between the two implementations — every
+// one of the five censored records accrues exactly "0" (verified by reading
+// every one of the five), so the sum of accruals is unchanged by including or
+// excluding them. Only the denominator differs: summarise.py divides by
+// 12322, this reader by 12317, because mean_net is mean_gross minus one
+// round-trip cost, and mean_gross already carries the divisor split. That the
+// delta (-0.000000265) is IDENTICAL across all three costs is the tell: a
+// per-record cost charge on the censored rows (as opposed to a denominator
+// difference) would move by a different amount at each cost, since the cost
+// term itself differs between 0.0021, 0.0029 and 0.0090.
+//
 // Recording the delta is what stops a later reader from either "fixing" the Go
 // fold or widening the oracle until the finding disappears.
 func TestOracle_CensoringIsTheOnlyDisagreement(t *testing.T) {
@@ -190,10 +217,12 @@ func TestOracle_CensoringIsTheOnlyDisagreement(t *testing.T) {
 		episodes  int
 		runMean   string
 		meanGross string
+		meanNet   map[string]string
 	}{}
 	for _, p := range sum.Pooled {
 		if p.Entry == "0.0002" {
-			row.episodes, row.runMean, row.meanGross = p.Episodes, p.RunMean, p.MeanGross
+			row.episodes, row.runMean, row.meanGross, row.meanNet =
+				p.Episodes, p.RunMean, p.MeanGross, p.MeanNet
 		}
 	}
 	if row.episodes != 12322 {
@@ -233,6 +262,36 @@ func TestOracle_CensoringIsTheOnlyDisagreement(t *testing.T) {
 	}
 	if roundedTo9(t, row.meanGross) != "0.000653343" {
 		t.Errorf("artifact mean_gross (to 9) = %s, want 0.000653343", roundedTo9(t, row.meanGross))
+	}
+
+	// The fourth place: mean_net, at all three costs. Every value below was
+	// recomputed independently (a fractions.Fraction fold over
+	// research/persistence/episodes.json, exact rational arithmetic, no
+	// float and no fixed Decimal context precision), cross-checked against
+	// the actual fixedpoint output (a throwaway `go run` against the same
+	// coordinate, output discarded, not committed), and confirmed tie-free at
+	// the ninth place for both the reader's value and the artifact's.
+	meanNetCases := []struct {
+		cost, readerMeanNet, artifactMeanNetTo9 string
+	}{
+		{"0.0021", "-0.001446392", "-0.001446657"},
+		{"0.0029", "-0.002246392", "-0.002246657"},
+		{"0.0090", "-0.008346392", "-0.008346657"},
+	}
+	for _, c := range meanNetCases {
+		npe, err := set.NetPerEpisode(persistence.CostAt{
+			EntryAt: persistence.EntryAt{Entry: mustRate(t, "0.0002")},
+			Cost:    mustRate(t, c.cost),
+		})
+		if err != nil {
+			t.Fatalf("NetPerEpisode at %s: %v", c.cost, err)
+		}
+		if npe.MeanNet.Decimal() != c.readerMeanNet {
+			t.Errorf("cost %s: mean_net = %s, want %s", c.cost, npe.MeanNet.Decimal(), c.readerMeanNet)
+		}
+		if got := roundedTo9(t, row.meanNet[c.cost]); got != c.artifactMeanNetTo9 {
+			t.Errorf("cost %s: artifact mean_net (to 9) = %s, want %s", c.cost, got, c.artifactMeanNetTo9)
+		}
 	}
 }
 
