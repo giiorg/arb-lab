@@ -1550,6 +1550,15 @@ nor any of §8's four tables.
 
 #### F51 — the gate is green on the file this record puts the server in
 
+> ***[CLOSED 2026-08-30, record §102, doc set v0.9.74.]*** The grant is retired: it was bought by
+> `reconcile_test.go`'s fixtures and by nothing else, so the CLI's report renderer and its six tests
+> moved to `internal/app/reconcile` — the package that declares the `Report` — and the grant was
+> deleted. Re-probed **A/B**, two files, four cells, with rule 6 speaking in every cell so no
+> silence could mean "unanalysed": with the grant restored the entrypoint draws **rule 11 silent**,
+> with it deleted the same file draws **rule 11**, and a *granted* root making the identical edge is
+> silent in both. `build-spec.md:821` clause (a) now holds for the entrypoint too and **no longer
+> gates `serve` code**. The finding below stands as written — it is what was true when this round ran.
+
 §4's layout names the phase-1 entrypoint: **`cmd/arblab/serve.go` — *"subcommand,
 existing dispatch pattern"***. `cmd/arblab` is **entry 1 of rule 11's grant
 list**, and `omsauthority.go`'s `grantedTo(self, root)` arm `continue`s before any
@@ -1717,9 +1726,15 @@ not the hurdle — it is the **entry level**, a second unlabelled base in the sa
 
 #### What round 5 should attack
 
-1. **F51's remedy** — retire `cmd/arblab`'s grant via F48, and **re-run the probe
+1. ~~**F51's remedy** — retire `cmd/arblab`'s grant via F48, and **re-run the probe
    with its control**; a scoping claim holds only once it has been run, and this
-   round is the third demonstration of that in four rounds.
+   round is the third demonstration of that in four rounds.~~ ***[DONE — record
+   §102. Two further findings came out of doing it: F58, a testdata fixture whose
+   isolating property was the exemption being deleted, and F59, a positive
+   control whose expected outcome was silence and which therefore measured file
+   selection rather than the gate. The second is the collapse checklist's
+   fourteenth instance and it landed on the CONTROL rather than on the
+   subject.]***
 2. **§7's Venues, Evidence and System screens** — this round reached Overview,
    Markets, Market detail, Positions and Journal. Three screens are still a
    reading, and the cross-tabulation instrument is cheap enough to finish.

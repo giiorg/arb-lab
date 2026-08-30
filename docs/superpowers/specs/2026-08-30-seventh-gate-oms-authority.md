@@ -131,7 +131,7 @@ found the same way, and the sentence in §3.6 now covers all three paths.
 The in-package case needs no rule and gets none, deliberately: a `*_test.go` file
 in `package main` can call anything `package main` can, so it holds exactly the
 authority its package holds. That is the honest reading rather than an oversight,
-and it is why the grant list carries `cmd/arblab` — see below.
+and it is why the grant list carries `cmd/arblab` — see below. ***[2026-08-30, record §102: it no longer does. This paragraph is what F51 turned out to be about — the grant existed for one test file's fixtures, the fixtures moved to `internal/app/reconcile` with the renderer they test, and the grant was deleted.]***
 
 ## 5. The gate is coarser than the capability, and the reason is in `oms/application` (F48)
 

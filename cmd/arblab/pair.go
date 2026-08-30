@@ -8,6 +8,7 @@ import (
 	"os"
 
 	apppair "github.com/giiorg/arb-lab/internal/app/pair"
+	appreconcile "github.com/giiorg/arb-lab/internal/app/reconcile"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/config"
 	"github.com/giiorg/arb-lab/internal/platform/observability"
@@ -91,8 +92,8 @@ func pairExitCode(class apppair.ExitClass) int {
 func writePairReport(w io.Writer, r apppair.Report) {
 	for i := range r.Sides {
 		fmt.Fprintf(w, "side %d — %s\n", i, r.Sides[i].Venue)
-		writeReconcileVerdict(w, r.Sides[i].Boot)
-		writeReconcileDiagnosis(w, r.Sides[i].Boot)
+		appreconcile.WriteVerdict(w, r.Sides[i].Boot)
+		appreconcile.WriteDiagnosis(w, r.Sides[i].Boot)
 		writePairLeg(w, "open  ", r.Sides[i].Open)
 		writePairLeg(w, "unwind", r.Sides[i].Unwind)
 		if e := r.Sides[i].Exposure; e.Established && e.ID != "" {
@@ -105,7 +106,7 @@ func writePairReport(w io.Writer, r apppair.Report) {
 		// Unconditional, and before any class-specific return below: precedence
 		// reduces a process EXIT CODE, never the operator-visible facts. A ban
 		// earned during dispatch must print even when exposure outranks it.
-		writeRateLimitStatus(w, r.Sides[i].RateLimit)
+		appreconcile.WriteRateLimitStatus(w, r.Sides[i].RateLimit)
 	}
 	if !r.Drove {
 		fmt.Fprintf(w, "pair:     not driven: %v\n", r.Refusal)

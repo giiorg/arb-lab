@@ -213,7 +213,7 @@ func TestPairReportSaysNothingAboutALegThatWasNeverAttempted(t *testing.T) {
 func TestPairReportOfANotDrivenRunNamesTheRefusal(t *testing.T) {
 	t.Parallel()
 	// Side 1's snapshot carries a fold miss, so it has something to report:
-	// writeRateLimitStatus is silent on an all-zero snapshot, and asserting a
+	// appreconcile.WriteRateLimitStatus is silent on an all-zero snapshot, and asserting a
 	// line from one would be asserting the renderer's silence.
 	rep := exposedPairReport(ratelimit.Snapshot{
 		Venue:  ids.Venue("bybit"),

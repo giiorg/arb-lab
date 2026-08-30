@@ -8,6 +8,7 @@ import (
 	"os"
 
 	appexercise "github.com/giiorg/arb-lab/internal/app/exercise"
+	appreconcile "github.com/giiorg/arb-lab/internal/app/reconcile"
 	"github.com/giiorg/arb-lab/internal/platform/clock"
 	"github.com/giiorg/arb-lab/internal/platform/config"
 	"github.com/giiorg/arb-lab/internal/platform/observability"
@@ -78,15 +79,15 @@ func exerciseRun(args []string, stdout, stderr io.Writer) int {
 // writeExerciseReport renders reconcile's verdict and diagnosis around the
 // execute step, then reports the final rate-limit state once.
 func writeExerciseReport(w io.Writer, r appexercise.Report) {
-	writeReconcileVerdict(w, r.Boot)
-	writeReconcileDiagnosis(w, r.Boot)
+	appreconcile.WriteVerdict(w, r.Boot)
+	appreconcile.WriteDiagnosis(w, r.Boot)
 	if !r.Executed {
 		if r.Refusal != nil {
 			fmt.Fprintf(w, "execute:  refused, nothing sent: %v\n", r.Refusal)
 		} else {
 			fmt.Fprintln(w, "execute:  did not run")
 		}
-		writeRateLimitStatus(w, r.Boot.RateLimit)
+		appreconcile.WriteRateLimitStatus(w, r.Boot.RateLimit)
 		return
 	}
 	fmt.Fprintf(w, "execute:  %d leg(s) dispatched\n", r.Execution.Dispatched())
@@ -118,7 +119,7 @@ func writeExerciseReport(w io.Writer, r appexercise.Report) {
 	}
 	// The post-execute snapshot contains the boot's monotone counters plus any
 	// dispatch additions, so it is the one complete rate-limit history to print.
-	writeRateLimitStatus(w, r.RateLimit)
+	appreconcile.WriteRateLimitStatus(w, r.RateLimit)
 }
 
 // loadExerciseConfig is loadReconcileConfig over the exercise document.

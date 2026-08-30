@@ -38,12 +38,15 @@ func TestOMSAuthority(t *testing.T) {
 		//     normalisation reaching the OTHER branch. Both are exempt and
 		//     neither is exempt for the same reason, which is why the mirror
 		//     is a separate fixture rather than a duplicate.
-		//   - cmd/arblab is a grant OUTSIDE internal/, which is what forces the
-		//     module root to be resolved from the imported path.
+		//
+		// There is no longer a granted fixture outside internal/, because there
+		// is no longer such a GRANT: F51 deleted cmd/arblab's. The property it
+		// was credited with — forcing the module root to be resolved from the
+		// imported path — is measured by cmd/rogue below and always was, for
+		// the reason rogue.go states.
 		"github.com/giiorg/arb-lab/internal/oms",
 		"github.com/giiorg/arb-lab/internal/oms/infrastructure/baseline",
 		"github.com/giiorg/arb-lab/internal/app/pair",
-		"github.com/giiorg/arb-lab/cmd/arblab",
 
 		// Offending, and the motivating case: the web-facing tree record §100
 		// designs. httpapi is §15.7's probe kept as a fixture — both of its
@@ -69,10 +72,12 @@ func TestOMSAuthority(t *testing.T) {
 		"github.com/giiorg/arb-lab/internal/omsx",
 
 		// Offending from OUTSIDE internal/, and it is the fixture that forces
-		// the module root to be resolved from the IMPORTED path. cmd/arblab
-		// above cannot do that job: it is granted, so it is silent either way,
-		// and silent-for-the-right-reason and silent-for-the-wrong-one are the
-		// same output. Only a cmd/ package that must be REPORTED separates them.
+		// the module root to be resolved from the IMPORTED path. A GRANTED cmd/
+		// package cannot do that job — it is silent either way, and
+		// silent-for-the-right-reason and silent-for-the-wrong-one are the same
+		// output. Only a cmd/ package that must be REPORTED separates them,
+		// which is why this one survived F51 and the granted twin beside it did
+		// not.
 		"github.com/giiorg/arb-lab/cmd/rogue",
 
 		// Offending, mixed: a bounded context whose file carries three reported
@@ -143,10 +148,16 @@ func TestSurfaceEntriesRenderDistinctly(t *testing.T) {
 // itself reported."
 //
 // It cannot be an analyzer diagnostic, and the reason is worth recording rather
-// than rediscovering: an analyzer runs per package VARIANT, and cmd/arblab's
-// production variant imports none of the surface — only its in-package test
-// file does. A per-variant "this grant permits nothing" report would fire on a
-// real, correct package.
+// than rediscovering: an analyzer runs per package VARIANT, and a binary whose
+// production variant imports none of the surface while its in-package test file
+// does is a real, correct shape — cmd/arblab was exactly that until F51. A
+// per-variant "this grant permits nothing" report would fire on it.
+//
+// It fired for real one session after it was written. F51's remedy moved
+// cmd/arblab's fixtures to internal/app/reconcile, the `go list` graph lost the
+// edge, and this test failed naming the grant and quoting the reason that had
+// expired — which is the whole of what it was built to do, and the only thing
+// in the repo that could have said so.
 //
 // So it is a `go list` over the engine module, which is the shape
 // internal/app/capture/imports_test.go already uses for §32b's fence.

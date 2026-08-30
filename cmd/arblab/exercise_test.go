@@ -15,11 +15,13 @@ import (
 )
 
 // TestExerciseReportPrintsTheBanAlertExactlyOnce polices the composition:
-// writeExerciseReport renders the boot through writeReconcileReport — which
-// prints the PRE-execute snapshot — and then adds its own post-execute call,
-// gated on Executed. The two cases below are the two ways a ban can arrive,
-// and in each exactly ONE of the two calls must speak, or the operator reads
-// two counts for one venue and has to work out which is real.
+// writeExerciseReport renders the boot through appreconcile.WriteVerdict and
+// WriteDiagnosis, neither of which draws a rate-limit line, and then makes
+// exactly ONE appreconcile.WriteRateLimitStatus call — the PRE-execute snapshot
+// when nothing was dispatched, the post-execute one when something was. The two
+// cases below are the two ways a ban can arrive, and in each exactly one of
+// those calls must speak, or the operator reads two counts for one venue and
+// has to work out which is real.
 func TestExerciseReportPrintsTheBanAlertExactlyOnce(t *testing.T) {
 	until := time.Date(2026, 8, 3, 15, 0, 0, 0, time.UTC)
 	banned := ratelimit.Snapshot{

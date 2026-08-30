@@ -55,7 +55,7 @@
 // internal/app/admin/ are each unpoliced the day somebody creates them, and the
 // gate reports nothing while the route it was built to close is open.
 //
-// So the surface below is the OMS use-case surface, which EXISTS and has four
+// So the surface below is the OMS use-case surface, which EXISTS and has three
 // real importers today, and the exemption is a list of names. A web-facing root
 // is denied because it is not on the list, not because somebody remembered to
 // add its tree to a deny-list. That is the standing rule about defaults: when a
@@ -149,9 +149,13 @@
 // on every fixture here.
 //
 // IN-package test files are not normalised and need no rule: they compile as the
-// package itself, so cmd/arblab's reconcile_test.go carries the authority its
-// package is granted. That is the honest reading rather than an oversight —
-// a *_test.go file in package main can call anything package main can call.
+// package itself, so a *_test.go file in package main holds exactly the
+// authority package main holds. That is the honest reading rather than an
+// oversight — and it is not a formality, because it is the whole of how
+// cmd/arblab came to hold this authority at all. See the grant list: the
+// binary's production files imported none of the surface, one fixture in one
+// test file imported all of it, and the grant that bought covered every
+// subcommand (F51).
 //
 // There is a THIRD path Go builds, and §3.6's sentence does not name it: the
 // synthesized main, p.test, which imports p and p_test. This is the first gate
@@ -269,19 +273,40 @@ type grant struct {
 // grants is the enumeration of who holds OMS write authority.
 //
 // Every entry was measured rather than assumed: `go list` over ./... reports
-// exactly these four packages importing the surface above, and nothing outside
+// exactly these three packages importing the surface above, and nothing outside
 // internal/oms/ imports oms/application/ports, oms/infrastructure/driven or
 // oms/infrastructure/markstate at all.
 //
-// All four are in the actuator's failure domain, which is the property that
+// All three are in the actuator's failure domain, which is the property that
 // makes the list a principle rather than an inventory of what happened to
 // exist. Core §11:817 draws that line and §11:826 puts the operator/dashboard
 // process on the other side of it.
+//
+// # There WAS a fourth, and its deletion is the argument for the whole shape
+//
+// cmd/arblab held one until F51. Its reason read "the CLI binary — §11:826's
+// actuator-domain process, as against arblab-operator, which is web-facing and
+// has none of this" — and the other half of that same commit (v0.9.72, task
+// #243) made `arblab serve` a cmd/arblab SUBCOMMAND and dropped
+// cmd/arblab-operator/ entirely. The distinction the reason turned on stopped
+// existing before the reason was a session old, and nothing failed: lint only
+// ever reports a package MISSING from this list. Record §100 §4 then specified
+// cmd/arblab/serve.go as the phase-1 HTTP entrypoint, so the gate built to keep
+// a web-facing process out of the write path was green on the one file that
+// most needed it — probed, with an ungranted control reporting in the same run.
+//
+// The grant existed for TEST FIXTURES: cmd/arblab/reconcile_test.go named
+// application.Reconciliation to build a Report the renderer printed. The
+// renderer named no such type — field access is structural in Go and needs no
+// import — and no production file in the binary did either. F51's remedy moved
+// the renderer and its fixtures to internal/app/reconcile, which holds the
+// authority for a real reason, and deleted the grant (record §102).
+//
+// TestEveryGrantIsStillUsed is what turned the move into a refusal rather than
+// a thing to remember: the fixtures moved, the `go list` graph lost the edge,
+// and the test failed naming the grant and quoting its expired reason. It was
+// written one session before it fired.
 var grants = []grant{
-	{
-		pkg: "cmd/arblab",
-		why: "the CLI binary — §11:826's actuator-domain process, as against arblab-operator, which is web-facing and has none of this. Its own use is narrower than the grant: reconcile_test.go names application.Reconciliation and its report value types, never a use case (F48)",
-	},
 	{
 		pkg: "internal/app/pair",
 		why: "§98's cross-venue pair root: it drives oms.Module through a package's worth of execution and holds oms.LegState",

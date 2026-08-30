@@ -117,7 +117,7 @@ because a linter you cannot unit-test cannot be *shown* to bite:
 | `kernelpurity` | A `platform/` package may import only the standard library and other `platform/` packages. |
 | `hexboundary` | `domain/` and `application/` may not import `infrastructure/` or `engine/`. Classifies both ends of the edge, so it scopes to this module's `internal/` rather than matching a bare path segment. |
 | `exhaustiveswitch` | A switch over a module-declared enum-like must name every member. A `default:` does not excuse a missing one — that is where the new member lands silently. No escape: name the rest in a grouped case, which the compiler checks. |
-| `omsauthority` | Only **named composition roots** may import the OMS *use cases* — `internal/oms` (exactly) and `internal/oms/application` (as a tree). Default-deny with a **grant list**, four entries, each carrying its reason. Rule 6 forbids BYPASSING the write path; this forbids *invoking* it from a package that was never granted the authority. Grants are exact packages, never trees. |
+| `omsauthority` | Only **named composition roots** may import the OMS *use cases* — `internal/oms` (exactly) and `internal/oms/application` (as a tree). Default-deny with a **grant list**, three entries, each carrying its reason. Rule 6 forbids BYPASSING the write path; this forbids *invoking* it from a package that was never granted the authority. Grants are exact packages, never trees. |
 | `singlewriter` | Only `oms` may import the OMS write path — `oms/application/ports` **and** `oms/infrastructure/driven`, by position, `app/` roots included. The port is policed as well as the adapter, because depending on the abstraction is the *recommended* way to depend on anything. `oms/domain` is deliberately out: a projection naming the state enum is §5.1's pattern working. |
 
 **Rule 11 never opened a deferral at all, and the reason completes the pair.** A
@@ -155,15 +155,24 @@ file draws **rule 11 alone, rule 11 alone, rule 6 alone**. That the two gates ar
 disjoint is a measurement, not an argument, and it is what keeps either one's
 probe able to isolate it.
 
-**⚠ And rule 11 is currently GREEN on the entrypoint the dashboard design
-specifies (F51).** `cmd/arblab` is grant entry 1, so `cmd/arblab/serve.go` — the
-phase-1 server subcommand — holds unrestricted OMS write authority; probed with
-its ungranted control reporting in the same run. **A default-deny with a grant
-list moves the whole question onto the grant's REASON**, and this one's reason
-(*"as against arblab-operator, which is web-facing"*) was falsified by the other
-half of its own commit, which made `arblab serve` a `cmd/arblab` subcommand. The
-remedy is F48's debt promoted: move `reconcile_test.go` off `oms/application` and
-**delete the grant**. No `serve` code before that closes.
+**Rule 11 was GREEN on the entrypoint the dashboard design specifies, and the
+grant that did it is now retired (F51, closed by record §102).** `cmd/arblab` was
+grant entry 1, so `cmd/arblab/serve.go` — the phase-1 server subcommand — held
+unrestricted OMS write authority. **A default-deny with a grant list moves the
+whole question onto the grant's REASON**, and this one's (*"as against
+arblab-operator, which is web-facing"*) was falsified by the other half of its
+own commit, which made `arblab serve` a `cmd/arblab` subcommand. **The grant was
+bought by fixtures and by nothing else**: the binary's production graph imported
+none of the surface, and one in-package test file named
+`application.Reconciliation` to check how the CLI rendered it — a renderer that
+names no such type, because Go needs no import for field access. So the report
+renderer and its tests moved to `internal/app/reconcile`, which declares the
+`Report`, and the grant went. *When an import edge exists only to name a value
+type, move the naming or move the type — never re-export it across the boundary
+the gate reads*, which was the cheap alternative and would have left the gate
+reporting a clean tree it had stopped measuring. Re-probed **A/B**, two files,
+four cells, rule 6 speaking in every one so no cell's silence could mean
+"unanalysed".
 `singlewriter`'s obvious probe — `marketdata/application` importing
 `oms/infrastructure/driven` — trips `hexboundary` as well, so it shows that
 something objected rather than that this rule did. The isolating probe is a
@@ -296,7 +305,14 @@ These are not style preferences. Each one was paid for.
   read as general. Varying only the entry level moves the run-4 figure
   **10.0 → 38.6 → 94.9 → 100.0 %**. *Fixing one missing base does not audit the
   others: enumerate every axis the artifact declares and ask which blocks answer
-  for a single point on it.* **Thirteen times now**,
+  for a single point on it.* Then F51's re-run probe did it on the **control**
+  rather than on the subject: the granted root proving rule 11 objects to the
+  IMPORTER and not to the import was expected to be **silent**, and a silent file
+  is indistinguishable from one the invocation never selected — the subject
+  carried its own speaker three lines down and the control did not. *A claim
+  whose evidence is an ABSENCE needs a co-located presence to date it; applying
+  "a clean gate run is not evidence" to the subject alone is where it gets lost.*
+  **Fourteen times now**,
   which makes it a checklist item and not a war story: before believing a suite,
   find the fixture parameter pinned to the value that collapses the distinction
   the code makes, and vary it. The tell is that the fixture does not contain the
