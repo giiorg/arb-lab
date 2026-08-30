@@ -154,6 +154,16 @@ lines away in the same file — without which every silent row would have meant
 file draws **rule 11 alone, rule 11 alone, rule 6 alone**. That the two gates are
 disjoint is a measurement, not an argument, and it is what keeps either one's
 probe able to isolate it.
+
+**⚠ And rule 11 is currently GREEN on the entrypoint the dashboard design
+specifies (F51).** `cmd/arblab` is grant entry 1, so `cmd/arblab/serve.go` — the
+phase-1 server subcommand — holds unrestricted OMS write authority; probed with
+its ungranted control reporting in the same run. **A default-deny with a grant
+list moves the whole question onto the grant's REASON**, and this one's reason
+(*"as against arblab-operator, which is web-facing"*) was falsified by the other
+half of its own commit, which made `arblab serve` a `cmd/arblab` subcommand. The
+remedy is F48's debt promoted: move `reconcile_test.go` off `oms/application` and
+**delete the grant**. No `serve` code before that closes.
 `singlewriter`'s obvious probe — `marketdata/application` importing
 `oms/infrastructure/driven` — trips `hexboundary` as well, so it shows that
 something objected rather than that this rule did. The isolating probe is a
@@ -278,7 +288,15 @@ These are not style preferences. Each one was paid for.
   module root is resolved from the imported path or from the analyzed one — so
   the fixture meant to force the first could not fail under the second, because
   *silent for the right reason and silent for the wrong one are the same output*.
-  The separating fixture had to be one that must **not** be silent. **Twelve times now**,
+  The separating fixture had to be one that must **not** be silent. Then
+  `summarise.py`'s `run_vs_breakeven`, in the session F45 fixed the block eleven
+  lines above it: the artifact publishes `costs` (3) and `levels` (4) in its own
+  header and that block answers for **one** of the twelve pairs, emitting neither
+  coordinate — so every golden reproduces it and the file's own header makes it
+  read as general. Varying only the entry level moves the run-4 figure
+  **10.0 → 38.6 → 94.9 → 100.0 %**. *Fixing one missing base does not audit the
+  others: enumerate every axis the artifact declares and ask which blocks answer
+  for a single point on it.* **Thirteen times now**,
   which makes it a checklist item and not a war story: before believing a suite,
   find the fixture parameter pinned to the value that collapses the distinction
   the code makes, and vary it. The tell is that the fixture does not contain the

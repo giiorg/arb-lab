@@ -666,6 +666,28 @@ only because the journals are readable: F23 says a successful `pair run` latches
 both journals and no CLI lifts them, so today the only way to know is to
 remember.
 
+> **⚠ THE PARAGRAPH ABOVE IS FALSE AS WRITTEN AND IS KEPT SO THE CORRECTION IS
+> LEGIBLE (F52, §15.9).** The journal's schema is 13 tables and **none of them is
+> a gate, a latch or a checklist**; `Checklist.Latched()` reads an **in-memory**
+> map and `GateNetDeltaAsserted` is settled by a **credentialed** venue join.
+> Measured on `run/pair/{binance,bybit}.db` — the two files the handoff calls
+> *"the evidence that the gate fired"* — each holds **5 records** whose terminal
+> state is **`filled`**. A phase-1 reader renders `Attention 0` while both are
+> latched. The sentence carries its own refutation: *"a **successful** pair run
+> latches both journals"*, so the journal records the success and not the latch.
+> **What phase 1 can honestly show is journal-local incidents; venue-derived
+> gates and latches are phase 2, and until then the tile's state is
+> `unverified`, never `0`.**
+
+**⚠ Two more cells in the table above do not survive re-derivation (§15.9).**
+**Market detail's *funding history both legs*** has no producer this subsystem can
+reach — no committed artifact holds per-leg rates, `venue/funding.go` is a payload
+type with no reader, and the one producer writes to a **gitignored** directory
+(F53). **Markets' *live funding both legs* across 466 rows** is the *broad funding
+tier* `venue-profiles.md:499` gates on its own §42c pricing: under §42c's
+one-source-one-connection-one-topic capture it is **122 sockets at 61 symbols and
+932 at 466**, and this record counts connections nowhere (F54).
+
 ## 8. The economic surface — what an operator can actually see
 
 The requirement was *"every metric that matters for assessing a funding-rate
@@ -699,7 +721,7 @@ arbitrage opportunity."* This is that list, with provenance, honestly marked.
 |---|---|---|
 | Leverage brackets, IM / MM tiers | `research/venue-probes/233-bracket-fixed-point` | 1 |
 | Margin mode; portfolio-margin posture | `venue/posture.go`, `marginstatus.go` | 1 / 2 |
-| Liquidation price per leg | derived from position and brackets | 2 |
+| Liquidation price per leg | ⚠ **F56 — the venue's, never reconstructed.** `venue/marginstatus.go:167`: *"It is the VENUE's number and never one this system reconstructs"*, and absence is modelled (`LiqPriceStated`) because a zero reads as maximum headroom. A bracket-derived figure is a separate **modelled** quantity and may never substitute for venue risk state | 2 |
 | Free vs allocated collateral | `venue/balances.go` | 2 |
 | Basis / mark divergence between legs | `venue/mark.go` | 1 |
 | Tick, lot, min-notional filters | reference data | 1 |
@@ -711,10 +733,23 @@ arbitrage opportunity."* This is that list, with provenance, honestly marked.
 |---|---|---|
 | Settlements to break even | derived from spread and cost | 1 |
 | p50 / p75 / p90 historical run length | `summary.json` | 1 |
-| P(clearing break-even) at this run length | `summary.json`'s `run_vs_breakeven` | 1 |
+| P(clearing break-even) at this run length | ⚠ **F55 — `summary.json`'s `run_vs_breakeven`, which is pinned to entry level `0.0005` and cost `0.0021` and declares neither.** Varying the level alone moves the run-4 figure 10.0 → 38.6 → 94.9 → 100.0 %. Owed before any panel reads it | 1 |
 | Expected net per episode | `episodes.json` | 1 |
 | Annualised return, with denominator | derived | 1 |
 | Hurdle comparison; concentration; sample size | `verdict` **once it carries its hurdle** (F45), F27, F29 | 1 |
+
+**⚠ Three quantities §7 puts on a screen have no row in this table at all
+(§15.9).** *Funding history, both legs* (F53), *equity* and *realized/unrealized
+PnL* (F57) — the last two named in §1's stated requirement and pinned to every
+screen by §7's status strip. This table claims to be **the** list, *"with
+provenance, honestly marked"*, so an absence here is a claim too: **`reconcile.go:205`
+— *"State, not quantity — no fill is journaled"* — and `fill.go:93` — *"nothing in
+the ledger computes with it yet; §6 step 9's realized-PnL decomposition … is a
+later slice."*** Balances are point-in-time enumerations with three channels
+(`Rows` / `Unpinned` / `Absence`), and `balances_bybit.go:27` **refuses** to compute
+equity while `locked != 0`. So a *trend* has no durable store on either side of the
+credential line, and the honest phase-2 scope is a current equity point with PnL
+history **explicitly unavailable** until a durable economic time series exists.
 
 ### 8a. The cost assumption becomes a control
 
@@ -941,7 +976,7 @@ endpoint may shape the JSON; it may not be the authority for what is in it.
 Recorded as **F37**. `tools/mutate.sh` on the classifier and the
 encoder. Positive controls on every harness.
 
-**The fixture-collapse checklist runs before the mutations.** **Eleven** collapses
+**The fixture-collapse checklist runs before the mutations.** **Twelve** collapses
 are nameable and must be designed against — the count is stated because this
 list's own count word was wrong (see below):
 
@@ -953,16 +988,17 @@ list's own count word was wrong (see below):
 | Money strings with **trailing zeros** at scale 9 | two different encoders agree on `1.500000000` and `1.5` |
 | An attention list of **one latch** | "the worst" and "the first" are the same row |
 | A **constant column** — every row showing the same `need` | the comparison the column exists to make cannot fail anywhere in the fixture (**found in this record's own mockups — see §15**) |
-| **Zero, unknown, and confirmed-zero** rendering identically | "the journal holds no package", "venue truth is unavailable" and "both venues confirm flat" are three states, and a flat account collapses them to `0` |
+| **Zero, unknown, and confirmed-zero** rendering identically | "the journal holds no package", "venue truth is unavailable" and "both venues confirm flat" are three states, and a flat account collapses them to `0`. **It has a mirror one tile over and round 4 found it (F52): the *Attention* tile's three states are "nothing latched", "the latch is not a journal record" and "phase 1 cannot ask the venue", and the measured journals — terminal state `filled` — render all three as `0`** |
 | **Independently hand-written responsive mirrors** | the desktop table and the mobile card state one observation twice, so a fix applied to one leaves the other asserting the old value |
 | A golden **generated by the endpoint it checks** | it agrees by construction — it can detect change, never error (see above) |
 | A book fixture whose **configured size fits at the best level** | multi-level VWAP and top-of-book-only return the **same cost**, so the flat-cost defect §8b exists to fix survives inside its own remedy |
 | A golden over an artifact holding a **stored comparison but not its comparand** | `summary.json`'s `beat_hurdle_symbols` reproduces as `4` at **any** hurdle, so no fixture generated from it can fail on the threshold (**F45**) |
+| An artifact block **pinned to one cell of a grid the artifact itself declares** | `summary.json` publishes `costs` (3) and `levels` (4) at top level; `run_vs_breakeven` answers for **one** of the twelve pairs and emits neither coordinate, so every golden reproduces it and the file's own header makes it read as general (**F55**) |
 
-**Six of the eleven were found by review rather than by writing this list** —
-rows 6-10 by rounds 1 and 2, row 11 by round 3 — which is the list's own lesson,
-three rounds running. Rows 1-5 are the original five; every row added since came
-from someone attacking the document.
+**Seven of the twelve were found by review rather than by writing this list** —
+rows 6-10 by rounds 1 and 2, row 11 by round 3, row 12 by round 4 — which is the
+list's own lesson, **four** rounds running. Rows 1-5 are the original five; every
+row added since came from someone attacking the document.
 
 **And the sentence above it was wrong about its own table (round 3).** It read
 *"Five collapses are already nameable"* against a list that had grown to ten, and
@@ -1127,6 +1163,34 @@ comparable; only writing the comparand beside the conclusion does.
    (F44). §6a's deferral names the construct; F44 moves it ahead of the facade
    and widens its deny-list to bare `internal/oms`. Debt 0's spec edit cannot be
    settled without it — §15.7 records them as one decision.
+
+6. **⚠ BLOCKING — retire `cmd/arblab`'s rule-11 grant, and re-run the probe with
+   its control** (F51, §15.9). The gate is green on `cmd/arblab/serve.go`, the
+   entrypoint §4 specifies, because its package is granted — measured, with the
+   ungranted control reporting in the same run. F48 already established that the
+   grant exists only for `reconcile_test.go`'s use of `application.Reconciliation`
+   and its sibling report value types, so the remedy is to move that test off
+   `oms/application` and **delete the grant**. Until then `build-spec.md:821`
+   clause (a) — *"the CAPABILITY boundary is enforced … 'read-only' is a build
+   failure rather than a promise"* — is true of `internal/app/serve/…` and false
+   of the file that starts the server, and **no `serve` code may be written before
+   this closes**. Deleting a grant is a normative change to §3.6 rule 11 and owes
+   its own decision record.
+7. **`summarise.py`'s `run_vs_breakeven` and `per_symbol` must carry their entry
+   level** (F55), and `run_vs_breakeven` its cost, on the same argument that
+   landed F45 one block over. Owed before any panel reads either. Cheap for the
+   same reason F45 was: `episodes.json` is committed, so no venue re-fetch.
+8. **Phase 1 must state, per screen, what it costs in CONNECTIONS** (F54).
+   `venue-profiles.md:499` gates a broad funding tier on its own §42c pricing and
+   possibly a multi-topic capture design record; this record cites neither and
+   §7's Markets screen is that tier. Either price it, or bound the live-funding
+   column to a symbol count this architecture can carry and say what the rest of
+   the table shows instead.
+9. **A durable economic time series is a prerequisite for the word *trend***
+   (F57), and it does not exist on either side of the credential line. Until it
+   does, phase 2 shows a current equity point and marks PnL history
+   **unavailable** rather than rendering an ephemeral chart that resets on
+   deploy.
 
 ---
 
@@ -1450,3 +1514,218 @@ as the backstop, sized by F43's eleven fields and specified as a property rather
 than a list. And §15.7's remaining three targets are untouched:
 `ReconcileMarginOp`'s actor identity, the twenty unsampled §8 provenance rows, and
 **§7's screens, which no round has reached.**
+
+### 15.9 External review, round 4 — scoped to §7, which no round had reached
+
+**Instrument: an external adversarial round *plus* a mechanical cross-tabulation,
+run in parallel.** §15.7's yield-curve question — *has the finding class repeated,
+and has any round re-examined ground already examined and found nothing* — answers
+the same way it has since round 1: **every round has found its blocker in a
+section the previous round did not examine**, which is the signature of a review
+whose **coverage** is the binding constraint rather than its depth. So round 4 was
+scoped rather than general, at §7 and at §15.8, and the reviewer was told
+explicitly not to trust this record's own summary of any file.
+
+**Verdict: NO-SHIP.** Seven findings, **F51–F57**. Every one was validated against
+source before acceptance; one reviewer citation was corrected (`.gitignore:36` →
+`:42`) and no finding was rejected. Two were reached independently by both halves
+of the round.
+
+**The cross-tabulation was the productive instrument, and it is cheap.** §3's
+phase table, §7's screen table and §8's provenance tables enumerate the same
+quantities from three angles. Three lists by one author *agreeing* proves nothing;
+three lists **disagreeing** localises the error mechanically. F53 fell out of it in
+four commands: *funding history both legs* is in §7, in neither §3's phase-1 list
+nor any of §8's four tables.
+
+| # | Finding | Severity |
+|---|---|---|
+| **F51** | **Rule 11 exempts the entrypoint this record specifies**, and the grant's own justification was falsified by its own commit | **BLOCKING** |
+| **F52** | The **"needs a human" panel** reads a fact the journals do not contain, and their terminal record says the opposite | **BLOCKING** |
+| **F53** | **Funding history** has no producer the dashboard can reach | MAJOR |
+| **F54** | The dashboard renders the **rate-limit budget** and never counts itself against it | MAJOR |
+| **F55** | F45's fix did not reach **two mirrors in the same file**, and the base it missed is a different base | MAJOR |
+| **F56** | **Liquidation price** is assigned to the wrong authority | MAJOR |
+| **F57** | **"Equity and PnL trend"** has neither a store nor a completed producer | MAJOR |
+
+#### F51 — the gate is green on the file this record puts the server in
+
+§4's layout names the phase-1 entrypoint: **`cmd/arblab/serve.go` — *"subcommand,
+existing dispatch pattern"***. `cmd/arblab` is **entry 1 of rule 11's grant
+list**, and `omsauthority.go`'s `grantedTo(self, root)` arm `continue`s before any
+report. So the package that starts the HTTP server holds unrestricted OMS write
+authority, and `build-spec.md:821`'s clause **(a) The CAPABILITY boundary is
+enforced** — the condition round 2 attached to accepting a phase-1 shape at all —
+is true of `internal/app/serve/…` and false of the entrypoint.
+
+**Probed, with the control, in one run.** A temporary file in each package, both
+deleted:
+
+| File | Import | Result |
+|---|---|---|
+| `internal/app/serve/httpapi/probe.go` (**control**, ungranted) | `internal/oms` | **rule 11 reports** |
+| `cmd/arblab/serve_probe.go` (**probe** — the specified entrypoint) | `oms.ReconcileMarginOp`, two strings | **`go build` OK, all seven gates silent** |
+
+The control is the half that carries the information: had it also been silent, the
+run would have said the analyzer never selected these packages and every row would
+have been vacuous. This is F44's route — *"appends to §5.1's hash chain from two
+strings, with no value a facade could wrap"* — reopened at the one file §15.8 did
+not consider, three lines after §15.8 says that route **"is closed."**
+
+**The grant's reason was falsified by the other half of its own commit.** Entry 1
+reads: *"the CLI binary — §11:826's actuator-domain process, **as against
+arblab-operator, which is web-facing and has none of this**."* True when written.
+In the **same decision** (`v0.9.72`, task #243), §4c made `arblab serve` a
+subcommand of `cmd/arblab` and dropped `cmd/arblab-operator/` as the phase-1
+shape — so the web-facing surface moved **into** the granted package and the
+clause distinguishing them now names a binary that does not exist (`ls cmd/` →
+`arblab`). *A fix relocates its premise*, on the two halves of one commit.
+
+**And the analyzer wrote the sentence that predicts this, about a different file
+kind.** `omsauthority.go:151`: *"IN-package test files are not normalised and need
+no rule: they compile as the package itself, so `cmd/arblab`'s
+`reconcile_test.go` carries the authority its package is granted. That is the
+honest reading rather than an oversight — **a `*_test.go` file in package `main`
+can call anything package `main` can call**."* A `serve.go` in package `main`
+likewise. F50's lesson, in F50's own session, in the file F50 was found in.
+
+**The remedy is already written down as a debt, and F48 is it.** `cmd/arblab`'s
+grant exists **only** for `reconcile_test.go` naming `application.Reconciliation`
+and its sibling report value types — *"nothing there is a use case."* Move that
+test off `oms/application` and the grant can be **deleted**, at which point the
+entrypoint is policed by the gate that already exists. F48 filed narrowing it as a
+debt; F51 makes it load-bearing. **That is F44's shape one layer out** — the item
+filed as the backstop turns out to be the remedy — and it is why this record does
+not apply it here: deleting a grant is a normative change to §3.6 rule 11 and owes
+its own decision, with its own probe.
+
+> *Rejected alternative:* leave the grant and rely on §100 §6a's capability-limited
+> facade. Rejected on F44's measurement — `ReconcileMarginOp` is a package-level
+> function over two strings and there is no value to wrap, which is the finding
+> that moved the gate ahead of the facade in the first place.
+
+> *Rejected alternative:* read this as already covered by `build-spec.md:821`
+> clause **(b)**, the failure-domain half. It is not the same claim. Clause (b)
+> concerns a **binary** sharing an address space and says the boundary is *not*
+> met; clause (a) concerns a **package**'s capability and says it *is* enforced.
+> This finding is in clause (a)'s territory, which is the half the record asserts.
+
+#### F52 — the highest-value phase-1 panel reads a fact the journals do not hold
+
+§7: the **"needs a human"** panel *"is the highest-value item in phase 1 and exists
+**only because the journals are readable**: F23 says a successful `pair run`
+latches both journals and no CLI lifts them."*
+
+**The journal has no gate record.** Its schema is 13 tables — 12 record kinds
+across orders, delever generations and margin ops — and **none is a gate, latch or
+checklist**. `Checklist.Latched()` (`internal/platform/boot/gate.go:769`) iterates
+`c.outcomes`, an **in-memory** map built during a boot; `GateNetDeltaAsserted` is
+reported at `internal/oms/application/reconcile.go:354` from `r.join.Assert(…)`, a
+**credentialed** venue join. Phase 1 has no credentials.
+
+**Measured on the two live journals the handoff calls "the evidence that the gate
+fired":** `run/pair/{binance,bybit}.db`, **5 records each** — 1 `planned`, 1
+`authorized`, 1 `acked`, 2 `state` — and the terminal state on **both venues** is
+**`filled`**. The most reassuring member of the enum. A phase-1 reader replaying
+these files renders **`Attention 0`** while both journals are latched and no CLI
+lifts them; the mockup renders **`2 · latched journals`**.
+
+**This is F41's shape at the top level, and the sentence contains its own
+refutation:** *"a **successful** pair run latches both journals"* — so the journal
+is a record of success and the latch is precisely the part not in it.
+Regenerating the mockup from the journals would produce `0` and leave the
+sentence standing, and the next implementation would restore `2` from the prose.
+**Check whether the prose predicts the fixture's error**; here it does.
+
+**And §11's eighth collapse row was written one tile away.** *"'the journal holds
+no package', 'venue truth is unavailable' and 'both venues confirm flat' are three
+states"* — written for the **Open pkgs** tile, which the round-2 repair fixed to
+`0 journal · venue unverified`. The **Attention** tile sits beside it in the same
+strip, has the same three states, and was not touched. *A fix applied in one place
+gets applied to its mirror.*
+
+#### F53 / F54 — what a phase defined by "needs no credentials" does not count
+
+**F53.** §7 puts *"funding history both legs"* on Market detail at **phase 1**. No
+committed artifact holds per-leg rates: `ranking.json` carries aggregates of the
+**spread** (`median_abs`, `p99_abs`, `max_abs`), `episodes.json` carries per-episode
+`accrued`, `census.json` carries episode events. **`engine/venue/funding.go` is a
+payload type** — `Funding`, `Validate`, `FundingIntervalFromHours` — with **no
+reader**; funding arrives only as `events.StreamFunding`. The one producer is
+`cmd/arblab/screen.go`'s own `net/http` client (`politeGet`, its own hand-rolled
+pacing, importing neither `venue` nor `ratelimit`), writing to
+`research/screening/raw/` — **gitignored at `.gitignore:42`**, 935 files
+inventoried by `sha256` in `ledger.json` and deliberately not committed. §3's
+phase-1 list omits the quantity; §8's four tables have no row for it. **§7 alone
+claims it.**
+
+**F54 — the Venues screen renders the rate-limit budget and no screen counts
+itself against it.** §8 sources live funding to `venue/funding.go`, i.e. §4's
+**StreamFunding**, and §42c's capture architecture is **one source = one
+connection = one topic**: `configs/capture.json` holds `sources: 39`, one entry per
+`(venue, symbol, stream)`, and `venue-profiles.md:492` confirms a full restart
+opens **39**. Two lines on:
+
+> *"Streams-per-connection limits are untouched by construction: **the capture
+> never multiplexes**. … **A broad funding tier is a different arithmetic** — 2N
+> sockets against Bybit's 500/5min restart burst and Binance's behavioral bound —
+> and **stays gated on its own §42c pricing**, plus the multi-topic capture mode's
+> design record if ruled wide enough to need it."* — `venue-profiles.md:498-502`
+
+§7's Markets screen **is** that tier: *"all 466 screened / 61 eligible … live
+funding both legs"*, phase 1 — **122 sockets at 61, 932 at 466**, against a
+verified Bybit ceiling of 500-per-5-minutes and a Binance bound whose stated
+consequence is an **IP ban**. This record contains **zero** occurrences of
+`connection`, `socket`, `subscribe`, `multiplex` or `§42c`; its only mention of
+*rate-limit* is the Venues screen's **readout**. §3 defines phase 1 as *"needing
+no credentials"* — which treats credentials as the only cost, where the profile
+says the cost is **connections**. Neither the §42c pricing nor the multi-topic
+capture record the profile gates this on is cited or opened here.
+
+#### F55 — F45's fix did not reach two mirrors eleven lines away, and the base it missed is a different base
+
+`summarise.py` computes `run_vs_breakeven` at entry level **`0.0005`** and cost
+**`0.0021`**, both as inline literals, and emits **neither** — while every other
+cost-dependent block in the same file emits a dict keyed by cost (`wins`,
+`mean_net`, `net_usd_1000_per_leg`, `annual_pct_on_2000`, `verdict`).
+`summary.json` publishes `costs` (3) and `levels` (4) at its top level, so a reader
+meets a file declaring twelve combinations and one block silently answering for
+one. §8 sources *"P(clearing break-even) at this run length"* to exactly this
+field, **phase 1**.
+
+**Measured, with the control passing** — recomputing at the two literals reproduces
+the committed `run_vs_breakeven` exactly, so the variation below is the artifact's
+and not the harness's:
+
+| run | vary **cost** (level pinned 0.0005) | vary **entry level** (cost pinned 0.0021) |
+|---|---|---|
+| 3 | 15.0 % → 7.6 % → 0.9 % | 4.3 % → **15.0 %** → 52.2 % → 93.8 % |
+| 4 | 38.6 % → 20.8 % → 1.0 % | 10.0 % → **38.6 %** → 94.9 % → 100.0 % |
+| 5 | 73.8 % → 40.0 % → 6.2 % | 18.8 % → **73.8 %** → 97.9 % → 100.0 % |
+
+A **~10× swing** on a base the file does not record, with the published column
+sitting in the middle where it reads plausibly from either side — the collapse
+shape in the artifact's *values* rather than in a fixture. `per_symbol` is pinned
+the same way (level `0.001`, no level field), which is **why it holds 56 rows
+against `symbols_eligible: 61`**; the populations are 61 / 60 / 56 / 49. So §7's
+Markets screen says *61 eligible* and the Evidence screen's F27 concentration is
+over *56*, both true, neither declaring the entry level that separates them.
+
+**F45 fixed the hurdle and could not have found this**, because the base here is
+not the hurdle — it is the **entry level**, a second unlabelled base in the same
+`verdict`-adjacent code, eleven lines away, in the session F45 landed.
+
+#### What round 5 should attack
+
+1. **F51's remedy** — retire `cmd/arblab`'s grant via F48, and **re-run the probe
+   with its control**; a scoping claim holds only once it has been run, and this
+   round is the third demonstration of that in four rounds.
+2. **§7's Venues, Evidence and System screens** — this round reached Overview,
+   Markets, Market detail, Positions and Journal. Three screens are still a
+   reading, and the cross-tabulation instrument is cheap enough to finish.
+3. **The twenty unsampled §8 provenance rows** — F46 found two wrong in ten, F56
+   makes it three in eleven, and F56 is the first found against a *venue-semantics*
+   comment rather than a schema.
+4. **`ReconcileMarginOp`'s actor identity** and **F42's `notimenow` hole** — both
+   untouched since §15.7 named them, and F51 makes the first one sharper: the
+   entrypoint that would supply the identity is inside the granted package.
