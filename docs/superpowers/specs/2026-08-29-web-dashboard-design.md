@@ -710,7 +710,7 @@ arbitrage opportunity."* This is that list, with provenance, honestly marked.
 | Quantity | Source | Phase |
 |---|---|---|
 | Funding rate, each leg, live | ⚠ **F65 — every PRODUCER of `venue.Funding` is downstream of a recorded TAPE.** The two are `FundingInfoOverlay.Compose` (fed only by `replay/ingest.go:137`) and `BybitTickerState.funding` (constructed only in `replay/ingest.go` and `crossvenue/sample.go`,`check.go`), all over capture records; `app/capture` writes raw bytes and imports no decoder. The type is right and both venues are right — *live* names a component that does not exist. Binance is gated further: `Compose` emits nothing until the REST `fundingInfo` overlay is applied (§39p-2) | **replay 1 / live: none** |
-| Predicted next funding (premium index) | venue REST | 1 |
+| Predicted next funding (premium index) | ⚠ **F70 — the lane's ONE REST source carries no rate.** `configs/capture.json` declares 39 WebSocket `sources` and **one** `rest_sources` entry — Binance `/fapi/v1/fundingInfo`, one symbol, 1h poll — which §39p-2 says holds *"interval, cap or floor"* and NOT the rate: that is rows 3 and 4, and **row 4 already cites it and calls it *live***. The rate is on the socket, and it is **row 1's field** (`funding.go:80`: *"the venue's current estimate for the NEXT settlement"*), so this row is F65's lane again. `premiumIndex` occurs 4× in the repo — three in Python probes reading it for a **mark**, one in `build-spec.md:593` — and **zero** in `internal/`, `cmd/`, `configs/` or Profiles; `lastFundingRate` is unrecorded in Profiles and its NAME says *last* | **none** |
 | Funding interval and grid alignment (4h vs 8h) | ⚠ **F66 — the file DOES hold it** (`binance_interval_hours`, `bybit_interval_minutes`, `same_grid` on all 466; `universe.go:183` converts at the comparison). But `report.go:141` is `interval_changes` **`int` + `omitempty`**, so *measured zero* (30 rows) and *never measured* (405 rows) reach a reader through one silence; and `same_grid == false` ⇔ `eligible == "mismatched_grid"` **35/35**, so the display column IS the exclusion verdict — from a snapshot dated **2026-08-01** over a quantity the same file records changing up to **1445** times. The *"+ live"* half is **F65** | 1, **dated**; live: none |
 | Rate cap / floor per venue | **live** — Bybit ticker `fundingCap`, Binance `fundingInfo` (F46) | 1 |
 | Spread — the actual revenue | derived, server-side | 1 |
@@ -722,8 +722,8 @@ arbitrage opportunity."* This is that list, with provenance, honestly marked.
 |---|---|---|
 | Taker / maker fee, per venue, per tier | `configs/reference.*.json`, `venue-profiles.md` | 1 |
 | The account's *actual* tier and discounts | signed `commissionRate` — ⚠ F24: the demo publishes the right number and charges another | 2 |
-| Half-spread crossing at the configured size | live book, VWAP vs mid | 1 |
-| Slippage at the configured size | live book depth | 1 |
+| Half-spread crossing at the configured size | ⚠ **F71 — *VWAP* names no construct outside this record: 0 in `internal/`, 0 in `cmd/`, 0 in `build-spec.md`.** Before round 7 it occurred 3× in the whole repository and all three were in this file — this row, §11's book-fixture line and §11's *"VWAP, crossing, slippage"* assertion. *(The total is no longer a stable measurement: §15.12 discusses the word. The **zero in code** is, and it is the half that bites.)* The tree's term is the **walk premium**, and `cost.go` fixes its reference: *"|Σ level fills − **best**·qty|"* — the touch, so the half-spread is not in the number, which is what F26 says of the constant too. The mid exists **once**, as `(ask−bid)/mid`, the **stratum** feature — and `view.go:14`, `readport.go:18` and `enter.go:217` each refuse a collapsed mid as a price, the first citing Profiles for the rule. `PriceView` also drops depth *"deliberately"* | **none** |
+| Slippage at the configured size | ⚠ **F72/F73 — this and the row above are the operands of a MAX, tabled as summands.** `sideCost` is `max(walk premium + adverse charge, p90 charge)`, worse side per leg — `build-spec.md:793`'s *"the **worse of**"* verbatim — so adding them double-charges depth while row 11 (*"4 fee legs + 2 crossings"*) drops the p90; and **`AdverseMove`, a charge inside that max, has no row in this table at all**. F73: `NewConservativeCostModel` has **0** non-test call sites (9 test, as control), `driven.BookSource` has **0** implementations, **no calibration artifact is committed**, and its input `/archive/` is **gitignored**. `marketdata.New` has one production call site — `app/sim/sim.go:132`, *"replayed archive … under TestClock"* | **none** |
 | Round trip = 4 fee legs + 2 crossings | derived | 1 |
 | Realized cost from actual fills | ⚠ one confounded observation (§98) | **open** |
 
@@ -807,6 +807,20 @@ terms that describe the panel almost exactly:
 > programmatically-fetched, per-leg, per-venue maker/taker fees plus a measured
 > slippage model. **No hardcoded fee constants; no second copy of the number in
 > another module.**"*
+
+**⚠ F74 — the word *per-symbol* outruns the tier that authorises the bound.**
+`build-spec.md:793` fixes the structure *"on captured + Tardis **BTC** data"*, and
+§9's economic gate scopes it twice more: the `$1K` profile requires the
+conservative bound *"(**BTC-only**; survivorship out of scope)"*, deferrable
+*"while the `$1K` universe is **strictly BTC**"*. The code agrees —
+`ProcCandidateQty` is **0.02 BTC**, and `run.go:519` refuses any frame outside the
+exact `(instrument, stratum, MaxQty)` triple with `ErrFrameUnpriced`. **`CostCell`
+*is* keyed per instrument, so the schema admits per-symbol and the finding is the
+PHASE STAMP rather than the type**: §7 renders 61 symbols, §8 stamps their cost
+phase 1, and for the other sixty the adapter's honest answer is a refusal by name
+(`ErrSizeOutsideCalibration`, `ErrDepthInsufficient`). §8's table has no cell for a
+refusal — every row answers with a source and a phase, as though a number always
+arrives.
 
 `screening/params.go` holds `BinanceTakerFee = 0.0005` and
 `BybitTakerFee = 0.00055` as package-level constants. **That is not asserted here
@@ -1266,6 +1280,55 @@ comparable; only writing the comparand beside the conclusion does.
     written against the file, not against the finding's list — and
     `summarise.py:87`'s inline `> D("0.0021")` inside `cleared_cost` is a fourth
     mirror sitting in the file debt 10 already owns.
+19. **§8's row 2 is withdrawn or restated as the socket** (F70). *Predicted next
+    funding* is `Funding.Rate`, which is **row 1's field**, so the honest table
+    has one row and not two — and it inherits debt 14 rather than opening a
+    separate remedy. If a second row survives, it names the transport this
+    system actually declares: `configs/capture.json`'s 39 `sources`, not its
+    single `rest_sources` entry, which is rows 3 and 4's `fundingInfo` overlay.
+    **And before any code reads a Binance REST estimate, `lastFundingRate` needs
+    a `venue-profiles.md` entry** — the name says *last* and the row says
+    *predicted next*, and Profiles is where that is settled from a live call, not
+    from a doc read. Do **not** re-source it to `/fapi/v1/fundingRate`: that is
+    settled-rate history, the one class `build-spec.md:793` excludes as a signal.
+20. **§8's two cost rows become the max the spec fixes** (F72) — `max(walk
+    premium + adverse move, p90 slippage)`, both sides, worse side per leg.
+    **The adverse move gets a row of its own**, because it is a charge and §15.9
+    already ruled that an absence in this table is a claim; the latency gets one
+    too, or a stated omission, because `ErrLatencyOutsideCalibration` decides
+    whether any number is produced at all. Row 11's *"4 fee legs + 2 crossings"*
+    is then wrong on its own terms and is rewritten with them — **that row is
+    group B's, and this is the second time a group-B row has been answered by a
+    group-C finding**, which is debt 10's shape: a remedy scoped to the finding's
+    list.
+21. **§8's cost rows lose phase 1, or the calibration artifact is named as work**
+    (F73). `NewConservativeCostModel` has zero non-test call sites, its
+    `BookSource` has zero implementations, no artifact is committed, and
+    `/archive/` is gitignored — so the adapter **cannot be constructed on a fresh
+    clone**, and the milestone-2 predecessor deliverable that would construct it
+    is not in the tree. That is `episodes.json`'s situation with the committed
+    half missing, and it is a §12 roster item rather than a citation fix. **It
+    joins debt 14 rather than sitting beside it:** `marketdata.New` has one
+    production call site and it is the replay parity probe, so *live book* and
+    *live funding* are one missing composition, not two.
+22. **§8b's *per-symbol* is scoped to the tier that authorises it** (F74) — BTC
+    at `$1K`, per `build-spec.md:793` and §9, per `ProcCandidateQty` and
+    `ErrFrameUnpriced`. `CostCell` is already keyed per instrument, so **no type
+    changes**; what changes is the phase stamp. Beside it, the smaller and more
+    general debt: **§8's table has no cell for a refusal**, while three of the
+    adapter's named errors are the honest answer for most symbols. A provenance
+    column that can only say *where a number comes from* cannot say *that no
+    number comes*.
+23. **§8's vocabulary is checked against the tree before it reaches §11** (F71).
+    *VWAP* named no construct in `internal/`, `cmd/` or `build-spec.md`, and
+    occurred three times in the repository — all three in this file, one of them
+    already inside §11's test plan — so the invented word has crossed
+    from the provenance table into the assertions that would check it, which is
+    F36's shape with a second hop. The tree's word is **walk premium**, its
+    reference is **best**, and a mid as a *price* is refused in three files, one
+    citing `venue-profiles.md` for the rule. Cheap and separate: §11's fixture
+    line and its *"VWAP, crossing, slippage"* assertion are rewritten with the
+    row.
 
 ---
 
@@ -2048,7 +2111,7 @@ enum with no producer is this repo's own named shape.
    |---|---|---|
    | **A — a named path, never opened** ***[DONE — §15.11, five findings, F65–F69; all five rows failed]*** | 3 `ranking.json`, 16 `venue/balances.go`, 17 `venue/mark.go`, 23 `episodes.json`, and **re-check 1** `venue/funding.go`, which **F53 already found is a payload type with no reader** while row 1 still names it as the live source | `ls` it, then confirm the file **produces** the quantity rather than consuming or merely typing it. This is F61's check |
    | **B — "derived"** | 5, 6, 11, 20, 24 | A derived row inherits the worst phase and the weakest provenance of its **inputs**, and names none of them. Row 11 (*"4 fee legs + 2 crossings"*) inherits row 7's **single hand-recorded tier** and rows 9/10's live book |
-   | **C — "live", no endpoint named** | 2 (*"venue REST"* — the table's weakest citation, naming no route at all), 9, 10 | Name the route, then answer the phase question §3 actually poses: **is it public or signed**, and does a reader exist? F63 is what this check finds |
+   | **C — "live", no endpoint named** ***[DONE — §15.12, five findings, F70–F74; all three rows failed]*** | 2 (*"venue REST"* — the table's weakest citation, naming no route at all), 9, 10 | Name the route, then answer the phase question §3 actually poses: **is it public or signed**, and does a reader exist? F63 is what this check finds |
    | **D — partially examined, finish it** | 7 and 18 (F63 bounded them: one tier per venue-product, one symbol per reference revision), 21 (F55/F60 opened two blocks of `summary.json`; `pooled` and the header are unexamined) | Re-read the row's **wording** against what the source holds. *Fee tiers* and *filters* are both plurals the source does not support |
 2. **`ReconcileMarginOp`'s actor identity** and **F42's `notimenow` hole** — now
    the only items named by §15.7 and never touched, two rounds on.
@@ -2279,3 +2342,229 @@ rests on — funding and mark — have no live producer**, which is a §3 phase-
 question rather than five separate row citations. Group C (rows 2, 9, 10, all
 *"live"*) is where the rest of that answer is, and row 2's *"venue REST"* is the
 table's weakest citation.
+
+### 15.12 External review, round 7 — group C, the three rows that name no route
+
+**Instrument: §15.10's own group-C check, run in the order it states it.** *Name
+the route, then ask whether a reader exists.* Group A's rows named a path, so
+F61's `ls` opened them and §15.11 sharpened it to the constructor grep. Group C
+names **no** path — *"venue REST"*, *"live book, VWAP vs mid"*, *"live book
+depth"* — so there is nothing to `ls`, and the first step is to resolve the
+citation to a route at all. Two of the three resolve to a route this repo has
+never called; the third resolves to the one it calls hourly, for a different
+quantity.
+
+**Verdict: NO-SHIP, unchanged.** Five findings, **F70–F74**. All three rows fail,
+and the third and fourth findings are about the two rows *jointly* rather than
+about either citation. The sampled error rate on §8 rows is now **twelve in
+twenty**. Every number below is a count over the committed tree, each with a
+control beside it.
+
+| # | Finding | Severity |
+|---|---|---|
+| **F70** | *"venue REST"* resolves to the lane's **one** REST source, which carries no rate; the rate is on the **socket**, and `premiumIndex` is in no Go file | MAJOR |
+| **F71** | *"VWAP vs mid"* names no construct in `internal/`, and it makes a **pricing reference** of the mid that three files refuse in prose | MAJOR |
+| **F72** | Rows 9 and 10 are the operands of a **max**, tabled as summands — and the **adverse move** completing that max has no row at all | MAJOR |
+| **F73** | The cost model has **zero producers at four levels**, and the bottom one is **gitignored** | MAJOR |
+| **F74** | §8b promises a **per-symbol** cost; the bound §8 fixes is **BTC-only** at the `$1K` tier | MAJOR |
+
+#### F70 — row 2: the one REST source in the lane is row 4's, and it holds no rate
+
+§8's Revenue table: *"Predicted next funding (premium index) | venue REST | 1"*.
+
+**Rows 1 and 2 are one field.** `venue/funding.go:80` on `Funding.Rate`: *"the
+venue's current estimate for the **NEXT** settlement — a per-settlement rate"*.
+That is what "predicted next funding" names, so row 2 is row 1's quantity cited
+to a second transport with a second phase — and row 1 is F65's lane, whose
+producers are all downstream of a tape.
+
+**The rate is on the socket, and this repo's own configuration says so.**
+`wire_binance.go`'s §39p-2 sentence: *"the frame carries **rate and settlement
+instant** and NO interval, cap or floor; those exist **only in the overlay**"*.
+`configs/capture.json` then declares the whole market-data REST surface in one
+key:
+
+| `configs/capture.json` | |
+|---|---|
+| `sources` (WebSocket) | **39** — `binance/book` 11, `binance/funding` 9, `bybit/book` 10, `bybit/funding` 9 |
+| **`rest_sources`** | **1** — `binance` · `BTCUSDT` · `https://fapi.binance.com/fapi/v1/fundingInfo` · `poll_interval 1h` |
+
+So *"venue REST"* has exactly one referent in this system, it is one route on one
+venue for one symbol, and by §39p-2 it carries **cap, floor and interval** — which
+is rows 3 and 4. **Row 4 already cites it, and labels it *"live"***. The table's
+one row that says REST names the streamed quantity, and the row that says *live*
+names (half of) the polled one.
+
+**The route the row's parenthesis names is in no Go file.** `premiumIndex`
+occurs **4** times in the repository and none is code this system runs: three in
+`research/venue-probes/` (`probe230.py:210`, `:237`, `probe225_pass3_separate.py:396`),
+each an unsigned Binance call whose printed fields are read for a **mark**, and
+one in `build-spec.md:593`, about the mark-risk read port. **Zero** in
+`internal/`, `cmd/`, `configs/` or `venue-profiles.md`. *(Control: `fundingInfo`,
+**80** occurrences across `internal/` and Profiles — the grep can find a route
+this repo does use.)*
+
+And the field such a reader would take is `lastFundingRate` — **2** occurrences,
+both inside one probe's `print`. **`venue-profiles.md` records it nowhere**, so
+by this repo's own rule its semantics are unverified; and its *name* says **last**
+while the row says **predicted next**. Whether Binance's `lastFundingRate` is the
+settled rate or the accruing estimate is precisely the question Profiles exists to
+answer before code depends on it, and no one has asked it.
+
+> *Rejected remedy:* point row 2 at `/fapi/v1/fundingRate` and
+> `/v5/market/funding/history`, the two funding-rate REST routes that **do**
+> exist (`strategy/.../fetch.go:49,55`). They are **settled-rate history** — the
+> screener's family-1 fetch — and `build-spec.md:793`'s first fidelity
+> requirement is *"**live-estimate (not settled-rate) signal**, no lookahead"*.
+> That remedy would source a live panel to the one class the spec excludes.
+
+#### F71 — row 9: the vocabulary is this record's, and the mid is refused three times
+
+§8's cost table: *"Half-spread crossing at the configured size | live book, **VWAP
+vs mid** | 1"*.
+
+**Measured before this round's edits: VWAP occurred three times in the whole
+repository and all three were in this file** — §8's row, §11's book-fixture line
+(*"multi-level VWAP and top-of-book-only"*) and §11's assertion that a test
+*"must assert that VWAP, crossing, slippage"* agree. **Zero** in `internal/`,
+`cmd/`, or `build-spec.md`. *(Control: the tree's own term for the same
+arithmetic, **walk premium**, 4 occurrences, all in `cost.go`.)*
+
+**⚠ The total is no longer a stable measurement, and saying so is the point:**
+this subsection discusses the word, so a re-run of that grep today counts this
+prose too. **The zero-in-code half is stable** — nothing here writes Go — and it
+is the half the finding rests on. *A count over a corpus that includes the
+review is a measurement the review moves; state the sub-count taken over the
+part the review cannot touch.* This is F36's
+shape — an invented vocabulary — reaching §8 from §7, and it has already
+propagated into §11's test plan, which is what makes it more than wording.
+
+**The tree's reference is the touch, not the mid.** `cost.go`, on `sideCost`:
+
+> *"The walk premium is |Σ level fills − **best**·qty| with the roundings chosen
+> so the premium can only be overstated"*
+
+Measured against `best`, the walk contains the depth impact and **no half-spread
+at all** — which is exactly what F26 says of the constant it would replace
+(`RoundTripCost()` is *"four taker legs and nothing else — no spread crossing, no
+slippage"*). So the quantity row 9 names is missing from the one cost model this
+tree has, and the row asserts it as a phase-1 render.
+
+**The mid exists once, and it is a classifier feature rather than a price.**
+`BookFeaturesFor` computes `(ask − bid) / mid` to select a **stratum**
+(`stratum.go:203`); `calibrate/occupancy.go:91`'s `mid` is a binary-search index.
+There is no third. And three files refuse the collapse in prose, one of them
+citing Profiles for the rule:
+
+| Where | The refusal |
+|---|---|
+| `strategy/domain/view.go:14` | *"bid AND ask rather than a collapsed mid, for the discipline **venue-profiles records**: the venue publishes the book; a mid is a locally derived judgement, and **which side of the spread a term should be priced against is the CORE's judgement** … a pre-collapsed mid would make that judgement here, silently, for every consumer at once"* |
+| `engine/state/readport.go:18` | *"the top of book as a PriceView — bid and ask, **never a collapsed mid**, because which side of the spread a term is priced against is the consumer's conservative judgement (§40c)"* |
+| `cashcarry/enter.go:217` | *"an entry the capital only just affords **at the mid** is an entry a real fill can leave unfunded"* — the consequence stated in this project's own currency |
+
+Row 9 makes the mid the pricing reference for a phase-1 column. **And the seam a
+panel would read carries neither half of the row:** `PriceView`'s next sentence
+is *"**Depth is deliberately absent**: the slippage charge is
+ExecutionCostModel's business"*, so the projection holds bid and ask and no
+ladder.
+
+#### F72 — rows 9 and 10 are a max presented as two summands, and one term is missing entirely
+
+`cost.go`, on `sideCost`: **`max(walk premium + adverse charge, p90 charge)`**,
+evaluated on **both** sides of the book with the worse side charged per leg —
+which is `build-spec.md:793`'s structure verbatim: *"taking the **worse of** {the
+depth-walked fill after that latency + adverse move, the measured p90 slippage
+conditional on order size and book state}"*.
+
+§8 tables the two branches as **two independent phase-1 rows**, and row 11 then
+composes the round trip as *"4 fee legs + **2 crossings**"*. Both readings are
+wrong and they are wrong in opposite directions:
+
+| Reading | What it does to the number |
+|---|---|
+| Rows 9 + 10 added | the depth term is charged **twice** — the walk and the p90 both measure it |
+| Row 11 as written | the p90 branch is **dropped**; only crossings are summed, and slippage has no place in the formula that names the round trip |
+
+Neither is the max. **And the term that completes the max has no row in the
+table at all:** `CostCalibration.AdverseMove` — *"the measured adverse price move
+over the calibrated latency window, as a fraction of notional — the '+ adverse
+move' half of §8's depth-walk branch"* — is a **charge**, inside branch 1, and §8's
+cost table lists fees, tier, crossing, slippage, the round trip and realized cost,
+and nothing else. `Latency` is not a charge but it decides whether a number is
+produced at all (`ErrLatencyOutsideCalibration`), and it is likewise unlisted.
+§15.9 already ruled what that means here: this table claims to be **the** list
+*"with provenance, honestly marked"*, so an absence in it is a claim.
+
+#### F73 — zero producers at four levels, and the bottom one is gitignored
+
+The constructor grep §15.11 sharpened, applied down the chain rather than once:
+
+| Level | Count | Control |
+|---|---|---|
+| `NewConservativeCostModel` call sites, non-test | **0** | **9** in `cost_test.go` / `calibration_test.go` |
+| implementations of `driven.BookSource` (`Snapshot(ids.VenueInstrument) (mdomain.BookSnapshot, bool)`) | **0** — the interface declaration and test doubles (`flatBooks`) | `venue.BookSource` is a **different thing** with the same name: a `SourceID` function |
+| committed calibration artifacts | **0** — `configs/` holds `capture`, `pair.*`, `reconcile.*`, `reference.*`; no `git ls-files '*.json'` match carries the schema | `reference.*.json` **is** committed, four revisions, and §8c reads it |
+| the artifact's input | `arblab calibrate run` derives it from `cfg.ArchiveRoot`; **`/archive/` is gitignored** — *"unrecoverable-by-construction data"* | — |
+
+`CostCalibration`'s own doc: *"the set refuses to validate without the artifact
+identity, and **the adapter refuses to exist without a valid set**. There are no
+defaults — each number's zero flatters the gate."* So rows 9 and 10 stamp phase 1
+on quantities whose only implementation **cannot be constructed today**, and the
+milestone-2 *predecessor deliverable* that would construct it — pre-registered,
+holdout-frozen, *"produced and approved before the promotion sample is
+scored"* — is not in the tree. **This is `episodes.json`'s situation with the
+committed half missing:** there, the derived artifact is committed precisely
+because its input is gitignored; here neither is.
+
+**And the live book lane is in F65's position, for the same reason.**
+`marketdata.New` has **one** production call site — `app/sim/sim.go:132` — whose
+package doc reads *"the parity probe's composition root (§39p-8) … **replayed
+archive** → ingestion → marketdata → mailboxes → dispatcher+LogWriter →
+engine/state, under **TestClock**"*, wired `Resnapshotter: refuseResnapshot{}`.
+F65 found this for funding by walking two decoders; it is not a funding fact. The
+**whole context** — books included — is assembled in one place, and that place
+replays a tape with resnapshot refused. *Rows 9 and 10's "live book" is the same
+component F65's "live" funding was.*
+
+#### F74 — §8b's per-symbol promise against a BTC-only tier
+
+§8b: *"The dashboard therefore shows a **per-symbol**, per-size cost decomposition
+instead of one constant."*
+
+The bound whose structure §8b invokes is scoped by the spec in three places:
+`build-spec.md:793` fixes it *"on captured + Tardis **BTC** data"*; §9's economic
+gate reads *"the `$1K` profile requires the conservative adverse-selection bound
+(**BTC-only**; survivorship out of scope)"*, and *"survivorship … `$10K+`,
+deferrable while the `$1K` universe is **strictly BTC**"*. The code agrees:
+`ProcCandidateQty` is **0.02 BTC**, the procedure's candidates are
+`{0.02, 0.1, 0.5}`, and `run.go:519` refuses any frame whose cell is not that
+exact `(instrument, stratum, MaxQty)` triple — `ErrFrameUnpriced`.
+
+**`CostCell` *is* keyed per instrument, so the schema admits per-symbol** — the
+finding is the **phase stamp**, not the schema, and saying so is what keeps the
+remedy from being a type change. §7's Markets screen renders 61 symbols and §8
+stamps their cost phase 1, while the tier authorising the bound is BTC-only and
+the adapter refuses by name outside it: `ErrSizeOutsideCalibration`,
+`ErrDepthInsufficient`, `ErrTacticUncalibrated`. **The honest render for the
+other sixty is a refusal, and §8's table has no cell for a refusal** — every row
+answers with a source and a phase, as though a number always arrives. That is *a
+gate's refusing path is the untested one*, in a provenance table.
+
+#### What round 7 changes about the worklist
+
+Group C is closed: **three rows checked, five findings, three rows failed.**
+Twelve of twenty sampled §8 rows now carry a defect. Groups B and D remain —
+**eight rows** — and group B is now half-answered against its will: §15.10 wrote
+that row 11 *"inherits row 7's single hand-recorded tier and **rows 9/10's live
+book**"*, and F72 and F73 have just priced that inheritance. Row 11's formula is
+wrong on its own terms (F72) before any inheritance is traced.
+
+**The check that found four of these five is the same one, run one level deeper.**
+§15.11 established that a citation to a Go file is a claim about a call site.
+Group C's rows cite no file, and the lesson that generalises is the next step out:
+**a citation naming a CAPABILITY — *"live"*, *"REST"*, *"the book"* — is a claim
+about a composition root.** `venue.Funding`, `venue.BookSnapshot` and
+`ConservativeCostModel` are all reachable types with real producers; what none of
+them has is an **assembly** outside `app/sim`, and no grep for a type or a
+constructor shows that. The grep that does is for the module's `New` — one call
+site, and reading what the package around it says it is.
