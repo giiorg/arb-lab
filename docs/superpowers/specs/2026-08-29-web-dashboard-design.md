@@ -739,6 +739,22 @@ four (F60). **System**'s *formal-model freshness* is a five-verdict gate rendere
 as a boolean, with *"this model's runs are void"* on the green side — **6 of 16
 tracked sections today** (F62). Its other three items hold.
 
+**⚠ AND THE COMPONENT ON EVERY SCREEN CARRIES NO PHASE STAMP AT ALL (F95,
+§15.16).** The **status strip** above — `venues · equity · open packages ·
+attention · engine state`, *"pinned to every screen"* — sits outside the Phase
+column, and at least three of its five items are not phase 1: **equity** is
+phase 2 on all three of its candidate quantities and refusable on the first
+(F94), live **open packages** is phase 2 (journals are 1), and **attention** is
+the tile F52 rules must render `unverified` and never `0`. §15's findings table
+already records an *"eighth collapse, with a live instance in the mockup's
+status strip"*. Three more screens carry a `1` over items this record has
+already ruled otherwise: **Markets** (*live funding* **none** F65, *spread* live
+**none** F77, *next settlement* F78), **Market detail** (*funding history* F53,
+*book depth at size* F73, *the cost decomposition* F71/F72) and **Journal**
+(*gates* and *latches*, phase 2 by F52 four paragraphs above). §14 debt 12 named
+only Venues; the counter-evidence for two of the four is in the ⚠ blocks
+directly above this one.
+
 ## 8. The economic surface — what an operator can actually see
 
 The requirement was *"every metric that matters for assessing a funding-rate
@@ -1218,20 +1234,43 @@ comparable; only writing the comparand beside the conclusion does.
 3. **`.gitignore` gained `.superpowers/`** during this session (the brainstorming
    companion's scratch directory). Unrelated to the subsystem; recorded so it is
    not mistaken for drift.
-4. **`research/persistence/summarise.py` must write `hurdle_pct` into `verdict`,
-   and `summary.json` be regenerated** (F45). One line in the script and a
-   regenerated artifact; owed before any panel reads the block, because until
-   then the comparison it publishes has no recoverable base. Note that the
-   regeneration is cheap: `summarise.py` reads `episodes.json`, which **is**
-   committed (§99), so this does not need a venue re-fetch.
-5. **The seventh §3.6 gate is owed as the PRIMARY remedy, not the backstop**
-   (F44). §6a's deferral names the construct; F44 moves it ahead of the facade
-   and widens its deny-list to bare `internal/oms`. Debt 0's spec edit cannot be
-   settled without it — §15.7 records them as one decision.
+4. **~~`research/persistence/summarise.py` must write `hurdle_pct` into
+   `verdict`, and `summary.json` be regenerated~~ — CLOSED** `[2026-08-30,
+   commit bd979b0, record §101; marked 2026-08-30, round 11, F91]` (F45).
+   `summarise.py:167-177` emits `hurdle_pct`, `hurdle_class`, `hurdle_source`
+   and `hurdle_comparison`; the committed `summary.json` carries all four under
+   each of the three costs. **It was closed by the same commit that closed
+   debts 0 and 1 and was not marked with them**, because that commit's message
+   names those two by name and lands this one in a later paragraph — see F91.
+   §8's own `verdict` row already reads *"it carries four hurdle-provenance
+   fields and no level"*, so the record has stated the fix since round 6 while
+   this line kept asking for it. **The level half is open and lives in debt 10.**
+5. **~~The seventh §3.6 gate is owed as the PRIMARY remedy, not the
+   backstop~~ — CLOSED** `[2026-08-30, commit bd979b0, record §101; marked
+   2026-08-30, round 11, F91]` (F44). `tools/lint/omsauthority` landed with
+   debt 0's spec edit, as §15.7 said it had to. **Satisfied by a different
+   mechanism than this line specifies, and the difference is worth keeping:**
+   the debt asks the gate to *"widen its **deny-list** to bare `internal/oms`"*
+   and what shipped is a **default-deny with a grant list** — F47 inverted the
+   shape and §15.8 records why, so the wording above describes a rejected
+   design. **What the grant list then costs is F85 and debt 33**, which is a
+   property of the shape and not a regression in it.
 
-6. **⚠ BLOCKING — retire `cmd/arblab`'s rule-11 grant, and re-run the probe with
-   its control** (F51, §15.9). The gate is green on `cmd/arblab/serve.go`, the
-   entrypoint §4 specifies, because its package is granted — measured, with the
+6. **~~⚠ BLOCKING — retire `cmd/arblab`'s rule-11 grant, and re-run the probe
+   with its control~~ — CLOSED** `[2026-08-30, commit c7ccf22, record §102;
+   marked 2026-08-30, round 11, F91]` (F51, §15.9). The grant is gone;
+   `omsauthority.go:287-307` holds the retirement's post-mortem where the entry
+   used to be, and the re-run was A/B, two files, four cells, with rule 6
+   speaking in every one. **`serve` code is no longer blocked by this line, and
+   it read as blocked for two commits** — `git show c7ccf22` touches §15 twice
+   and §14 zero times, so the debt F51 owns was the one section the closing
+   decision never opened. That direction is the finding (F91): §14 is where a
+   later session looks first to learn what is still owed. **What survives the
+   closure is F86** — the retirement's *reach* claim is narrower than §102
+   states, and that is debt 34, not this one. The text below is kept unstruck
+   for the record of what was owed.
+
+   ~~The gate is green on `cmd/arblab/serve.go`, the entrypoint §4 specifies, because its package is granted — measured, with the
    ungranted control reporting in the same run. F48 already established that the
    grant exists only for `reconcile_test.go`'s use of `application.Reconciliation`
    and its sibling report value types, so the remedy is to move that test off
@@ -1240,7 +1279,7 @@ comparable; only writing the comparand beside the conclusion does.
    failure rather than a promise"* — is true of `internal/app/serve/…` and false
    of the file that starts the server, and **no `serve` code may be written before
    this closes**. Deleting a grant is a normative change to §3.6 rule 11 and owes
-   its own decision record.
+   its own decision record.~~
 7. **`summarise.py`'s `run_vs_breakeven` and `per_symbol` must carry their entry
    level** (F55), and `run_vs_breakeven` its cost, on the same argument that
    landed F45 one block over. Owed before any panel reads either. Cheap for the
@@ -1248,14 +1287,37 @@ comparable; only writing the comparand beside the conclusion does.
 8. **Phase 1 must state, per screen, what it costs in CONNECTIONS** (F54).
    `venue-profiles.md:499` gates a broad funding tier on its own §42c pricing and
    possibly a multi-topic capture design record; this record cites neither and
-   §7's Markets screen is that tier. Either price it, or bound the live-funding
+   §7's Markets screen is that tier. ~~Either price it, or bound the live-funding
    column to a symbol count this architecture can carry and say what the rest of
-   the table shows instead.
+   the table shows instead.~~ **⚠ BOTH OPTIONS ARE WITHDRAWN BY F92 AND F93.**
+   *Price it* is already done and produced a **refusal**: §42f decision 2 ruled
+   **no broad funding-only tier** until the dislocation census, at a measured
+   20–110 M/day per symbol — **9.3–51 G/day at 466 rows**, against a whole-capture
+   burn of 3.6–3.8 G/day. The ruling is in **bytes and a deferred capacity
+   decision**, not in connections. *Bound the column* concedes a ceiling neither
+   venue imposes: measured, all 466 Bybit `tickers.<sym>` args are **8 809 chars
+   of a documented 21 000-char cap** and all 466 Binance mark-price streams are
+   **466 of a documented 1 024 per connection** — one connection per venue —
+   while `venue-profiles.md:498` says the 932 is ours in its own words
+   (*"the capture never multiplexes"*). **The debt this becomes is 39: state
+   whether `serve` subscribes or consumes**, which decides the cost and is the
+   question this one should have asked.
 9. **A durable economic time series is a prerequisite for the word *trend***
    (F57), and it does not exist on either side of the credential line. Until it
-   does, phase 2 shows a current equity point and marks PnL history
+   does, phase 2 shows ~~a current equity point~~ and marks PnL history
    **unavailable** rather than rendering an ephemeral chart that resets on
-   deploy.
+   deploy. **⚠ THE FALLBACK IS REFUSABLE AND NAMES ONE OF THREE QUANTITIES
+   (F94).** §8's own closing paragraph — the one this debt was written from —
+   already says `balances_bybit.go:27` **refuses** to compute equity while
+   `locked != 0`, and `balances.go:40-42` shows the two venues resolving that
+   ambiguity in **opposite** directions in one type: Binance's `Total` is
+   `free + locked`, a summed documented partition; Bybit's is `walletBalance`
+   only where `locked == 0` and an **unpinned row** otherwise, with
+   `SpotUnpinnedBorrow` a second unpinned channel. That is also the **spot**
+   surface while §2.3's live strategy is perp-perp, where F67 already put
+   *allocated* on `PostedMargin` and *free* on account-level `availableBalance`
+   — both **signed**. So the point-in-time fallback is phase **2** on all three
+   readings and refusable on the first. **The debt this becomes is 40.**
 10. **Debt 7 widens to `verdict`** (F60). The block §8 sources the Evidence
     screen's headline to must carry its **entry level**, and adding a `level`
     field to each `per_symbol` **row** does not do it — `verdict` is a separate
@@ -1271,7 +1333,18 @@ comparable; only writing the comparand beside the conclusion does.
 12. **Every phase stamp in §7 becomes per-item where its items disagree** (F63).
     Positions and Overview already do it; Venues carries eight items under one
     stamp and that is where a signed reader sat under a "1". **The stamp is a
-    claim per item, not per screen.**
+    claim per item, not per screen.** **⚠ AND VENUES IS ONE OF FIVE, WITH THE
+    COUNTER-EVIDENCE ALREADY ON THE PAGE (F95).** Read against §7's table rather
+    than against F63's sentence: **Markets** carries five items under a `1` of
+    which three are **none** (F65, F77, F78); **Market detail** carries six under
+    a `1` of which three are absent (F53, F73, F71/F72); **Journal** carries five
+    under a `1` and F52 — four paragraphs below the same table — rules its
+    *gates* and *latches* phase **2**. Two of those are §15.9's own ⚠ blocks,
+    written directly beneath the table this debt is about. **And the status strip
+    carries no stamp at all**: five items *"pinned to every screen"*, of which
+    equity is phase 2 (F94), live open packages phase 2, and attention the tile
+    F52 rules must read `unverified` and never `0`. **The debt this becomes is
+    41**, and it is debt 10's shape a fourth time.
 13. **The System screen's freshness tile renders `formalfresh.Verdict`, all five
     members** (F62), and `MarkedStale` is rendered as **attention**, not as green.
     Separately and cheaply: `make formal-fresh` currently prints nothing for a
@@ -1518,6 +1591,63 @@ comparable; only writing the comparand beside the conclusion does.
     inversion and §6a rejected for rule 6. `platform/ids/ids.go:8-12` already
     records the twin hole in its own words and no gate changed. A §3.6 decision,
     filed here because F42 is where it is written down.
+
+39. **§4 must state whether `serve` SUBSCRIBES to the venues or CONSUMES the
+    capture, and the connection question is downstream of that** (F92, F93).
+    §4 gives `marketdata` *"a read port for book and funding snapshots"* and
+    gives `internal/app/serve/` *"pollers"*, which are two different subsystems:
+    a consumer costs **zero** sockets and inherits debt 14 whole — the funding
+    lane resolves to `replay.Ingester` under `TestClock` — while a subscriber
+    costs two multiplexed connections (932 as `configs/capture.json` is shaped
+    today), puts a **second connection footprint on the same IP** beside the
+    running capture, and owes its own decoder and its own gap record. Debt 8
+    priced neither because it never asked which. Beside it, two corrections that
+    outlive the debt: **§42f's ruling on the broad tier is a refusal, not a
+    missing input**, so §7's 466-row live-funding column is gated on the
+    dislocation census and not on this record; and `venue-profiles.md`'s *"every
+    documented numeric bound clears by an order of magnitude"* is a reading taken
+    at **39** sources — at 466 the Bybit restart burst is **466 of 500 per 5
+    minutes**, which clears by 7 % on a burst a process restart produces by
+    construction.
+
+40. **A point-in-time equity value names WHICH of three quantities, and renders
+    its refusal** (F94). The three are the spot wallet enumeration (`Rows` /
+    `Unpinned` / `Absence`, two unpinned channels), account-level
+    `availableBalance`, and `PostedMargin` + free; §2.3's live strategy makes the
+    third the relevant one and F63 already established every reader of the last
+    two is **signed**. Bybit's spot row refuses where `locked != 0` and Binance's
+    sums; a strip that adds them adds a pinned number to a refused one. This is
+    F74's *no cell for a refusal* reaching the debt list — **the remedy the debt
+    offered instead of the trend is itself refusable.**
+
+41. **§7's status strip gets a phase stamp per item, and §7's per-screen stamps
+    are computed the way debt 24 computes §8's** (F95). The strip is five items
+    on **every** screen with no stamp anywhere, at least three of them phase 2 or
+    `unverified`; Markets, Market detail and Journal each carry a `1` over items
+    this record has already ruled `none` or phase 2, in ⚠ blocks printed below
+    the same table. **This is debt 24's rule one table over** — the phase is
+    `max(items)` and it is only checkable once the items are named — so the two
+    debts want the same linter and should be written against the same predicate.
+
+42. **A debt in §14 is closed against the TREE, not against the closing
+    decision's own enumeration** (F91). Debts 4, 5 and 6 were satisfied by
+    commits `bd979b0` and `c7ccf22` and stayed open in this list, and debt 6 —
+    the one carrying **BLOCKING** and *"no `serve` code may be written before
+    this closes"* — stayed open for two commits after F51 shipped, because
+    `git show c7ccf22 -- <this file>` touches §15 twice and §14 zero times. The
+    discipline is one line in the closing pass: **a commit that closes a debt
+    closes it here, not only in its message.** The audit is what round 11 ran —
+    open every file a debt names, once, and compare. *A debt list is a claim
+    about the tree, so it goes stale the way any claim about the tree goes stale,
+    and nothing fails when it does* — §88's own lesson in prose instead of TLA+.
+
+43. **Debt 5's satisfied wording describes a rejected design, and that is worth a
+    clause when a debt is closed** (F91). It asked the seventh gate to *"widen
+    its **deny-list** to bare `internal/oms`"*; what shipped is a **default-deny
+    with a grant list**, because F47 inverted the shape and §15.8 records why.
+    Closing a debt on substance while its text still specifies the rejected
+    mechanism leaves the next reader to re-derive which one is normative — so a
+    closure states **what closed it**, not only that it closed.
 
 ---
 
@@ -3530,3 +3660,255 @@ it. Rounds 6–9 changed instrument every round as the yield fell; this one went
 back to the oldest instrument in the review and it was the right one, because the
 subject changed rather than the method. *Match the instrument to what the claim
 is about: a claim about a gate is checked by running the gate.*
+
+### 15.16 External review, round 11 — §14 re-read against the files, not against its findings
+
+**Instrument: the debt list's own general form, turned on the debt list.** Debt
+10 states it — *"when a finding names n mirrors, write the remedy against the
+**file**, not against the finding's list, or the next block inherits the defect
+while reading as audited"* — and F84 then found the disease **inside** §14, in
+debt 24's count word. Round 11 is that check run over the whole list: for each
+debt, open the file it names and ask what the file says now, rather than what the
+finding said when the debt was written. Debts 8 and 9 had never had it.
+
+**Five findings, F91–F95.** Three are readings of the tree against the list; two
+are measurements. `build-spec.md` unchanged at v0.9.74; no code, no venue
+contact, no normative edit.
+
+| # | Finding | Severity |
+|---|---|---|
+| **F91** | Three debts are **satisfied in the tree and open in the list**, and the one carrying **BLOCKING** is among them | MAJOR |
+| **F92** | Debt 8 asks for a price that **was computed**, and the ruling it produced was a **refusal**, made in a different resource | MAJOR |
+| **F93** | The socket ceiling debt 8 concedes is **ours**, and the cited page says so three lines above the clause it cites — measured, the whole 466-row universe fits on **one connection per venue** | MAJOR |
+| **F94** | Debt 9's fallback — *"a current equity point"* — is **refusable**, **unstamped**, and names **one of three** quantities, all credentialed | MAJOR |
+| **F95** | Debt 12's remedy names **one** screen; **four** more disagree, and the always-visible status strip carries **no phase stamp at all** | MAJOR |
+
+#### F91 — three debts are closed in the tree and open in the list, and one of them says BLOCKING
+
+§14 has a closing mechanism and it has been used: debts 0 and 1 carry
+*"— CLOSED `[2026-08-30, v0.9.72, task #243, record §101]`"*. Read against the
+tree, three more are satisfied and unmarked.
+
+| Debt | Says | The tree says |
+|---|---|---|
+| **4** (F45) | *"`summarise.py` must write `hurdle_pct` into `verdict`, and `summary.json` be regenerated"* | both done in commit `bd979b0` — `summarise.py:167-177` emits `hurdle_pct`, `hurdle_class`, `hurdle_source`, `hurdle_comparison`, and the committed `summary.json` carries all four under each of the three costs |
+| **5** (F44) | *"the seventh §3.6 gate is owed as the PRIMARY remedy, not the backstop"* | `tools/lint/omsauthority` landed in the same commit `bd979b0`; rule 11 denies bare `internal/oms` |
+| **6** (F51) | *"**⚠ BLOCKING** — retire `cmd/arblab`'s rule-11 grant… **no `serve` code may be written before this closes**"* | retired in commit `c7ccf22`, record §102; `omsauthority.go:287-307` holds the retirement's own post-mortem where the grant used to be |
+
+**The mechanism is that a closing pass is scoped to the debts the closing
+*decision* enumerates, and a commit closes debts its decision text never names.**
+`bd979b0` is one commit: its message closes debt 0's spec edit and debt 1's
+roster entry *by name* — and those two are the two that got marked — while the
+same commit's last two paragraphs land the gate (debt 5) and the `hurdle_pct`
+fix (debt 4) without either being read back against §14. Record §102 is the
+cleaner instance: `git show c7ccf22 -- <this file>` touches **§15 twice and §14
+zero times**, and debt 6 is the debt F51 owns.
+
+**Debt 6's staleness has a direction, and it is the blocking one.** The handoff's
+findings table says *"F51 is the only one closed"*; §14 debt 6 says no `serve`
+code may be written until F51 closes. **Two enumerations of one fact, disagreeing
+— and disagreeing is what localizes it.** A reader who starts at §14, which is
+where "what does this record still owe" is supposed to be answered, is told that
+implementation is blocked on work that shipped two commits ago.
+
+**Debt 5 is also satisfied by a different mechanism than it specifies**, which is
+worth a clause and not a second finding: it asks the gate to *"widen its
+deny-list to bare `internal/oms`"*, and what landed is a **grant list** — F47
+inverted the shape, §15.8 records why. The substance is met; the wording
+describes a rejected design.
+
+**The remedy is debt 10's general form applied to §14 itself: close against the
+tree, not against the record.** A one-line check exists and nobody runs it —
+every debt naming a file, opened.
+
+**A third enumeration of the same review disagrees too, and it is the handoff's
+own running total.** `HANDOFF.md` read *"the open list is now thirty-eight —
+F52–F57, F60–F64, F65–F69, F70–F74, F75–F79, F80–F84, F85–F90"*; the ranges it
+prints sum to **thirty-seven**, and the reason the sequence skips F58 and F59 is
+that those two are **record §102's** findings and not §100's, which the line does
+not say. §15.10 already ruled on exactly this for §8's rows — *"earlier rounds
+reported a running total that does not reproduce against the tables, so this one
+is the enumeration and not the count"* — and the ruling was applied to the row
+list and not to the finding list beside it. **A remedy scoped to the finding's
+list, in the sentence that announced the rule.** Corrected to a count taken from
+the ADR table.
+
+#### F92 — debt 8 asks for a price that exists, and the ruling it produced was no
+
+Debt 8: *"`venue-profiles.md:499` gates a broad funding tier on its own §42c
+pricing… **Either price it**, or bound the live-funding column."* The pricing is
+not owed. It was done, and it produced a **ruling**:
+
+> §42f decision 2, 2026-08-01 — *"**no broad funding-only tier** until the
+> dislocation census — computable from backfillable data — prices what breadth
+> earns its disk"* (`adr-history.md:2443`); and the tier's own cost,
+> `2026-08-01-strategy-2-scoping.md:158`: *"roughly **20–110M/day per symbol**
+> (derived; the Binance leg is fixed 11M, the Bybit leg activity-scaled)."*
+
+`venue-profiles.md:500`'s *"stays gated on its own §42c pricing"* is therefore
+**the record of a refusal**, not an open invitation to supply a number. Debt 8
+reads the gate as a missing input and offers to fill it; the input is filled and
+the answer was no.
+
+**And the resource the ruling is denominated in is not the one the debt names.**
+§7's Markets screen is 466 rows, so the tier it needs is:
+
+| Symbols | Broad-tier cost/day (derived, §42f's own range) | Against |
+|---|---|---|
+| 61 eligible | **1.2 – 6.7 G/day** | current whole-capture burn **3.6–3.8 G/day** |
+| 466 screened | **9.3 – 51 G/day** | 967 G free; §38f's off-host clock, already compressed **~3×** by the eight-symbol shortlist alone |
+
+Debt 8 asks the record to state what a screen costs in **connections**. The
+standing ruling was made in **bytes and in a deferred capacity decision**, and at
+466 rows the column is between 2.5× and 14× the entire capture this project runs
+today. **A debt that asks for the wrong unit reads as answerable and is not.**
+
+#### F93 — and the socket count is our capture's, which the cited page says three lines above the cited clause
+
+F54 priced the column at *"122 sockets at 61 symbols and 932 at 466"*, from §42c's
+one-source-one-connection-one-topic model. `venue-profiles.md:498`, immediately
+above the sentence debt 8 cites:
+
+> *"Streams-per-connection limits are untouched by construction: **the capture
+> never multiplexes**."*
+
+That is a property of `configs/capture.json`'s shape — 39 `sources`, each a
+`{venue, symbol, stream, topic}` quadruple with its own connection — and
+`2026-08-01-strategy-2-scoping.md:166` names the alternative as work rather than
+as impossibility: *"a multi-topic-per-connection capture mode is a code slice
+with its own design record."*
+
+**Measured against the same page's committed venue limits**, over the 466 symbols
+in `research/screening/ranking.json`:
+
+| Leg | Subscription payload for all 466 | Documented ceiling (Profiles §1 / §5) | 61 eligible |
+|---|---|---|---|
+| Bybit `tickers.<sym>`, one public connection | **8 809 chars** of `args` | **21 000-char** args cap per public connection; futures/spread *"no args limit"* on count | 1 146 chars |
+| Binance `<sym>@markPrice@1s`, one `/market` connection | **466 streams** | **1 024** streams per connection | 61 streams |
+
+**The whole screened universe fits on one connection per venue, at 42 % and 45 %
+of the two documented ceilings.** So *"bound the live-funding column to a symbol
+count this architecture can carry"* concedes a ceiling neither venue imposes, and
+the architecture whose ceiling it concedes is a config file.
+
+**Even inside the one-topic model, the profiles page's reassurance is a reading
+taken at 39.** *"Every documented numeric bound clears by an order of
+magnitude"* is measured on the current capture — *"Bybit's restart burst is 19 of
+500/5min"*. At 466 the same arithmetic gives **466 of 500 per 5 minutes**: it
+clears by 7 %, on a burst that a process restart produces by construction. The
+sentence is true of the tier that exists and reads as true of the tier debt 8 is
+about — **a reassuring claim generalized from the one case where it holds**.
+
+**The half that actually decides the debt: this record never says whether `serve`
+subscribes or consumes.** §4 gives `marketdata` *"a read port for book and
+funding snapshots"* and gives `internal/app/serve/` *"pollers"*. Those are two
+different subsystems:
+
+| | Sockets | Inherits | Fails by |
+|---|---|---|---|
+| **consumer** of the capture / `marketdata` port | **0** | debt 14 whole — the funding lane resolves to `replay.Ingester` under `TestClock` | rendering a replay readout under the word *live* |
+| **subscriber** of its own | 2 (multiplexed) or 932 (as configured today) | a second connection footprint on the **same IP** beside the running capture, its own decoder, its own gap record | the venue's behavioral bound, which Binance futures states instead of a number |
+
+Debt 8 prices neither, because it never asks which one is being built. **That is
+the question the debt should have been, and the connection count is downstream
+of it.**
+
+#### F94 — debt 9's fallback is refusable, and it names one of three quantities
+
+Debt 9: *"Until it does, phase 2 shows **a current equity point** and marks PnL
+history unavailable."* The fallback is written as though the point is always
+available. §8's own closing paragraph — **the paragraph the debt was written
+from** — already says it is not: *"`balances_bybit.go:27` **refuses** to compute
+equity while `locked != 0`."*
+
+Opened, the two venues resolve the same ambiguity in **opposite directions**, in
+one type:
+
+```go
+// internal/engine/venue/balances.go:40-42
+// Total is the whole holding, derived from Words by the venue's rule:
+// free + locked on Binance (both documented partitions of holdings),
+// walletBalance on a Bybit row whose locked is zero.
+```
+
+Binance's total is a **sum over a documented partition**; Bybit's is
+`walletBalance` only where `locked == 0`, and otherwise an **unpinned row** —
+`SpotUnpinnedLockedSplit`, with `SpotUnpinnedBorrow` a second unpinned channel
+for a borrowed asset. A single summed "equity point" adds a pinned number to a
+refused one, and the refusal has a reason the codec states verbatim: *"no doc
+sentence states whether walletBalance includes locked… the row is reported
+unpinned rather than resolved by betting on an inference."*
+
+**And that is the *spot* surface, while §2.3's live strategy is perp-perp.** F67
+already ruled where the perp-perp quantity lives: *allocated* is `PostedMargin`
+in `marginstatus.go`, *free* is account-level `availableBalance` and **belongs to
+`treasury` by §7.2**. So *"a current equity point"* names three different
+quantities —
+
+1. the spot wallet enumeration (`Rows` / `Unpinned` / `Absence`, two refusal channels),
+2. account-level `availableBalance` (**signed**),
+3. `PostedMargin` + free (**signed**, F63's own list),
+
+— every reader of which is credentialed, so the fallback is phase **2** on all
+three readings. Meanwhile §7 pins **equity** to the status strip *"on every
+screen"*, phase-1 screens included, with no stamp saying so (F95).
+
+**This is F74's *no cell for a refusal* reaching the debt list.** The debt
+correctly refuses to render a trend and then offers a point-in-time value whose
+producers refuse to produce it.
+
+#### F95 — debt 12's remedy names one screen, four more disagree, and the strip has no stamp at all
+
+Debt 12: *"Every phase stamp in §7 becomes per-item where its items disagree
+(F63). Positions and Overview already do it; **Venues** carries eight items under
+one stamp… The stamp is a claim per item, not per screen."* Read against §7's
+table rather than against F63's list:
+
+| Screen | Stamp | Items that disagree with it |
+|---|---|---|
+| **Markets** | `1` | *live funding both legs* — **none** (F65); *spread* live — **none** (F77); *next settlement* — F78's two-leg countdown shipped as one scalar |
+| **Market detail** | `1` | *funding history both legs* — no producer, gitignored writer (F53); *book depth at size* — no committed artifact, `/archive/` gitignored (F73); *the cost decomposition* — **none** (F71, F72) |
+| **Journal** | `1` | *gates* and *latches* — ruled **phase 2** by F52, in this same section, four paragraphs below the table |
+| **the status strip** | — | **no stamp exists**: it sits outside the Phase column entirely |
+
+**The strip is the finding.** §7 makes it *"pinned to every screen"* — five items,
+`venues · equity · open packages · attention · engine state` — so it is the one
+component a phase-1 operator sees on all eight screens, and at least three of its
+five are not phase 1: **equity** is phase 2 on every reading (F94), **open
+packages** live is phase 2 (journals 1), and **attention** is the tile F52 rules
+must render `unverified` and never `0`. §15's own findings table already records
+an *"eighth collapse, with a live instance in the mockup's status strip"* — so
+the strip is where a known collapse lives, and it is the one element of §7 with
+no phase claim at all.
+
+**Two of the four counter-examples are already written in this record, in the ⚠
+blocks below the very table debt 12 is about** — Markets' *live funding both
+legs* and Market detail's *funding history both legs* are §15.9's own additions.
+The debt was written from F63's sentence about Venues and never re-read against
+the table three hundred lines above it. **Debt 10's shape, one more time: a
+remedy scoped to the finding's list, with the counter-evidence already on the
+page.**
+
+#### What round 11 changes about the next actions
+
+**Next action (1) is closed and it changed the list's meaning, not just its
+content.** The re-read was expected to widen debts; it retired three of them and
+found that the one word in §14 with the power to stop work — **BLOCKING** — was
+attached to a debt that closed two commits earlier. §14 is where a later session
+looks first, and it was the least current section in the record.
+
+**The instrument generalizes and it is nearly free.** *A debt list is a claim
+about the tree, so it goes stale the way any claim about the tree goes stale — and
+nothing fails when it does.* This is `make formal-fresh`'s lesson (§88) in prose
+instead of TLA+: the runs were real, they were run against a different document.
+The cheap version of the gate is the closing discipline — **when a commit closes a
+debt, it closes it in §14, not only in its own message** — and the cheap audit is
+what this round ran: open every file a debt names, once, and compare.
+
+**And two debts were priced in the wrong unit, which is the round's second
+pattern.** Debt 8 asks for connections where the ruling is in bytes (F92) and
+concedes a ceiling that belongs to our config (F93); debt 9 offers a fallback
+whose producers refuse (F94). All three are what happens when a remedy is written
+from the finding's sentence rather than from the thing the finding is about —
+**the same disease the list itself diagnosed in debt 10 and could not see in
+itself.**
