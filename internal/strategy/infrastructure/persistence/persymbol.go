@@ -23,6 +23,18 @@ type SymbolReturn struct {
 	First        time.Time
 	Last         time.Time
 
+	// Censored is how many of this symbol's entries at this level triggered
+	// with no settlement after them, and so are in neither Episodes nor Net.
+	//
+	// It is per-row rather than per-table because the population it shrinks is
+	// per-row: summarise.py counts these in its own `episodes` for the symbol, so a row
+	// here and the artifact's row for the same symbol are answers over
+	// different populations, and Episodes + Censored is the artifact's count.
+	// A symbol whose records were ALL censored has no row at all — it appears
+	// in Excluded, with its own count, so the level's censoring is fully
+	// accounted between the two.
+	Censored int
+
 	// Net is the total after cost, in the leg notional's asset, for a position
 	// of one LegNotional per leg.
 	Net fixedpoint.Money
@@ -32,18 +44,37 @@ type SymbolReturn struct {
 	Annual fixedpoint.Rate
 }
 
+// Exclusion is one symbol the level dropped, and WHY it was dropped.
+//
+// The two reasons are different facts and this type keeps them apart. Censored
+// == 0 means the symbol has no records at all at this entry level — the level
+// never triggered for it. Censored > 0 means it triggered and every record it
+// produced was right-censored (F103), so it has records and no runs. Filing
+// both as a bare name would make "never entered" and "entered, never settled"
+// indistinguishable, which is the same class of loss the coordinates on these
+// results exist to prevent.
+type Exclusion struct {
+	Symbol   string
+	Censored int
+}
+
 // SymbolReturns is the per-symbol table, and Excluded is why it is shorter than
 // the file's symbol count.
 type SymbolReturns struct {
 	// Rows are sorted by Annual descending, ties broken by Symbol ascending.
 	//
 	// The artifact sorts by the ROUNDED percentage at cost 0.0021 for every
-	// block; this sorts by the unrounded ratio at the coordinate asked for.
-	// Tests compare by symbol name, never by index, because those two orders
-	// are not the same claim.
+	// block; this sorts by the unrounded ratio at the coordinate asked for, so
+	// the oracle compares rows by symbol name and never by index — those two
+	// orders are not the same claim. The order itself is asserted as an
+	// INVARIANT over the rows instead (persymbol_test.go), with a fixture
+	// carrying an exact tie, because all 56 annual ratios in the committed file
+	// are distinct and the tiebreak has nothing to break against it.
 	Rows []SymbolReturn
 
-	// Excluded names the symbols with no episodes at this entry level, sorted.
+	// Excluded names the symbols with no RUNS at this entry level, sorted by
+	// symbol, each carrying its own censored count so the two reasons for a
+	// drop stay apart (see Exclusion).
 	//
 	// summarise.py:99 writes `if not e: continue` and records nothing. Measured
 	// over the committed file the excluded counts are 0 / 1 / 5 / 12 across the
@@ -51,7 +82,7 @@ type SymbolReturns struct {
 	// a header declaring symbols_eligible 61 — F60. The denominator is a
 	// function of the entry level, and no field in the artifact says so. This
 	// one does.
-	Excluded []string
+	Excluded []Exclusion
 
 	At SizeAt
 }
@@ -69,7 +100,9 @@ func (s Set) PerSymbol(at SizeAt) (SymbolReturns, error) {
 	out := SymbolReturns{At: at}
 	for _, r := range rows {
 		if len(r.episodes) == 0 {
-			out.Excluded = append(out.Excluded, r.symbol.name)
+			out.Excluded = append(out.Excluded, Exclusion{
+				Symbol: r.symbol.name, Censored: len(r.censored),
+			})
 			continue
 		}
 		row, err := symbolRow(r, at)
@@ -79,14 +112,30 @@ func (s Set) PerSymbol(at SizeAt) (SymbolReturns, error) {
 		out.Rows = append(out.Rows, row)
 	}
 
-	sort.Strings(out.Excluded)
+	sort.Slice(out.Excluded, func(i, j int) bool {
+		return out.Excluded[i].Symbol < out.Excluded[j].Symbol
+	})
+	// The Cmp error is CAPTURED, never folded into the tiebreak. Returning the
+	// name comparison on an error would answer a different question silently —
+	// a mismatched asset tag would render as a symbol-ordered table that no
+	// caller could tell from a correctly ranked one. verdict.go's median sort
+	// takes the same shape, and a claim checked in one place gets checked in
+	// its mirror.
+	var sortErr error
 	sort.Slice(out.Rows, func(i, j int) bool {
 		cmp, err := out.Rows[i].Annual.Cmp(out.Rows[j].Annual)
-		if err != nil || cmp == 0 {
+		if err != nil {
+			sortErr = err
+			return false
+		}
+		if cmp == 0 {
 			return out.Rows[i].Symbol < out.Rows[j].Symbol
 		}
 		return cmp > 0
 	})
+	if sortErr != nil {
+		return SymbolReturns{}, fmt.Errorf("persistence: sort per-symbol rows: %w", sortErr)
+	}
 	return out, nil
 }
 
@@ -148,7 +197,8 @@ func symbolRow(r symbolLevel, at SizeAt) (SymbolReturn, error) {
 
 	return SymbolReturn{
 		Symbol: r.symbol.name, Shortlist: r.symbol.shortlist,
-		Episodes: len(r.episodes), Days: days, ModalMinutes: r.symbol.modalMinutes,
+		Episodes: len(r.episodes), Censored: len(r.censored),
+		Days: days, ModalMinutes: r.symbol.modalMinutes,
 		First: r.symbol.first, Last: r.symbol.last,
 		Net: total, Annual: annual,
 	}, nil

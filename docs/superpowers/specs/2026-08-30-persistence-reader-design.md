@@ -1,7 +1,7 @@
 # A Go reader for the persistence artifacts — design (record §103)
 
 **Date:** 2026-08-30
-**Status:** implemented 2026-08-30, `d042b38`
+**Status:** implemented 2026-08-30, `d042b38`; final-review fixes 2026-08-30
 **Closes:** the last open next action of the web dashboard review — *"a reader
 for the persistence artifacts"*, F83's structural half.
 **Opens:** F102, F103 (below), and review round 13.
@@ -201,7 +201,8 @@ committed-data one.
 
 ### 4.2 The denominator moves, and the reader says so
 
-`SymbolReturns` carries **`Excluded []string`** beside its rows.
+`SymbolReturns` carries **`Excluded []Exclusion`** beside its rows — a name and
+its censored count, not a bare name.
 
 `summarise.py:99` is `if not e: continue`. Measured over the committed file, the
 symbols with an empty episode list are **1 at `0.0005`, 5 at `0.001`, 12 at
@@ -210,6 +211,12 @@ header declares `symbols_eligible: 61`, and why F60's counts run 61 / 60 / 56 / 
 across the four levels. **The denominator is a function of the entry level and no
 field records that it is.** The reader returns the shrinkage rather than swallowing
 it.
+
+`Exclusion` carries the **reason**, because "the level never triggered for this
+symbol" and "it triggered and every record it produced was right-censored" are two
+facts and a bare name files them identically. `Censored == 0` is the first, `> 0`
+the second. All **18** exclusions in the committed file are the first kind, so
+nothing in that file separates them — `testdata/all-censored.json` is what does.
 
 ## 5. Arithmetic, and one thing `fixedpoint` cannot represent
 
@@ -337,8 +344,32 @@ record should not claim more.
 **What the reader does:** `crossvenue.Window.Validate` already *"rejects the
 unusable zero value and every malformed direction"*. The reader classifies a
 zero-settlement record as censored and reports the count rather than admitting it
-to a run-length population, and `RunLength` carries the censored count beside the
-percentiles.
+to a run-length population.
+
+**The count rides on every result whose population it shrinks**, not on
+`RunLength` alone. `RunLength`, `NetPerEpisode` and `BreakevenTable` each carry
+`Censored`; `SymbolReturn` carries it per row and `Exclusion` per dropped symbol,
+so a level's censoring is fully accounted between the two. Reporting it on one
+type and not the others was the same defect one layer in: a caller holding a
+`NetPerEpisode` saw 12 317 against the artifact's 12 322 with **no field on the
+value saying why**, which is precisely F60's shrinking denominator — reproduced
+inside the package built to make it unrepresentable. The invariant every carrier
+now satisfies is `population + Censored == the artifact's count`, and the oracle
+asserts it on each of them separately, because `RunLength` reconciling says
+nothing about the other three.
+
+`Verdict` deliberately carries **no** `Censored`. Its counts are over SYMBOLS
+(`PositiveSymbols`, `BeatHurdle`, `TotalSymbols`), so an episode count beside them
+would be a figure whose base is not its neighbours' — the same "value travelled
+without its base" this package exists to prevent. The censoring fact at a
+verdict's granularity is a symbol dropped for having no runs, and `Excluded`
+carries that with its count.
+
+The decoder refuses a record with **no `"run"` field** rather than reading Go's
+zero. Absence would otherwise decode to 0 and be classified censored by the split
+above — a decode accident wearing a measurement's clothes, and now one that would
+propagate to four result types. It is the one missing field in this file that
+produces a plausible answer instead of an obviously empty one.
 
 ## 8. Scope
 
@@ -388,14 +419,33 @@ what every rounding call in this package uses, but it is **not separated from
 exact rounding tie. This is a known gap, stated rather than left for a reader
 to assume the choice is checked.
 
-**One finding stays open.** `SymbolReturns.Rows`' documented sort order — by
-`Annual` descending, `Symbol` ascending — is asserted by no test.
-`TestOracle_PerSymbolAgreesWithSummariseDotPy` compares rows by symbol name
-through a map, not index-for-index against the artifact's order, so it cannot
-close this. `summarise.py:115` sorts `per_symbol` by
-`-annual_pct_on_2000["0.0021"]`, which is a cheap oracle for an index-for-index
-comparison at that one cost — left for the next session that touches this
-package.
+**That finding — `SymbolReturns.Rows`' documented sort order, asserted by no test
+— is now closed, and NOT the way this record proposed.** The suggestion it made
+(an index-for-index comparison against `summarise.py:115`'s order) would have
+passed for the wrong reason twice over. `summarise.py:115` sorts **every**
+published block by `-annual_pct_on_2000["0.0021"]`, one fixed cost, while the
+reader sorts at whatever coordinate the caller named; and the artifact's key is a
+**one-decimal percentage** while the reader compares the **unrounded ratio**, so
+two symbols tying at one decimal place may legitimately order either way. *A
+rejected alternative is an unchecked claim, and this record's own "cheap oracle"
+was one.*
+
+What closes it is the invariant asserted directly over the rows — `Annual`
+non-increasing, `Symbol` ascending wherever consecutive `Annual` values are equal
+— plus a fixture the committed file cannot supply. All **56** annual ratios at
+`0.001`/`0.0021` are distinct (measured), so the tiebreak half of the rule is
+unexercised against that file and any tiebreak, or none, would pass.
+`testdata/annual-tie.json` carries two symbols whose `Annual` is **exactly**
+equal, laid out so that neither the file's order nor a plain name sort gives the
+right answer: the eighteenth collapse, in the **order** dimension.
+
+**One equivalent mutant, recorded rather than left as a gap.** `Verdict` copies
+`PerSymbol`'s exclusion slice instead of aliasing it. Deleting the copy SURVIVED,
+and the diagnosis is provable: `Verdict` calls `PerSymbol` itself, so the aliased
+table never leaves the function and no caller can hold both ends to observe a
+mutation. The copy stays — the alias becomes reachable the moment anything hands
+`Verdict` a table it did not build — but it is not credited with a protection
+anything checks, in the record or beside the field.
 
 ## 10. A finding about the plan, not about the artifact
 

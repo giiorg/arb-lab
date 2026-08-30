@@ -142,9 +142,62 @@ func TestOracle_PooledAgreesWithSummariseDotPy(t *testing.T) {
 
 			// F103's first magnitude: the artifact's episode count includes the
 			// censored records; this reader's does not, and the two reconcile.
-			if rl.Episodes+rl.Censored != row.Episodes {
-				t.Errorf("episodes %d + censored %d != artifact %d",
-					rl.Episodes, rl.Censored, row.Episodes)
+			//
+			// The reconciliation is repeated on EVERY type that now carries a
+			// censored count, and repeating it is the point. RunLength alone
+			// reporting the split does not help a caller holding a
+			// NetPerEpisode, a BreakevenTable or a SymbolReturns: each of those
+			// reports a population five short of the artifact's 12 322 at this
+			// level, and each must be able to derive the artifact's own figure
+			// from what it holds. Nothing outside these assertions could check
+			// that.
+			cost0 := persistence.CostAt{EntryAt: at, Cost: mustRate(t, sum.Costs[0])}
+
+			npe0, err := set.NetPerEpisode(cost0)
+			if err != nil {
+				t.Fatalf("NetPerEpisode: %v", err)
+			}
+			if npe0.Episodes+npe0.Censored != row.Episodes {
+				t.Errorf("NetPerEpisode: episodes %d + censored %d != artifact %d",
+					npe0.Episodes, npe0.Censored, row.Episodes)
+			}
+
+			bt, err := set.Breakeven(cost0)
+			if err != nil {
+				t.Fatalf("Breakeven: %v", err)
+			}
+			bucketed := 0
+			for _, r := range bt.Rows {
+				bucketed += r.Episodes
+			}
+			if bucketed+bt.Censored != row.Episodes {
+				t.Errorf("Breakeven: buckets %d + censored %d != artifact %d",
+					bucketed, bt.Censored, row.Episodes)
+			}
+
+			// Per-symbol reconciles across BOTH halves of the split: a censored
+			// record sits on a row when the symbol also has runs, and on an
+			// exclusion when it has none. Summing only the rows would be
+			// complete by accident at every committed level, since all five
+			// censored records land on symbols that also have runs.
+			ps, err := set.PerSymbol(persistence.SizeAt{
+				CostAt:      cost0,
+				LegNotional: mustMoney(t, "1000"),
+				Capital:     mustMoney(t, "2000"),
+			})
+			if err != nil {
+				t.Fatalf("PerSymbol: %v", err)
+			}
+			perSymbol := 0
+			for _, r := range ps.Rows {
+				perSymbol += r.Episodes + r.Censored
+			}
+			for _, e := range ps.Excluded {
+				perSymbol += e.Censored
+			}
+			if perSymbol != row.Episodes {
+				t.Errorf("PerSymbol: rows+exclusions total %d != artifact %d",
+					perSymbol, row.Episodes)
 			}
 
 			for _, cost := range sum.Costs {
@@ -169,14 +222,12 @@ func TestOracle_PooledAgreesWithSummariseDotPy(t *testing.T) {
 				}
 			}
 
-			npe, err := set.NetPerEpisode(persistence.CostAt{EntryAt: at, Cost: mustRate(t, sum.Costs[0])})
-			if err != nil {
-				t.Fatalf("NetPerEpisode: %v", err)
-			}
+			// mean_gross is entry-only, so npe0 — folded at the first cost
+			// above — is the right value at any cost.
 			if rl.Censored == 0 {
-				if npe.MeanGross.Decimal() != roundedTo9(t, row.MeanGross) {
+				if npe0.MeanGross.Decimal() != roundedTo9(t, row.MeanGross) {
 					t.Errorf("mean_gross %s, artifact (to 9) %s",
-						npe.MeanGross.Decimal(), roundedTo9(t, row.MeanGross))
+						npe0.MeanGross.Decimal(), roundedTo9(t, row.MeanGross))
 				}
 			}
 		})

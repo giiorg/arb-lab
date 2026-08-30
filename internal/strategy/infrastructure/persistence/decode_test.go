@@ -2,6 +2,7 @@ package persistence_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,5 +130,44 @@ func TestLoad_TwoTimestampLayouts(t *testing.T) {
 func TestLoad_MissingFileRefuses(t *testing.T) {
 	if _, err := persistence.Load("testdata/no-such-file.json"); err == nil {
 		t.Fatal("Load of a missing path returned nil error")
+	}
+}
+
+// A record missing "run" REFUSES. It must not decode to Go's zero and be
+// classified censored by the F103 split — that would turn a decode accident
+// into a measurement, and a censoring count is now carried on four result
+// types, so the wrong classification would propagate everywhere.
+//
+// The assertion is a refusal, which is what separates this from the record
+// being read as censored: a silent censoring classification returns nil here
+// and yields Censored 1.
+func TestLoad_MissingRunFieldRefuses(t *testing.T) {
+	set, err := persistence.Load("testdata/missing-run.json")
+	if err == nil {
+		t.Fatalf("Load returned nil error; RunLength would report %+v", mustRunLength(t, set))
+	}
+	if !strings.Contains(err.Error(), "no run field") {
+		t.Errorf("error = %v, want one naming the missing run field", err)
+	}
+}
+
+func mustRunLength(t *testing.T, set persistence.Set) persistence.RunLength {
+	t.Helper()
+	rl, err := set.RunLength(persistence.EntryAt{Entry: mustRate(t, "0.001")})
+	if err != nil {
+		t.Fatalf("RunLength: %v", err)
+	}
+	return rl
+}
+
+// The positive control for the refusal above: the same fixture WITH the field
+// present decodes, so the refusal is about the missing field and not about
+// anything else in the record. Without it, a Load that refused every hand-built
+// fixture would score a pass.
+func TestLoad_RunFieldPresentIsAccepted(t *testing.T) {
+	set := loadFixture(t, "testdata/annual-tie.json")
+	rl := mustRunLength(t, set)
+	if rl.Episodes != 3 || rl.Censored != 0 {
+		t.Fatalf("Episodes/Censored = %d/%d, want 3/0", rl.Episodes, rl.Censored)
 	}
 }

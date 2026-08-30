@@ -9,12 +9,17 @@ func TestNetPerEpisode_AgainstTheCommittedFile(t *testing.T) {
 	cases := []struct {
 		entry, cost        string
 		episodes, wins     int
+		censored           int
 		meanGross, meanNet string
 	}{
-		{"0.0002", "0.0021", 12317, 872, "0.000653608", "-0.001446392"},
-		{"0.0005", "0.0021", 3425, 586, "0.001518849", "-0.000581151"},
-		{"0.001", "0.0021", 1259, 343, "0.002613091", "0.000513091"},
-		{"0.002", "0.0021", 472, 168, "0.00367787", "0.00157787"},
+		// Censored is FIVE at 0.0002 and ZERO at the other three. The
+		// artifact's own episode count is Episodes + Censored — 12 322 at the
+		// first row — and asserting it only where it is zero would be
+		// satisfied by a field that is always zero.
+		{"0.0002", "0.0021", 12317, 872, 5, "0.000653608", "-0.001446392"},
+		{"0.0005", "0.0021", 3425, 586, 0, "0.001518849", "-0.000581151"},
+		{"0.001", "0.0021", 1259, 343, 0, "0.002613091", "0.000513091"},
+		{"0.002", "0.0021", 472, 168, 0, "0.00367787", "0.00157787"},
 	}
 	for _, c := range cases {
 		t.Run(c.entry, func(t *testing.T) {
@@ -28,6 +33,9 @@ func TestNetPerEpisode_AgainstTheCommittedFile(t *testing.T) {
 			if got.Wins != c.wins {
 				t.Errorf("Wins = %d, want %d", got.Wins, c.wins)
 			}
+			if got.Censored != c.censored {
+				t.Errorf("Censored = %d, want %d", got.Censored, c.censored)
+			}
 			if got.MeanGross.Decimal() != c.meanGross {
 				t.Errorf("MeanGross = %s, want %s", got.MeanGross.Decimal(), c.meanGross)
 			}
@@ -40,8 +48,9 @@ func TestNetPerEpisode_AgainstTheCommittedFile(t *testing.T) {
 
 // THE SIXTEENTH COLLAPSE, from record §103 §6.2.
 //
-// Wins counts accrued > cost. Measured over all 17 478 committed episodes,
-// EXACTLY ZERO accrue any of the three costs, so `>` and `>=` return the same
+// Wins counts accrued > cost. Measured over the 17 473 uncensored episodes
+// this fold sees (17 478 records in the file, 5 censored), EXACTLY ZERO
+// accrue any of the three costs, so `>` and `>=` return the same
 // three counts (1 969 / 1 485 / 430 pooled across levels). The committed data
 // cannot separate the two comparisons, and the oracle test in Task 8 passes
 // against both. Only a hand-built episode accruing EXACTLY the cost can tell
@@ -124,6 +133,9 @@ func TestNetPerEpisode_AllCensoredIsNotAnEmptyLevel(t *testing.T) {
 	}
 	if got.Episodes != 0 || got.Wins != 0 {
 		t.Fatalf("Episodes/Wins = %d/%d, want 0/0", got.Episodes, got.Wins)
+	}
+	if got.Censored != 3 {
+		t.Errorf("Censored = %d, want 3 — an empty population with a reason", got.Censored)
 	}
 	if got.MeanGross.Validate() != nil {
 		t.Error("MeanGross over an empty population must be a constructed zero, not the zero value")

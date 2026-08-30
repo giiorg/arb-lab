@@ -16,6 +16,19 @@ type NetPerEpisode struct {
 	// Episodes is the population size — censored records excluded.
 	Episodes int
 
+	// Censored is how many entries at this level triggered with no settlement
+	// after them, and so are in no mean and in no win count here.
+	//
+	// It rides on the value for the same reason the coordinate does. F103's
+	// five records are counted in summarise.py's published `episodes` (12 322
+	// against this reader's 12 317) and averaged into its published means, so a
+	// figure from this fold and a figure from the artifact are answers over
+	// DIFFERENT populations. Without this field the difference is a silent
+	// shrinking denominator, which is F60's defect — and RunLength reporting it
+	// does not help a caller holding a NetPerEpisode. Episodes + Censored is
+	// the artifact's count.
+	Censored int
+
 	// Wins counts episodes whose accrual was STRICTLY greater than the cost.
 	Wins int
 
@@ -39,8 +52,9 @@ func (s Set) NetPerEpisode(at CostAt) (NetPerEpisode, error) {
 	}
 
 	sum := fixedpoint.ZeroRate()
-	count, wins := 0, 0
+	count, wins, censored := 0, 0, 0
 	for _, r := range rows {
+		censored += len(r.censored)
 		for _, e := range r.episodes {
 			count++
 			sum, err = sum.Add(e.Accrued)
@@ -58,7 +72,7 @@ func (s Set) NetPerEpisode(at CostAt) (NetPerEpisode, error) {
 	}
 
 	out := NetPerEpisode{
-		Episodes: count, Wins: wins, At: at,
+		Episodes: count, Wins: wins, Censored: censored, At: at,
 		MeanGross: fixedpoint.ZeroRate(), MeanNet: fixedpoint.ZeroRate(),
 	}
 	if count == 0 {

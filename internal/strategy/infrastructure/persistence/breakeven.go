@@ -31,7 +31,21 @@ type BreakevenRow struct {
 // carried on the answer.
 type BreakevenTable struct {
 	Rows []BreakevenRow
-	At   CostAt
+
+	// Censored is how many entries at this level triggered with no settlement
+	// after them, and so are in NO bucket below.
+	//
+	// It rides on the value because the buckets are a partition of a population
+	// whose size is otherwise unstated: sum(Rows[i].Episodes) + Censored is the
+	// count summarise.py publishes. Without it the table simply sums short of
+	// the artifact — five short at level 0.0002 — with nothing on the value
+	// saying why, which is F60's shrinking denominator in a second place. The
+	// buckets themselves cannot carry it: a censored record is not a run of
+	// length zero, so a `0` bucket would assert exactly the reading F103 says
+	// is wrong.
+	Censored int
+
+	At CostAt
 }
 
 // Breakeven buckets the episodes at one entry level by run length and counts,
@@ -47,7 +61,9 @@ func (s Set) Breakeven(at CostAt) (BreakevenTable, error) {
 
 	episodes := map[int]int{}
 	cleared := map[int]int{}
+	censored := 0
 	for _, r := range rows {
+		censored += len(r.censored)
 		for _, e := range r.episodes {
 			b := e.Run
 			if b > breakevenCap {
@@ -60,7 +76,8 @@ func (s Set) Breakeven(at CostAt) (BreakevenTable, error) {
 			}
 			// Strictly greater. summarise.py:86 writes `>`, and the committed
 			// data cannot separate `>` from `>=` — measured: exactly zero of
-			// 17 478 episodes accrue any of the three costs. The hand-built
+			// the 17 473 uncensored episodes this loop sees accrue any of the
+			// three costs (17 478 records in the file, 5 censored). The hand-built
 			// fixture in net_test.go is what makes the choice checkable.
 			if cmp > 0 {
 				cleared[b]++
@@ -74,7 +91,7 @@ func (s Set) Breakeven(at CostAt) (BreakevenTable, error) {
 	}
 	sort.Ints(buckets)
 
-	table := BreakevenTable{At: at, Rows: make([]BreakevenRow, 0, len(buckets))}
+	table := BreakevenTable{At: at, Censored: censored, Rows: make([]BreakevenRow, 0, len(buckets))}
 	for _, b := range buckets {
 		table.Rows = append(table.Rows, BreakevenRow{
 			Run: b, Plus: b == breakevenCap,

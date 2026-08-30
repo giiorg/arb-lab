@@ -46,13 +46,16 @@ func TestVerdict_AgainstTheCommittedFile(t *testing.T) {
 			// F60/persymbol_test.go's own denominator note: the level's
 			// exclusions are a fact about the level, and Verdict carries them
 			// rather than only their count. Measured, not guessed at.
-			wantExcluded := []string{"CAPUSDT", "CFXUSDT", "WLDUSDT", "XAUTUSDT", "XPLUSDT"}
-			if len(got.Excluded) != len(wantExcluded) {
-				t.Fatalf("Excluded = %v, want %v", got.Excluded, wantExcluded)
+			wantExcluded := []persistence.Exclusion{
+				{Symbol: "CAPUSDT"}, {Symbol: "CFXUSDT"}, {Symbol: "WLDUSDT"},
+				{Symbol: "XAUTUSDT"}, {Symbol: "XPLUSDT"},
 			}
-			for i, name := range wantExcluded {
-				if got.Excluded[i] != name {
-					t.Errorf("Excluded[%d] = %s, want %s", i, got.Excluded[i], name)
+			if len(got.Excluded) != len(wantExcluded) {
+				t.Fatalf("Excluded = %+v, want %+v", got.Excluded, wantExcluded)
+			}
+			for i, want := range wantExcluded {
+				if got.Excluded[i] != want {
+					t.Errorf("Excluded[%d] = %+v, want %+v", i, got.Excluded[i], want)
 				}
 			}
 			if got.MedianAnnual.Decimal() != c.medianPct {
@@ -101,8 +104,12 @@ func TestVerdict_AllCensoredIsNotAnEmptyLevel(t *testing.T) {
 		t.Fatalf("PositiveSymbols/BeatHurdle/TotalSymbols = %d/%d/%d, want 0/0/0",
 			got.PositiveSymbols, got.BeatHurdle, got.TotalSymbols)
 	}
-	if len(got.Excluded) != 1 || got.Excluded[0] != "FIXTURE" {
-		t.Fatalf("Excluded = %v, want [FIXTURE]", got.Excluded)
+	// The exclusion carries WHY: three censored records, not "never entered".
+	// Every committed exclusion carries Censored 0, so this is the only place
+	// the non-zero reading is exercised.
+	wantExcluded := persistence.Exclusion{Symbol: "FIXTURE", Censored: 3}
+	if len(got.Excluded) != 1 || got.Excluded[0] != wantExcluded {
+		t.Fatalf("Excluded = %+v, want [%+v]", got.Excluded, wantExcluded)
 	}
 	if got.MedianAnnual.Validate() != nil {
 		t.Error("MedianAnnual over an empty population must be a constructed zero, not the zero value")
@@ -166,3 +173,10 @@ func TestVerdict_ComparesTheRatioNotTheRoundedPercentage(t *testing.T) {
 		t.Errorf("MedianAnnual = %s, want 0.0463", got.MedianAnnual.Decimal())
 	}
 }
+
+// There is no test for Verdict.Excluded being a COPY of PerSymbol's slice, and
+// that is a recorded result rather than an omission: Verdict calls PerSymbol
+// itself, so the aliased table never leaves the function and no caller can hold
+// both ends to observe the mutation. Deleting the copy was measured as an
+// EQUIVALENT mutant (SURVIVED, diagnosed). verdict.go says the same beside the
+// field, so the copy is not credited with a protection nothing checks.

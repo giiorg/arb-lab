@@ -58,7 +58,12 @@ type wireLevel struct {
 }
 
 type wireEpisode struct {
-	Run     int    `json:"run"`
+	// Run is a POINTER so that an absent "run" refuses rather than decoding to
+	// 0. A missing field landing on Go's zero would be classified censored by
+	// the F103 split below — a decode accident wearing a measurement's clothes,
+	// and the one missing field in this file that produces a plausible answer
+	// instead of an obviously empty one.
+	Run     *int   `json:"run"`
 	Accrued string `json:"accrued"`
 	Start   string `json:"start"`
 	End     string `json:"end"`
@@ -184,10 +189,13 @@ func decodeEpisode(symbol string, we wireEpisode) (Episode, error) {
 	if err != nil {
 		return Episode{}, fmt.Errorf("persistence: %s: episode end %q: %w", symbol, we.End, err)
 	}
-	if we.Run < 0 {
-		return Episode{}, fmt.Errorf("persistence: %s: negative run %d", symbol, we.Run)
+	if we.Run == nil {
+		return Episode{}, fmt.Errorf("persistence: %s: episode has no run field", symbol)
 	}
-	return Episode{Run: we.Run, Accrued: accrued, Start: start, End: end}, nil
+	if *we.Run < 0 {
+		return Episode{}, fmt.Errorf("persistence: %s: negative run %d", symbol, *we.Run)
+	}
+	return Episode{Run: *we.Run, Accrued: accrued, Start: start, End: end}, nil
 }
 
 // Levels returns the entry levels the file declares, ascending.

@@ -60,6 +60,68 @@ func TestBreakeven_AtTheArtifactsPin(t *testing.T) {
 	if totalEpisodes != populationAt0_0005 {
 		t.Errorf("sum of Episodes = %d, want %d (population)", totalEpisodes, populationAt0_0005)
 	}
+	// The zero half of the censoring assertion. Level 0.0005 carries no
+	// censored records, so the buckets ARE the whole population here and
+	// summary.json's own 3 425 needs no reconciliation.
+	// TestBreakeven_BucketsSumShortWhereRecordsAreCensored is the five half.
+	if got.Censored != 0 {
+		t.Errorf("Censored = %d, want 0 at level 0.0005", got.Censored)
+	}
+}
+
+// F103, in the block that would show it if it could. The buckets start at run
+// 1 and a censored record is not a run of length zero, so at level 0.0002 they
+// sum FIVE short of the 12 322 summarise.py publishes — and without Censored
+// on the table nothing on the value says why. Episodes summed plus Censored is
+// the artifact's count.
+//
+// This is also why the artifact never showed it: summarise.py pins
+// run_vs_breakeven to level 0.0005, which is the one level with censored
+// records absent. The pinned coordinate F55 names is exactly the one that hides
+// the zero bucket.
+func TestBreakeven_BucketsSumShortWhereRecordsAreCensored(t *testing.T) {
+	set := loadCommitted(t)
+	got, err := set.Breakeven(costAt(t, "0.0002", "0.0021"))
+	if err != nil {
+		t.Fatalf("Breakeven: %v", err)
+	}
+	if got.Censored != 5 {
+		t.Errorf("Censored = %d, want 5", got.Censored)
+	}
+	total := 0
+	for _, r := range got.Rows {
+		total += r.Episodes
+		if r.Run == 0 {
+			t.Errorf("a run-0 bucket exists: %+v — a censored record is not a run of length zero", r)
+		}
+	}
+	if total != 12317 {
+		t.Errorf("sum of Episodes = %d, want 12317", total)
+	}
+	if total+got.Censored != 12322 {
+		t.Errorf("episodes %d + censored %d != the artifact's 12322", total, got.Censored)
+	}
+}
+
+// Mirrors the other three folds' all-censored tests. Breakeven was the one fold
+// without one: a level whose only records are censored yields NO buckets, and
+// the count of what was dropped is the only thing distinguishing that from a
+// level that was never measured.
+func TestBreakeven_AllCensoredIsNotAnEmptyLevel(t *testing.T) {
+	set := loadFixture(t, "testdata/all-censored.json")
+	got, err := set.Breakeven(costAt(t, "0.001", "0.0021"))
+	if err != nil {
+		t.Fatalf("Breakeven: %v", err)
+	}
+	if len(got.Rows) != 0 {
+		t.Fatalf("Rows = %+v, want none", got.Rows)
+	}
+	if got.Censored != 3 {
+		t.Errorf("Censored = %d, want 3 — an empty table with a reason", got.Censored)
+	}
+	if got.At.Entry.Decimal() != "0.001" || got.At.Cost.Decimal() != "0.0021" {
+		t.Errorf("At = %s/%s, want 0.001/0.0021", got.At.Entry.Decimal(), got.At.Cost.Decimal())
+	}
 }
 
 // The table is a function of BOTH coordinates. A table asserted at one cost

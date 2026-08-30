@@ -40,6 +40,23 @@ func TestPerSymbol_AgainstTheCommittedFile(t *testing.T) {
 	if lab.Episodes != 71 {
 		t.Errorf("LABUSDT Episodes = %d, want 71", lab.Episodes)
 	}
+	// Shortlist and ModalMinutes come straight off the symbol record, and both
+	// separate LABUSDT from SOLUSDT below: true/240 against false/480. A single
+	// symbol could not tell a field wired to the right record from one wired to
+	// a constant, and 8 of the file's 61 symbols are on the shortlist, so
+	// "always false" would also pass on a majority of rows.
+	if !lab.Shortlist {
+		t.Error("LABUSDT Shortlist = false, want true")
+	}
+	if lab.ModalMinutes != 240 {
+		t.Errorf("LABUSDT ModalMinutes = %d, want 240", lab.ModalMinutes)
+	}
+	// No symbol carries a censored record at level 0.001; all five in the file
+	// are at 0.0002, and TestPerSymbol_CensoringIsCarriedPerRow asserts them
+	// where they are non-zero.
+	if lab.Censored != 0 {
+		t.Errorf("LABUSDT Censored = %d, want 0", lab.Censored)
+	}
 	// The task brief quoted the file's cents-rounded display value ("543.88")
 	// as the expected Net. Net is a full scale-9 fixedpoint.Money — nothing in
 	// symbolRow quantizes it to cents — so the true figure carries the ".166"
@@ -94,6 +111,12 @@ func TestPerSymbol_AgainstTheCommittedFile(t *testing.T) {
 	if sol.Episodes != 36 {
 		t.Errorf("SOLUSDT Episodes = %d, want 36", sol.Episodes)
 	}
+	if sol.Shortlist {
+		t.Error("SOLUSDT Shortlist = true, want false")
+	}
+	if sol.ModalMinutes != 480 {
+		t.Errorf("SOLUSDT ModalMinutes = %d, want 480", sol.ModalMinutes)
+	}
 	if sol.Net.Decimal() != "-13.10829" {
 		t.Errorf("SOLUSDT Net = %s, want -13.10829", sol.Net.Decimal())
 	}
@@ -110,15 +133,24 @@ func TestPerSymbol_TheDenominatorMovesWithTheLevel(t *testing.T) {
 	cases := []struct {
 		level    string
 		rows     int
-		excluded []string
+		excluded []persistence.Exclusion
 	}{
+		// Every committed exclusion carries Censored 0 — all 18 of them are
+		// symbols the level never triggered for, not symbols whose every
+		// record was censored. Asserting the count rather than only the name
+		// is what separates the two facts; the all-censored fixture below
+		// carries the other case, where the count is non-zero.
 		{"0.0002", 61, nil},
-		{"0.0005", 60, []string{"XAUTUSDT"}},
-		{"0.001", 56, []string{"CAPUSDT", "CFXUSDT", "WLDUSDT", "XAUTUSDT", "XPLUSDT"}},
-		{"0.002", 49, []string{
-			"BNBUSDT", "BTWUSDT", "CAPUSDT", "CFXUSDT", "FARTCOINUSDT",
-			"LDOUSDT", "OPUSDT", "ORDIUSDT", "UAIUSDT", "WLDUSDT",
-			"XAUTUSDT", "XPLUSDT",
+		{"0.0005", 60, []persistence.Exclusion{{Symbol: "XAUTUSDT"}}},
+		{"0.001", 56, []persistence.Exclusion{
+			{Symbol: "CAPUSDT"}, {Symbol: "CFXUSDT"}, {Symbol: "WLDUSDT"},
+			{Symbol: "XAUTUSDT"}, {Symbol: "XPLUSDT"},
+		}},
+		{"0.002", 49, []persistence.Exclusion{
+			{Symbol: "BNBUSDT"}, {Symbol: "BTWUSDT"}, {Symbol: "CAPUSDT"},
+			{Symbol: "CFXUSDT"}, {Symbol: "FARTCOINUSDT"}, {Symbol: "LDOUSDT"},
+			{Symbol: "OPUSDT"}, {Symbol: "ORDIUSDT"}, {Symbol: "UAIUSDT"},
+			{Symbol: "WLDUSDT"}, {Symbol: "XAUTUSDT"}, {Symbol: "XPLUSDT"},
 		}},
 	}
 	for _, c := range cases {
@@ -133,9 +165,9 @@ func TestPerSymbol_TheDenominatorMovesWithTheLevel(t *testing.T) {
 			if len(got.Excluded) != len(c.excluded) {
 				t.Fatalf("Excluded = %v, want %v", got.Excluded, c.excluded)
 			}
-			for i, name := range c.excluded {
-				if got.Excluded[i] != name {
-					t.Errorf("Excluded[%d] = %s, want %s", i, got.Excluded[i], name)
+			for i, want := range c.excluded {
+				if got.Excluded[i] != want {
+					t.Errorf("Excluded[%d] = %+v, want %+v", i, got.Excluded[i], want)
 				}
 			}
 			if len(got.Rows)+len(got.Excluded) != set.SymbolCount() {
@@ -169,5 +201,79 @@ func TestPerSymbol_ExactlyOneDaySpanIsAccepted(t *testing.T) {
 	}
 	if len(got.Rows) != 1 || got.Rows[0].Days != 1 {
 		t.Fatalf("rows = %+v, want one row with Days 1", got.Rows)
+	}
+}
+
+// F103's censoring is carried per ROW, and this asserts it where the count is
+// FIVE as well as where it is zero. A field asserted only at a level where it
+// is zero is satisfied by a field that is always zero.
+//
+// All five censored records in the committed file sit at entry 0.0002, one
+// each on five DIFFERENT symbols (1000RATSUSDT, SOONUSDT, UAIUSDT, USUSDT,
+// XMRUSDT), and each of those symbols also has runs at that level — so all five
+// land on rows and none on an exclusion. Level 0.001 is the zero control.
+func TestPerSymbol_CensoringIsCarriedPerRow(t *testing.T) {
+	set := loadCommitted(t)
+
+	censoredAt := func(level string) map[string]int {
+		t.Helper()
+		got, err := set.PerSymbol(sizeAt(t, level, "0.0021"))
+		if err != nil {
+			t.Fatalf("PerSymbol at %s: %v", level, err)
+		}
+		out := map[string]int{}
+		for _, r := range got.Rows {
+			if r.Censored != 0 {
+				out[r.Symbol] = r.Censored
+			}
+		}
+		for _, e := range got.Excluded {
+			if e.Censored != 0 {
+				out[e.Symbol] = e.Censored
+			}
+		}
+		return out
+	}
+
+	want := map[string]int{
+		"1000RATSUSDT": 1, "SOONUSDT": 1, "UAIUSDT": 1, "USUSDT": 1, "XMRUSDT": 1,
+	}
+	got := censoredAt("0.0002")
+	if len(got) != len(want) {
+		t.Fatalf("censored rows at 0.0002 = %v, want %v", got, want)
+	}
+	total := 0
+	for sym, n := range want {
+		if got[sym] != n {
+			t.Errorf("%s Censored = %d, want %d", sym, got[sym], n)
+		}
+		total += got[sym]
+	}
+	if total != 5 {
+		t.Errorf("total censored at 0.0002 = %d, want 5", total)
+	}
+
+	// The zero control, at a level where the field must be 0 on every row.
+	if zero := censoredAt("0.001"); len(zero) != 0 {
+		t.Errorf("censored at 0.001 = %v, want none", zero)
+	}
+}
+
+// An exclusion carries WHY the symbol was dropped, and this is the case the
+// committed file does not contain: a symbol that entered and whose every record
+// was right-censored. Its Censored is 3, against the committed exclusions'
+// 0 — without this the two reasons are one fact under two names.
+func TestPerSymbol_AnAllCensoredSymbolIsExcludedWithItsCount(t *testing.T) {
+	set := loadFixture(t, "testdata/all-censored.json")
+	got, err := set.PerSymbol(sizeAt(t, "0.001", "0.0021"))
+	if err != nil {
+		t.Fatalf("PerSymbol: %v", err)
+	}
+	if len(got.Rows) != 0 {
+		t.Fatalf("rows = %d, want 0", len(got.Rows))
+	}
+	want := persistence.Exclusion{Symbol: "FIXTURE", Censored: 3}
+	if len(got.Excluded) != 1 || got.Excluded[0] != want {
+		t.Fatalf("Excluded = %+v, want [%+v]", got.Excluded, want)
 	}
 }

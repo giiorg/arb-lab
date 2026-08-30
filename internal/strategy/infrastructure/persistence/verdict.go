@@ -38,8 +38,31 @@ type Verdict struct {
 	TotalSymbols int
 
 	// Excluded names the symbols this level dropped, carried through from
-	// PerSymbol so a verdict can state its own denominator's provenance.
-	Excluded []string
+	// PerSymbol so a verdict can state its own denominator's provenance. Each
+	// entry carries its own censored count, so a symbol dropped because every
+	// record it produced was right-censored is distinguishable from one that
+	// never entered at all.
+	//
+	// It is a COPY of PerSymbol's slice, not an alias. The copy is DEFENSIVE
+	// and no test can currently kill it: Verdict calls PerSymbol itself, so the
+	// table whose slice would be aliased never leaves this function and no
+	// caller can hold both ends. Removing the copy is an equivalent mutant —
+	// measured, SURVIVED, and diagnosed rather than left as a test gap. It
+	// stays because the alias becomes reachable the moment anything hands
+	// Verdict a table it did not build, and a shared backing array is invisible
+	// in both types' signatures. What it must NOT be credited with is a
+	// protection something checks today.
+	//
+	// There is deliberately no episode-level Censored field on Verdict. Every
+	// other count here — PositiveSymbols, BeatHurdle, TotalSymbols — is over
+	// SYMBOLS, and an episode count sitting beside them would be a figure whose
+	// base is not the one its neighbours share: exactly the "value travelled
+	// without its base" defect this package exists to make unrepresentable. The
+	// censoring fact AT a verdict's own granularity is a symbol dropped for
+	// having no runs, and that is what Excluded carries. A caller wanting the
+	// episode-level count asks NetPerEpisode or RunLength at the same
+	// coordinate.
+	Excluded []Exclusion
 
 	Hurdle Hurdle
 	At     SizeAt
@@ -55,8 +78,10 @@ func (s Set) Verdict(at SizeAt, h Hurdle) (Verdict, error) {
 		return Verdict{}, err
 	}
 
+	excluded := make([]Exclusion, len(table.Excluded))
+	copy(excluded, table.Excluded)
 	out := Verdict{
-		TotalSymbols: len(table.Rows), Excluded: table.Excluded,
+		TotalSymbols: len(table.Rows), Excluded: excluded,
 		Hurdle: h, At: at, MedianAnnual: fixedpoint.ZeroRate(),
 	}
 	if len(table.Rows) == 0 {
