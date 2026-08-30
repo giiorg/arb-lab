@@ -43,6 +43,18 @@ func TestVerdict_AgainstTheCommittedFile(t *testing.T) {
 			if got.TotalSymbols != c.total {
 				t.Errorf("TotalSymbols = %d, want %d", got.TotalSymbols, c.total)
 			}
+			// F60/persymbol_test.go's own denominator note: the level's
+			// exclusions are a fact about the level, and Verdict carries them
+			// rather than only their count. Measured, not guessed at.
+			wantExcluded := []string{"CAPUSDT", "CFXUSDT", "WLDUSDT", "XAUTUSDT", "XPLUSDT"}
+			if len(got.Excluded) != len(wantExcluded) {
+				t.Fatalf("Excluded = %v, want %v", got.Excluded, wantExcluded)
+			}
+			for i, name := range wantExcluded {
+				if got.Excluded[i] != name {
+					t.Errorf("Excluded[%d] = %s, want %s", i, got.Excluded[i], name)
+				}
+			}
 			if got.MedianAnnual.Decimal() != c.medianPct {
 				t.Errorf("MedianAnnual = %s, want %s", got.MedianAnnual.Decimal(), c.medianPct)
 			}
@@ -68,6 +80,32 @@ func TestVerdict_RefusesAnUnsetHurdle(t *testing.T) {
 	_, err := set.Verdict(sizeAt(t, "0.001", "0.0021"), persistence.Hurdle{})
 	if err == nil {
 		t.Fatal("Verdict with a zero Hurdle returned nil error")
+	}
+}
+
+// Mirrors runlength_test.go's TestRunLength_AllCensoredIsNotAnEmptyLevel and
+// net_test.go's TestNetPerEpisode_AllCensoredIsNotAnEmptyLevel: a level whose
+// only episodes are censored (run == 0) folds to an empty per-symbol
+// population, and Verdict's early-return branch (len(table.Rows) == 0) is the
+// third fold with exactly this shape. MedianAnnual must be a CONSTRUCTED
+// zero — Validate() passes — never the bare zero value, which Validate()
+// would refuse. Asserting only that it equals zero would not separate the
+// two: the bare zero value also equals zero.
+func TestVerdict_AllCensoredIsNotAnEmptyLevel(t *testing.T) {
+	set := loadFixture(t, "testdata/all-censored.json")
+	got, err := set.Verdict(sizeAt(t, "0.001", "0.0021"), illustrativeHurdle(t))
+	if err != nil {
+		t.Fatalf("Verdict: %v", err)
+	}
+	if got.PositiveSymbols != 0 || got.BeatHurdle != 0 || got.TotalSymbols != 0 {
+		t.Fatalf("PositiveSymbols/BeatHurdle/TotalSymbols = %d/%d/%d, want 0/0/0",
+			got.PositiveSymbols, got.BeatHurdle, got.TotalSymbols)
+	}
+	if len(got.Excluded) != 1 || got.Excluded[0] != "FIXTURE" {
+		t.Fatalf("Excluded = %v, want [FIXTURE]", got.Excluded)
+	}
+	if got.MedianAnnual.Validate() != nil {
+		t.Error("MedianAnnual over an empty population must be a constructed zero, not the zero value")
 	}
 }
 
