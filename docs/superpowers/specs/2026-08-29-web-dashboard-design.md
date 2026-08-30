@@ -319,6 +319,15 @@ journal-backed projector is constructed **inside the OMS package tree** over the
 existing verified `JournalReplay`; `serve` consumes only the finished audit read
 port. Recorded as **F33**.
 
+> **⚠ AND NOTHING HERE NAMES WHO CONSTRUCTS IT (F87, §15.15).** Measured:
+> `internal/app/serve` importing `oms/infrastructure/driven` is refused by
+> `singlewriter`; importing `internal/oms` for a constructor is refused by rule
+> 11, for `cmd/arblab` as well. The only lawful sites are `internal/oms` itself
+> and the three rule-11 grants — so the **phase-1** Journal and Positions screens
+> reach their data only through a package that also holds the write authority,
+> which is F85's edge. The wiring package must be named and granted with a
+> read-only reason. See §14 debt 35.
+
 ## 5. The wire contract — five rules, each traceable to a finding
 
 **Rule 1 — money and rates are decimal strings, never JSON numbers.** A JSON
@@ -455,6 +464,16 @@ So it is re-graded as **a control action with its own §7.3 grant**, and it does
 not ship before §7.3's clauses do. §6a's ladder point 2 already said each rung is
 a distinct authorization; this is the rung that was filed under the wrong one.
 
+> **⚠ THE RE-GRADING COVERS *WHO* AND LEAVES *WHEN* AND *WHICH REGIME* (F88,
+> F89, §15.15).** `At` is self-asserted in exactly the same way and its remedy
+> points the **opposite** direction — it is the operator's accounting instant by
+> design, bounded only against zero, and §7.3's replay protection needs a
+> **third** quantity (a signed near-now on the mutating call) that the preimage
+> `{kind, op, actor, at, note}` has no field for. And once both paths exist, one
+> chain holds §7.4-solo-honest rows and §7.3-authenticated rows in one `string`
+> with nothing separating them — unrepairable after the first append, because
+> the chain is append-only. See §14 debts 36 and 37.
+
 Arm/disarm is a write, but it is the right *shape* of write for this codebase:
 it only ever changes a permission, and its safe direction is disarmed. That
 matches the standing rule — when a default has two directions, pick the one that
@@ -502,6 +521,16 @@ So part of the answer is a **type**: `serve` receives a **capability-limited
 facade** whose method set contains no write use case, and the `*oms.Module` never
 leaves the wiring file. Rule 6's own reasoning applies — a package is the unit of
 dependency, and here a *type* is the unit of authority.
+
+> **⚠ THE `*oms.Module` ALREADY LEAVES ITS WIRING FILE, AND THROUGH A GRANTED
+> PACKAGE (F85, §15.15).** `internal/app/reconcile/app.go:740` exports
+> `func (r *Runner) Module() *oms.Module`; `internal/app/pair` and
+> `internal/app/exercise` consume it. Rule 11 polices imports of the OMS surface
+> and **nothing polices imports of a grant**, so one import of
+> `internal/app/reconcile` from a web-facing package yields the eleven use cases
+> and `ReconcileMarginOp` with **all seven gates silent** — measured, with the
+> `internal/oms` control reported in the same file. The sentence above is a
+> transitive claim about a one-hop check. See §14 debt 33.
 
 **But the type is the SECOND half, not the first, and the first draft of this
 section had the order backwards (F44).** It said *"the guarantee is a type, not a
@@ -619,6 +648,16 @@ for a different reason, and `notimenow`'s is structural rather than incidental:
 the web tree may read the ambient clock, which is §4a's hole seen from the other
 side, and it is why the audit timestamp in the measurement above came from
 `time.Now()` with nothing objecting.
+
+> **⚠ MEASURED, AND THE PROPERTY IS THE GATE'S RATHER THAN THE WEB TREE'S (F90,
+> §15.15).** Identical `time.Now()` statements: silent in
+> `internal/app/serve/httpapi`, **reported** in `internal/app/serve/httpapi/domain`,
+> same run. `policedLayers` is an **allow-list of suspected trees**, so the
+> remedy this paragraph's wording implies — add the serve tree — inherits its
+> enumeration, and `internal/app/dashboard/` is unpoliced the day it is created.
+> That is the inversion §15.8 recorded for rule 11 and the marker direction §6a
+> rejected for rule 6, one gate over. `platform/ids/ids.go:8-12` already records
+> the twin hole in its own words. See §14 debt 38.
 
 Recorded as **F34**, **F42**, **F43** and **F44**. Phase 2 and 3 do not begin
 without this section satisfied, and §13's arming store inherits all of it.
@@ -1424,6 +1463,62 @@ comparable; only writing the comparand beside the conclusion does.
     three findings for one missing composition inside one table. The linter debt
     24 promises needs a membership predicate before it can be written.
 
+33. **§6a's *"the `*oms.Module` never leaves the wiring file"* is restated as a
+    property of the GRANT LIST, or the facade is specified over a value that is
+    already public** (F85). `internal/app/reconcile/app.go:740` exports
+    `func (r *Runner) Module() *oms.Module`, consumed by `internal/app/pair` and
+    `internal/app/exercise`. Rule 11 polices imports of the OMS surface and
+    nothing polices imports of a **grant**, so one edge into a granted package
+    buys the eleven use cases and `ReconcileMarginOp` — measured, with a control
+    in the same file. Either the grant list gains a stated obligation (*a granted
+    package exports no OMS write capability*, checkable with the same `go list`
+    `TestEveryGrantIsStillUsed` already runs), or §6a's sentence is withdrawn.
+    §4c's address-space limit does not cover this and its `go list -deps` remedy
+    cannot: the edge is in `cmd/arblab`'s graph today for the CLI subcommand.
+
+34. **Record §102's closing claim is narrowed to the edge it measured** (F86).
+    Rule 11 is *"GREEN on the entrypoint the dashboard design specifies"* — true
+    of the import edge, and `cmd/arblab` holds `Dispatch`, `MarginTopUp` and
+    `Delever` today through `appreconcile.Runner.Module()` with no `internal/oms`
+    import and all seven gates silent. F51's own *"Go needs no import for field
+    access"* is the mechanism. The retirement stands; the sentence claims reach
+    and measured edges.
+
+35. **§4d names the projector's home and owes its CONSTRUCTOR** (F87). Measured:
+    `internal/app/serve` importing `oms/infrastructure/driven` is refused by
+    `singlewriter`, and importing `internal/oms` is refused by rule 11 — so the
+    only lawful sites are `internal/oms` and the three grants, and the Journal
+    and Positions screens are **phase 1**. The record must name the wiring
+    package and add it to the grant list with a read-only reason. **Not**
+    `cmd/arblab`, which buys the whole surface for one constructor.
+
+36. **§6's re-grading gains the INSTANT, and the two fields take opposite
+    remedies** (F88). `At` is the operator's accounting instant by design
+    (`marginop.go:571-578`), bounded only by `IsZero` (`marginop.go:600`) — no
+    ordering check, no future bound. §7.3's replay protection needs a **signed
+    near-now on the mutating call**, which is a third quantity with no field in
+    the preimage `{kind, op, actor, at, note}` (`journalcodec.go:451`), so the
+    chain cannot evidence it. The actor must stop being self-asserted; the
+    instant must stay self-asserted. No single rule about operator-supplied
+    fields gets both.
+
+37. **`MarginOpReconciliation` owes a discriminator for the actor's REGIME,
+    before the first mutating grant ships** (F89). The terminal act does not
+    retire when the API arrives, so one chain will hold §7.4-solo-honest rows and
+    §7.3-authenticated rows in one `string` field with nothing separating them.
+    The chain is append-only: a field added later leaves every earlier row
+    permanently ambiguous. This is the only debt in this record whose cost rises
+    with delay.
+
+38. **F42's `notimenow` hole is a property of the GATE and its remedy is
+    default-deny, not another policed segment** (F90). Measured: identical
+    `time.Now()` statements, one in `.../serve/httpapi` (silent) and one in
+    `.../serve/httpapi/domain` (reported), same run. `policedLayers` is an
+    allow-list of suspected trees, which is the shape §15.8 recorded as rule 11's
+    inversion and §6a rejected for rule 6. `platform/ids/ids.go:8-12` already
+    records the twin hole in its own words and no gate changed. A §3.6 decision,
+    filed here because F42 is where it is written down.
+
 ---
 
 ## 15. External review, round 1 — what it found and what changed
@@ -1678,10 +1773,14 @@ varying with it.
 1. **~~The seventh gate is now specified and still not written.~~ WRITTEN
    `[2026-08-30, task #243, record §101]` — and see §15.8: writing it found the
    specification backwards.**
-2. **`ReconcileMarginOp`'s actor field.** §7.3 requires an authenticated identity
-   and a per-actor audit; the field is self-asserted free text, correctly, for a
-   terminal. The design for how an HTTP caller's identity reaches that field does
-   not exist and phase 2 cannot start without it.
+2. **~~`ReconcileMarginOp`'s actor field.~~ ANSWERED, and the answer is larger
+   than the item — round 10, §15.15, F85–F89.** §7.3 requires an authenticated
+   identity and a per-actor audit; the field is self-asserted free text,
+   correctly, for a terminal. Round 10 found it cannot be settled as an identity
+   question alone: the field's twin `At` needs the **opposite** treatment (F88),
+   the field needs a regime discriminator that must exist **before** the first
+   phase-2 append (F89), and the only mechanism for letting `serve` reach the act
+   at all is a package grant that also carries `Dispatch` (F85, F87).
 3. **The twenty §8 rows that were not sampled**, against schemas rather than
    filenames. Two of ten were wrong.
 4. **§7's screens**, still unattacked line by line — the one part of §15.6 round
@@ -3180,3 +3279,254 @@ and are simply not using them. **F55, F60, F79 and F83 are four coordinate losse
 in one file, and the reference document has had none** — that is the difference a
 port makes, and it is the argument for where the persistence figures should be
 read from before any panel reads them.
+
+### 15.15 External review, round 10 — the two §15.7 items, and the gate's guarantee is one hop deep
+
+**Instrument: the probe again, because both subjects are about what a gate can
+see.** §15.7 item 2 (`ReconcileMarginOp`'s actor identity) and F42's `notimenow`
+hole are the only §15.7 items still open, six rounds on. Neither is a citation
+check and neither is an arithmetic, so neither yields to rounds 6–9's
+instruments. Both are questions of the form *what does the analyzer actually
+read* — which this repo answers by building the package and running the gates,
+with a co-located control, exactly as §15.7 and §15.8 did.
+
+**Six findings, F85–F90, and four of them are measurements.** A temporary
+`internal/app/serve`, `internal/app/serve/httpapi` and one file in `cmd/arblab`,
+built and deleted in the session, never committed; `make lint` over `./...` for
+each cell.
+
+| # | Cell | Result |
+|---|---|---|
+| 1 | `internal/app/serve/httpapi` imports **only** `internal/app/reconcile`, calls `appreconcile.ReconcileMarginOp(cfg, act)` with `Actor: r.FormValue("actor")` and `At: time.Now()` | **all seven gates silent**, `go build` succeeds |
+| 2 | the same package holds `runner.Module()` — the `*oms.Module` with eleven use cases | **all seven gates silent** |
+| 3 | the same package, `internal/oms` imported (**control**) | **rule 11 reports line 3**; it is the run's only diagnostic |
+| 4 | `internal/app/serve` imports `internal/oms/infrastructure/driven` — §4d's home for the journal projector | **`singlewriter` reports**, naming rule 6 |
+| 5 | `time.Now()` in `internal/app/serve/httpapi` vs the identical statement in `internal/app/serve/httpapi/domain` (**control**) | **handler silent; `domain/` sibling reported**, same run |
+| 6 | `cmd/arblab` holds `Dispatch`, `MarginTopUp` and `Delever` off `appreconcile.Runner.Module()`, **no `internal/oms` import**; the control import added to the same file | **use-case holds silent; control reported**, one diagnostic in the run |
+
+Cells 3, 5 and 6 are the halves that carry the information. A silent gate and an
+unanalysed package produce the same output, and F51's own lesson is that this
+bites hardest on the cell you expected to be quiet — so every silence above is
+dated by a speaker in the same file, under the same invocation.
+
+#### F85 — rule 11 grants a package, and a granted package re-exports the authority
+
+§6a's remedy is stated as a property: *"`serve` receives a capability-limited
+facade whose method set contains no write use case, and the `*oms.Module` **never
+leaves the wiring file**."* It already leaves it, through a public accessor in a
+granted package:
+
+```go
+// internal/app/reconcile/app.go:740
+func (r *Runner) Module() *oms.Module { return r.module }
+```
+
+`internal/app/reconcile` is grant entry 2. `Runner` and `Module()` are both
+exported, and the getter is load-bearing rather than incidental — measured with
+`go list`, `internal/app/pair` (`drive.go:272,300,367`; `app.go:126,145`) and
+`internal/app/exercise` (`app.go:213,224,245`) are its consumers, and both are
+themselves grants. So the reconcile root is not only the terminal act's
+composition; it is the **shared boot runner that hands the Module out**.
+
+Rule 11 polices declared import edges into `internal/oms` (exact) and
+`internal/oms/application` (tree). `internal/app/reconcile` is neither, so
+**nothing polices who imports the grant**. Cells 1 and 2 measure the consequence:
+a web-facing package that imports one granted package obtains the full
+eleven-use-case surface *and* appends to §5.1's hash chain, with all seven gates
+silent, while the control three lines away is reported.
+
+**This is not a hole in the analyzer; it is the shape of a package grant.** Go
+gives a granted package no way to hold an authority it cannot pass on, and rule
+11's own cost message says the surface is *"the OMS control surface"* — which
+`Runner.Module()` returns by value. `TestEveryGrantIsStillUsed` cannot see it
+either: it enumerates importers **of the surface** and asserts each is granted,
+and never asks who imports **the grants**. The gate's guarantee is therefore
+exactly **one hop deep**, and §6a states it as though it were transitive.
+
+> The record already states a limit — §4c: *"a `serve` root linked into
+> `cmd/arblab` shares an address space with roots that hold OMS authority, and
+> §3.6 rule 11 is a check on *packages*"* — and its named remedy is a
+> `go list -deps` fence over the binary's whole graph at the transition point.
+> **That limit is about the binary and this is about the import edge**, and the
+> named remedy does not reach it: `internal/app/reconcile` is in `cmd/arblab`'s
+> dep graph today for the `margin reconcile` subcommand, so a deps fence over
+> the binary finds the same edge whether or not a handler uses it. An
+> address-space argument cannot distinguish *linked in* from *reachable through
+> an exported getter*.
+
+#### F86 — F51's grant retirement is green for a weaker reason than record §102 states
+
+Record §102 retired `cmd/arblab`'s grant on a measurement: *"the binary's
+production graph imported none of the surface"*, and one in-package test file
+named `application.Reconciliation`. The measurement is of **import edges**, and
+cell 6 shows what it does not cover. A file in `cmd/arblab` holding
+`m.Dispatch`, `m.MarginTopUp` and `m.Delever` off `appreconcile.Runner.Module()`
+compiles and draws **nothing** from any of the seven gates, with no
+`internal/oms` import anywhere in it; adding that import to the same file
+produces the run's single diagnostic.
+
+**The mechanism is F51's own argument, running the other way.** §102's finding
+turned on *"the renderer names no such type, because Go needs no import for field
+access"* — used there to show an import edge existed for no production reason.
+The same fact means an **absent** import edge is no evidence about a capability:
+`r.Module().Dispatch` names `oms` nowhere. So *a finding recorded in a file is
+not a finding applied to the file*, one session out and one direction over —
+§102 measured the edges in both directions and concluded about the authority.
+
+Nothing here says the grant should not have been retired. It says the sentence
+that closed it — rule 11 *"GREEN on the entrypoint the dashboard design
+specifies"* — is true of the edge and not of the reach, and `cmd/arblab` is
+where `serve.go` is specified to live.
+
+#### F87 — §4d's read path has no lawful wiring, and it blocks phase 1
+
+§4d settles where the journal projector lives: *"`audit` declares the read port
+and owns the projection model; the journal-backed projector is constructed
+**inside the OMS package tree** over the existing verified `JournalReplay`;
+`serve` consumes only the finished audit read port."* Correct on rule 6's
+corollary, and the record never says **who constructs it**. Every candidate is
+refused:
+
+| Constructor site | Verdict |
+|---|---|
+| `internal/app/serve` importing `oms/infrastructure/driven` | **refused** — `singlewriter`, measured (cell 4) |
+| `internal/app/serve` or `cmd/arblab` importing `internal/oms` for a constructor | **refused** — rule 11, measured (cells 3, 6) |
+| `internal/oms` itself | lawful, and it is not a composition root |
+| the three grants | lawful — and that edge is **F85's** |
+
+So the Journal and Positions screens — **phase 1**, and the two that motivate
+§4d at all — reach their data only through a package that also holds the write
+authority. The remedy is visible and is F51's own move: a separately-packaged
+composition root (`internal/app/serve`) named in the grant list **with a reason
+that says read-only wiring**, rather than a handler importing `internal/app/
+reconcile` and taking the Module along with the projector. What must not happen
+is re-granting `cmd/arblab`, which buys the whole surface for one constructor and
+undoes §102 by the route F86 describes.
+
+**This is the read-side twin of the question §15.7 item 2 asks about the write
+side**, and it is why both are one round: *the only mechanism this codebase has
+for letting `serve` reach the OMS is a package grant, and a package grant is
+indivisible.* An import path grants every capability in the package — the
+projector's constructor and `Dispatch` arrive on the same edge.
+
+#### F88 — §6's re-grading covers *who* and leaves *when*, and the two need opposite remedies
+
+§6 re-grades *record a margin reconcile* out of the v2 row on the actor field:
+*"anonymous with a label when an HTTP request supplies it."* Correct, and the
+record stops there. `MarginOpReconciliation` carries §7.3's **three**, and the
+second one is self-asserted in exactly the same way — while its remedy points the
+**opposite** direction.
+
+`margin.go`'s own argument for the flag: *"`now` is not the instant (the
+accounting was done before the operator reached a terminal, and by however
+long)"*, and `marginop.go:571-578` makes it normative — *"the operator's own
+instant rather than a venue clock … the frame an audit is read in is the one the
+human acted in."* The field is a **claim about the past**, and it is right that
+it is. Measured: the only reference to `r.At` in the domain is
+`marginop.go:600`'s `IsZero` — there is no ordering check against the op's
+dispatch, and no future bound. Any instant validates.
+
+So an HTTP grant has **three** instants and the record names none of them:
+
+| Quantity | Who supplies it | Where it lives today |
+|---|---|---|
+| the accounting instant (§7.3's *when*) | the operator, about the past | `At`, in the chain |
+| the request's signed timestamp (§7.3's **replay protection**) | the transport, near-now | **nowhere** |
+| the append's own order | the journal | `seq`, in the chain |
+
+§7.3 requires *"replay protection (nonce + signed timestamp on every mutating
+call)"* and §6a quotes that clause. The preimage is
+`{kind, op, actor, at, note}` (`journalcodec.go:451`), so **the chain cannot
+evidence the replay protection §7.3 requires** — it records the claimed
+accounting instant and not the instant the mutating call was accepted. A design
+that says *the server fills in who and when* satisfies §7.3's *who* and destroys
+the *when*; a design that says *the client supplies who and when* does the
+reverse. The one-line version: **the actor must stop being self-asserted and the
+instant must stay self-asserted**, and no single rule about "operator-supplied
+fields" gets both.
+
+**And the codec's own comment names a harm that needs no tampering.** It puts the
+instant in the preimage because *"moving an act's time is how a clearance is made
+to look like it preceded the incident it cleared."* That defends against an
+**edit**. The same outcome is available at **write** time, to any caller, with the
+chain verifying perfectly — which the terminal's §7.4 solo-honest posture
+knowingly accepts and a §7.3-governed HTTP grant does not.
+
+#### F89 — the actor field has no carrier for whether it was authenticated, and the chain makes that unrepairable
+
+`Actor` is one `string`, documented as *"free text and self-asserted, because
+§7.4's approval kernel is 'solo-honest by default' and there is no identity
+service to check it against"*, and §6a's answer is that *"the immutability holds
+… the **attribution** does not."* The step the record does not take is what
+happens when **both** regimes exist.
+
+The CLI act does not go away when the API arrives — §7.3's own note says the act
+*"moves onto"* the API, and `marginclearance.go` documents the offline shape as
+the deliberate one for an incident where a venue may be unreachable. So the
+journal will hold rows written by a terminal under §7.4's solo-honest default and
+rows written by an authenticated HTTP caller under §7.3, in one chain, in one
+field, **with nothing distinguishing them**. A later reader asked *"was this act
+taken by an authenticated identity?"* has no field to consult, and the answer is
+not recoverable from the row, from the kind tag, or from the date once the two
+paths overlap.
+
+This is *provenance PRESENT is not provenance PERMITTED* on the control plane:
+§7.3's *"immutable per-actor audit"* gets its immutability from the chain and its
+attribution from a string that cannot say where it came from. And it is the one
+item in this record whose cost **rises with delay** — the chain is append-only, so
+a discriminator added after the first phase-2 append leaves every earlier row
+permanently ambiguous. **It is owed before the first mutating grant ships, not
+with it.**
+
+#### F90 — `notimenow`'s scope is a suspect list, and F42's remedy would inherit F42's enumeration
+
+Cell 5 is the measurement F42 argued: `time.Now()` in
+`internal/app/serve/httpapi` draws nothing; the identical statement in
+`internal/app/serve/httpapi/domain` is reported, in the same run, by position
+alone. `policedLayers` is `{domain, application, engine}` (`notimenow.go:123`),
+so the rule is an **allow-list of policed segments** — everything not named is
+silent.
+
+**F42 states this as a property of the web tree, and it is a property of the
+gate.** The remedy that follows from F42's wording — add the serve tree, or add
+its handler segment — is *a remedy scoped to the finding's list*: it inherits
+F42's enumeration, and `internal/app/dashboard/` is unpoliced the day somebody
+creates it. That is the exact failure §6a already rejected once for rule 6
+(*"the repository somebody adds next year without the marker is silently
+unpoliced"*) and that §15.8 recorded as rule 11's inversion — **naming the
+suspected end of the edge fails in the marker direction.** One gate over, the
+same shape, and this record proposes it as the fix.
+
+**The tree records the twin in its own words.** `platform/ids/ids.go:8-12`:
+*"§3.6 rule 5 does NOT reach `platform/` — no gate would have caught an ambient
+`time.Now()` here."* Measured today, no production package outside
+`platform/clock` (the seam) and `cmd/arblab`'s four fetch stamps reads the
+ambient clock, so the hole is unexercised rather than violated — which is
+precisely why it has survived. A note in a file is not a change to the gate.
+
+The direction the repo's standing default rule picks is the one rule 11 landed
+on: **default-deny with a grant list**, where `platform/clock` and the
+composition roots' fetch stamps are named entries with reasons, and a package
+created next year is refused by default and names itself in the refusal. That is
+a §3.6 decision, not a §100 one, and it is filed here because F42 is where the
+hole is written down.
+
+#### What round 10 changes about the next actions
+
+**§15.7 item 2 is answered, and the answer is larger than the item.** The
+question was *how does an HTTP caller's identity reach `Actor`*. The findings say
+it cannot be settled as an identity question alone: the field's twin (`At`) needs
+the opposite treatment (F88), the field needs a discriminator that must exist
+before the first append (F89), and the **only mechanism for letting `serve` reach
+the act at all** is a package grant that also carries `Dispatch` (F85, F87). Item
+2 is therefore not a phase-2 design note; it is three decisions, one of which
+(F89) has a deadline.
+
+**The instrument's yield is still in the probe, and the reason is stable across
+four uses.** §15.7, §15.8, §102 and now §15.15 each ran the same shape and each
+found something the reading had missed — because the question *what does this
+analyzer read* is answered by the analyzer and not by the paragraph describing
+it. Rounds 6–9 changed instrument every round as the yield fell; this one went
+back to the oldest instrument in the review and it was the right one, because the
+subject changed rather than the method. *Match the instrument to what the claim
+is about: a claim about a gate is checked by running the gate.*
