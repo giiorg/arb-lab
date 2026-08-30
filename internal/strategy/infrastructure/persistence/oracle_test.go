@@ -67,12 +67,16 @@ func roundedTo9(t *testing.T, s string) string {
 	return trimZeros(r.FloatString(fixedpoint.Scale))
 }
 
-// roundedTo2 renders a decimal string at two places, half away from zero —
-// the same rounding summarise.py:110's tot.quantize(D("0.01")) performs under
-// Python's default decimal context (ROUND_HALF_EVEN). None of the 168
-// per-symbol net figures lands on an exact half-cent tie — verified when this
-// test was written, the same way roundedTo9 verifies its own ninth place — so
-// the two rounding modes agree here and this is not a byte-equality claim.
+// roundedTo2 renders a decimal string at two places.
+//
+// big.Rat.FloatString rounds half AWAY FROM ZERO. summarise.py:110's
+// tot.quantize(D("0.01")) rounds half to EVEN, under Python's default decimal
+// context. Those are different rules, and they differ only on an exact
+// half-cent tie: none of the 168 per-symbol net figures lands on one —
+// verified when this test was written, the same way roundedTo9 verifies its
+// own ninth place — so the two agree on every value this compares. This is a
+// measured agreement, not a byte-equality claim, and a future artifact landing
+// on a tie is a signal rather than noise.
 func roundedTo2(t *testing.T, s string) string {
 	t.Helper()
 	r, ok := new(big.Rat).SetString(s)
@@ -122,6 +126,13 @@ func TestOracle_PooledAgreesWithSummariseDotPy(t *testing.T) {
 	if len(sum.Costs) != 3 {
 		t.Fatalf("summary.json has %d costs, want 3", len(sum.Costs))
 	}
+
+	// The guarded comparisons below are gated on rl.Censored == 0, which is a
+	// DATA-dependent skip: an artifact carrying censored records at every level
+	// would silence all twelve and leave this test passing over zero
+	// comparisons. The counters make the skip's own arithmetic visible, the way
+	// TestOracle_PerSymbolAgreesWithSummariseDotPy counts its 168 cells.
+	meanNetCompared, meanGrossCompared := 0, 0
 
 	for _, row := range sum.Pooled {
 		t.Run(row.Entry, func(t *testing.T) {
@@ -216,21 +227,36 @@ func TestOracle_PooledAgreesWithSummariseDotPy(t *testing.T) {
 				// all three costs, with its magnitude. This test is "where the
 				// two implementations agree"; asserting equality on a cell known
 				// to disagree would be the wrong claim, not a weaker one.
-				if rl.Censored == 0 && npe.MeanNet.Decimal() != roundedTo9(t, row.MeanNet[cost]) {
-					t.Errorf("cost %s: mean_net %s, artifact (to 9) %s",
-						cost, npe.MeanNet.Decimal(), roundedTo9(t, row.MeanNet[cost]))
+				if rl.Censored == 0 {
+					meanNetCompared++
+					if npe.MeanNet.Decimal() != roundedTo9(t, row.MeanNet[cost]) {
+						t.Errorf("cost %s: mean_net %s, artifact (to 9) %s",
+							cost, npe.MeanNet.Decimal(), roundedTo9(t, row.MeanNet[cost]))
+					}
 				}
 			}
 
 			// mean_gross is entry-only, so npe0 — folded at the first cost
 			// above — is the right value at any cost.
 			if rl.Censored == 0 {
+				meanGrossCompared++
 				if npe0.MeanGross.Decimal() != roundedTo9(t, row.MeanGross) {
 					t.Errorf("mean_gross %s, artifact (to 9) %s",
 						npe0.MeanGross.Decimal(), roundedTo9(t, row.MeanGross))
 				}
 			}
 		})
+	}
+
+	// 4 levels x 3 costs = 12 mean_net cells, less the 3 at level 0.0002, the
+	// only level carrying censored records: 9. mean_gross is one per level,
+	// less the same level: 3. Asserted rather than computed — if the guarded
+	// comparisons stopped running, this is what fails.
+	if meanNetCompared != 9 {
+		t.Errorf("compared %d mean_net cells, want 9 (12 less the 3 at the censored level)", meanNetCompared)
+	}
+	if meanGrossCompared != 3 {
+		t.Errorf("compared %d mean_gross cells, want 3 (4 less the censored level)", meanGrossCompared)
 	}
 }
 
