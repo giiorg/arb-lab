@@ -1,7 +1,7 @@
 # A Go reader for the persistence artifacts — design (record §103)
 
 **Date:** 2026-08-30
-**Status:** design approved, unimplemented
+**Status:** implemented 2026-08-30, `d042b38`
 **Closes:** the last open next action of the web dashboard review — *"a reader
 for the persistence artifacts"*, F83's structural half.
 **Opens:** F102, F103 (below), and review round 13.
@@ -245,7 +245,7 @@ repo's standing trap"*.
 
 ### 6.2 The fixture-collapse checklist, run before the tests are written
 
-Three results, all settled before implementation:
+Four results, all settled before implementation:
 
 1. **The separating member is `episodes`, not `p75`.** Measured across the four
    declared levels: p75 is **3, 3, 3, 3**; p50 is 1, 2, 2, 1; p90 is 5, 6, 5, 4;
@@ -261,6 +261,18 @@ Three results, all settled before implementation:
    **The sixteenth collapse**, found by running the checklist first.
 3. **`ErrSpanDegenerate` has no committed instance** (§4.1) and takes a
    hand-built fixture.
+4. **The hurdle comparison, on the stored ratio versus on the rounded
+   percentage, is one predicate on the committed file.** Measured at every
+   cost: both readings give a `BeatHurdle` count of 4 / 3 / 0 and the same
+   median. The committed data cannot separate "strictly greater than the
+   ratio" from "strictly greater than the rounded percentage", so
+   `testdata/hurdle-boundary.json` carries a symbol whose annual return rounds
+   to the same one-decimal percentage as the hurdle while its ratio sits
+   strictly above it (`0.0463` against a `0.046` hurdle, both reading `4.6%`),
+   plus a second symbol exactly at the hurdle (`0.046`) to separate `>` from
+   `>=` in the same fixture. **The seventeenth collapse**, found while writing
+   this implementation plan, before any code — the same "changing the
+   instrument found it" pattern rounds 9 through 12 recorded.
 
 ### 6.3 Mutation targets
 
@@ -344,8 +356,68 @@ remedy; that recomputation from `episodes.json` makes four findings
 unrepresentable rather than annotated; that F102 and F103 are measured facts about
 the committed file, with the magnitudes stated in §7.
 
+**§6.1's measured result.** At all four declared levels (`0.0002`, `0.0005`,
+`0.001`, `0.002`), `run_p50`/`run_p75`/`run_p90`/`run_max` and `wins` (at all
+three costs) agree exactly with `summary.json`, censored records included or
+excluded from the reader's own population. At the three levels with no
+censored records (`0.0005`, `0.001`, `0.002`), `mean_gross` and `mean_net`
+also agree with the artifact to 9 places. At level `0.0002` — the only level
+carrying the five right-censored records — the two implementations
+**disagree, in four places, by exactly F103's magnitude**: `episodes` (12 322
+against 12 317), `run_mean` (2.433 against 2.433628319), `mean_gross`
+(0.0006533427008602499594221717254 against 0.000653608), and `mean_net` at
+each of the three costs (a constant −0.000000265 delta, e.g. −0.001446657299…
+against −0.001446392 at cost `0.0021`). The numerator is identical in every
+case — every censored record accrues exactly `"0"` — and only the denominator
+differs, 12 322 against 12 317; that the delta is constant across all three
+costs is what shows it is a denominator effect rather than a per-record charge.
+These four are **asserted with their exact values, not tolerated inside a
+range**: `TestOracle_CensoringIsTheOnlyDisagreement` fails if any of them
+moves.
+
 **Does not claim.** That the Go fold agrees with `summarise.py` — that is what
 §6.1 measures, and a disagreement is a finding either way. That F103 changes any
 published percentile; §7 measures that it does not. That the reader is used by
 anything: it has no production consumer until phase 3, and §3.2 records why that
 is the right shape rather than a gap.
+
+**A stated coverage boundary.** `RoundHalfEven` is what §5's rules require and
+what every rounding call in this package uses, but it is **not separated from
+`RoundHalfUp` by any test**: no fixture and no cell of the committed artifact
+(checked across all 168 per-symbol cells, 56 symbols × 3 costs) lands on an
+exact rounding tie. This is a known gap, stated rather than left for a reader
+to assume the choice is checked.
+
+**One finding stays open.** `SymbolReturns.Rows`' documented sort order — by
+`Annual` descending, `Symbol` ascending — is asserted by no test.
+`TestOracle_PerSymbolAgreesWithSummariseDotPy` compares rows by symbol name
+through a map, not index-for-index against the artifact's order, so it cannot
+close this. `summarise.py:115` sorts `per_symbol` by
+`-annual_pct_on_2000["0.0021"]`, which is a cheap oracle for an index-for-index
+comparison at that one cost — left for the next session that touches this
+package.
+
+## 10. A finding about the plan, not about the artifact
+
+This plan's own arithmetic did not survive independent recomputation, in five
+of the implementation tasks. Task 3: three of four nine-decimal `Mean` literals were
+wrong, and two were **provably impossible** before any test ran — run lengths
+are integers, so a mean times its population must be an integer, and the
+plan's values implied sums of 9007.5 and 1027.2. Task 5: the brief's test
+snippet did not compile; it imported a package it never named. Task 6: two
+literals were the artifact's **display**-rounded figures rather than the
+values themselves — the plan's wrong `Annual` and the correct one both render
+as 35.8% at the one decimal place `summary.json` publishes, so checking
+against the artifact would have **confirmed the wrong number**. Task 7: all
+three nine-decimal median literals were wrong. Task 8: the per-symbol `Net`
+comparison was a logic bug rather than a wrong literal — it compared the
+reader's full-precision value against the artifact's cents-quantized string,
+so 167 of 168 cells failed.
+
+The lesson is not "the plan had typos". It is that **a measured-looking table
+in a plan is an unchecked claim**, and the artifact cannot always arbitrate —
+when the plan's error is finer than the artifact's published precision,
+checking against the artifact confirms the error rather than catching it.
+What caught all five is recomputation at higher precision than the artifact
+publishes, plus two cheap invariants: a mean over integer counts times its
+population must be an integer, and bucket counts must sum to the population.
