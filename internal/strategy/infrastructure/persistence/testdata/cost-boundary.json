@@ -1,0 +1,5 @@
+[{"symbol":"FIXTURE","shortlist":false,"matched":3,"first":"2026-01-01T00:00:00Z","last":"2026-06-01T00:00:00Z","modal_minutes":480,"levels":[{"entry":"0.001","episodes":[
+{"run":2,"accrued":"0.00209999","start":"2026-01-01T00:00Z","end":"2026-01-01T16:00Z"},
+{"run":2,"accrued":"0.0021","start":"2026-01-02T00:00Z","end":"2026-01-02T16:00Z"},
+{"run":2,"accrued":"0.00210001","start":"2026-01-03T00:00Z","end":"2026-01-03T16:00Z"}
+]}]}]
